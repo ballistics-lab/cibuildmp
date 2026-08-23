@@ -1,0 +1,167 @@
+name: Build usermod unix arch
+description: >
+  Builds a MicroPython ports/unix "usermod" binary (a C module compiled
+  straight into the port via USER_C_MODULES=, not a dynruntime.mk natmod)
+  for one of the unix-port cross-compile targets shared across this repo's
+  consuming projects: x64, x86 (32-bit), aarch64, armhf, or mipsel.
+  Installs whatever that arch needs (a cross toolchain via apt,
+  qemu-user-static for the emulated ones, a from-source libffi for the
+  statically linked ones), builds mpy-cross, then runs the port build.
+
+  Requires MPY_DIR to already be exported (fetch-micropython or
+  clone-micropython) and the calling repo already checked out. The actual
+  `runs-on:` (ubuntu-latest vs ubuntu-24.04-arm) still has to come from the
+  caller's own matrix -- a composite action cannot choose its own runner.
+  aarch64 and armhf both need ubuntu-24.04-arm to execute what they build;
+  x64/x86/mipsel run fine on ubuntu-latest.
+
+inputs:
+  arch:
+    description: x64, x86, aarch64, armhf, or mipsel.
+    required: true
+  user_c_modules:
+    description: Value for USER_C_MODULES=. Defaults to the workspace root.
+    required: false
+    default: ''
+  frozen_manifest:
+    description: >
+      Value for FROZEN_MANIFEST=. Defaults to usermod/manifest.py under the
+      workspace root.
+    required: false
+    default: ''
+  extra_make_args:
+    description: >
+      Extra space-separated VAR=value pairs appended to the build command,
+      e.g. a module's own precision define.
+    required: false
+    default: ''
+  build_dir:
+    description: >
+      Value for BUILD=. Defaults to usermod/build/<arch> under the
+      workspace root.
+    required: false
+    default: ''
+
+outputs:
+  build_dir:
+    description: >
+      The BUILD= directory actually used (resolved default included), so
+      the caller can find the built binary without recomputing it.
+    value: ${{ steps.vars.outputs.build_dir }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve arch-dependent build settings
+      id: vars
+      shell: bash
+      run: |
+        set -e
+        ARCH="${{ inputs.arch }}"
+        UCM="${{ inputs.user_c_modules }}"
+        FM="${{ inputs.frozen_manifest }}"
+        BUILD="${{ inputs.build_dir }}"
+
+        CROSS=""
+        LINK_OPTS=""
+        STANDALONE=0
+        case "$ARCH" in
+          x64|aarch64) ;;
+          x86)
+            LINK_OPTS="MICROPY_FORCE_32BIT=1"
+            ;;
+          armhf)
+            CROSS="arm-linux-gnueabihf-"
+            LINK_OPTS="MICROPY_STANDALONE=1 LDFLAGS_EXTRA=-static"
+            STANDALONE=1
+            ;;
+          mipsel)
+            CROSS="mipsel-linux-gnu-"
+            LINK_OPTS="MICROPY_STANDALONE=1 LDFLAGS_EXTRA=-static"
+            STANDALONE=1
+            ;;
+          *)
+            echo "::error::build-usermod-unix-arch: unknown arch '$ARCH'"
+            exit 1
+            ;;
+        esac
+
+        {
+          echo "user_c_modules=${UCM:-$GITHUB_WORKSPACE}"
+          echo "frozen_manifest=${FM:-$GITHUB_WORKSPACE/usermod/manifest.py}"
+          echo "build_dir=${BUILD:-$GITHUB_WORKSPACE/usermod/build/$ARCH}"
+          echo "cross_compile=$CROSS"
+          echo "link_opts=$LINK_OPTS"
+          echo "standalone=$STANDALONE"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Install build deps
+      shell: bash
+      run: |
+        set -e
+        case "${{ inputs.arch }}" in
+          x64|aarch64)
+            PKGS="libffi-dev pkg-config"
+            ;;
+          x86)
+            sudo dpkg --add-architecture i386
+            PKGS="gcc-multilib libffi-dev:i386 pkg-config"
+            ;;
+          armhf)
+            PKGS="gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf libltdl-dev autoconf libtool libtool-bin pkg-config"
+            ;;
+          mipsel)
+            PKGS="gcc-mipsel-linux-gnu g++-mipsel-linux-gnu libc6-mipsel-cross libltdl-dev autoconf libtool libtool-bin pkg-config"
+            ;;
+        esac
+        # apt-get update first -- the runner image's baked-in package index
+        # can already be stale by the time a job runs (404 Not Found on
+        # install rather than a version error) -- same issue build-natmod-arch
+        # guards against.
+        sudo apt-get update -q
+        sudo apt-get install -y $PKGS
+
+    - name: Install qemu-user-static
+      # Only mipsel is emulated -- aarch64 and armhf both run on their own
+      # CPU on ubuntu-24.04-arm (the caller's runs_on choice), so installing
+      # an emulator there would be dead weight that could also mask a
+      # genuine failure to execute.
+      if: inputs.arch == 'mipsel'
+      shell: bash
+      run: |
+        sudo apt-get update -q
+        sudo apt-get install -y qemu-user-static
+        qemu-mipsel-static --version
+
+    - name: Build mpy-cross
+      shell: bash
+      run: make -C "$MPY_DIR/mpy-cross"
+
+    - name: Build libffi (deplibs)
+      # MICROPY_STANDALONE=1 only makes libffi a DEPLIBS entry, not an
+      # actual prerequisite of the default build target -- must run as its
+      # own step first. BUILD must match the main build step's BUILD:
+      # deplibs writes libffi.a under $(BUILD)/lib/libffi/out/lib/ and the
+      # main build looks for it there.
+      if: steps.vars.outputs.standalone == '1'
+      shell: bash
+      run: |
+        make -C "$MPY_DIR/ports/unix" VARIANT=standard \
+          BUILD="${{ steps.vars.outputs.build_dir }}" \
+          CROSS_COMPILE="${{ steps.vars.outputs.cross_compile }}" \
+          MICROPY_STANDALONE=1 deplibs
+
+    - name: Build usermod (${{ inputs.arch }})
+      shell: bash
+      # BUILD is a local shell var, not a job/step env -- see the callers
+      # this was extracted from: a job-level env: BUILD would leak into the
+      # "Build mpy-cross" / "Build libffi" steps above too, and
+      # py/mkenv.mk's BUILD ?= build only applies when nothing else set it.
+      run: |
+        make -C "$MPY_DIR/ports/unix" VARIANT=standard \
+          BUILD="${{ steps.vars.outputs.build_dir }}" \
+          CROSS_COMPILE="${{ steps.vars.outputs.cross_compile }}" \
+          ${{ steps.vars.outputs.link_opts }} \
+          USER_C_MODULES="${{ steps.vars.outputs.user_c_modules }}" \
+          FROZEN_MANIFEST="${{ steps.vars.outputs.frozen_manifest }}" \
+          ${{ inputs.extra_make_args }} -j"$(nproc)"

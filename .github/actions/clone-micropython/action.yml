@@ -1,0 +1,45 @@
+name: Clone MicroPython
+description: >
+  Shallow-clones a MicroPython release branch, initialises the requested
+  submodules, and exports MPY_DIR into $GITHUB_ENV. Use this instead of
+  fetch-micropython when the build needs a submodule the release tarball
+  doesn't vendor (e.g. lib/pico-sdk for an rp2 port build).
+
+inputs:
+  mpy_tag:
+    description: MicroPython release tag (e.g. v1.28.0)
+    required: true
+  submodules:
+    description: Space-separated list of submodules to init (leave empty to skip)
+    required: false
+    default: ''
+  pico_sdk_submodules:
+    description: Also run `git -C lib/pico-sdk submodule update --init` (needed for rp2040 builds)
+    required: false
+    default: 'false'
+  path:
+    description: >
+      Directory to clone into, relative to the workspace root. Defaults to
+      "micropython" -- override this when the calling repo already has its
+      own top-level directory of that name (e.g. a7p's own micropython/
+      subtree), or `git clone` fails with "destination path ... already
+      exists and is not an empty directory".
+    required: false
+    default: 'micropython'
+
+runs:
+  using: composite
+  steps:
+    - name: Clone MicroPython ${{ inputs.mpy_tag }}
+      shell: bash
+      run: |
+        git clone --depth=1 --branch "${{ inputs.mpy_tag }}" \
+          https://github.com/micropython/micropython.git "${{ inputs.path }}"
+        cd "${{ inputs.path }}"
+        if [ -n "${{ inputs.submodules }}" ]; then
+          git submodule update --init ${{ inputs.submodules }}
+        fi
+        if [ "${{ inputs.pico_sdk_submodules }}" = "true" ]; then
+          git -C lib/pico-sdk submodule update --init
+        fi
+        echo "MPY_DIR=$GITHUB_WORKSPACE/${{ inputs.path }}" >> "$GITHUB_ENV"

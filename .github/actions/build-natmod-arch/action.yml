@@ -1,0 +1,133 @@
+name: Build natmod arch
+description: >
+  Installs whatever cross toolchain a single dynruntime.mk ARCH needs (a
+  plain apt package, the xtensa-lx106 tarball, or esp-idf -- picked per
+  ARCH, matching dynruntime.mk's own CROSS choices), builds mpy-cross, then
+  runs `make ARCH=<arch> dist` in the natmod directory.
+
+  Requires MPY_DIR to already be exported (e.g. by the fetch-micropython or
+  clone-micropython action from this same repo) and the calling repo's own
+  checkout to already have happened, submodules included if the natmod
+  Makefile needs any.
+
+inputs:
+  arch:
+    description: >
+      dynruntime.mk ARCH to build: x64, x86, armv6m, armv7m, armv7emsp,
+      armv7emdp, rv32imc, rv64imc, xtensa, or xtensawin. (aarch64 has no
+      dynruntime.mk ARCH at all as of MicroPython <= v1.28 -- build it via
+      a usermod instead.)
+    required: true
+  natmod_dir:
+    description: Path to the directory containing natmod/Makefile, relative to the workspace root.
+    required: false
+    default: natmod
+  esp_idf_ver:
+    description: esp-idf tag to install for the xtensawin toolchain.
+    required: false
+    default: v5.4
+  extra_pip:
+    description: >
+      Extra space-separated pip packages to install alongside pyelftools/ar
+      (both always installed -- mpy_ld.py needs them for every ARCH).
+    required: false
+    default: ''
+  pre_build_command:
+    description: >
+      Optional shell command run once inside natmod_dir, after mpy-cross is
+      built and before `make dist` -- e.g. a7p's `make fetch-nanopb`, which
+      the natmod Makefile needs vendored in before it can build any ARCH.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Install cross-compiler
+      shell: bash
+      run: |
+        set -e
+        case "${{ inputs.arch }}" in
+          x64|xtensa|xtensawin)
+            # x64 needs no cross toolchain at all; xtensa/xtensawin are
+            # handled by their own steps below, not a plain apt package.
+            exit 0
+            ;;
+          x86)
+            PKGS="gcc-multilib"
+            ;;
+          armv6m|armv7m|armv7emsp|armv7emdp)
+            PKGS="gcc-arm-none-eabi libnewlib-arm-none-eabi"
+            ;;
+          rv32imc|rv64imc)
+            PKGS="gcc-riscv64-unknown-elf picolibc-riscv64-unknown-elf"
+            ;;
+          *)
+            echo "::error::build-natmod-arch: unknown ARCH '${{ inputs.arch }}'"
+            exit 1
+            ;;
+        esac
+        # apt-get update first: the runner image's baked-in package index
+        # can already be stale by the time a job runs, pointing at a
+        # gcc/glibc revision the mirror has since superseded (404 Not Found
+        # on install rather than a version error) -- seen for real on the
+        # x86 leg across every repo this action was extracted from.
+        sudo apt-get update -q
+        sudo apt-get install -y $PKGS
+
+    - name: Install xtensa (esp8266) toolchain
+      if: inputs.arch == 'xtensa'
+      shell: bash
+      # Same tarball MicroPython's own ci_esp8266_setup uses -- no apt
+      # package exists for this target.
+      run: |
+        wget -q https://micropython.org/resources/xtensa-lx106-elf-standalone.tar.gz
+        tar xzf xtensa-lx106-elf-standalone.tar.gz
+        echo "$PWD/xtensa-lx106-elf/bin" >> "$GITHUB_PATH"
+
+    - name: Install esp-idf (xtensawin toolchain)
+      if: inputs.arch == 'xtensawin'
+      shell: bash
+      # Deliberately not `git clone --recursive`: this only ever wants the
+      # xtensa-esp32s3-elf- toolchain that install.sh downloads separately
+      # from GitHub releases, not a full esp32 port build against IDF's own
+      # components (bt/mbedtls/lwip/openthread/...) -- so nothing here
+      # touches IDF_PATH or any esp-idf header/component, and the
+      # submodule init (most of a --recursive clone's cost) buys nothing.
+      env:
+        IDF_VER: ${{ inputs.esp_idf_ver }}
+      run: |
+        git clone --depth 1 --branch "$IDF_VER" https://github.com/espressif/esp-idf.git
+        ./esp-idf/install.sh
+
+    - name: Install Python deps for mpy_ld.py
+      shell: bash
+      run: pip install pyelftools ar ${{ inputs.extra_pip }}
+
+    - name: Build mpy-cross
+      shell: bash
+      run: make -C "$MPY_DIR/mpy-cross"
+
+    - name: Build ${{ inputs.arch }}
+      shell: bash
+      working-directory: ${{ inputs.natmod_dir }}
+      # esp-idf's own venv shadows the system pip install above the moment
+      # export.sh is sourced -- mpy_ld.py then runs under *that* python, so
+      # pyelftools/ar have to be reinstalled inside this same shell right
+      # before the build, not just once earlier in the job. A real failure
+      # without it: "RuntimeError: Please run 'pip install ar' to link .a
+      # files" even though the step above already ran.
+      # pre_build_command runs via `${{ ... || ':' }}` rather than an
+      # `if [ -n ... ]; then ... fi` guard: when the input is empty, that
+      # guard's then-body would be blank text with nothing else on the
+      # line, and bash rejects an empty compound-command body at parse
+      # time ("syntax error near unexpected token `fi'") even though the
+      # condition is false and the body would never run. `:` is a real,
+      # always-present no-op command, so the line is never empty.
+      run: |
+        if [ "${{ inputs.arch }}" = "xtensawin" ]; then
+          source "$GITHUB_WORKSPACE/esp-idf/export.sh"
+          pip install pyelftools ar ${{ inputs.extra_pip }}
+        fi
+        ${{ inputs.pre_build_command || ':' }}
+        make ARCH=${{ inputs.arch }} MPY_DIR="$MPY_DIR" dist

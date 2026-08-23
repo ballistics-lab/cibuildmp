@@ -1,0 +1,33 @@
+version: 2
+updates:
+  # Dependabot's github-actions ecosystem only scans one directory's worth
+  # of `uses:` references per entry -- it does not recurse into
+  # subdirectories on its own. None of the composite actions below
+  # currently have a `uses:` step (they're pure `run:` shell), so this has
+  # nothing to bump yet; it's here so a future `uses:` step (or a
+  # .github/workflows/*.yml this repo doesn't have today) gets picked up
+  # automatically instead of silently going stale.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "github-actions"
+    directory: "/.github/actions/fetch-micropython"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "github-actions"
+    directory: "/.github/actions/clone-micropython"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "github-actions"
+    directory: "/.github/actions/build-natmod-arch"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "github-actions"
+    directory: "/.github/actions/build-usermod-unix-arch"
+    schedule:
+      interval: "weekly"
