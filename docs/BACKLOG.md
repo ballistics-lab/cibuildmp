@@ -207,6 +207,45 @@ environment" this used to require comes for free, since `uv tool install`
 is never touched. This removes the first M3 checkbox as separate work; it is
 one more argument on the `make` command line.
 
+**D13 — `micropython` accepts a list, deduped by ABI, not by tag.**
+Resolves the open question this file used to carry under that name.
+`micropython` takes either a string or a list, the same "accept a list, or
+a shell-ish string" idiom `archs`/`build`/`skip`/`extra-make-args` already
+use (`options._as_list`) — no new config convention.
+
+Building against several tags is a real use case only when they cross an
+ABI boundary (`py/persistentcode.h`'s `MPY_VERSION`/`MPY_SUB_VERSION`);
+otherwise every one of them produces a byte-for-byte identical native
+`.mpy`, since the identifier — and so the output — is keyed on ABI, not
+tag. So `targets.resolve_micropython_tags()` collapses the list to one
+`(tag, abi)` pair per distinct ABI, keeping whichever tag came first in
+the list and silently dropping a later one whose ABI an earlier one
+already covers. `micropython = ["v1.23.0", "v1.28.0"]` is one build
+against `v1.23.0` (both are ABI 6.3), not two; `["v1.22.0", "v1.28.0"]`
+is two (6.2 and 6.3) — the real case this exists for.
+
+Each `(tag, abi)` pair is its own ABI group: `Target` now carries the
+`tag` it was resolved against (identifiers stay ABI-only, unaffected), and
+`cli.build()` fetches MicroPython and builds `mpy-cross` once per group
+rather than once per invocation — the D9 sharing argument still holds
+*within* a group, just not across a genuine ABI boundary, where the
+source is different by construction and there is nothing to share.
+
+Verified live against a real second ABI (`v1.22.0` + `v1.28.0`, ABI 6.2 and
+6.3): two groups, `fetch_micropython` called once per tag, two correctly
+named outputs. One caveat surfaced by that same test, unrelated to this
+decision's own logic: an old enough tag can fail to build `mpy-cross`
+under a modern host `gcc` on its own merits — tried with `v1.21.0`,
+upstream's `py/emitinlinethumb.c`/`emitinlinextensa.c` initialise
+fixed-size `char` arrays without room for the trailing NUL (`{10,
+"r10"}`), which a recent `gcc`'s `-Werror=unterminated-string-initialization`
+rejects. `mpy-cross` is a host build, not a cross-compile, so this is not
+a toolchain-resolution problem cibuildmp can route around; it is a real
+constraint on which old tags a multi-version config can list on a modern
+runner. `examples/template/cibuildmp.toml` stays single-tag for exactly
+this reason — its job is to keep CI green on M3's build path, not to
+chase every historical tag's own build health.
+
 ## Identifier scheme
 
 Shaped after `cp311-manylinux_x86_64` = *{ABI}-{platform}\_{arch}*:
@@ -245,7 +284,8 @@ MicroPython release tag in the first slot, since a firmware image's identity
 ```toml
 # cibuildmp.toml — repo root
 
-micropython = "v1.28.0"       # release tag to build against
+micropython = "v1.28.0"       # release tag(s) to build against -- also
+                              # accepts a list (D13): ["v1.22.0", "v1.28.0"]
 output-dir = "mpyhouse"       # where built .mpy files land
 build = "*"                   # glob(s) over identifiers, space-separated
 skip = ""
@@ -485,6 +525,31 @@ the `seen_names` check below copy.
       `BuildInfo`/`print_summary` shape, minus the `humanize`/SHA256 parts
       that would cost a dependency for no real natmod need.
 
+**Two bugs only a real end-to-end run against `examples/template` caught**
+(both unit-tested in isolation, neither exercised the real failure mode):
+
+- `run_make()` passed `-C <module-dir>` in the command *and*
+  `cwd=<module-dir>` to `subprocess.run` — harmless when `module-dir` is
+  absolute, broken when relative (the common case: `package_dir` defaults
+  to `.`), since the process chdirs there and `-C` then looks for
+  `<module-dir>` nested inside itself. Fixed by dropping `cwd=`; `-C`
+  alone is sufficient and was already the right layer for it.
+- `dynruntime.mk` defaults `BUILD ?= build`, not scoped by `$(ARCH)`. That
+  is invisible to `build-natmod` (one job, one checkout, one arch each),
+  but `cibuildmp` with no `--only` runs every target sequentially in the
+  same `natmod/` tree (**D9**) — a second `ARCH=` finds the first arch's
+  own object files "up to date" and skips rebuilding, so the merged
+  `.mpy` silently stays the first arch's binary. Not a `cibuildmp` bug to
+  fix in code (it is the consuming project's Makefile that owns this),
+  but real enough that it needed becoming a documented requirement:
+  `examples/template/natmod/Makefile` sets `BUILD = .obj/$(ARCH)` (kept
+  outside `build/` so it cannot collide with the `dist` output
+  `collect_output()` globs for), and README.md's "Conventions this repo
+  assumes" now says so. `cibuildmp` still fails loudly instead of
+  shipping the wrong arch either way — that is what the header
+  verification above is for — this just avoids paying for the failed
+  build at all.
+
 ### M4 — publish
 
 - [ ] `cibuildmp publish` — absorb bclibc's `tools/build_release_assets.py`:
@@ -534,10 +599,15 @@ one with no cibuildwheel analogue and the most value for embedded.
   for the arm/riscv/xtensa arches; `x86`'s multilib and the whole
   `docker` strategy are Linux-only. Decide whether phase 1 claims anything
   beyond Linux, or explicitly does not.
-- **`micropython` as a list.** The draft config has `mpy_tags` as an array.
-  Building one module against several MicroPython tags is a real use case
-  only when they span an ABI boundary; otherwise it produces identical
-  output. Start with a single tag; revisit when a second ABI is in play.
+- **Old tags vs. a modern host `gcc`.** Found while verifying **D13** live:
+  `v1.21.0` fails to build `mpy-cross` under a recent `gcc`
+  (`-Werror=unterminated-string-initialization` on upstream's own
+  `py/emitinlinethumb.c`/`emitinlinextensa.c`). `mpy-cross` is a host
+  build, so this is not a cross-toolchain problem the resolver can route
+  around. Unclear yet how far back tags stay buildable, or whether that
+  is worth a documented "known good" floor, a suggested
+  `CFLAGS=-Wno-error` escape hatch, or just something a user hits and
+  works around per-project.
 - **Toolchain pinning vs. reproducibility.** Pinned tarball versions make
   builds reproducible but drift from what a contributor has on `PATH`. The
   `host` strategy running first means a laptop and CI can silently use

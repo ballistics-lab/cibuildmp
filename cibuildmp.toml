@@ -27,6 +27,11 @@
 # MPY_VERSION/MPY_SUB_VERSION pair (6.3 as of v1.28), which spans several
 # releases. That ABI is derived from the checked-out source and appears in
 # the build identifier; this key only pins the source tree.
+#
+# Also accepts a list (D13), e.g. ["v1.22.0", "v1.28.0"], to cover more
+# than one .mpy ABI from one config. Tags that resolve to the same ABI are
+# deduped to one build -- only list a second tag when it is a real ABI
+# boundary, or it does nothing.
 micropython = "v1.28.0"
 
 # Where built .mpy files are collected. cibuildwheel's "wheelhouse".

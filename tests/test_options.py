@@ -13,7 +13,7 @@ def write(tmp_path: Path, text: str, name: str = "cibuildmp.toml") -> Path:
 def test_defaults_with_no_config_at_all(tmp_path):
     options = Options.load(tmp_path, env={})
     assert options.config_path is None
-    assert options.micropython == "v1.28.0"
+    assert options.micropython == ["v1.28.0"]
     assert len(options.targets()) == 10
     build_options = options.build_options(options.targets()[0], env={})
     assert build_options.module_dir == "natmod"
@@ -57,7 +57,8 @@ def test_environment_beats_file(tmp_path):
     options = Options.load(
         tmp_path, env={"CIBMP_SKIP": "*-x86", "CIBMP_MICROPYTHON": "v1.28.0"}
     )
-    assert options.abi == "6.3"  # not 6.2, which the file's tag would give
+    # not 6.2, which the file's tag would give
+    assert options.tag_groups() == [("v1.28.0", "6.3")]
     assert [t.arch for t in options.targets()] == ["x64"]
 
 
@@ -88,7 +89,7 @@ def test_pyproject_fallback(tmp_path):
     assert (
         options.config_path is not None and options.config_path.name == "pyproject.toml"
     )
-    assert options.abi == "6.2"
+    assert options.tag_groups() == [("v1.22.0", "6.2")]
     assert [t.arch for t in options.targets()] == ["x64"]
 
 
@@ -99,7 +100,48 @@ def test_standalone_wins_over_pyproject(tmp_path):
     )
     options = Options.load(tmp_path, env={})
     assert options.config_path.name == "cibuildmp.toml"
-    assert options.abi == "6.3"
+    assert options.tag_groups() == [("v1.28.0", "6.3")]
+
+
+def test_micropython_list_spans_two_abi_groups(tmp_path):
+    write(
+        tmp_path,
+        """
+        micropython = ["v1.22.0", "v1.28.0"]
+        [natmod]
+        archs = ["x64"]
+        """,
+    )
+    options = Options.load(tmp_path, env={})
+    assert options.tag_groups() == [("v1.22.0", "6.2"), ("v1.28.0", "6.3")]
+    targets = options.targets()
+    assert [(t.tag, t.abi, t.identifier) for t in targets] == [
+        ("v1.22.0", "6.2", "mpy6.2-natmod-x64"),
+        ("v1.28.0", "6.3", "mpy6.3-natmod-x64"),
+    ]
+
+
+def test_micropython_list_dedups_redundant_abi(tmp_path):
+    write(
+        tmp_path,
+        """
+        micropython = ["v1.23.0", "v1.28.0"]
+        [natmod]
+        archs = ["x64"]
+        """,
+    )
+    options = Options.load(tmp_path, env={})
+    # Both are ABI 6.3 -- one build, not two, and it is built against
+    # whichever tag was listed first.
+    assert options.tag_groups() == [("v1.23.0", "6.3")]
+    assert [t.tag for t in options.targets()] == ["v1.23.0"]
+
+
+def test_micropython_env_accepts_space_separated_list(tmp_path):
+    write(tmp_path, '[natmod]\narchs = ["x64"]\n')
+    options = Options.load(tmp_path, env={"CIBMP_MICROPYTHON": "v1.22.0 v1.28.0"})
+    assert options.micropython == ["v1.22.0", "v1.28.0"]
+    assert options.tag_groups() == [("v1.22.0", "6.2"), ("v1.28.0", "6.3")]
 
 
 def test_runs_on_defaults_and_can_be_overridden(tmp_path):

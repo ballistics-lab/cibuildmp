@@ -88,6 +88,27 @@ def is_abi_known(tag: str) -> bool:
     return tag in MPY_ABI
 
 
+def resolve_micropython_tags(
+    tags: list[str], override: str | None = None
+) -> list[tuple[str, str]]:
+    """One (tag, abi) pair per distinct ABI `tags` resolves to.
+
+    Building against several tags is a real use case only when they span an
+    ABI boundary (py/persistentcode.h's MPY_VERSION/MPY_SUB_VERSION) --
+    otherwise every one of them produces a byte-for-byte identical native
+    .mpy, since the identifier (and so the output) is keyed on ABI, not tag.
+    A later tag whose ABI an earlier one already covers is silently
+    dropped rather than built again for no different output; order follows
+    `tags`, so the kept tag is whichever came first in the config.
+    """
+    seen: dict[str, str] = {}
+    for tag in tags:
+        abi = abi_for_tag(tag, override)
+        if abi not in seen:
+            seen[abi] = tag
+    return [(tag, abi) for abi, tag in seen.items()]
+
+
 @dataclass(frozen=True)
 class Target:
     """One build: an identifier plus the axes it decodes back into."""
@@ -95,6 +116,10 @@ class Target:
     abi: str  # "6.3"
     mode: str  # "natmod"
     arch: str  # "armv7emsp"
+    # The MicroPython tag actually fetched and built to produce this target
+    # -- not part of the identifier (that's ABI, the compatibility axis),
+    # but the build itself needs to know which checkout to run against.
+    tag: str = ""
 
     @property
     def identifier(self) -> str:
@@ -117,7 +142,7 @@ class Target:
         return self.identifier
 
 
-def natmod_targets(archs: list[str], abi: str) -> list[Target]:
+def natmod_targets(archs: list[str], abi: str, tag: str) -> list[Target]:
     """Build a Target per arch, preserving NATMOD_ARCHS order."""
     unknown = [a for a in archs if a not in NATMOD_CROSS]
     if unknown:
@@ -127,7 +152,9 @@ def natmod_targets(archs: list[str], abi: str) -> list[Target]:
         )
     selected = set(archs)
     return [
-        Target(abi=abi, mode="natmod", arch=a) for a in NATMOD_ARCHS if a in selected
+        Target(abi=abi, mode="natmod", arch=a, tag=tag)
+        for a in NATMOD_ARCHS
+        if a in selected
     ]
 
 

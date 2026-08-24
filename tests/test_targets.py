@@ -10,6 +10,7 @@ from cibuildmp.targets import (
     is_abi_known,
     natmod_targets,
     parse_selector,
+    resolve_micropython_tags,
     select,
 )
 
@@ -42,14 +43,37 @@ def test_unknown_tag_falls_back_and_is_reported():
     assert abi_for_tag("v1.99.0", override="7.0") == "7.0"
 
 
+def test_resolve_micropython_tags_dedups_by_abi():
+    # v1.23.0 and v1.28.0 both produce ABI 6.3 -- the second is redundant,
+    # not a second build.
+    assert resolve_micropython_tags(["v1.23.0", "v1.28.0"]) == [("v1.23.0", "6.3")]
+
+
+def test_resolve_micropython_tags_keeps_distinct_abis():
+    # v1.22.0 (6.2) and v1.28.0 (6.3) are a real ABI boundary.
+    assert resolve_micropython_tags(["v1.22.0", "v1.28.0"]) == [
+        ("v1.22.0", "6.2"),
+        ("v1.28.0", "6.3"),
+    ]
+
+
+def test_resolve_micropython_tags_honours_override():
+    # An explicit mpy-abi override makes every listed tag resolve to the
+    # same ABI, so only the first is kept.
+    assert resolve_micropython_tags(["v1.22.0", "v1.28.0"], override="7.0") == [
+        ("v1.22.0", "7.0")
+    ]
+
+
 def test_natmod_targets_preserve_canonical_order():
-    targets = natmod_targets(["rv64imc", "x64", "armv6m"], "6.3")
+    targets = natmod_targets(["rv64imc", "x64", "armv6m"], "6.3", "v1.28.0")
     assert [t.arch for t in targets] == ["x64", "armv6m", "rv64imc"]
+    assert all(t.tag == "v1.28.0" for t in targets)
 
 
 def test_unknown_arch_rejected():
     with pytest.raises(UnknownArchError, match="aarch64"):
-        natmod_targets(["x64", "aarch64"], "6.3")
+        natmod_targets(["x64", "aarch64"], "6.3", "v1.28.0")
 
 
 def test_parse_selector_accepts_both_forms():
@@ -59,7 +83,7 @@ def test_parse_selector_accepts_both_forms():
 
 
 def test_select_globs():
-    targets = natmod_targets(list(NATMOD_ARCHS), "6.3")
+    targets = natmod_targets(list(NATMOD_ARCHS), "6.3", "v1.28.0")
     assert [t.arch for t in select(targets, "*-armv7em*", "")] == [
         "armv7emsp",
         "armv7emdp",

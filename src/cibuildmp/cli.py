@@ -19,7 +19,13 @@ from .sources import (
     fetch_micropython,
     read_mpy_abi,
 )
-from .targets import NATMOD_ARCHS, Target, UnknownArchError, is_abi_known
+from .targets import (
+    LATEST_KNOWN_ABI,
+    NATMOD_ARCHS,
+    Target,
+    UnknownArchError,
+    is_abi_known,
+)
 from .toolchains import ResolvedToolchain, ToolchainError, resolve
 
 
@@ -154,11 +160,17 @@ def build(options: Options, targets: list[Target], *, toolchain: str = "auto") -
 
     Sequential and in-process on purpose (D9), the same shape cibuildwheel
     uses for the Python versions inside one runner. Fetching MicroPython and
-    building mpy-cross are identical for every natmod arch, so doing them
-    once here is strictly cheaper than paying for them in each of ten matrix
-    legs -- and unlike cibuildwheel, no natmod target needs a runner any
-    other target cannot use, so nothing forces a fan-out. Callers who want
-    one anyway (failure isolation, wall-clock) opt in with --only.
+    building mpy-cross are identical for every natmod arch *sharing an ABI*,
+    so doing them once per ABI group here is strictly cheaper than paying
+    for them in each of ten matrix legs -- and unlike cibuildwheel, no
+    natmod target needs a runner any other target cannot use, so nothing
+    forces a fan-out. Callers who want one anyway (failure isolation,
+    wall-clock) opt in with --only.
+
+    Grouped by MicroPython tag (**D13**): almost always one group, since
+    that is the common case, but `tag_groups()` can hand back more than one
+    when `micropython` spans an ABI boundary, and each needs its own
+    checkout and its own mpy-cross.
     """
     resolved = [options.build_options(t) for t in targets]
     total = len(resolved)
@@ -177,56 +189,65 @@ def build(options: Options, targets: list[Target], *, toolchain: str = "auto") -
             *build_options.extra_make_args,
         ]
 
-    print(
-        f"\ncibuildmp: {total} target(s) against MicroPython {options.micropython} "
-        f"(.mpy ABI {options.abi})"
-    )
+    tags = ", ".join(tag for tag, _abi in options.tag_groups())
+    print(f"\ncibuildmp: {total} target(s) against MicroPython {tags}")
     for index, (build_options, chain) in enumerate(
         zip(resolved, chains, strict=True), 1
     ):
         print("  " + _plan_line(index, total, build_options, chain))
         print(f"        {chain.describe()}")
 
-    # Shared setup, paid once for the whole invocation rather than once per
-    # matrix leg -- see build()'s own docstring and D9.
-    print("\ncibuildmp: preparing MicroPython")
-    mpy_dir = fetch_micropython(
-        options.micropython, submodules=options.micropython_submodules
-    )
-    build_mpy_cross(mpy_dir)
-
-    # The checkout is authoritative about the ABI; targets.MPY_ABI's table
-    # is only a way to answer the question without one. A disagreement means
-    # the identifiers already printed are wrong, so it stops here rather
-    # than producing files labelled with an ABI they do not have.
-    actual_abi = read_mpy_abi(mpy_dir)
-    if actual_abi != options.abi:
-        raise SourceError(
-            f"MicroPython {options.micropython} has .mpy ABI {actual_abi}, but the "
-            f"identifiers were built assuming {options.abi}. Set `mpy-abi = "
-            f'"{actual_abi}"` in the config, or report the stale entry in '
-            f"cibuildmp.targets.MPY_ABI."
-        )
-
-    print(f"\ncibuildmp: building {total} target(s)")
     seen_names: set[str] = set()
     results: list[BuildResult] = []
-    for index, (build_options, chain) in enumerate(
-        zip(resolved, chains, strict=True), 1
-    ):
-        print("\n  " + _plan_line(index, total, build_options, chain))
-        module_root = options.package_dir / build_options.module_dir
-        output_dir = options.package_dir / build_options.output_dir
-        result = build_target(
-            build_options,
-            chain,
-            mpy_dir,
-            module_root,
-            output_dir,
-            seen_names,
-        )
-        results.append(result)
-        print(f"        done in {result.duration:.1f}s -> {result.output}")
+    index = 0
+    # Preserves first-appearance order (options.targets() emits one ABI
+    # group at a time), not sorted -- a later tag never jumps ahead of an
+    # earlier one just because it sorts first.
+    build_tags = list(dict.fromkeys(bo.target.tag for bo in resolved))
+    for tag in build_tags:
+        group = [
+            (bo, chain)
+            for bo, chain in zip(resolved, chains, strict=True)
+            if bo.target.tag == tag
+        ]
+        abi = group[0][0].target.abi  # one ABI per tag group, by construction
+
+        # Shared setup, paid once per ABI group rather than once per target
+        # in it -- see build()'s own docstring and D9.
+        print(f"\ncibuildmp: preparing MicroPython {tag}")
+        mpy_dir = fetch_micropython(tag, submodules=options.micropython_submodules)
+        build_mpy_cross(mpy_dir)
+
+        # The checkout is authoritative about the ABI; targets.MPY_ABI's
+        # table is only a way to answer the question without one. A
+        # disagreement means the identifiers already printed are wrong, so
+        # it stops here rather than producing files labelled with an ABI
+        # they do not have.
+        actual_abi = read_mpy_abi(mpy_dir)
+        if actual_abi != abi:
+            raise SourceError(
+                f"MicroPython {tag} has .mpy ABI {actual_abi}, but the "
+                f"identifiers were built assuming {abi}. Set `mpy-abi = "
+                f'"{actual_abi}"` in the config, or report the stale entry in '
+                f"cibuildmp.targets.MPY_ABI."
+            )
+
+        print(f"\ncibuildmp: building {len(group)} target(s) for MicroPython {tag}")
+        for build_options, chain in group:
+            index += 1
+            print("\n  " + _plan_line(index, total, build_options, chain))
+            module_root = options.package_dir / build_options.module_dir
+            output_dir = options.package_dir / build_options.output_dir
+            result = build_target(
+                build_options,
+                chain,
+                mpy_dir,
+                module_root,
+                output_dir,
+                seen_names,
+            )
+            results.append(result)
+            print(f"        done in {result.duration:.1f}s -> {result.output}")
 
     total_duration = sum(r.duration for r in results)
     print(f"\ncibuildmp: {total} target(s) built in {total_duration:.1f}s")
@@ -310,21 +331,20 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    if not is_abi_known(options.micropython):
+    unknown_tags = [tag for tag in options.micropython if not is_abi_known(tag)]
+    if unknown_tags:
         print(
             f"cibuildmp: warning: no recorded .mpy ABI for MicroPython "
-            f"{options.micropython}; assuming {options.abi}. The ABI actually "
-            f"encoded in each built .mpy is verified against its identifier, so "
-            f"a wrong guess fails the build rather than shipping.",
+            f"{', '.join(unknown_tags)}; assuming {LATEST_KNOWN_ABI}. The ABI "
+            f"actually encoded in each built .mpy is verified against its "
+            f"identifier, so a wrong guess fails the build rather than shipping.",
             file=sys.stderr,
         )
 
     if args.dry_run:
         total = len(targets)
-        print(
-            f"cibuildmp: {total} target(s) against MicroPython "
-            f"{options.micropython} (.mpy ABI {options.abi})"
-        )
+        tags = ", ".join(tag for tag, _abi in options.tag_groups())
+        print(f"cibuildmp: {total} target(s) against MicroPython {tags}")
         for index, target in enumerate(targets, 1):
             print("  " + _plan_line(index, total, options.build_options(target)))
         return 0

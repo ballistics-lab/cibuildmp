@@ -22,6 +22,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `docs/BACKLOG.md`) rather than something installed at build time: both are
   pure-Python packages `tools/mpy_ld.py` itself needs, and `PYTHON=` on the
   `make` command line points it at the interpreter that already has them.
+- **`micropython` accepts a list, not just a string** (**D13**), to cover
+  more than one `.mpy` ABI from one config: `micropython = ["v1.22.0",
+  "v1.28.0"]`. Tags are deduped by the ABI they resolve to, keeping
+  whichever came first — building against two tags only produces different
+  output when they cross an ABI boundary, otherwise it's the same native
+  `.mpy` twice. `cli.build()` fetches MicroPython and builds `mpy-cross`
+  once per distinct ABI group rather than once per invocation.
+- `examples/template` — a minimal real natmod module, built by this repo's
+  own `action.yml` in `.github/workflows/build-template.yml` on every push
+  and PR. cibuildmp's own integration test: green here means the real
+  build path (M3) works end to end, not just that `--dry-run` prints a
+  plausible plan.
 
 ### Changed
 
@@ -29,6 +41,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   module rather than depending on the `mpbuild` package, which would have
   pulled `rich`/`textual`/`typer` and Python ≥3.12 onto a build driver that
   has stayed standard-library-only otherwise.
+
+### Fixed
+
+- `run_make()` passed both `-C <module-dir>` in the command *and*
+  `cwd=<module-dir>` to `subprocess.run` — redundant when `module-dir` is
+  absolute, broken when it's relative (the common case: `package_dir`
+  defaults to `.`), since the process would chdir there and then `-C`
+  would look for `<module-dir>` nested inside itself. Found by actually
+  running `cibuildmp` against `examples/template`, not just by unit tests
+  that mocked `subprocess.run` entirely.
+- `.gitignore` had a blanket `**/*.c`, left over from before this repo had
+  any real C source of its own — it silently excluded
+  `examples/template/natmod/template.c`. Narrowed to natmod's own build
+  byproducts (`**/build`, `*.mpy`, `.mpy_ld_cache`) instead.
 
 ## [0.3.0a1] - 2026-08-24
 

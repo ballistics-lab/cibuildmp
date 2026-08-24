@@ -88,6 +88,22 @@ def test_run_make_failure_names_the_command(tmp_path, monkeypatch):
         run_make(build_options(), tmp_path / "mpy", tmp_path, {})
 
 
+def test_run_make_does_not_also_pass_cwd(tmp_path, monkeypatch):
+    # `-C module_root` in the command already makes make chdir there; also
+    # passing cwd=module_root double-applies it, breaking whenever
+    # module_root is relative (options.package_dir defaults to ".") --
+    # make then looks for module_root nested inside itself.
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(kwargs)
+
+    monkeypatch.setattr(build.subprocess, "run", fake_run)
+    relative_module_root = Path("natmod")
+    run_make(build_options(), tmp_path / "mpy", relative_module_root, {})
+    assert "cwd" not in calls[0]
+
+
 # -- collect_output -----------------------------------------------------------
 
 

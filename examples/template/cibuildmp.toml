@@ -1,0 +1,31 @@
+# cibuildmp's own integration test bed -- see
+# .github/workflows/build-template.yml. natmod/template.c is a trivial
+# module whose only job is to build cleanly, so this config deliberately
+# doesn't override archs/skip: every target cibuildmp claims to support
+# should build here, or the claim is wrong.
+#
+# Single tag deliberately, not a D13 multi-tag list: an old enough tag to
+# land on a different ABI (e.g. v1.21.0, ABI 6.1) fails to build mpy-cross
+# under a modern host gcc -- upstream's py/emitinlinethumb.c and
+# emitinlinextensa.c initialise fixed-size char arrays without room for the
+# trailing NUL ({10, "r10"}), which recent gcc's
+# -Werror=unterminated-string-initialization rejects. Nothing cibuildmp can
+# fix (mpy-cross is a host build, not a cross-compile), so this CI stays on
+# one tag; D13's multi-tag path is covered by tests/test_options.py and
+# tests/test_targets.py instead.
+
+micropython = "v1.28.0"
+
+[natmod]
+archs = [
+    "x64",
+    "x86",
+    "armv6m",
+    "armv7m",
+    "armv7emsp",
+    "armv7emdp",
+    "rv32imc",
+    "rv64imc",
+    "xtensa",
+    "xtensawin",
+]

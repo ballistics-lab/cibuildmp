@@ -1,0 +1,29 @@
+name: Build template
+
+# cibuildmp's own integration test: examples/template is a real, minimal
+# natmod module, built here with this repo's own root action.yml -- the
+# same `uses:` a consumer like bclibc or a7p would write. Green here means
+# the actual build path (M3: make, collect, verify) works end to end, not
+# just that --dry-run prints a plausible plan.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "LICENSE"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./
+        with:
+          package-dir: examples/template
+
+      - name: List built artifacts
+        run: ls -la examples/template/mpyhouse

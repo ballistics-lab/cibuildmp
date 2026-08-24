@@ -406,6 +406,21 @@ target that drops the built `.mpy` under `build/<arch>*/`. Nothing here
 assumes a specific module name, precision scheme, or test framework --
 those stay in the consuming repo.
 
+**One more requirement for the `cibuildmp` CLI specifically** (not
+`build-natmod`, which gives every arch its own job and checkout): scope
+`dynruntime.mk`'s `BUILD` variable by `$(ARCH)` --
+`BUILD = .obj/$(ARCH)` before the `include`, kept outside `build/` so it
+does not collide with the `dist` output the CLI globs for (see
+`examples/template/natmod/Makefile`). `cibuildmp` with no `--only` runs
+every target sequentially in one `natmod/` tree (**D9**), and
+`dynruntime.mk` defaults `BUILD ?= build` unscoped, so without this a
+second `ARCH=` in the same invocation finds the previous arch's own
+object files "up to date" (same path, source unchanged) and skips
+rebuilding -- the merged `$(MOD).mpy` silently stays the *first* arch's
+binary. `cibuildmp` catches this itself (the header-arch verification
+that is its `auditwheel` equivalent fails loudly instead), but scoping
+`BUILD` avoids paying for the failed build at all.
+
 ## Roadmap
 
 `cibuildmp` is the roadmap. [`docs/BACKLOG.md`](docs/BACKLOG.md) is the

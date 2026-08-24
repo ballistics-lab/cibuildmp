@@ -1,8 +1,6 @@
 **/__pycache__
 **/.idea
-**/*.c
 **/*.pyd
-**/build
 **/dist
 **/*.egg-info
 *.py[cod]
@@ -14,6 +12,17 @@
 coverage.xml
 coverage.json
 htmlcov/
+
+# natmod build byproducts: py/dynruntime.mk's own `all: $(MOD).mpy` rule
+# writes the merged .mpy and mpy_ld.py's cache directly into module-dir
+# (not under build/), and `dist` (see examples/template/natmod/Makefile)
+# copies it into build/<arch>*/ for cibuildmp to collect from. .obj/ is
+# where that same Makefile scopes make's own per-arch intermediate objects
+# (BUILD=.obj/$(ARCH)) -- kept out of build/ on purpose, see its comment.
+**/build
+.obj/
+*.mpy
+.mpy_ld_cache
 
 # cibuildmp's own outputs and caches
 mpyhouse/

@@ -21,10 +21,10 @@ from typing import Any
 from .targets import (
     NATMOD_ARCHS,
     Target,
-    abi_for_tag,
     matches,
     natmod_targets,
     parse_selector,
+    resolve_micropython_tags,
     select,
 )
 
@@ -80,7 +80,7 @@ class Options:
 
     package_dir: Path
     config_path: Path | None
-    micropython: str
+    micropython: list[str]
     output_dir: Path
     build: list[str]
     skip: list[str]
@@ -121,7 +121,9 @@ class Options:
         return cls(
             package_dir=package_dir,
             config_path=config_path,
-            micropython=str(opt("micropython", DEFAULT_MICROPYTHON)),
+            micropython=_as_list(
+                opt("micropython", DEFAULT_MICROPYTHON), "micropython"
+            ),
             output_dir=Path(str(opt("output-dir", DEFAULT_OUTPUT_DIR))),
             build=parse_selector(opt("build", "*")),
             skip=parse_selector(opt("skip", "")),
@@ -136,13 +138,27 @@ class Options:
 
     # ── Resolution ────────────────────────────────────────────────────────
 
-    @property
-    def abi(self) -> str:
-        return abi_for_tag(self.micropython, self.mpy_abi)
+    def tag_groups(self) -> list[tuple[str, str]]:
+        """One (tag, abi) pair per distinct ABI `micropython` resolves to.
+
+        See resolve_micropython_tags(): almost always a single pair, since
+        that is the common case (**D13**), but never fewer than the number
+        of distinct ABIs actually requested.
+        """
+        return resolve_micropython_tags(self.micropython, self.mpy_abi)
 
     def targets(self) -> list[Target]:
-        """Every target this config selects, in NATMOD_ARCHS order."""
-        return select(natmod_targets(self.archs, self.abi), self.build, self.skip)
+        """Every target this config selects.
+
+        One ABI group per `tag_groups()` entry, archs in NATMOD_ARCHS order
+        within each group.
+        """
+        all_targets = [
+            target
+            for tag, abi in self.tag_groups()
+            for target in natmod_targets(self.archs, abi, tag)
+        ]
+        return select(all_targets, self.build, self.skip)
 
     def build_options(
         self, target: Target, env: Mapping[str, str] | None = None
@@ -170,7 +186,7 @@ class Options:
 
         return BuildOptions(
             target=target,
-            micropython=self.micropython,
+            micropython=target.tag,
             output_dir=self.output_dir,
             module_dir=str(opt("module-dir", DEFAULT_MODULE_DIR)),
             make_target=str(opt("make-target", DEFAULT_MAKE_TARGET)),

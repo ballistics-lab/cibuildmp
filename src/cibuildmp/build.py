@@ -78,9 +78,13 @@ def run_pre_build_command(module_root: Path, command: str, env: dict[str, str]) 
 def run_make(
     build_options: BuildOptions, mpy_dir: Path, module_root: Path, env: dict[str, str]
 ) -> None:
+    # No cwd= here: `-C module_root` in the command itself already makes
+    # make chdir there, and module_root can be relative (it usually is --
+    # options.package_dir is often "."), so also passing it as cwd would
+    # chdir twice and have make look for module_root nested inside itself.
     command = make_command(build_options, mpy_dir, module_root)
     try:
-        subprocess.run(command, cwd=module_root, env=env, check=True)
+        subprocess.run(command, env=env, check=True)
     except subprocess.CalledProcessError as exc:
         raise BuildError(
             f"{build_options.identifier}: `{' '.join(command)}` failed with exit "

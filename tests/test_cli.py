@@ -46,6 +46,18 @@ def test_dry_run_covers_every_target_and_succeeds(tmp_path, capsys):
     assert "ARCH=x64" in out and "ARCH=armv6m" in out
 
 
+def test_dry_run_spans_multiple_micropython_tags(tmp_path, capsys):
+    config = """
+    micropython = ["v1.22.0", "v1.28.0"]
+    [natmod]
+    archs = ["x64"]
+    """
+    assert main([write(tmp_path, config), "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert "v1.22.0, v1.28.0" in out
+    assert "mpy6.2-natmod-x64" in out and "mpy6.3-natmod-x64" in out
+
+
 def test_only_overrides_skip(tmp_path, capsys):
     config = CONFIG + '\nskip = "*-armv6m"\n'
     argv = [write(tmp_path, config), "--only", "mpy6.3-natmod-armv6m", "--dry-run"]
