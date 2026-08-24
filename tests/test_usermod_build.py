@@ -2,12 +2,16 @@ from pathlib import Path
 
 import pytest
 
+from cibuildmp.toolchains import ResolvedToolchain
 from cibuildmp.usermod import build
 from cibuildmp.usermod.build import (
     UNIX_ARCH_SETTINGS,
+    QemuBuildOptions,
     UnixBuildOptions,
     UsermodBuildError,
+    build_qemu,
     build_unix,
+    qemu_make_command,
     run_unix_deplibs,
     unix_make_command,
 )
@@ -140,3 +144,95 @@ def test_x86_toolchain_error_propagates_unwrapped(tmp_path, monkeypatch):
     monkeypatch.setattr(build.toolchains, "resolve", boom)
     with pytest.raises(ToolchainError, match="gcc-multilib"):
         build_unix(opts("x86", build_dir=tmp_path / "build-x86"), tmp_path / "mpy")
+
+
+# ── qemu ───────────────────────────────────────────────────────────────────
+
+HOST_CHAIN = ResolvedToolchain("host", "arm-none-eabi-", "arm-none-eabi-", None)
+
+
+def qemu_opts(**overrides) -> QemuBuildOptions:
+    defaults = {
+        "user_c_modules": "/gh/ws/micropython/usermod",
+        "frozen_manifest": "/gh/ws/a7p_manifest.py",
+        "build_dir": Path("/gh/ws/usermod/build/armv7m"),
+    }
+    defaults.update(overrides)
+    return QemuBuildOptions(**defaults)
+
+
+def test_qemu_command_matches_build_usermod_armv7m_shape():
+    # build-usermod-armv7m's own "Build usermod (armv7m, MPS2_AN385)" step.
+    command = qemu_make_command(qemu_opts(), Path("/gh/ws/mpy"), HOST_CHAIN)
+
+    assert command == [
+        "make",
+        "-C",
+        "/gh/ws/mpy/ports/qemu",
+        "BOARD=MPS2_AN385",
+        "BUILD=/gh/ws/usermod/build/armv7m",
+        "CROSS_COMPILE=arm-none-eabi-",
+        "USER_C_MODULES=/gh/ws/micropython/usermod",
+        "FROZEN_MANIFEST=/gh/ws/a7p_manifest.py",
+    ]
+
+
+def test_qemu_probes_armv7m_toolchain_not_a_new_one(monkeypatch, tmp_path):
+    """qemu must reuse toolchains.resolve("armv7m") -- natmod's own
+    arm-none-eabi- pin -- not a second toolchain resolution path."""
+    calls = []
+    monkeypatch.setattr(
+        build.toolchains,
+        "resolve",
+        lambda arch, **k: calls.append(arch) or HOST_CHAIN,
+    )
+    build_dir = tmp_path / "build-armv7m"
+    build_dir.mkdir()
+    (build_dir / "firmware.elf").write_bytes(b"\x7fELF")
+    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
+
+    build_qemu(qemu_opts(build_dir=build_dir), tmp_path / "mpy")
+
+    assert calls == ["armv7m"]
+
+
+def test_qemu_builds_and_returns_firmware_path(monkeypatch, tmp_path):
+    build_dir = tmp_path / "build-armv7m"
+    build_dir.mkdir()
+    (build_dir / "firmware.elf").write_bytes(b"\x7fELF")
+
+    monkeypatch.setattr(build.toolchains, "resolve", lambda arch, **k: HOST_CHAIN)
+    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
+
+    result = build_qemu(qemu_opts(build_dir=build_dir), tmp_path / "mpy")
+
+    assert result == build_dir / "firmware.elf"
+
+
+def test_qemu_missing_firmware_after_success_is_an_error(monkeypatch, tmp_path):
+    build_dir = tmp_path / "build-armv7m"
+    build_dir.mkdir()
+
+    monkeypatch.setattr(build.toolchains, "resolve", lambda arch, **k: HOST_CHAIN)
+    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
+
+    with pytest.raises(UsermodBuildError, match="build reported success but"):
+        build_qemu(qemu_opts(build_dir=build_dir), tmp_path / "mpy")
+
+
+def test_qemu_build_failure_names_the_command(monkeypatch, tmp_path):
+    import subprocess as sp
+
+    def fake_run(cmd, **kwargs):
+        raise sp.CalledProcessError(1, cmd)
+
+    monkeypatch.setattr(build.toolchains, "resolve", lambda arch, **k: HOST_CHAIN)
+    monkeypatch.setattr(build.subprocess, "run", fake_run)
+
+    with pytest.raises(UsermodBuildError, match="failed with exit code"):
+        build_qemu(qemu_opts(build_dir=tmp_path / "build-armv7m"), tmp_path / "mpy")
+
+
+def test_qemu_unsupported_board_rejected(tmp_path):
+    with pytest.raises(UsermodBuildError, match="not supported yet"):
+        build_qemu(qemu_opts(board="MIMXRT1050_EVK"), tmp_path / "mpy")

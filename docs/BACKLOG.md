@@ -1196,9 +1196,31 @@ style, now that a slice of it is actually implemented:
         natmod's bare-metal pins) plus the `deplibs` static-libffi
         pre-step wired to a real toolchain. Real work, not attempted in
         this slice.
-  - [ ] `webassembly`, `qemu`/armv7m, `windows` — not started. `windows`
-        specifically waits on **M9**'s MSYS2 orchestration (**D18**), not
-        just a toolchain pin.
+  - [x] `usermod/build.py`: `build_qemu()`, `MPS2_AN385` only. Reuses
+        natmod's own `armv7m` toolchain (`toolchains.resolve("armv7m")`,
+        `arm-none-eabi-`) rather than pinning a second copy —
+        `ports/qemu/Makefile`'s default-board `CROSS_COMPILE` is exactly
+        that prefix, verified directly against a real `v1.28.0` checkout.
+        `ports/qemu/Makefile` also has RISC-V boards
+        (`riscv64-unknown-elf-`, natmod's own `rv32imc`/`rv64imc`
+        toolchain) — a real, cheap extension later, not attempted since
+        nothing here exercises it yet. `CROSS_COMPILE=` is qemu's own
+        variable name, not natmod's `CROSS=`, so this builds its own
+        override from `chain.prefix` rather than reusing
+        `ResolvedToolchain.make_overrides` (that property is
+        `dynruntime.mk`-specific). Output is `$(BUILD)/firmware.elf`
+        (`ports/qemu/Makefile`'s own `all:` target), no globbing needed,
+        same shape as `unix`'s. 6 new hermetic cases in
+        `tests/test_usermod_build.py` (19 total in that file) plus a live
+        build: real `v1.28.0` checkout, `make -C ports/qemu` run for
+        real, 44s, a genuine 321904-byte `firmware.elf` — and the
+        toolchain it linked against was the exact
+        `~/.cache/cibuildmp/toolchains/arm-none-eabi/15.2.1-1.1/` M2
+        already downloaded for natmod earlier, confirming the reuse
+        actually works end to end, not just past a mock.
+  - [ ] `webassembly`, `windows` — not started. `windows` specifically
+        waits on **M9**'s MSYS2 orchestration (**D18**), not just a
+        toolchain pin.
 - **M9** — toolchain provisioning: MSYS2 orchestration (**D18**), ESP-IDF
   fetch + caching, `docker` strategy revisit for it (**D19**).
 - **M10** — runner/matrix integration, fan-out-by-default for usermod

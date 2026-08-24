@@ -17,7 +17,16 @@ ports/unix/Makefile directly, not just that action's comments) so the
 data is ready when a toolchain resolver for them exists, but build_unix()
 raises rather than pretending to build them today.
 
-windows/webassembly/qemu are M8's own remaining scope, not started.
+`qemu` (armv7m) is the second port here: `ports/qemu/Makefile`'s own
+`CROSS_COMPILE ?= arm-none-eabi-` for its default board (`MPS2_AN385`,
+Cortex-M3) is the exact toolchain natmod's own `armv7m` arch already
+resolves (`toolchains.resolve("armv7m")`) -- reused rather than pinning it
+a second time. Only `MPS2_AN385` is supported: `ports/qemu` also has
+RISC-V boards (`CROSS_COMPILE ?= riscv64-unknown-elf-`, natmod's own
+`rv32imc`/`rv64imc` toolchain), a real, cheap-to-add extension later, not
+attempted now since nothing here exercises it yet.
+
+`windows`/`webassembly` are M8's own remaining scope, not started.
 """
 
 from __future__ import annotations
@@ -27,6 +36,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .. import toolchains
+from ..toolchains import ResolvedToolchain
 
 
 class UsermodBuildError(Exception):
@@ -175,3 +185,85 @@ def build_unix(
             f"unix/{opts.arch}: build reported success but {binary} is missing"
         )
     return binary
+
+
+# ── qemu (armv7m) ────────────────────────────────────────────────────────
+
+_QEMU_SUPPORTED_BOARDS = ("MPS2_AN385",)
+
+
+@dataclass(frozen=True)
+class QemuBuildOptions:
+    user_c_modules: str
+    frozen_manifest: str
+    build_dir: Path
+    board: str = "MPS2_AN385"
+    extra_make_args: tuple[str, ...] = ()
+
+
+def qemu_make_command(
+    opts: QemuBuildOptions, mpy_dir: Path, chain: ResolvedToolchain
+) -> list[str]:
+    # ports/qemu/Makefile uses CROSS_COMPILE=, not natmod's own CROSS= --
+    # ResolvedToolchain.make_overrides is dynruntime.mk-specific (that
+    # variable name), so this builds its own override from chain.prefix
+    # instead of reusing it. Always passed explicitly rather than relying
+    # on the Makefile's own `CROSS_COMPILE ?= arm-none-eabi-` default
+    # coinciding with it -- harmless when they already match, and correct
+    # when resolve() ever returns a different working prefix.
+    return [
+        "make",
+        "-C",
+        str(mpy_dir / "ports" / "qemu"),
+        f"BOARD={opts.board}",
+        f"BUILD={opts.build_dir}",
+        f"CROSS_COMPILE={chain.prefix}",
+        f"USER_C_MODULES={opts.user_c_modules}",
+        f"FROZEN_MANIFEST={opts.frozen_manifest}",
+        *opts.extra_make_args,
+    ]
+
+
+def build_qemu(
+    opts: QemuBuildOptions,
+    mpy_dir: Path,
+    *,
+    toolchain_root: Path | None = None,
+    quiet: bool = False,
+) -> Path:
+    """Build ports/qemu for `opts.board`, returning the produced firmware.
+
+    The toolchain is natmod's own `armv7m` (`arm-none-eabi-`) --
+    `ports/qemu/Makefile`'s default-board `CROSS_COMPILE` is exactly that
+    prefix, so this resolves it via `toolchains.resolve("armv7m")` rather
+    than pinning a second copy. Only `MPS2_AN385` is supported today; see
+    this module's own docstring for why the RISC-V boards are not.
+
+    The output path is `opts.build_dir / "firmware.elf"` --
+    ports/qemu/Makefile's own `all: $(BUILD)/firmware.elf` target, again
+    no globbing needed.
+    """
+    if opts.board not in _QEMU_SUPPORTED_BOARDS:
+        raise UsermodBuildError(
+            f"qemu board {opts.board!r} not supported yet. Known: "
+            f"{', '.join(_QEMU_SUPPORTED_BOARDS)} (see this module's own "
+            f"docstring for why the RISC-V boards are not)"
+        )
+
+    chain = toolchains.resolve("armv7m", root=toolchain_root, quiet=quiet)
+
+    command = qemu_make_command(opts, mpy_dir, chain)
+    try:
+        subprocess.run(command, env=chain.env(), check=True)
+    except subprocess.CalledProcessError as exc:
+        raise UsermodBuildError(
+            f"qemu/{opts.board}: `{' '.join(command)}` failed with exit "
+            f"code {exc.returncode}"
+        ) from exc
+
+    firmware = opts.build_dir / "firmware.elf"
+    if not firmware.exists():
+        raise UsermodBuildError(
+            f"qemu/{opts.board}: build reported success but {firmware} is missing"
+        )
+    return firmware
