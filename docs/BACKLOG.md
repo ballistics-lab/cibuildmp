@@ -805,10 +805,13 @@ shape `collect_output()`/`verify_output()` copy.
       `collect_output()` correctly refuse an ambiguous two-`.mpy` result
       instead of silently picking one. Neither is a `cibuildmp` bug; both
       are now fixed in their own repos' Makefiles.
-- [ ] `micropython-bclibc`, `a7p`, `micropython-wasm3`: repin every
+- [x] `micropython-bclibc`, `a7p`, `micropython-wasm3`: repinned every
       `uses:` path from the interim `cibuildmp@<commit-sha>` pin (used
-      because no tag existed past `v0.3.0a1`) to `cibuildmp@v0.3.0`
-      (**D11**) once that tag is cut — mechanical, no behaviour change.
+      while no tag existed past `v0.3.0a1`) to `cibuildmp@v0.3.0`
+      (**D11**), now that it's cut — mechanical, no behaviour change.
+      Not yet pushed/re-verified against the tag at the time of this
+      note; the SHA it points to is the same commit already confirmed
+      green in all three repos' CI.
 - [ ] Archive `ballistics-lab/micropython-native-ci` once all three have
       repinned.
 - [ ] Reduce `build-natmod` to a wrapper over `cibuildmp --only <id>` so
