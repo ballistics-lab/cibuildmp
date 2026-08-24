@@ -1,0 +1,122 @@
+# cibuildmp.toml — example config, in the spirit of cibuildwheel's
+# [tool.cibuildwheel] section: one declarative file in a module's own repo
+# drives its whole target matrix, resolved by the `cibuildmp` CLI instead of
+# hand-wired GitHub Actions per repo.
+#
+# This particular file is a reference example, not a live config —
+# micropython-native-ci is not itself a MicroPython C module and has no
+# natmod/ directory. The values below are drawn from micropython-bclibc,
+# the most demanding of the three consuming repos.
+#
+# See docs/BACKLOG.md for the decisions behind this schema (D1-D8) and for
+# what is and is not implemented yet.
+#
+# Location: cibuildmp.toml at the repo root. If the project also has a
+# pyproject.toml, the same tree is accepted under [tool.cibuildmp]; this
+# file wins when both exist. (MicroPython C-module repos generally have no
+# pyproject.toml — it is not their convention — hence the standalone file.)
+#
+# Every option below is overridable by a CIBMP_-prefixed environment
+# variable (CIBMP_BUILD, CIBMP_SKIP, CIBMP_MICROPYTHON, CIBMP_OUTPUT_DIR,
+# CIBMP_EXTRA_MAKE_ARGS, ...). Precedence, lowest to highest:
+#   defaults -> this file -> matching [[overrides]] -> environment -> CLI
+
+# ── Global ────────────────────────────────────────────────────────────────
+# MicroPython release to build *against*. Note this is not the same thing as
+# where the result runs: a native .mpy loads into any runtime with a matching
+# MPY_VERSION/MPY_SUB_VERSION pair (6.3 as of v1.28), which spans several
+# releases. That ABI is derived from the checked-out source and appears in
+# the build identifier; this key only pins the source tree.
+micropython = "v1.28.0"
+
+# Where built .mpy files are collected. cibuildwheel's "wheelhouse".
+output-dir = "mpyhouse"
+
+# ── Build selectors ───────────────────────────────────────────────────────
+# Globs over the flat build identifier, which is shaped after
+# cibuildwheel's cp311-manylinux_x86_64 = {ABI}-{platform}_{arch}:
+#
+#     mpy6.3-natmod-x64
+#     mpy6.3-natmod-armv7emsp
+#
+# Space-separated, `skip` applied after `build`. Examples:
+#     build = "mpy6.3-*"          # everything at this ABI
+#     build = "*-armv7em*"        # both Cortex-M4F/M7 variants
+#     skip  = "*-xtensawin"       # temporarily drop one arch
+#
+# There is deliberately no precision/float field in the identifier: it is
+# already encoded in the arch itself (MP_NATIVE_ARCH_ARMV7EMSP and
+# ...ARMV7EMDP are distinct values, selected from __ARM_FP in
+# py/persistentcode.h). A project-level precision define is an override, not
+# an axis — see [[overrides]] below.
+build = "*"
+skip = ""
+
+# ── natmod: one build per dynruntime.mk ARCH ──────────────────────────────
+# The build itself is delegated: cibuildmp invokes this project's own
+# natmod/Makefile (which includes py/dynruntime.mk and takes ARCH=/MPY_DIR=).
+# What cibuildmp owns is everything around it — fetching MicroPython,
+# building mpy-cross, resolving the cross toolchain per arch, installing
+# mpy_ld.py's host deps, and collecting the outputs.
+[natmod]
+archs = ["x64", "x86", "armv6m", "armv7m", "armv7emsp", "armv7emdp",
+         "rv32imc", "rv64imc", "xtensa", "xtensawin"]
+
+# No aarch64: dynruntime.mk has no ARCH=aarch64 branch at all as of
+# MicroPython v1.28, so natmod cannot target it. Cover it via usermod.
+
+module-dir = "natmod"       # directory containing the Makefile.
+                            # a7p passes "micropython/natmod".
+make-target = "dist"
+extra-make-args = []
+
+# Optional shell command run once inside module-dir, after mpy-cross is
+# built and before the make target — e.g. a7p's `make fetch-nanopb`, which
+# vendors a dependency the natmod Makefile needs for every ARCH.
+pre-build-command = ""
+
+# ── Overrides ─────────────────────────────────────────────────────────────
+# One mechanism, cibuildwheel-shaped: a list of tables, each with a `select`
+# glob over the same identifier the build/skip selectors use. First match
+# wins per option. Everything settable above is settable here.
+#
+# The example below is real: bclibc's natmod/Makefile already derives
+# MP_BCLIBC_PRECISION from ARCH on its own, so this override is redundant
+# there — it is written out to show the mechanism, and to show where a
+# project-level define belongs (here, not in the identifier).
+[[overrides]]
+select = "*-armv7emsp"
+extra-make-args = ["MP_BCLIBC_PRECISION=single"]
+
+# ── Not implemented yet ───────────────────────────────────────────────────
+# Sketched here so the intended shape is on record, but NOT parsed by
+# cibuildmp today. Do not rely on any of it. See docs/BACKLOG.md.
+#
+# usermod (D7) — firmware, not a distributable artifact, and a different
+# pipeline: driven by mpbuild (github.com/mattytrentini/mpbuild) for the
+# ports it covers. Identifiers take the MicroPython release tag in the first
+# slot rather than an .mpy ABI, since a firmware image's identity *is* its
+# MicroPython version: v1.28.0-usermod-esp32_ESP32_GENERIC
+#
+#     [usermod.unix]
+#     archs = ["x64", "x86", "aarch64", "armhf", "mipsel"]
+#
+#     [usermod.webassembly]
+#     variant = "pyscript"     # standard's ASYNCIFY is broken on modern emsdk
+#
+#     [usermod.rp2040]
+#     boards = ["RPI_PICO"]
+#
+#     [usermod.esp32]
+#     boards = ["ESP32_GENERIC"]
+#     idf-target = "esp32"     # chip family, deliberately separate from board
+#     idf-ver = "v5.5.1"
+#
+# tests (D6) — deferred outright. The axis is an explicit runner
+# (native / qemu-user / qemu-system / node / rp2040py / mpremote / none),
+# not a bare command string, because these substrates differ in more than
+# what they invoke.
+#
+#     [test]
+#     runner = "qemu-system"
+#     command = "python3 -m ci.run_tests {build_dir}"

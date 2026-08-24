@@ -1,0 +1,37 @@
+name: cibuildmp
+description: "Installs and runs cibuildmp on the current runner"
+inputs:
+  package-dir:
+    description: 'Input directory, defaults to "."'
+    required: false
+    default: .
+  output-dir:
+    description: 'Folder to place the outputs in, defaults to "mphouse"'
+    required: false
+    default: mphouse
+  config-file:
+    description: "File containing the config, defaults to {package}/cibuildmp.toml"
+    required: false
+    default: ""
+  only:
+    description: "Build a specific target only. No need for arch/platform if this is set"
+    required: false
+    default: ""
+  extras:
+    description: "Comma-separated list of extras to install"
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
+      with:
+        python-version: "3.14"
+
+    - id: cibmp
+      shell: bash
+      run: |
+        # Install cibuildmp and build the command line
+        uv tool install cibuildmp # should install directly from cibuildmp action's ref
+        cibuildmp  # run cibuildmp
