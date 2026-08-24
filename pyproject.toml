@@ -1,20 +1,74 @@
+[build-system]
+requires = ["setuptools>=64", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "cibuildmp"
-version = "0.1.0"
-description = "Add your description here"
+authors = [{ name = "o-murphy", email = "thehelixpg@gmail.com" }]
+description = "Build MicroPython native C extensions for every target, from one config — cibuildwheel for MicroPython"
 readme = "README.md"
-authors = [
-    { name = "o-murphy", email = "thehelixpg@gmail.com" }
-]
 requires-python = ">=3.11"
+keywords = [
+    "micropython",
+    "natmod",
+    "usermod",
+    "mpy",
+    "cross-compile",
+    "ci",
+    "build",
+    "embedded",
+]
+license = "MIT"
+license-files = ["LICENSE"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Natural Language :: English",
+    "Environment :: Console",
+    "Topic :: Software Development :: Build Tools",
+    "Topic :: Software Development :: Embedded Systems",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: Implementation :: CPython",
+]
+# Standard library only, deliberately: a build tool that has to resolve its
+# own dependency tree before it can fetch anything is harder to trust, and
+# `wget` not being everywhere is the exact class of problem this replaces.
 dependencies = []
+dynamic = ["version"]
 
 [project.scripts]
 cibuildmp = "cibuildmp:main"
 
-[build-system]
-requires = ["uv_build>=0.12.5,<0.13.0"]
-build-backend = "uv_build"
+[project.urls]
+"Homepage" = "https://github.com/ballistics-lab/cibuildmp"
+"Bug Reports" = "https://github.com/ballistics-lab/cibuildmp/issues"
+"Source" = "https://github.com/ballistics-lab/cibuildmp"
+"Changelog" = "https://github.com/ballistics-lab/cibuildmp/blob/main/CHANGELOG.md"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["cibuildmp*"]
+
+# Explicit rather than relying on include-package-data: resources/natmod.toml
+# holds every pinned toolchain URL, checksum and arch table, so a wheel that
+# silently omits it is a wheel that fails at import.
+[tool.setuptools.package-data]
+cibuildmp = ["resources/*.toml"]
+
+[tool.setuptools_scm]
+fallback_version = "0.0.0.dev0"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.pyright]
+include = ["src"]
 
 [dependency-groups]
 dev = [

@@ -1,8 +1,19 @@
-__pycache__/
+**/__pycache__
+**/.idea
+**/*.c
+**/*.pyd
+**/build
+**/dist
+**/*.egg-info
 *.py[cod]
 .venv/
 .pytest_cache/
 .ruff_cache/
+
+.coverage*
+coverage.xml
+coverage.json
+htmlcov/
 
 # cibuildmp's own outputs and caches
 mpyhouse/

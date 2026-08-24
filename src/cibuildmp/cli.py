@@ -9,6 +9,7 @@ import shutil
 import sys
 from pathlib import Path
 
+from . import __version__
 from .options import BuildOptions, ConfigError, Options
 from .sources import (
     SourceError,
@@ -35,6 +36,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=".",
         type=Path,
         help='Directory containing the module and its config (default: ".")',
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"cibuildmp {__version__}",
     )
     parser.add_argument(
         "--config-file",
