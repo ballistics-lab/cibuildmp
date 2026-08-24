@@ -26,7 +26,12 @@ RISC-V boards (`CROSS_COMPILE ?= riscv64-unknown-elf-`, natmod's own
 `rv32imc`/`rv64imc` toolchain), a real, cheap-to-add extension later, not
 attempted now since nothing here exercises it yet.
 
-`windows`/`webassembly` are M8's own remaining scope, not started.
+`webassembly` is the third port here: its toolchain (`emsdk`) needs its
+own resolver, `usermod/emsdk.py` -- not `toolchains.py`'s shape, see that
+module's own docstring for why.
+
+`windows` is M8's own remaining scope, not started (waits on **M9**'s
+MSYS2 orchestration, **D18**).
 """
 
 from __future__ import annotations
@@ -37,6 +42,7 @@ from pathlib import Path
 
 from .. import toolchains
 from ..toolchains import ResolvedToolchain
+from . import emsdk
 
 
 class UsermodBuildError(Exception):
@@ -267,3 +273,66 @@ def build_qemu(
             f"qemu/{opts.board}: build reported success but {firmware} is missing"
         )
     return firmware
+
+
+# ── webassembly ──────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class WebassemblyBuildOptions:
+    user_c_modules: str
+    frozen_manifest: str
+    build_dir: Path
+    variant: str = "pyscript"
+    extra_make_args: tuple[str, ...] = ()
+
+
+def webassembly_make_command(opts: WebassemblyBuildOptions, mpy_dir: Path) -> list[str]:
+    return [
+        "make",
+        "-C",
+        str(mpy_dir / "ports" / "webassembly"),
+        f"VARIANT={opts.variant}",
+        f"BUILD={opts.build_dir}",
+        f"USER_C_MODULES={opts.user_c_modules}",
+        f"FROZEN_MANIFEST={opts.frozen_manifest}",
+        *opts.extra_make_args,
+    ]
+
+
+def build_webassembly(
+    opts: WebassemblyBuildOptions,
+    mpy_dir: Path,
+    *,
+    toolchain_root: Path | None = None,
+    quiet: bool = False,
+) -> Path:
+    """Build ports/webassembly for `opts.variant`, returning the produced
+    `micropython.mjs`.
+
+    emsdk is resolved via `emsdk.resolve_emsdk()` -- a pinned download,
+    not a `git clone emsdk` + installer run; see `usermod/emsdk.py`'s own
+    docstring and `resources/usermod.toml`'s `[emsdk]` table for why this
+    needs its own resolver rather than `toolchains.resolve()`.
+
+    The output path is `opts.build_dir / "micropython.mjs"` --
+    `ports/webassembly/Makefile`'s own `all:` target.
+    """
+    sdk = emsdk.resolve_emsdk(root=toolchain_root, quiet=quiet)
+
+    command = webassembly_make_command(opts, mpy_dir)
+    try:
+        subprocess.run(command, env=sdk.env(), check=True)
+    except subprocess.CalledProcessError as exc:
+        raise UsermodBuildError(
+            f"webassembly/{opts.variant}: `{' '.join(command)}` failed "
+            f"with exit code {exc.returncode}"
+        ) from exc
+
+    produced = opts.build_dir / "micropython.mjs"
+    if not produced.exists():
+        raise UsermodBuildError(
+            f"webassembly/{opts.variant}: build reported success but "
+            f"{produced} is missing"
+        )
+    return produced

@@ -1218,9 +1218,47 @@ style, now that a slice of it is actually implemented:
         `~/.cache/cibuildmp/toolchains/arm-none-eabi/15.2.1-1.1/` M2
         already downloaded for natmod earlier, confirming the reuse
         actually works end to end, not just past a mock.
-  - [ ] `webassembly`, `windows` — not started. `windows` specifically
-        waits on **M9**'s MSYS2 orchestration (**D18**), not just a
-        toolchain pin.
+  - [x] `usermod/build.py`: `build_webassembly()`, `pyscript` variant.
+        The toolchain (`emsdk`) does not fit `toolchains.py`'s
+        `ToolchainSpec`/`resolve()` shape at all — no `<prefix>gcc`
+        binary, two directories need to land on `PATH`
+        (`emscripten/` for the `emcc`/`em++` driver scripts,
+        `bin/` for the LLVM/wasm binaries they invoke) — so
+        `usermod/emsdk.py` is a small, dedicated resolver instead, reusing
+        `sources.py`'s own `cached_dir`/`download_file`/`verify_sha256`/
+        `extract_archive` primitives rather than duplicating them.
+        Pinned to one resolved version (`resources/usermod.toml`'s
+        `[emsdk]` table, `6.0.8`/`linux-x64` today) rather than floating
+        on `latest` the way `build-usermod-webassembly`'s own
+        `emsdk_ref: latest` default does — a deliberate divergence from
+        that action, argued in the table's own header comment and tied to
+        the **"Toolchain pinning vs. reproducibility"** open question
+        below. Bypasses `emsdk`'s own installer (`git clone emsdk` +
+        `./emsdk install/activate`) entirely: downloads
+        Emscripten's own `wasm-binaries.tar.xz` release asset directly
+        (`storage.googleapis.com/webassembly/emscripten-releases-builds/
+        {os}/{hash}/...`, resolved from `emsdk`'s own
+        `emscripten-releases-tags.json` at pin time, not at build time),
+        the same "verify and switch to the standalone tarball" move M2
+        already made for `xtensawin` vs. the full ESP-IDF installer.
+        Verified live, not assumed: extracting the tarball and
+        prepending `emscripten/`+`bin/` to `PATH` is sufficient on its
+        own — `emcc`'s own `tools/config.py` auto-derives `LLVM_ROOT`
+        (from `clang`) and `BINARYEN_ROOT` (from `wasm-opt`) by
+        searching `PATH` when no `.emscripten` config file exists, so
+        none needs writing. 5 hermetic cases in `tests/test_emsdk.py` (real
+        `verify_sha256`/`extract_archive`/`cached_dir` exercised against
+        a small fake tarball, not mocked away) + 5 more in
+        `tests/test_usermod_build.py`, plus two separate live checks: a
+        real ~300 MiB download+extract+verify of the pinned tarball
+        through `resolve_emsdk()` itself, and a full
+        `build_webassembly()` run against a real `v1.28.0` checkout — 31s,
+        a genuine `micropython.mjs` (217344 bytes, byte-identical to an
+        earlier manual PATH-only proof done before any of this code
+        existed) plus its `.wasm` — through the actual production code
+        path, not the manual proof.
+  - [ ] `windows` — not started, waits on **M9**'s MSYS2 orchestration
+        (**D18**), not just a toolchain pin.
 - **M9** — toolchain provisioning: MSYS2 orchestration (**D18**), ESP-IDF
   fetch + caching, `docker` strategy revisit for it (**D19**).
 - **M10** — runner/matrix integration, fan-out-by-default for usermod
@@ -1272,6 +1310,22 @@ rather than design from scratch.
   `host` strategy running first means a laptop and CI can silently use
   different compilers — acceptable, but the summary output must always say
   which toolchain was actually used.
+- **Nothing checks whether a pinned version is stale.** Dependabot already
+  watches this repo's own `uv`/Actions dependencies (the "Graph Update"/
+  "github_actions ... Update" runs in Actions history), but it has no
+  visibility into the pins that actually matter here: every toolchain
+  version + sha256 in `resources/natmod.toml`/`resources/usermod.toml`
+  (arm-none-eabi, xtensa-esp, riscv-none-elf, and now emsdk), and the
+  MicroPython release tag each `examples/*/cibuildmp.toml` builds against.
+  All of that goes stale on an upstream's own schedule, same as **D10**
+  already says about the toolchain table specifically — but nothing here
+  today notices *when*, for any of it, MicroPython tag included. Not
+  designed yet: could be a periodic job that diffs each pin against
+  upstream's latest release and opens an issue/PR, a documented manual
+  review cadence, or something narrower per pin (e.g. a script that
+  re-derives the emsdk hash for a given alias and flags drift). Flagged so
+  a real staleness incident (a build that quietly stops matching upstream)
+  doesn't become the way this gap gets found.
 
 ## Non-goals
 

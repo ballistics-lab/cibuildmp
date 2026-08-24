@@ -9,12 +9,16 @@ from cibuildmp.usermod.build import (
     QemuBuildOptions,
     UnixBuildOptions,
     UsermodBuildError,
+    WebassemblyBuildOptions,
     build_qemu,
     build_unix,
+    build_webassembly,
     qemu_make_command,
     run_unix_deplibs,
     unix_make_command,
+    webassembly_make_command,
 )
+from cibuildmp.usermod.emsdk import ResolvedEmsdk
 
 
 def opts(arch: str = "x64", **overrides) -> UnixBuildOptions:
@@ -236,3 +240,105 @@ def test_qemu_build_failure_names_the_command(monkeypatch, tmp_path):
 def test_qemu_unsupported_board_rejected(tmp_path):
     with pytest.raises(UsermodBuildError, match="not supported yet"):
         build_qemu(qemu_opts(board="MIMXRT1050_EVK"), tmp_path / "mpy")
+
+
+# ── webassembly ──────────────────────────────────────────────────────────
+
+
+def wasm_opts(**overrides) -> WebassemblyBuildOptions:
+    defaults = {
+        "user_c_modules": "/gh/ws/micropython/usermod",
+        "frozen_manifest": "/gh/ws/a7p_manifest.py",
+        "build_dir": Path("/gh/ws/usermod/build/wasm"),
+    }
+    defaults.update(overrides)
+    return WebassemblyBuildOptions(**defaults)
+
+
+def test_webassembly_command_matches_build_usermod_webassembly_shape():
+    # build-usermod-webassembly's own "Build usermod (webassembly, pyscript
+    # variant)" step -- no CROSS_COMPILE, emsdk activation is PATH/env, not
+    # a make variable.
+    command = webassembly_make_command(wasm_opts(), Path("/gh/ws/mpy"))
+
+    assert command == [
+        "make",
+        "-C",
+        "/gh/ws/mpy/ports/webassembly",
+        "VARIANT=pyscript",
+        "BUILD=/gh/ws/usermod/build/wasm",
+        "USER_C_MODULES=/gh/ws/micropython/usermod",
+        "FROZEN_MANIFEST=/gh/ws/a7p_manifest.py",
+    ]
+
+
+def test_webassembly_resolves_emsdk_before_building(monkeypatch, tmp_path):
+    """Must go through emsdk.resolve_emsdk() -- not toolchains.resolve(),
+    which has no emsdk entry at all."""
+    calls = []
+
+    def fake_resolve(**kwargs):
+        calls.append(kwargs)
+        return ResolvedEmsdk(install_dir=tmp_path / "sdk")
+
+    monkeypatch.setattr(build.emsdk, "resolve_emsdk", fake_resolve)
+    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
+
+    build_dir = tmp_path / "build-wasm"
+    build_dir.mkdir()
+    (build_dir / "micropython.mjs").write_bytes(b"")
+
+    build_webassembly(wasm_opts(build_dir=build_dir), tmp_path / "mpy")
+
+    assert len(calls) == 1
+
+
+def test_webassembly_builds_and_returns_mjs_path(monkeypatch, tmp_path):
+    build_dir = tmp_path / "build-wasm"
+    build_dir.mkdir()
+    (build_dir / "micropython.mjs").write_bytes(b"")
+
+    monkeypatch.setattr(
+        build.emsdk,
+        "resolve_emsdk",
+        lambda **k: ResolvedEmsdk(install_dir=tmp_path / "sdk"),
+    )
+    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
+
+    result = build_webassembly(wasm_opts(build_dir=build_dir), tmp_path / "mpy")
+
+    assert result == build_dir / "micropython.mjs"
+
+
+def test_webassembly_missing_mjs_after_success_is_an_error(monkeypatch, tmp_path):
+    build_dir = tmp_path / "build-wasm"
+    build_dir.mkdir()
+
+    monkeypatch.setattr(
+        build.emsdk,
+        "resolve_emsdk",
+        lambda **k: ResolvedEmsdk(install_dir=tmp_path / "sdk"),
+    )
+    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
+
+    with pytest.raises(UsermodBuildError, match="build reported success but"):
+        build_webassembly(wasm_opts(build_dir=build_dir), tmp_path / "mpy")
+
+
+def test_webassembly_build_failure_names_the_command(monkeypatch, tmp_path):
+    import subprocess as sp
+
+    def fake_run(cmd, **kwargs):
+        raise sp.CalledProcessError(1, cmd)
+
+    monkeypatch.setattr(
+        build.emsdk,
+        "resolve_emsdk",
+        lambda **k: ResolvedEmsdk(install_dir=tmp_path / "sdk"),
+    )
+    monkeypatch.setattr(build.subprocess, "run", fake_run)
+
+    with pytest.raises(UsermodBuildError, match="failed with exit code"):
+        build_webassembly(
+            wasm_opts(build_dir=tmp_path / "build-wasm"), tmp_path / "mpy"
+        )

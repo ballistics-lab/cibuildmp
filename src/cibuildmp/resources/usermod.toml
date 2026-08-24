@@ -88,3 +88,48 @@ default-manifest = "boards/manifest.py"
 [port.rp2]
 build-system = "cmake"
 default-manifest = "boards/manifest.py"
+
+# ── emsdk (webassembly toolchain) ───────────────────────────────────────────
+# Pinned to one specific resolved version, not "latest" -- unlike
+# build-usermod-webassembly's own `emsdk_ref: latest` default (its own
+# doc comment already calls this "a moving target... some future emsdk
+# release could break a build with no change on either side of this
+# action"). Floating is a defensible choice for ephemeral CI; it trades
+# away exactly the reproducibility the `download` strategy exists for in
+# a locally-reproducible tool (D2/D3) -- see docs/BACKLOG.md's own
+# "Toolchain pinning vs. reproducibility" open question, and its new
+# "nothing checks whether a pinned version is stale" note for how this
+# and every other pin here should eventually get reviewed.
+#
+# Bypasses emsdk's own installer (`git clone emsdk` + `./emsdk
+# install/activate`) entirely -- verified live, not assumed: extracting
+# this tarball and prepending its `emscripten/` and `bin/` directories to
+# PATH is sufficient on its own. emcc's own tools/config.py auto-derives
+# LLVM_ROOT (from `clang`) and BINARYEN_ROOT (from `wasm-opt`) by
+# searching PATH when no `.emscripten` config file exists, so no config
+# file needs writing either. A host python3 (already a
+# dependency-of-a-dependency of pyelftools/ar, D12) runs emcc.py itself;
+# a host node is only needed to *run* the produced .wasm/.mjs, not to
+# build it, so it is not this table's concern.
+#
+# version -- an emscripten-releases-tags.json alias (e.g. "6.0.8"), the
+#   value it resolved to when this was pinned, not the literal string
+#   "latest".
+# [emsdk.platform.<os>-<arch>] -- one table per host this project builds
+#   webassembly on. Only linux-x64 today: a7p's own mp-usermod.yml (the
+#   reference D16-D21 rest on) only ever runs this port on `ubuntu-latest`.
+#   hash is the emscripten-releases build hash "version" resolved to; url
+#   is transcribed from emsdk.py's own
+#   emscripten_releases_download_url_template
+#   (storage.googleapis.com/webassembly/emscripten-releases-builds/
+#   {os}/{hash}/wasm-binaries{arch-suffix}.{ext}); sha256 is a literal pin
+#   computed locally -- Emscripten publishes no checksum sidecar for this
+#   asset, same as the Espressif/micropython.org case D10 already
+#   documents.
+[emsdk]
+version = "6.0.8"
+
+[emsdk.platform.linux-x64]
+hash = "9d70dbe8860ccdd3595f6e6065d94bfb543ae955"
+url = "https://storage.googleapis.com/webassembly/emscripten-releases-builds/linux/9d70dbe8860ccdd3595f6e6065d94bfb543ae955/wasm-binaries.tar.xz"
+sha256 = "9bea769c189d9f52196e74283fb86937318cc24bf14879f2c6bdd19862131901"
