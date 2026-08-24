@@ -6,19 +6,23 @@ inputs:
     required: false
     default: .
   output-dir:
-    description: 'Folder to place the outputs in, defaults to "mphouse"'
+    description: 'Folder to place the outputs in, defaults to "mpyhouse"'
     required: false
-    default: mphouse
+    default: ""
   config-file:
-    description: "File containing the config, defaults to {package}/cibuildmp.toml"
+    description: "File containing the config, defaults to {package-dir}/cibuildmp.toml"
     required: false
     default: ""
   only:
-    description: "Build a specific target only. No need for arch/platform if this is set"
+    description: >
+      Build exactly this one identifier (e.g. mpy6.3-natmod-armv7emsp),
+      ignoring the config's own build/skip selectors. This is what a matrix
+      leg passes back in -- see the cibuildmp-matrix action, which generates
+      the list.
     required: false
     default: ""
   extras:
-    description: "Comma-separated list of extras to install"
+    description: "Comma-separated list of cibuildmp extras to install"
     required: false
     default: ""
 
@@ -32,6 +36,31 @@ runs:
     - id: cibmp
       shell: bash
       run: |
-        # Install cibuildmp and build the command line
-        uv tool install cibuildmp # should install directly from cibuildmp action's ref
-        cibuildmp  # run cibuildmp
+        set -euo pipefail
+
+        # Install cibuildmp from this action's own checkout, so the version
+        # that runs is exactly the ref the caller pinned -- no separate
+        # package index to keep in sync with the action tag, and no way for
+        # the two to disagree. github.action_path is where the runner put
+        # this repo at that ref.
+        SPEC="${{ github.action_path }}"
+        if [ -n "${{ inputs.extras }}" ]; then
+          SPEC="${SPEC}[${{ inputs.extras }}]"
+        fi
+        uv tool install "$SPEC"
+
+        # `if` blocks, not `[ -n x ] && ARGS+=(...)`: under `set -e` a
+        # false test makes the whole && list return non-zero and kills the
+        # step, since it is not in a condition context.
+        ARGS=("${{ inputs.package-dir }}")
+        if [ -n "${{ inputs.output-dir }}" ]; then
+          ARGS+=(--output-dir "${{ inputs.output-dir }}")
+        fi
+        if [ -n "${{ inputs.config-file }}" ]; then
+          ARGS+=(--config-file "${{ inputs.config-file }}")
+        fi
+        if [ -n "${{ inputs.only }}" ]; then
+          ARGS+=(--only "${{ inputs.only }}")
+        fi
+
+        cibuildmp "${ARGS[@]}"

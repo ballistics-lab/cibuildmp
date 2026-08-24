@@ -1,0 +1,57 @@
+name: cibuildmp matrix
+description: >
+  Resolves a cibuildmp.toml into the list of build identifiers it selects,
+  as JSON, for use as a strategy.matrix via fromJSON(). This is what removes
+  the hand-copied arch matrix from each consuming repo's workflow: the list
+  lives in that repo's cibuildmp.toml, in one place, next to the rest of its
+  build config.
+
+  Needs no MicroPython checkout and no toolchain -- identifier generation is
+  pure config resolution, so this runs in a few seconds on a plain runner.
+
+inputs:
+  package-dir:
+    description: 'Directory containing the config, defaults to "."'
+    required: false
+    default: .
+  config-file:
+    description: "File containing the config, defaults to {package-dir}/cibuildmp.toml"
+    required: false
+    default: ""
+
+outputs:
+  identifiers:
+    description: >
+      JSON array of build identifiers, e.g.
+      ["mpy6.3-natmod-x64","mpy6.3-natmod-armv6m"]. Feed it to a matrix with
+      `matrix: { identifier: ${{ fromJSON(needs.<job>.outputs.identifiers) }} }`
+      and pass each leg back to the cibuildmp action's `only` input.
+    value: ${{ steps.resolve.outputs.identifiers }}
+
+runs:
+  using: composite
+  steps:
+    - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
+      with:
+        python-version: "3.14"
+
+    - id: resolve
+      shell: bash
+      run: |
+        set -euo pipefail
+        # This action lives at .github/actions/cibuildmp-matrix/ inside
+        # the cibuildmp repo, so the package root is three levels up from
+        # github.action_path. Resolved rather than passed through with ../
+        # so uv sees a clean path.
+        REPO_ROOT=$(cd "${{ github.action_path }}/../../.." && pwd)
+        uv tool install "$REPO_ROOT"
+
+        ARGS=("${{ inputs.package-dir }}" --print-build-identifiers --json)
+        if [ -n "${{ inputs.config-file }}" ]; then
+          ARGS+=(--config-file "${{ inputs.config-file }}")
+        fi
+
+        IDENTIFIERS=$(cibuildmp "${ARGS[@]}")
+        echo "identifiers=$IDENTIFIERS" >> "$GITHUB_OUTPUT"
+        echo "Resolved $(echo "$IDENTIFIERS" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))') target(s):"
+        echo "$IDENTIFIERS" | python3 -c 'import json,sys; [print("  "+i) for i in json.load(sys.stdin)]'

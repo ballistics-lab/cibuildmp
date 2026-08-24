@@ -182,19 +182,31 @@ Two findings worth acting on:
 
 ## Phases
 
-### M0 — skeleton
+### M0 — skeleton — **done**
 
-- [ ] Replace the `main()` stub with a real CLI: `cibuildmp [--config-file]
-      [--output-dir] [--only ID] [--print-build-identifiers] [--platform]`.
-- [ ] Config loader: `cibuildmp.toml` → `pyproject.toml [tool.cibuildmp]`
-      fallback; env-var layer; `[[overrides]]` resolution.
-- [ ] Identifier generation + `build`/`skip` glob filtering.
-- [ ] `--print-build-identifiers` emitting JSON, suitable for
-      `strategy.matrix` via `fromJSON`.
-- [ ] Fix `action.yml`'s install line per **D8**.
+- [x] Real CLI in `src/cibuildmp/cli.py`: `cibuildmp [package_dir]
+      [--config-file] [--output-dir] [--only ID] [--print-build-identifiers]
+      [--json] [--platform]`.
+- [x] Config loader in `src/cibuildmp/options.py`: `cibuildmp.toml` →
+      `pyproject.toml [tool.cibuildmp]` fallback; `CIBMP_*` env layer;
+      `[[overrides]]` resolution. Full precedence chain implemented and
+      covered by tests.
+- [x] Identifier generation + `build`/`skip` glob filtering in
+      `src/cibuildmp/targets.py`, including the arch→`CROSS` table and the
+      release-tag→ABI table (both transcribed from MicroPython source, see
+      the toolchain map above).
+- [x] `--print-build-identifiers`, with `--json` for `fromJSON`.
+- [x] `action.yml` installs from `${{ github.action_path }}` per **D8**, so
+      the running version is exactly the ref the caller pinned.
+- [x] New `.github/actions/cibuildmp-matrix` composite action: resolves a
+      config into an `identifiers` JSON output for `strategy.matrix`. Needs
+      no checkout and no toolchain.
 
 `--print-build-identifiers` alone removes the duplicated matrix from all
-three repos. It is worth releasing on its own, before any build logic exists.
+three repos, which is why M0 shipped before any build logic exists. Running
+`cibuildmp` without `--print-build-identifiers` currently prints the
+resolved build plan and exits 1 — deliberately, so the action fails loudly
+rather than appearing to succeed while building nothing.
 
 ### M1 — MicroPython + mpy-cross provisioning
 
