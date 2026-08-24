@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-24
+
+First release where `cibuildmp` actually builds a module — `v0.3.0a1` could
+only plan the target matrix. Validated against three real consuming repos
+(`micropython-bclibc`, `a7p`, `micropython-wasm3`), all natmod and usermod
+workflows green on every arch, including the RISC-V toolchain fix below.
+
 ### Added
 
 - **`cibuildmp` can now actually build natmod targets**, not just plan them:
@@ -297,7 +304,8 @@ ballistics-lab/micropython-native-ci, but both tags exist here too, so every
 link resolves inside this repository -- the version line continues rather
 than restarting (see the 0.3.0a1 entry). -->
 
-[Unreleased]: https://github.com/ballistics-lab/cibuildmp/compare/v0.3.0a1...HEAD
+[Unreleased]: https://github.com/ballistics-lab/cibuildmp/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/ballistics-lab/cibuildmp/compare/v0.3.0a1...v0.3.0
 [0.3.0a1]: https://github.com/ballistics-lab/cibuildmp/compare/v0.2.0...v0.3.0a1
 [0.2.0]: https://github.com/ballistics-lab/cibuildmp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ballistics-lab/cibuildmp/releases/tag/v0.1.0

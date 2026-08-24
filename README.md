@@ -89,7 +89,7 @@ identical:
 
 ```diff
 - uses: ballistics-lab/micropython-native-ci/.github/actions/build-natmod@v0.2.0
-+ uses: ballistics-lab/cibuildmp/.github/actions/build-natmod@v0.3.0a1
++ uses: ballistics-lab/cibuildmp/.github/actions/build-natmod@v0.3.0
 ```
 
 Pin a tag, as before -- not `@main`, not a commit SHA.
@@ -369,11 +369,11 @@ jobs:
         with:
           submodules: recursive
 
-      - uses: ballistics-lab/cibuildmp/.github/actions/fetch-micropython@v0.3.0a1
+      - uses: ballistics-lab/cibuildmp/.github/actions/fetch-micropython@v0.3.0
         with:
           mpy_tag: v1.28.0
 
-      - uses: ballistics-lab/cibuildmp/.github/actions/build-natmod@v0.3.0a1
+      - uses: ballistics-lab/cibuildmp/.github/actions/build-natmod@v0.3.0
         with:
           arch: ${{ matrix.arch }}
           # natmod_dir: natmod              # default; a7p passes micropython/natmod
@@ -456,13 +456,18 @@ provisioning, cross-toolchain resolution, and the natmod build itself
 (running `make`, collecting the `.mpy`, verifying its header) are done.
 There is no separate publish step -- `cibuildmp` writes each identifier's
 own `package.json` as part of the normal build once `version` is set, the
-same way cibuildwheel has no publish step either. Next up is adopting
-this in the three consuming repos. usermod will vendor board data from
+same way cibuildwheel has no publish step either. Adopted in all three
+consuming repos' natmod workflows and verified green on real CI, arch by
+arch (`micropython-bclibc`, `a7p`, `micropython-wasm3`) -- not just
+`--dry-run`. usermod is next: it will vendor board data from
 [`mpbuild`](https://github.com/mattytrentini/mpbuild) rather than depend
-on the package, and test runners are deferred outright.
+on the package, and test runners stay deferred.
 
-Until each piece lands and is verified against real CI in a consuming repo,
-the composite actions below stay the supported path.
+Until usermod lands and is verified against real CI in a consuming repo the
+same way natmod now is, the composite actions below stay the supported
+path for it -- natmod's own composite actions (`fetch-micropython`,
+`build-natmod`) are still here too, unchanged, for anything that hasn't
+repinned to the `cibuildmp` CLI yet.
 
 ## Versioning
 
@@ -471,12 +476,13 @@ a consumer references is a deliberate, visible edit in that repo, same as
 bumping any other CI dependency -- a change here never silently changes
 what three other repos' builds do.
 
-`v0.3.0a1` is this repository's first tag, and it continues
-`micropython-native-ci`'s version line rather than restarting it: its
-composite actions are `v0.2.0`'s, moved. The alpha marks the CLI, not the
-actions -- those are as stable as they were. Consumers pinned to
-`micropython-native-ci@v0.2.0` keep working until they repin -- that
-repository is deprecated, not deleted.
+`v0.3.0` is the first tag where the `cibuildmp` CLI actually builds a
+module, not just plans it -- `v0.3.0a1` (this repository's first tag)
+shipped the composite actions and the CLI's target-resolution half only.
+Both continue `micropython-native-ci`'s version line rather than
+restarting it: the composite actions are `v0.2.0`'s, moved. Consumers
+pinned to `micropython-native-ci@v0.2.0` keep working until they repin --
+that repository is deprecated, not deleted.
 
 Older tags, on the old repository: `v0.2.0` added `build-usermod-windows`,
 `-webassembly`, `-rp2040`, `-armv7m` and `-esp32`, and dropped the `-arch`
