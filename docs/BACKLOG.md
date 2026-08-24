@@ -1056,16 +1056,31 @@ Revisit once a real consumer wants a zephyr usermod build, the same way
 the six existing ports got their own findings from `a7p` actually driving
 them rather than from reading upstream cold.
 
-**Rough phase outline, unscheduled.** Not detailed the way M0–M5 are —
-none of this is implemented yet, and giving it that treatment now would
-repeat the exact mistake D16–D21 above just corrected in this section
-(reasoning presented as verified fact before any code exists). Names and
-one line each, so M6 doesn't start from a blank page; each gets its own
-citations and "verified live" notes once it's actually underway:
+**Rough phase outline.** Still names-and-one-line for M7 onward, so they
+don't get reasoned about before any code exists — the exact mistake
+D16–D21 corrected above. M6 gets its first real checkbox, in M0–M5's own
+style, now that a slice of it is actually implemented:
 
 - **M6** — extend the **D7** vendored board/variant database with each
   port's default-manifest path and its Make-vs-CMake `USER_C_MODULES`
   shape (**D16**).
+  - [x] `src/cibuildmp/usermod/boards.py`: `Port`/`Board`/`Variant`/
+        `Database` + `check_board_json`, vendored from `mpbuild` commit
+        `972d8319f90dd5a70e3ab6fd1660b9d5a01017fe` (v1.2.0) per **D7** —
+        MIT header and provenance kept in the module's own docstring, not
+        just here. `tests/test_boards.py` (13 cases, hermetic fixtures)
+        plus a live check against a real `v1.28.0` checkout (M1's own
+        `fetch_micropython()`, not a second fetcher): 13 ports, 215
+        boards found; `zephyr` correctly absent from both (**D22** —
+        confirmed live, not just read from upstream source); `unix`
+        alone already has 5 real variants (`minimal`, `longlong`,
+        `nanbox`, `coverage`, `standard`), more than the two this file's
+        own "Two different selector axes" section illustrates.
+  - [ ] The two fields **D16** actually asks for beyond what mpbuild's own
+        `board_database.py` carries — default-manifest path, Make-vs-CMake
+        `USER_C_MODULES` shape — not added yet, deliberately: this first
+        slice is the vendored scan alone, kept reviewable on its own
+        rather than bundled with cibuildmp-specific additions.
 - **M7** — combined-`FROZEN_MANIFEST` generation + `USER_C_MODULES`
   resolution off that database (**D17**).
 - **M8** — the build driver itself, for the ports that need no exotic
