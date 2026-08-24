@@ -36,8 +36,16 @@ def build_system(port: str) -> str:
 
 
 def default_manifest(port: str) -> str | None:
-    """This port's own default manifest.py, relative to its $(PORT_DIR),
-    or None if it ships none (D17) -- confirmed for `qemu`, not assumed.
+    """The manifest.py this port resolves to under exactly how a7p's own
+    mp-usermod.yml builds it today, relative to $(PORT_DIR); None if it
+    ships none (D17) -- confirmed for `qemu`, not assumed.
+
+    NOT a general per-variant/per-board resolver: unix and webassembly
+    both build a specific, non-default variant there (their own
+    mpconfigvariant.mk overrides the port-level Makefile default), so
+    their values here are that override, not the port-level default the
+    other four ports resolve to unmodified. See resources/usermod.toml
+    for exactly which is which and why.
     """
     value = _port(port)["default-manifest"]
     return value or None

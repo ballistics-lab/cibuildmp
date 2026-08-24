@@ -967,20 +967,33 @@ that freezes their module, same shape `natmod`'s `pre-build-command`
 already lets a consumer opt into project-specific setup without owning
 the whole recipe.
 
-Corrected after reading the paths directly off a real `v1.28.0` checkout
-rather than guessing from the shape above: it is **one shared
-`manifest.py` per port**, not per-board or per-variant.
-`ports/unix/variants/manifest.py` is a single file covering every unix
-variant, not `variants/<name>/manifest.py` (the `pyscript` guess this
-decision originally made); same shape for `webassembly` and `windows`.
-Board-based ports match the original guess: `ports/esp32/boards/
-manifest.py` and `ports/rp2/boards/manifest.py`, one file each, not
-per-board. `qemu` was right the first time — confirmed no `manifest.py`
-anywhere under `ports/qemu` on disk, not assumed from the action's own
-behaviour. Deliberately kept out of this table (not covered by **D7**'s
-vendored scan either): every port not in **D16–D21**'s six — a `stm32`
-default manifest, say, is a real thing to add later, not something this
-decision claims to already know. Landed as `resources/usermod.toml` +
+Corrected twice now, which is itself the finding worth recording: reading
+paths directly off a `v1.28.0` checkout is not the same as reading how a
+real consumer resolves them. The first pass concluded "one shared
+`manifest.py` per port, not per-board or per-variant" — true of the
+*files on disk* (`ports/unix/variants/manifest.py` exists as one file),
+false of what actually gets *built*: `unix`'s `Makefile` sets a
+port-level default (`FROZEN_MANIFEST ?= variants/manifest.py`), but
+`variants/standard/mpconfigvariant.mk` overrides that default to
+`variants/standard/manifest.py` for exactly the variant `a7p`'s own
+`mp-usermod.yml` builds (`webassembly`'s `pyscript` variant the same way;
+`unix`'s own `minimal` variant overrides to *empty*, dropping the
+manifest entirely). Board-based ports carry the identical shape one level
+down — `rp2/CMakeLists.txt`'s own comment says the quiet part directly:
+"Include board config, it may override MICROPY_FROZEN_MANIFEST" — most
+`esp32`/`rp2` boards do ship their own `boards/<BOARD>/manifest.py`.
+`qemu` was right both times — confirmed no `manifest.py` anywhere under
+`ports/qemu` on disk, not assumed from the action's own behaviour.
+
+What's pinned in `resources/usermod.toml` is therefore **not** a general
+per-variant/per-board resolver — building one is real, unstarted work,
+out of scope for the current six ports. It is the one fixed path each
+port resolves to under exactly how `a7p`'s own `mp-usermod.yml` builds it
+*today*: `unix` → `variants/standard/manifest.py`, `webassembly` →
+`variants/pyscript/manifest.py` (both variant overrides, because that
+workflow builds those specific variants), `windows`/`esp32`/`rp2` → each
+port's own unmodified default (that workflow applies no variant/board
+override for any of the three). Landed as `resources/usermod.toml` +
 `usermod/portinfo.py`'s `default_manifest()`, alongside `build_system()`
 from **D16** above — the generation step itself (the actual
 `FROZEN_MANIFEST` combine) is still M7, not this.
@@ -1126,8 +1139,11 @@ style, now that a slice of it is actually implemented:
         rather than trusting a composite action's doc comment (which
         corrected **D16**'s own "file, not directory" framing — see its
         own addendum above), and `find`-verified every `manifest.py` path
-        (which corrected **D17**'s per-variant guess to the real
-        one-shared-file-per-port shape — see its own addendum too).
+        on disk — which turned out not to be enough on its own: reading
+        paths off the checkout alone concluded one shared file per port,
+        which cross-checking against `a7p`'s real `mp-usermod.yml` then
+        corrected again (per-variant/per-board overrides are real; see
+        **D17**'s own addendum, now written twice, for the full story).
         `tests/test_portinfo.py` (10 cases) covers both accessors and the
         unknown-port error path. **Not** in this slice: the actual
         combined-`FROZEN_MANIFEST` generation this data feeds — that stays

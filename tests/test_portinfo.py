@@ -23,8 +23,14 @@ def test_cmake_driven_ports(port):
 
 
 def test_default_manifest_paths():
-    assert default_manifest("unix") == "variants/manifest.py"
-    assert default_manifest("webassembly") == "variants/manifest.py"
+    # unix/webassembly build a specific, non-default variant in a7p's own
+    # mp-usermod.yml (standard, pyscript), each with its own
+    # mpconfigvariant.mk override -- not the port-level Makefile default
+    # (variants/manifest.py) both ports otherwise share.
+    assert default_manifest("unix") == "variants/standard/manifest.py"
+    assert default_manifest("webassembly") == "variants/pyscript/manifest.py"
+    # windows/esp32/rp2 build with no variant/board override in that same
+    # workflow, so these are each port's own unmodified default.
     assert default_manifest("windows") == "variants/manifest.py"
     assert default_manifest("esp32") == "boards/manifest.py"
     assert default_manifest("rp2") == "boards/manifest.py"

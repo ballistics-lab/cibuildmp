@@ -34,18 +34,44 @@
 # ── Default manifest path (D17) ────────────────────────────────────────────
 # Relative to $(PORT_DIR). Empty means the port ships no default manifest to
 # combine a consumer's own FROZEN_MANIFEST with -- confirmed for qemu by its
-# absence on disk, not assumed. One shared file per port, not per-board or
-# per-variant: e.g. ports/unix/variants/manifest.py covers every unix
-# variant from one file, not variants/<name>/manifest.py as D17 originally
-# guessed before this table was verified against real source.
+# absence on disk, not assumed.
+#
+# The real mechanism (checked against a7p's actual mp-usermod.yml, then
+# against py/py.mk-including Makefiles and py/usermod.cmake-including
+# CMakeLists.txt directly -- an earlier version of this table got it wrong
+# from reading source alone, without cross-checking a real consumer):
+# every make-driven port sets one port-level default in its own Makefile
+# (`FROZEN_MANIFEST ?= variants/manifest.py`, same line shape in unix,
+# webassembly and windows), which a variant's own mpconfigvariant.mk can
+# override (`FROZEN_MANIFEST ?= variants/<name>/manifest.py`, or override to
+# empty -- unix's own `minimal` variant does exactly that). Board-based
+# ports have the same shape one level down: CMakeLists.txt defaults
+# MICROPY_FROZEN_MANIFEST to boards/manifest.py, and "Include board config,
+# it may override MICROPY_FROZEN_MANIFEST" (rp2/CMakeLists.txt's own
+# comment) -- most esp32/rp2 boards do ship their own boards/<BOARD>/
+# manifest.py.
+#
+# The paths below are NOT that general per-variant/per-board resolution --
+# they are the one fixed path each port resolves to under exactly how
+# a7p's own mp-usermod.yml builds it today (its own combined-FROZEN_MANIFEST
+# step passes an explicit path, which always wins over any board/variant
+# default or override in the Makefile/CMakeLists.txt above). unix and
+# webassembly both build a specific, non-default variant, so their entries
+# below are that variant's own override, not the port-level default:
+# `variants/standard/manifest.py` (unix), `variants/pyscript/manifest.py`
+# (webassembly). windows/esp32/rp2 build without any variant/board
+# override in a7p's workflow, so their entries below are each port's own
+# unmodified default. Widening this to real per-variant/per-board
+# resolution is real, unstarted work -- nothing in the current six-port
+# scope exercises it, so it is not attempted here.
 
 [port.unix]
 build-system = "make"
-default-manifest = "variants/manifest.py"
+default-manifest = "variants/standard/manifest.py"
 
 [port.webassembly]
 build-system = "make"
-default-manifest = "variants/manifest.py"
+default-manifest = "variants/pyscript/manifest.py"
 
 [port.windows]
 build-system = "make"
