@@ -36,6 +36,21 @@ xtensawin = { cross = "xtensa-esp32-elf-",     toolchain = "xtensa-esp-elf",  na
 rv32imc   = { cross = "riscv64-unknown-elf-",  toolchain = "riscv-none-elf",  native-code = 11 }
 rv64imc   = { cross = "riscv64-unknown-elf-",  toolchain = "riscv-none-elf",  native-code = 12 }
 
+# ── RISC-V arch-flags (rv32imc only) ───────────────────────────────────────
+# Transcribed from tools/mpy_ld.py's RV32_EXTENSIONS. Only rv32imc accepts
+# ARCH_FLAGS= -- mpy_ld.py's own validate_arch_flags() raises for every other
+# arch, and py/persistentcode.h's mp_raw_code_load() only validates
+# arch_flags for MP_NATIVE_ARCH_RV32IMC too (any other arch with the
+# arch-flags bit set is an unconditional "incompatible .mpy file" on load).
+# Required ⊆ available at install time (a variant that does not need an
+# extension must still install on hardware that has it) -- see
+# micropython/micropython#19479 -- but that subset match is mip's job, not
+# cibuildmp's: what cibuildmp verifies is narrower and exact -- did the
+# linker actually encode the arch-flags the config asked for.
+[arch-flags.rv32imc]
+zba = 1    # 1 << 0
+zcmp = 2   # 1 << 1
+
 # ── .mpy ABI per MicroPython tag ──────────────────────────────────────────
 # "<MPY_VERSION>.<MPY_SUB_VERSION>" from py/persistentcode.h at that tag.
 #

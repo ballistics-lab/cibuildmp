@@ -91,7 +91,7 @@ for exactly this reason.
 
 Extract into one vendored module (`usermod/boards.py`, MIT header kept, with
 a comment naming the origin repo and the commit it was taken from — the same
-discipline **M4** applies to the `package.json` schema):
+discipline **D14** applies to the `package.json` schema):
 
 - `Port`/`Board`/`Variant` plus the `ports/*/boards/*/board.json` scan,
 - `check_board_json`.
@@ -246,37 +246,166 @@ runner. `examples/template/cibuildmp.toml` stays single-tag for exactly
 this reason — its job is to keep CI green on M3's build path, not to
 chase every historical tag's own build health.
 
-**D14 — `cibuildmp publish` accepts untagged companion files, not just
-per-arch `.mpy`s.**
-Found inspecting a real second module in `../micropython-bclibc`:
-`ffimod/` builds a native `.so` plus facade `.py` files (`ffi.py`,
+**D14 — `cibuildmp` itself writes one self-contained mip package per
+identifier as part of the normal build, in today's stable schema — there
+is no separate `cibuildmp publish` command.**
+Originally scoped as a separate `cibuildmp publish` absorbing bclibc's
+`tools/build_release_assets.py`, and around the "per-entry native code
+compatibility tag" schema — [micropython#19532](https://github.com/micropython/micropython/pull/19532)
+/ [micropython-lib#1144](https://github.com/micropython/micropython-lib/pull/1144)
+— which would let one `package.json` list every arch's `.mpy`, each
+tagged, and let `mip` pick the right one at install time. Both revisited:
+
+- **No separate command.** `mpyhouse/` is the thing to fix, not a second
+  step that reorganises it afterwards: `cli.build()` writes each target
+  straight into `output-dir/<identifier>/` from the start, so an
+  identifier's directory already holds its `.mpy`, any `extra-files`
+  companions, and its own `package.json` the moment that target's build
+  finishes. Consistent with cibuildwheel, which has no publish step
+  either — `wheelhouse/` is immediately `twine upload`-able, no
+  intermediate packaging command. Creating a release or uploading the
+  tree stays the caller's own CI step (**Non-goals**), same as
+  `wheelhouse/*` → `twine upload` is the caller's job, never
+  cibuildwheel's.
+- **No compat-tag schema dependency.** Both upstream PRs are
+  self-authored (by this project's own maintainer), open, with no
+  reviewers, and each explicitly says "not yet tested ... on real
+  hardware ... before merge." That is a materially weaker foundation than
+  "a proposal pending review" suggested — depending on an unmerged,
+  hardware-untested, zero-review-traction PR of one's own is premature,
+  however directionally sound the schema itself is.
+
+Each identifier's `package.json` uses the plain two-element
+`["path", "url"]` `urls` schema `mip` has always supported — no compat
+tag, no upstream change needed, works with every `mip` in the wild today.
+A consumer picks which identifier's `package.json` to `mip.install()` by
+URL, the same way `--only <identifier>` already picks one target to
+build; the tag-matching problem #19532/#1144 solve is sidestepped by the
+*URL* being the selector instead of runtime tag matching on-device. A
+single unified, tag-matching manifest stays possible as a later, additive
+mode on top of the per-identifier one — gated on those two PRs actually
+picking up review traction or landing, not on a fixed date.
+
+**Companion files, the original reason for this decision:** found
+inspecting a real second module in `../micropython-bclibc` — `ffimod/`
+builds a native `.so` plus facade `.py` files (`ffi.py`,
 `_tiny_bclibc.py`) that stay separate, unlike `natmod/`, where
 `SRC = tiny_bclibc_mp.c tiny_bclibc.py` already gets merged by
 `dynruntime.mk`'s own `SRC_MPY`/`--merge` rule into one `.mpy` per arch —
 that merged case needs nothing from `cibuildmp`, it is `natmod/Makefile`'s
 own business (**D2**). What is not covered: a facade or any other file
-meant to install identically regardless of target arch, alongside the
-per-arch native entries.
+meant to install identically regardless of target arch. Per-identifier
+packages resolve this for free: `[publish] extra-files` gets copied into
+*every* identifier's directory and listed in that identifier's own
+`package.json` — no separate "untagged entry" case to design, since every
+entry in the (untagged) per-identifier schema already installs
+unconditionally. Confirmed as a real need, not hypothetical (bclibc's own
+`ffimod/` wants exactly this), but bclibc does not publish `ffimod`'s
+output today, so there is no existing package.json to match against — the
+shape is designed and tested against `examples/template`, not yet
+verified against a real consumer's actual release.
 
-The [micropython#19532](https://github.com/micropython/micropython/pull/19532)
-/ [micropython-lib#1144](https://github.com/micropython/micropython-lib/pull/1144)
-schema M4 already builds on supports this natively — each `package.json`
-`urls` entry carries its own compat tag, and an entry with no tag installs
-unconditionally. `tools/build_release_assets.py`, the tool M4 absorbs,
-does not use that: it only ever takes built `.mpy` files as positional
-args, one tagged entry each.
+`version` (top-level config key / `CIBMP_VERSION`) gates the whole
+packaging step: empty (the default) means an identifier's directory holds
+only its `.mpy` — still useful on its own (a Makefile-driven consumer
+downstream just wants the file), just not mip-installable yet. Set it
+(`CIBMP_VERSION: ${{ github.ref_name }}` in CI) and `extra-files` +
+`package.json` are written too. No CLI flag: `--version` was already
+taken (prints `cibuildmp`'s own version).
 
-So M4 needs one more config surface: a way to name extra files (an
-`extra-files` list, scope TBD — global or per-`[publish]`) that
-`cibuildmp publish` copies into the release assets as-is and lists in
-`package.json` with no compat tag, using the same schema's own
-"universal entry" case rather than inventing a second mechanism.
-Confirmed as real, not hypothetical (bclibc's own `ffimod/` needs
-exactly this), but bclibc does not publish `ffimod`'s output today
-(`release.yml` only ever calls `build_release_assets.py` on
-`tiny_bclibc.mpy`), so there is no existing package.json to match
-against — the shape above is proposed, not yet verified against a real
-consumer.
+Still open: how the local `output-dir/<identifier>/` tree gets deployed.
+Each `.mpy` is already named `<module>-<identifier>.mpy` (**M3**, kept
+even though the directory alone would disambiguate it locally) so it
+never collides even if a caller later flattens several identifiers into
+one namespace — a GitHub Release's own asset list is necessarily flat
+(no real subdirectories) — but `package.json` itself is not yet
+identifier-qualified and would still need renaming to
+`<identifier>_package.json` (or similar) on that specific upload path. A
+host that preserves real paths (GitHub Pages, S3, a raw git tree) can
+take the tree as-is. Not decided which target `cibuildmp` should make
+easiest first — bclibc's own `release.yml` today only does GitHub
+Releases.
+
+**D15 — `rv32imc`'s `ARCH_FLAGS=` is part of the identifier, not an
+invisible extra-make-args string.**
+Found reading [micropython#19479](https://github.com/micropython/micropython/issues/19479)
+carefully, as flagged directly: `py/dynruntime.mk` (line 197-198) turns a
+consuming Makefile's `ARCH_FLAGS=` into `mpy_ld.py --arch-flags`, which
+packs a variable-length uint into the `.mpy` header (feature-byte bit 6
+set, the value follows as a big-endian 7-bit-group varint). Two rv32imc
+builds that differ only in this value are **not** interchangeable —
+`py/persistentcode.c`'s `mp_raw_code_load()` validates it as `required ⊆
+available` against `asm_rv32_allowed_extensions()` (confirmed in the
+issue thread: an exact-int match, the obvious first idea, does not work
+for this reason) — but before this decision `Target.identifier` had no
+way to say two such builds were different at all.
+
+`arch-flags` (top-level config key, `[natmod]`-nested also accepted,
+matching how `archs` itself is read) accepts a string *or a list*, the
+same "accept a list, or a shell-ish string" idiom `archs`/`micropython`/
+`extra-make-args` already use — because "build every arch-flags variant"
+turned out to be a real, distinct request from "build every arch" (a
+consuming project wanting both a baseline `rv32imc` and a
+`Zba`/`Zcmp`-optimised one, say), not something a single value could ever
+express. Each entry is parsed the way `mpy_ld.py`'s own
+`validate_arch_flags()` does — a numeric string (`0b`/`0x`/decimal) or a
+comma-separated list of named extensions (`RV32_ARCH_FLAGS` in
+`resources/natmod.toml`, transcribed from `mpy_ld.py`'s
+`RV32_EXTENSIONS`) — and `natmod_targets()` emits one `rv32imc` `Target`
+*per entry*, side by side with every other selected arch's single Target.
+Resolved before `build`/`skip`/`[[overrides]]` selection either way, since
+it changes the identifier those glob against: `mpy6.3-natmod-rv32imc+0x3`,
+the `+0x..` suffix present only when nonzero. Opaque hex, not named flags
+reconstructed from the int: a named encoding would have to stay in
+lockstep with `RV32_ARCH_FLAGS` to remain accurate, and the identifier
+must still mean the same thing if that table gains a flag a given build
+predates. `arch-flags` can only be set at this one place (like `archs`,
+not per-`[[overrides]]`) for exactly that reason — an override selects by
+identifier, and the identifier cannot depend on which override already
+matched it.
+
+`mpy_ld.py` itself restricts `--arch-flags` to `rv32imc` only (raises for
+every other arch), and `persistentcode.c` only ever validates arch_flags
+for `MP_NATIVE_ARCH_RV32IMC` (any other arch with the header bit set is
+an unconditional `"incompatible .mpy file"` on load) — not `rv64imc`
+despite the name similarity. `cibuildmp` mirrors that restriction
+exactly: `natmod_targets()` only ever puts a nonzero `arch_flags` on the
+`rv32imc` `Target`, zero on every other arch regardless of config.
+
+`verify_output()` (**M3**'s `auditwheel` equivalent) now checks
+arch_flags too, exact match — that is a different question from mip's
+own subset check above: this asks whether the *linker* encoded what the
+config asked for, not whether a *device* can run the result.
+
+Caught while implementing this: `build.py`'s existing arch-decoding was
+`header[2] >> 2`, no mask. `py/persistentcode.h`'s own
+`MPY_FEATURE_DECODE_ARCH` is `((feat) >> 2) & 0x2F` — bit 6 (the
+arch-flags marker) becomes bit 4 after the shift, and `0x2F` is the mask
+that excludes it. Without it, `rv32imc` (native-code 11) with the
+arch-flags bit set decoded as 27. Latent until now — no arch besides
+`rv32imc` sets the marker bit, and nothing set it for `rv32imc` either
+until this decision — but a real bug in already-shipped M3 code,
+findable only by reading the upstream macro precisely rather than
+inferring the shift from bclibc's own script, which carries the same
+mask but not a citation of where `0x2F` comes from.
+
+Also caught, running the list variant for real rather than trusting the
+single-value case already worked: the `BUILD=` scoping fix from M3's own
+"two bugs" note (`BUILD = .obj/$(ARCH)`) only accounts for `$(ARCH)`, not
+`$(ARCH_FLAGS)`. `rv32imc`'s own object file does not depend on
+`ARCH_FLAGS` at all, so building `arch-flags = ["", "zba", "zba,zcmp"]`
+back to back in one invocation reused the *first* variant's cached
+`.o`/`.mpy` for the second and third just as silently as the original
+`$(ARCH)` bug did — `$(ARCH)` never changes across these three targets, so
+the earlier fix alone does nothing here. `examples/template/natmod/Makefile`
+now scopes `BUILD` by both:
+`BUILD = .obj/$(ARCH)$(if $(ARCH_FLAGS),+$(ARCH_FLAGS))`, and README.md's
+"Conventions this repo assumes" says so for every arch-flags-using natmod
+Makefile too. Same class of bug, same fix shape, second axis — worth
+noting as a pattern: *any* build-relevant variable dynruntime.mk does not
+already fold into `BUILD` on its own needs to be added by the consuming
+Makefile, or D9's one-sequential-invocation model silently serves stale
+output for it.
 
 ## Identifier scheme
 
@@ -296,6 +425,11 @@ mpy6.3-natmod-x64
   source (and cross-checked against the built file's own header).
 - **`natmod`** — the build mode, i.e. the "platform" slot.
 - **arch** — one of `dynruntime.mk`'s ten `ARCH` values.
+- **`+0x..`** (optional, `rv32imc` only) — `arch_flags`, present only when
+  `arch-flags` is set (**D15**): `mpy6.3-natmod-rv32imc+0x3`. Absent for
+  every other arch and for `rv32imc` with no `arch-flags` configured, so
+  every identifier in this file predating D15 is still exactly what it
+  was.
 
 No separate float/precision field. Precision is already encoded in the arch
 itself (`MP_NATIVE_ARCH_ARMV7EMSP` vs `…ARMV7EMDP` are distinct values, and
@@ -305,11 +439,17 @@ define and module-naming convention*, not part of the `.mpy` ABI — they
 belong in that project's own Makefile and, where CI must set them, in an
 `extra-make-args` override.
 
-Glob-friendly in both directions: `mpy6.3-*`, `*-armv7em*`, `*-x64`.
+Glob-friendly in both directions: `mpy6.3-*`, `*-armv7em*`, `*-x64` — though
+an exact-arch pattern with no trailing `*` (`skip = "*-rv32imc"`) will not
+match a `+0x..`-suffixed variant; `*-rv32imc*` does.
 
 Usermod identifiers, when that phase lands, take the same shape with the
 MicroPython release tag in the first slot, since a firmware image's identity
-*is* its MicroPython version: `v1.28.0-usermod-esp32_ESP32_GENERIC`.
+*is* its MicroPython version: `v1.28.0-usermod-esp32_ESP32_GENERIC` for a
+board-based port. `unix`/`windows`/`webassembly` have no board, only a
+`VARIANT=` (see "Later — usermod" below), so theirs is
+`v1.28.0-usermod-unix_standard` — same shape, the last slot names whichever
+axis that port actually selects on.
 
 ## Config schema (phase 1)
 
@@ -318,9 +458,12 @@ MicroPython release tag in the first slot, since a firmware image's identity
 
 micropython = "v1.28.0"       # release tag(s) to build against -- also
                               # accepts a list (D13): ["v1.22.0", "v1.28.0"]
-output-dir = "mpyhouse"       # where built .mpy files land
+output-dir = "mpyhouse"       # output-dir/<identifier>/ per target (D14)
 build = "*"                   # glob(s) over identifiers, space-separated
 skip = ""
+version = ""                 # set (CIBMP_VERSION in CI) to also write each
+                              # identifier's package.json (D14); empty means
+                              # just the .mpy, not mip-installable yet
 
 [natmod]
 archs = ["x64", "x86", "armv6m", "armv7m", "armv7emsp", "armv7emdp",
@@ -330,6 +473,14 @@ make-target = "dist"
 extra-make-args = []
 pre-build-command = ""        # run in module-dir after mpy-cross, before make
                               # (a7p: "make fetch-nanopb")
+arch-flags = ""               # rv32imc only, e.g. "zba,zcmp" (D15) -- part
+                              # of that arch's identifier, so this cannot be
+                              # set per-[[overrides]], only here
+
+[publish]
+extra-files = []              # copied into every identifier's own directory,
+                              # untagged in package.json (D14) -- a facade
+                              # or anything else install-everywhere (ffimod)
 
 [[overrides]]
 select = "*-armv7emsp"
@@ -338,9 +489,9 @@ extra-make-args = ["MP_BCLIBC_PRECISION=single"]
 
 Every option is overridable by environment variable, `CIBMP_`-prefixed and
 screaming-snake-cased: `CIBMP_BUILD`, `CIBMP_SKIP`, `CIBMP_MICROPYTHON`,
-`CIBMP_OUTPUT_DIR`, `CIBMP_EXTRA_MAKE_ARGS`, … Precedence, lowest to highest:
-defaults → config file → `[[overrides]]` matching the identifier →
-environment → CLI flags.
+`CIBMP_OUTPUT_DIR`, `CIBMP_EXTRA_MAKE_ARGS`, `CIBMP_VERSION`,
+`CIBMP_ARCH_FLAGS`, … Precedence, lowest to highest: defaults → config
+file → `[[overrides]]` matching the identifier → environment → CLI flags.
 
 ## Toolchain map (authoritative, from `py/dynruntime.mk`)
 
@@ -555,9 +706,8 @@ cannot express at all — not just x86's narrower one.
 `platforms/linux.py` rather than assumed: it is fail-fast per identifier too
 (a `subprocess.CalledProcessError` from one platform config aborts the whole
 invocation, no per-target continue-and-report), and its
-`BuildProducedNoWheelError`/`RepairStepProducedMultipleWheelsError`/
-`AlreadyBuiltWheelError` are the shape `collect_output()`/`verify_output()`/
-the `seen_names` check below copy.
+`BuildProducedNoWheelError`/`RepairStepProducedMultipleWheelsError` are the
+shape `collect_output()`/`verify_output()` copy.
 
 - [x] Run `pre-build-command` in `module-dir` (`shell=True`, matching what
       `build-natmod`'s own `pre_build_command` input already does).
@@ -566,15 +716,17 @@ the `seen_names` check below copy.
       resolves `pyelftools`/`ar` from `cibuildmp`'s own dependencies
       (**D12**), verified for real against a live `make dist` run, not just
       by inspection.
-- [x] Collect the produced `.mpy` into `output-dir`, named unambiguously:
+- [x] Collect the produced `.mpy` into `output-dir/<identifier>/`
+      (**D14**), named unambiguously within it too —
       `<module-stem>-<identifier>.mpy`, found by globbing
       `<module-dir>/build/<arch>*/*.mpy` — the layout `build-natmod`'s own
       artifact-upload step already assumes. Zero or more-than-one match is a
       `BuildError` naming what was found, cibuildwheel's
       `BuildProducedNoWheelError`/`RepairStepProducedMultipleWheelsError`
-      shape. Two targets landing on the same output name within one
-      invocation is also a `BuildError` (`AlreadyBuiltWheelError`'s
-      equivalent), tracked in a `seen_names` set threaded through the loop.
+      shape. Cross-target collisions are structural, not a runtime check:
+      distinct `Target`s (keyed on abi/mode/arch/tag/arch_flags) always
+      produce distinct identifiers and therefore distinct directories, so
+      there is no `AlreadyBuiltWheelError`-equivalent to run.
 - [x] Verify each output's header arch against the requested identifier and
       fail loudly on mismatch — `cibuildmp`'s equivalent of `auditwheel`.
       `native-code` was added to `resources/natmod.toml`'s `[arch]` table
@@ -613,22 +765,27 @@ the `seen_names` check below copy.
   verification above is for — this just avoids paying for the failed
   build at all.
 
-### M4 — publish
+**Publish, folded in (D14, D15) — this used to be a separate "M4":**
 
-- [ ] `cibuildmp publish` — absorb bclibc's `tools/build_release_assets.py`:
-      emit flat, uniquely named assets plus a `package.json` using the
-      per-entry native compat tag schema from
-      [micropython#19532](https://github.com/micropython/micropython/pull/19532)
-      / [micropython-lib#1144](https://github.com/micropython/micropython-lib/pull/1144).
-- [ ] Keep relative `urls` (resolved by `mip` against wherever it fetched
-      `package.json`), with `--repo` for absolute ones.
-- [ ] `extra-files` (**D14**): named files copied into the release assets
-      and listed in `package.json` with no compat tag, for a facade or any
-      other file meant to install identically regardless of target arch
-      (found via `../micropython-bclibc`'s `ffimod/`, which is not
-      natmod's merged-`.mpy` case).
-- [ ] **Isolate this behind one module.** The upstream schema is still a
-      proposal; if it changes, exactly one file should need rewriting.
+- [x] `package_target()` writes each identifier's own `package.json`
+      (today's plain two-element `urls` schema, not the deferred
+      compat-tag one) and copies `[publish] extra-files` into that same
+      directory, gated on `version` being set — empty (the default)
+      means an identifier's directory holds only its `.mpy`.
+- [x] `arch-flags` (`rv32imc` only) resolved before target selection,
+      folded into that arch's identifier as `+0x..`, and passed through to
+      `make` as `ARCH_FLAGS=` — **D15**.
+- [x] `verify_output()` also checks arch_flags, exact match. Fixed a
+      latent header-decoding bug in the process: arch-code extraction was
+      an unmasked `header[2] >> 2`; `py/persistentcode.h`'s own
+      `MPY_FEATURE_DECODE_ARCH` masks with `0x2F` after the shift to
+      exclude the arch-flags marker bit. Never triggered before D15 (no
+      arch used the marker bit until now).
+- [ ] Still open (**D14**): how the `output-dir/<identifier>/` tree gets
+      deployed — flattening `package.json`'s own filename for a GitHub
+      Release's flat asset list, vs. hosts that preserve real paths.
+      Not blocking; the `.mpy` itself is already collision-safe either
+      way.
 
 ### M5 — adopt in the three repos
 
@@ -647,12 +804,36 @@ the `seen_names` check below copy.
 
 ### Later — usermod
 
-Not scheduled. Built on board data vendored from `mpbuild` (**D7**):
-`cibuildmp` resolves the port → Docker-image map and build command itself
-for `rp2`/`esp32`/`stm32`/etc., keeps the existing composite actions for the
-ports mpbuild does not cover (`unix`, `windows`, `webassembly`), and treats
-firmware as a verification output rather than a published artifact by
-default.
+Not scheduled. `cibuildmp` drives every usermod port itself, not just the
+ones `mpbuild` has a board database for — correcting an earlier version of
+this section, which wrongly had `unix`/`windows`/`webassembly` staying on
+the composite actions permanently. That contradicts Positioning, above:
+every composite action (`build-usermod-unix`/`-windows`/`-webassembly`/
+`-rp2040`/`-esp32`/`-qemu`, not just `build-natmod`) is the low-level
+layer until `cibuildmp` covers its ground, then becomes a thin wrapper
+over it — no port gets carved out as a permanent exception.
+
+Two different selector axes, not the same thing under two names:
+
+- **Board-based ports** (`rp2`/`esp32`/`stm32`/etc.) select a `BOARD=`
+  (`ESP32_GENERIC`, `RPI_PICO`, …) and resolve it to a Docker
+  image/toolchain via the data vendored from `mpbuild` (**D7**).
+- **`unix`/`windows`/`webassembly` have no board concept at all** — they
+  select a `VARIANT=` instead: `ports/unix/variants/` (`standard`,
+  `coverage`, …; `build-usermod-unix`'s own `variant` input already
+  exposes this), `ports/webassembly`'s `standard`/`pyscript`
+  (`build-usermod-webassembly`'s `variant` input, `pyscript` default
+  since `standard`'s `-s ASYNCIFY` is broken on modern emsdk). `mpbuild`'s
+  board database was never going to cover these regardless of the
+  dependency-vs-vendor question **D7** is actually about — a variant
+  isn't a board missing from the list, it's a different axis entirely.
+
+`cibuildmp` drives `unix`/`windows`/`webassembly`'s own port Makefile
+directly, the same delegate-the-compile shape **D2** already uses for
+natmod, with `variant` as their own config axis parallel to `boards` for
+the board-based ports. Either way `cibuildmp` resolves the port → build
+command itself and treats firmware as a verification output rather than a
+published artifact by default.
 
 ### Later — tests
 
@@ -688,3 +869,8 @@ one with no cibuildwheel analogue and the most value for embedded.
 - Compiling anything itself. `dynruntime.mk` and the project's Makefile own
   that (**D2**).
 - Replacing `mpremote`/`mip` on the install side.
+- Creating a release or uploading anything (**D14**). `cibuildmp` assembles
+  a ready-to-install `output-dir/<identifier>/` tree; turning that into a
+  GitHub Release, a PyPI-style index, or any other host stays the
+  caller's own CI step — cibuildwheel draws the identical line at
+  `wheelhouse/`, and never runs `twine upload` itself either.

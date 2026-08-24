@@ -1,4 +1,5 @@
-"""Running the build itself: pre-build command, make, collect, verify.
+"""Running the build itself: pre-build command, make, collect, verify,
+package.
 
 Fails fast, one target at a time -- matching cibuildwheel's own
 build-in-container loop (platforms/linux.py), which lets a
@@ -8,16 +9,25 @@ invocation rather than collecting per-target failures into a report.
 alongside SourceError/ToolchainError.
 
 Also cibuildwheel-shaped: `collect_output()`/`verify_output()` mirror its
-"exactly one artifact, or a named error" checks (BuildProducedNoWheelError,
-RepairStepProducedMultipleWheelsError) and its AlreadyBuiltWheelError, and
-the BuildResult accumulated per target mirrors its BuildInfo summary line.
+"exactly one artifact, or a named error" check (BuildProducedNoWheelError/
+RepairStepProducedMultipleWheelsError), and the BuildResult accumulated per
+target mirrors its BuildInfo summary line.
+
+No separate `cibuildmp publish` step (see docs/BACKLOG.md D14): each
+target's own directory under `output-dir` already holds everything mip
+needs -- the `.mpy`, any `extra-files` companions, and a `package.json` --
+the moment the build finishes. Assembling a ready-to-upload tree is as far
+as this goes; creating a release or uploading it stays the caller's own CI
+step, the same way cibuildwheel never runs `twine upload` itself.
 """
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,6 +36,7 @@ from .targets import NATIVE_ARCH_CODE
 from .toolchains import ResolvedToolchain
 
 MPY_HEADER_MAGIC = ord("M")
+MPY_ARCH_FLAGS_BIT = 0x40
 
 
 class BuildError(Exception):
@@ -116,37 +127,133 @@ def collect_output(build_options: BuildOptions, module_root: Path) -> Path:
     return candidates[0]
 
 
-def read_native_arch(mpy_path: Path) -> int:
-    """The MP_NATIVE_ARCH_* code baked into a native .mpy's own header.
+def _read_varint(data: bytes, offset: int) -> tuple[int, int]:
+    """MicroPython's own uint encoding: big-endian 7-bit groups, MSB=more.
 
-    Layout from tools/mpy_ld.py's build_mpy(): byte 0 is 'M', byte 1 is
-    MPY_VERSION, byte 2 packs MPY_SUB_VERSION in its low 2 bits and the arch
-    code shifted left 2 above that, byte 3 is MP_SMALL_INT_BITS.
+    Same format tools/mpy_ld.py's MPYOutput.write_uint() writes and
+    py/persistentcode.c's read_uint() reads. Returns (value, bytes consumed).
     """
-    header = mpy_path.read_bytes()[:4]
-    if len(header) < 4 or header[0] != MPY_HEADER_MAGIC:
+    value = 0
+    consumed = 0
+    while True:
+        if offset + consumed >= len(data):
+            raise BuildError("truncated .mpy header (arch-flags field cut off)")
+        byte = data[offset + consumed]
+        value = (value << 7) | (byte & 0x7F)
+        consumed += 1
+        if not byte & 0x80:
+            return value, consumed
+
+
+def read_mpy_header(mpy_path: Path) -> tuple[int, int, int]:
+    """(MPY_VERSION, native-arch code, arch_flags) from a compiled .mpy.
+
+    Layout from tools/mpy_ld.py's build_mpy() / py/persistentcode.h: byte 0
+    is 'M', byte 1 is MPY_VERSION, byte 2 packs MPY_SUB_VERSION in bits 0-1,
+    the native-arch code in bits 2-6 (`MPY_FEATURE_DECODE_ARCH`, mask 0x2F
+    *after* the shift -- bit 6 is the arch-flags marker, not part of the
+    arch code, and must be excluded or a flagged file decodes as a bogus
+    arch), byte 3 is MP_SMALL_INT_BITS. A variable-length uint (arch_flags)
+    follows when that marker bit is set.
+    """
+    data = mpy_path.read_bytes()
+    if len(data) < 4 or data[0] != MPY_HEADER_MAGIC:
         raise BuildError(f"{mpy_path}: does not look like a compiled .mpy (bad header)")
-    return header[2] >> 2
+    feat = data[2]
+    arch_code = (feat >> 2) & 0x2F
+    arch_flags = 0
+    if feat & MPY_ARCH_FLAGS_BIT:
+        arch_flags, _consumed = _read_varint(data, 4)
+    return data[1], arch_code, arch_flags
+
+
+def read_native_arch(mpy_path: Path) -> int:
+    """The MP_NATIVE_ARCH_* code baked into a native .mpy's own header."""
+    return read_mpy_header(mpy_path)[1]
 
 
 def verify_output(build_options: BuildOptions, mpy_path: Path) -> None:
     """cibuildmp's equivalent of auditwheel: the header the linker actually
-    wrote must name the arch this target was building for, not just live in
-    the right build/<arch>*/ directory -- catches "built the wrong thing
-    into the right directory" the way a wheel tag/platform mismatch would.
+    wrote must name the arch (and, for rv32imc, the arch-flags) this target
+    was building for, not just live in the right build/<arch>*/ directory --
+    catches "built the wrong thing into the right directory" the way a wheel
+    tag/platform mismatch would.
+
+    Exact match on arch_flags, not the "required subset of available" rule
+    mip applies when installing (micropython/micropython#19479) -- that
+    rule is about whether a *device* can run this file; this check is about
+    whether the *linker* encoded what the config actually asked for.
     """
-    arch = build_options.target.arch
-    expected = NATIVE_ARCH_CODE[arch]
-    actual = read_native_arch(mpy_path)
-    if actual != expected:
+    target = build_options.target
+    _version, actual_arch, actual_flags = read_mpy_header(mpy_path)
+    expected_arch = NATIVE_ARCH_CODE[target.arch]
+    if actual_arch != expected_arch:
         raise BuildError(
             f"{build_options.identifier}: {mpy_path.name}'s header encodes native "
-            f"arch code {actual}, expected {expected} ({arch})"
+            f"arch code {actual_arch}, expected {expected_arch} ({target.arch})"
+        )
+    if actual_flags != target.arch_flags:
+        raise BuildError(
+            f"{build_options.identifier}: {mpy_path.name}'s header encodes "
+            f"arch_flags {actual_flags:#x}, expected {target.arch_flags:#x}"
         )
 
 
 def output_name(build_options: BuildOptions, mpy_path: Path) -> str:
+    # Identifier-qualified even though the file already lives in its own
+    # identifier/ directory: package.json's own urls stay unambiguous even
+    # if a caller later flattens several identifiers' directories into one
+    # namespace (e.g. a GitHub Release's own asset list, which cannot nest
+    # directories -- see D14's "still open" deployment note).
     return f"{mpy_path.stem}-{build_options.identifier}{mpy_path.suffix}"
+
+
+def _write_package_json(path: Path, urls: list[tuple[str, str]], version: str) -> None:
+    manifest = {
+        "urls": [[target_path, url] for target_path, url in urls],
+        "version": version,
+    }
+    path.write_text(json.dumps(manifest, indent=2) + "\n")
+
+
+def package_target(
+    build_options: BuildOptions,
+    identifier_dir: Path,
+    install_name: str,
+    mpy_dest: Path,
+    extra_files: list[Path],
+    version: str,
+) -> None:
+    """Copy `extra-files` alongside the built `.mpy` and write this
+    identifier's own `package.json` (**D14**): today's plain, always-
+    supported two-element `urls` schema, not a unified multi-arch manifest
+    -- see build.__doc__ and docs/BACKLOG.md D14 for why.
+
+    `urls` entries are `[target_path, url]`, deliberately not the same
+    string twice: `target_path` is what `import <module>` needs on-device
+    -- the project's own original basename (e.g. `template.mpy`), not the
+    identifier-qualified one `mpy_dest` was stored under -- while `url` is
+    that qualified, collision-safe filename actually sitting next to this
+    `package.json`. Conflating the two would make mip install the file
+    under its long, arch-qualified name, and `import template` would not
+    find it.
+
+    A no-op when `version` is unset: an identifier directory with a `.mpy`
+    and no `package.json` is still useful (the file itself is what a
+    Makefile-driven consumer wants), it just is not mip-installable yet.
+    """
+    if not version:
+        return
+    urls = [(install_name, mpy_dest.name)]
+    for extra in extra_files:
+        if not extra.is_file():
+            raise BuildError(
+                f"{build_options.identifier}: extra-files entry not found: {extra}"
+            )
+        dest = identifier_dir / extra.name
+        dest.write_bytes(extra.read_bytes())
+        urls.append((extra.name, extra.name))
+    _write_package_json(identifier_dir / "package.json", urls, version)
 
 
 def build_target(
@@ -155,13 +262,20 @@ def build_target(
     mpy_dir: Path,
     module_root: Path,
     output_dir: Path,
-    seen_names: set[str],
+    *,
+    extra_files: Sequence[Path] = (),
+    version: str = "",
 ) -> BuildResult:
-    """Run one target's build end to end and collect its result.
+    """Run one target's build end to end: pre-build-command, make, collect,
+    verify, package.
 
-    `seen_names` is shared across every target in the invocation -- the
-    natmod equivalent of cibuildwheel's AlreadyBuiltWheelError, catching two
-    targets that would silently overwrite each other's output.
+    Writes into `output_dir/<identifier>/`, not a flat `output_dir/` --
+    every identifier gets its own directory from the start (D14), so there
+    is no separate reorganising step between building and having something
+    mip can install. Two targets can never collide here: `Target` is keyed
+    on (abi, mode, arch, tag, arch_flags), and natmod_targets()/tag_groups()
+    both dedupe by construction, so distinct targets always get distinct
+    identifiers and therefore distinct directories.
     """
     start = time.time()
     env = chain.env()
@@ -172,16 +286,14 @@ def build_target(
     produced = collect_output(build_options, module_root)
     verify_output(build_options, produced)
 
-    name = output_name(build_options, produced)
-    if name in seen_names:
-        raise BuildError(
-            f"{build_options.identifier}: two targets both produced {name!r}"
-        )
-    seen_names.add(name)
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    dest = output_dir / name
+    identifier_dir = output_dir / build_options.identifier
+    identifier_dir.mkdir(parents=True, exist_ok=True)
+    dest = identifier_dir / output_name(build_options, produced)
     dest.write_bytes(produced.read_bytes())
+
+    package_target(
+        build_options, identifier_dir, produced.name, dest, list(extra_files), version
+    )
 
     return BuildResult(
         identifier=build_options.identifier, output=dest, duration=time.time() - start

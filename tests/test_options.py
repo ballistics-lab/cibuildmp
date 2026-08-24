@@ -144,6 +144,74 @@ def test_micropython_env_accepts_space_separated_list(tmp_path):
     assert options.tag_groups() == [("v1.22.0", "6.2"), ("v1.28.0", "6.3")]
 
 
+def test_arch_flags_land_on_rv32imc_identifier_and_make_args(tmp_path):
+    write(
+        tmp_path,
+        """
+        [natmod]
+        archs = ["rv32imc", "rv64imc"]
+        arch-flags = "zba,zcmp"
+        """,
+    )
+    options = Options.load(tmp_path, env={})
+    targets = {t.arch: t for t in options.targets()}
+    assert targets["rv32imc"].identifier == "mpy6.3-natmod-rv32imc+0x3"
+    assert targets["rv64imc"].identifier == "mpy6.3-natmod-rv64imc"  # unaffected
+
+    rv32_args = options.build_options(targets["rv32imc"], env={}).extra_make_args
+    assert "ARCH_FLAGS=0x3" in rv32_args
+    rv64_args = options.build_options(targets["rv64imc"], env={}).extra_make_args
+    assert not any(a.startswith("ARCH_FLAGS=") for a in rv64_args)
+
+
+def test_arch_flags_list_builds_one_rv32imc_target_per_variant(tmp_path):
+    write(
+        tmp_path,
+        """
+        [natmod]
+        archs = ["rv32imc"]
+        arch-flags = ["", "zba", "zba,zcmp"]
+        """,
+    )
+    options = Options.load(tmp_path, env={})
+    identifiers = [t.identifier for t in options.targets()]
+    assert identifiers == [
+        "mpy6.3-natmod-rv32imc",
+        "mpy6.3-natmod-rv32imc+0x1",
+        "mpy6.3-natmod-rv32imc+0x3",
+    ]
+    make_args_by_id = {
+        t.identifier: options.build_options(t, env={}).extra_make_args
+        for t in options.targets()
+    }
+    assert not any(
+        a.startswith("ARCH_FLAGS=") for a in make_args_by_id["mpy6.3-natmod-rv32imc"]
+    )
+    assert "ARCH_FLAGS=0x1" in make_args_by_id["mpy6.3-natmod-rv32imc+0x1"]
+    assert "ARCH_FLAGS=0x3" in make_args_by_id["mpy6.3-natmod-rv32imc+0x3"]
+
+
+def test_version_defaults_empty_and_is_settable(tmp_path):
+    write(tmp_path, '[natmod]\narchs = ["x64"]\n')
+    assert Options.load(tmp_path, env={}).version == ""
+    versioned = Options.load(tmp_path, env={"CIBMP_VERSION": "0.3.0"})
+    assert versioned.version == "0.3.0"
+
+
+def test_extra_files_from_publish_table(tmp_path):
+    write(
+        tmp_path,
+        """
+        [natmod]
+        archs = ["x64"]
+        [publish]
+        extra-files = ["src/facade.py", "src/ffi.py"]
+        """,
+    )
+    options = Options.load(tmp_path, env={})
+    assert options.extra_files() == ["src/facade.py", "src/ffi.py"]
+
+
 def test_runs_on_defaults_and_can_be_overridden(tmp_path):
     write(
         tmp_path,

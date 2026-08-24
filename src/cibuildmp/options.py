@@ -23,6 +23,7 @@ from .targets import (
     Target,
     matches,
     natmod_targets,
+    parse_arch_flags,
     parse_selector,
     resolve_micropython_tags,
     select,
@@ -87,8 +88,11 @@ class Options:
     archs: list[str]
     micropython_submodules: list[str]
     mpy_abi: str | None
+    arch_flags: list[str]
+    version: str
     natmod: dict[str, Any]
     overrides: list[dict[str, Any]]
+    publish: dict[str, Any]
 
     # ── Loading ───────────────────────────────────────────────────────────
 
@@ -106,6 +110,7 @@ class Options:
         overrides = list(raw.get("overrides") or [])
         if not isinstance(overrides, list):
             raise ConfigError("[[overrides]] must be an array of tables")
+        publish = dict(raw.get("publish") or {})
 
         def opt(key: str, default: Any = None) -> Any:
             # Environment beats the file for every global option. Keys are
@@ -117,6 +122,7 @@ class Options:
             return raw.get(key, default)
 
         archs_value = opt("archs") or natmod.get("archs") or list(NATMOD_ARCHS)
+        arch_flags_value = opt("arch-flags") or natmod.get("arch-flags") or []
 
         return cls(
             package_dir=package_dir,
@@ -132,8 +138,11 @@ class Options:
                 opt("micropython-submodules"), "micropython-submodules"
             ),
             mpy_abi=(str(opt("mpy-abi")) if opt("mpy-abi") is not None else None),
+            arch_flags=_as_list(arch_flags_value, "arch-flags"),
+            version=str(opt("version", "")),
             natmod=natmod,
             overrides=overrides,
+            publish=publish,
         )
 
     # ── Resolution ────────────────────────────────────────────────────────
@@ -147,16 +156,32 @@ class Options:
         """
         return resolve_micropython_tags(self.micropython, self.mpy_abi)
 
+    def extra_files(self) -> list[str]:
+        """`[publish] extra-files` -- files copied into every identifier's
+        own output directory alongside its `.mpy`, for a facade or anything
+        else meant to install regardless of target arch (**D14**)."""
+        return _as_list(self.publish.get("extra-files"), "extra-files")
+
     def targets(self) -> list[Target]:
         """Every target this config selects.
 
         One ABI group per `tag_groups()` entry, archs in NATMOD_ARCHS order
-        within each group.
+        within each group. `arch_flags` (rv32imc only) is resolved here,
+        before selection, since it is part of the identifier that
+        `build`/`skip`/`[[overrides]]` glob against. A list produces one
+        rv32imc target *per entry* -- "build every arch-flags variant" is
+        its own request, distinct from "build every arch", so
+        `arch-flags = ["", "zba,zcmp"]` is two rv32imc identifiers, not one.
         """
+        arch_flags = (
+            [parse_arch_flags("rv32imc", value) for value in self.arch_flags]
+            if self.arch_flags
+            else [0]
+        )
         all_targets = [
             target
             for tag, abi in self.tag_groups()
-            for target in natmod_targets(self.archs, abi, tag)
+            for target in natmod_targets(self.archs, abi, tag, arch_flags)
         ]
         return select(all_targets, self.build, self.skip)
 
@@ -184,6 +209,19 @@ class Options:
                     return layer[key]
             return default
 
+        extra_make_args = _as_list(opt("extra-make-args"), "extra-make-args")
+        if target.arch_flags:
+            # The packed int as hex, not the config's own raw string: with
+            # arch-flags now a list (one rv32imc Target per entry), the
+            # Target itself is the only place that still knows which entry
+            # produced it. mpy_ld.py's validate_arch_flags() accepts a
+            # numeric string exactly as well as a named-flag list, so this
+            # round-trips to the same value either way.
+            extra_make_args = [
+                f"ARCH_FLAGS=0x{target.arch_flags:x}",
+                *extra_make_args,
+            ]
+
         return BuildOptions(
             target=target,
             micropython=target.tag,
@@ -191,7 +229,7 @@ class Options:
             module_dir=str(opt("module-dir", DEFAULT_MODULE_DIR)),
             make_target=str(opt("make-target", DEFAULT_MAKE_TARGET)),
             runs_on=str(opt("runs-on", target.default_runner)),
-            extra_make_args=_as_list(opt("extra-make-args"), "extra-make-args"),
+            extra_make_args=extra_make_args,
             pre_build_command=str(opt("pre-build-command", "")),
         )
 

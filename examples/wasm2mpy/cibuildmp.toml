@@ -1,0 +1,33 @@
+# cibuildmp's own second integration test -- see
+# .github/workflows/build-examples.yml. Unlike examples/template (natmod's
+# own C, compiled directly), this module's native source is WebAssembly
+# (test/zig.wasm, vendored from github.com/vshymanskyy/wasm2mpy -- see
+# NOTICE), compiled to C via `wasm2c` inside the vendored Makefile's own
+# `$(BUILD)/wasm.c` rule before the normal dynruntime.mk CC/LINK/GEN flow
+# takes over. Proves cibuildmp's whole natmod contract (D2: it only cares
+# that the Makefile accepts ARCH=/MPY_DIR=/PYTHON= and has a dist target
+# under build/<arch>*/) is genuinely source-language-agnostic, not just
+# validated against a plain-C example.
+#
+# Limited to the arches wasm2mpy's own Makefile documents (its own comment
+# omits rv32imc/rv64imc, unlike examples/template's default of all ten) --
+# not independently verified against those two here.
+#
+# No xtensa (ESP8266): a real, external mismatch, not a cibuildmp bug --
+# the vendored Makefile sets LINK_RUNTIME=1 unconditionally, which pulls
+# libgcc.a in via MPY_LD_FLAGS on every arch, but runtime/esp8266-rom.S
+# already provides the same soft-division routines (__udivsi3 and friends)
+# by redirecting into the chip's own ROM. mpy_ld.py's linker then sees the
+# same symbol from both and rejects it ("LinkError: duplicate symbol").
+# Upstream wasm2mpy presumably handles this in its own CI toolchain choice
+# or an unmerged dynruntime.mk difference (see its now-obsolete
+# mpy-ld-link-archives fork); not something to guess a fix for here.
+micropython = "v1.28.0"
+
+[natmod]
+archs = ["x64", "x86", "armv6m", "armv7m", "armv7emsp", "armv7emdp",
+         "xtensawin"]
+# wasm2mpy's own layout has no natmod/ subdirectory -- its Makefile is
+# vendored at this module's own root (unlike examples/template's).
+module-dir = "."
+extra-make-args = ["APP=zig"]

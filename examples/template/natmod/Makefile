@@ -6,11 +6,16 @@ MOD = template
 SRC = template.c
 
 # Must be set before the include below -- dynruntime.mk only defaults it
-# with `?=`. Scopes intermediate objects (*.o/.native.mpy) per arch: found
-# for real running the whole matrix in one natmod/ tree -- without this, a
-# second `make ARCH=<other>` sees the first arch's own build objects as up
-# to date (same path, nothing in the source changed) and skips rebuilding,
-# so $(MOD).mpy silently stays the *first* arch's binary.
+# with `?=`. Scopes intermediate objects (*.o/.native.mpy) per arch *and*
+# per arch-flags variant: found for real running the whole matrix in one
+# natmod/ tree -- without the $(ARCH) half, a second `make ARCH=<other>`
+# sees the first arch's own build objects as up to date (same path,
+# nothing in the source changed) and skips rebuilding, so $(MOD).mpy
+# silently stays the *first* arch's binary. The $(ARCH_FLAGS) half is the
+# same bug on a second axis, found the same way: rv32imc's own object file
+# doesn't depend on ARCH_FLAGS at all, so building several arch-flags
+# variants back to back (D15) reuses the first variant's cached .o/.mpy for
+# every later one just as silently, even though $(ARCH) never changed.
 #
 # Deliberately NOT under build/$(ARCH) -- cibuildmp's collect_output()
 # globs build/<arch>*/*.mpy for the *finished* dist artifact, and dropping
@@ -18,7 +23,7 @@ SRC = template.c
 # directory makes the glob ambiguous (two .mpy files where it expects
 # one). .obj/ keeps make's own per-arch object cache out of the tree
 # cibuildmp looks in.
-BUILD = .obj/$(ARCH)
+BUILD = .obj/$(ARCH)$(if $(ARCH_FLAGS),+$(ARCH_FLAGS))
 
 include $(MPY_DIR)/py/dynruntime.mk
 

@@ -9,6 +9,7 @@ from cibuildmp.targets import (
     abi_for_tag,
     is_abi_known,
     natmod_targets,
+    parse_arch_flags,
     parse_selector,
     resolve_micropython_tags,
     select,
@@ -19,6 +20,55 @@ def test_identifier_shape():
     t = Target(abi="6.3", mode="natmod", arch="armv7emsp")
     assert t.identifier == "mpy6.3-natmod-armv7emsp"
     assert t.cross == "arm-none-eabi-"
+
+
+def test_identifier_carries_arch_flags_only_when_set():
+    plain = Target(abi="6.3", mode="natmod", arch="rv32imc")
+    assert plain.identifier == "mpy6.3-natmod-rv32imc"
+    flagged = Target(abi="6.3", mode="natmod", arch="rv32imc", arch_flags=3)
+    assert flagged.identifier == "mpy6.3-natmod-rv32imc+0x3"
+
+
+def test_parse_arch_flags_numeric_forms():
+    assert parse_arch_flags("rv32imc", "") == 0
+    assert parse_arch_flags("rv32imc", "3") == 3
+    assert parse_arch_flags("rv32imc", "0x3") == 3
+    assert parse_arch_flags("rv32imc", "0b11") == 3
+
+
+def test_parse_arch_flags_named_forms():
+    assert parse_arch_flags("rv32imc", "zba") == 1
+    assert parse_arch_flags("rv32imc", "zcmp") == 2
+    assert parse_arch_flags("rv32imc", "zba,zcmp") == 3
+    assert parse_arch_flags("rv32imc", "ZBA,ZCMP") == 3  # case-insensitive
+
+
+def test_parse_arch_flags_rejects_unknown_flag():
+    with pytest.raises(UnknownArchError, match="unknown rv32imc arch-flag"):
+        parse_arch_flags("rv32imc", "not-a-flag")
+
+
+def test_parse_arch_flags_rejects_every_other_arch():
+    # mpy_ld.py's own validate_arch_flags() raises the same way.
+    with pytest.raises(UnknownArchError, match="only valid for rv32imc"):
+        parse_arch_flags("rv64imc", "zba")
+
+
+def test_natmod_targets_arch_flags_land_only_on_rv32imc():
+    targets = natmod_targets(["rv32imc", "rv64imc", "x64"], "6.3", "v1.28.0", [3])
+    by_arch = {t.arch: t.arch_flags for t in targets}
+    assert by_arch == {"rv32imc": 3, "rv64imc": 0, "x64": 0}
+
+
+def test_natmod_targets_one_rv32imc_target_per_arch_flags_entry():
+    # "build every arch-flags variant" is distinct from "build every arch":
+    # each entry produces its own rv32imc identifier, side by side.
+    targets = natmod_targets(["rv32imc"], "6.3", "v1.28.0", [0, 1, 3])
+    assert [t.identifier for t in targets] == [
+        "mpy6.3-natmod-rv32imc",
+        "mpy6.3-natmod-rv32imc+0x1",
+        "mpy6.3-natmod-rv32imc+0x3",
+    ]
 
 
 def test_ten_arches_five_toolchains():

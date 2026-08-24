@@ -27,11 +27,19 @@ implemented so far.
 
 ```console
 $ cibuildmp --dry-run
-cibuildmp: 10 target(s) against MicroPython v1.28.0 (.mpy ABI 6.3)
-  [ 1/10] mpy6.3-natmod-x86       CROSS=(host)              make -C natmod ARCH=x86 dist
-  [ 2/10] mpy6.3-natmod-x64       CROSS=(host)              make -C natmod ARCH=x64 dist
+cibuildmp: 10 target(s) against MicroPython v1.28.0
+  [ 1/10] mpy6.3-natmod-x86            CROSS=(host)                 make -C natmod ARCH=x86 dist
+  [ 2/10] mpy6.3-natmod-x64            CROSS=(host)                 make -C natmod ARCH=x64 dist
   ...
 ```
+
+Drop `--dry-run` and it builds for real: each target lands in its own
+`output-dir/<identifier>/` directory (`mpyhouse/mpy6.3-natmod-x64/`, …)
+alongside a `package.json` once `version` is set — see
+[`examples/template`](examples/template) and
+[`examples/wasm2mpy`](examples/wasm2mpy) (native source is WebAssembly,
+compiled through `wasm2c` — the natmod contract doesn't care what
+produced the C).
 
 **The composite actions.** The original building blocks, still the way every
 usermod target is built today. `cibuildmp` is absorbing them one at a time
@@ -421,6 +429,22 @@ binary. `cibuildmp` catches this itself (the header-arch verification
 that is its `auditwheel` equivalent fails loudly instead), but scoping
 `BUILD` avoids paying for the failed build at all.
 
+If the module also uses `rv32imc`'s `arch-flags` (**D15**), `BUILD` needs
+`$(ARCH_FLAGS)` folded in too --
+`BUILD = .obj/$(ARCH)$(if $(ARCH_FLAGS),+$(ARCH_FLAGS))`. Same bug, second
+axis: `rv32imc`'s own object file does not depend on `ARCH_FLAGS` at all,
+so building several arch-flags variants back to back in one invocation
+(`arch-flags = ["", "zba", "zba,zcmp"]`) reuses the first variant's cached
+`.o`/`.mpy` for every later one just as silently, even though `$(ARCH)`
+never changed. Found the same way as the `$(ARCH)` case: by actually
+running the whole variant list, not by inspection.
+
+None of this cares what produced the `.c` files `SRC` lists --
+[`examples/wasm2mpy`](examples/wasm2mpy) compiles WebAssembly to C via
+`wasm2c` in a Makefile rule before the same `dynruntime.mk` flow takes
+over, and needs nothing from `cibuildmp` beyond `module-dir = "."` and an
+`extra-make-args` entry for its own `APP=` variable.
+
 ## Roadmap
 
 `cibuildmp` is the roadmap. [`docs/BACKLOG.md`](docs/BACKLOG.md) is the
@@ -430,9 +454,12 @@ what is deliberately deferred.
 Where it stands: target selection, MicroPython and `mpy-cross`
 provisioning, cross-toolchain resolution, and the natmod build itself
 (running `make`, collecting the `.mpy`, verifying its header) are done.
-Publishing (`cibuildmp publish`) is next. usermod will vendor board data
-from [`mpbuild`](https://github.com/mattytrentini/mpbuild) rather than
-depend on the package, and test runners are deferred outright.
+There is no separate publish step -- `cibuildmp` writes each identifier's
+own `package.json` as part of the normal build once `version` is set, the
+same way cibuildwheel has no publish step either. Next up is adopting
+this in the three consuming repos. usermod will vendor board data from
+[`mpbuild`](https://github.com/mattytrentini/mpbuild) rather than depend
+on the package, and test runners are deferred outright.
 
 Until each piece lands and is verified against real CI in a consuming repo,
 the composite actions below stay the supported path.

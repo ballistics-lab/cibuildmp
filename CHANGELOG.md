@@ -13,11 +13,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cli.build()` runs each target's `pre-build-command`, invokes
   `make -C <module-dir> ARCH=<arch> MPY_DIR=<…> PYTHON=<sys.executable>
   <extra-make-args> <make-target>`, collects the produced `.mpy` from
-  `<module-dir>/build/<arch>*/`, verifies its header's native-arch code
-  against the requested identifier (`cibuildmp`'s `auditwheel` equivalent),
-  and copies it into `output-dir` as `<module-stem>-<identifier>.mpy`. Ends
-  with a per-target `done in Ns` line and a summary table. See
+  `<module-dir>/build/<arch>*/`, and verifies its header's native-arch code
+  (and, for `rv32imc`, its arch-flags — **D15**) against the requested
+  identifier — `cibuildmp`'s `auditwheel` equivalent. Ends with a
+  per-target `done in Ns` line and a summary table. See
   [`docs/BACKLOG.md`](docs/BACKLOG.md) M3 and **D12**.
+- **Every target gets its own `output-dir/<identifier>/` directory and,
+  once `version` is set, a `package.json` mip can install straight from**
+  (**D14**) — no separate `cibuildmp publish` command; `cli.build()`
+  writes it as part of the normal build, the same way cibuildwheel has no
+  publish step and `wheelhouse/*` is immediately `twine upload`-able.
+  `[publish] extra-files` copies a facade or any other file meant to
+  install regardless of target arch into every identifier's directory too
+  (found via `../micropython-bclibc`'s `ffimod/`). `package.json`'s `urls`
+  install the file under its own clean name (e.g. `template.mpy`, what
+  `import template` needs on-device) from the identifier-qualified,
+  collision-safe filename actually sitting next to it
+  (`template-mpy6.3-natmod-x64.mpy`).
 - `pyelftools`/`ar` are now `cibuildmp`'s own dependencies (**D12** in
   `docs/BACKLOG.md`) rather than something installed at build time: both are
   pure-Python packages `tools/mpy_ld.py` itself needs, and `PYTHON=` on the
@@ -29,11 +41,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   output when they cross an ABI boundary, otherwise it's the same native
   `.mpy` twice. `cli.build()` fetches MicroPython and builds `mpy-cross`
   once per distinct ABI group rather than once per invocation.
-- `examples/template` — a minimal real natmod module, built by this repo's
-  own `action.yml` in `.github/workflows/build-template.yml` on every push
-  and PR. cibuildmp's own integration test: green here means the real
-  build path (M3) works end to end, not just that `--dry-run` prints a
-  plausible plan.
+- **`rv32imc`'s `ARCH_FLAGS=` is now part of the identifier** (**D15**):
+  `arch-flags = "zba,zcmp"` (or a numeric string, matching `mpy_ld.py`'s
+  own `validate_arch_flags()`) produces `mpy6.3-natmod-rv32imc+0x3`.
+  Verified live against a real `riscv-none-elf-gcc` build, not just a
+  synthetic header: the produced `.mpy`'s own arch-flags round-trip
+  through `verify_output()` correctly. Also accepts a list --
+  `arch-flags = ["", "zba", "zba,zcmp"]` builds every variant as its own
+  `rv32imc` identifier in one invocation, the same "build every X" shape
+  `archs`/`micropython` already have.
+- `examples/template` and `examples/wasm2mpy` — real natmod modules, both
+  built by this repo's own `action.yml` in
+  `.github/workflows/build-examples.yml` on every push and PR.
+  `wasm2mpy`'s native source is WebAssembly (vendored from
+  [`vshymanskyy/wasm2mpy`](https://github.com/vshymanskyy/wasm2mpy), MIT,
+  see `examples/wasm2mpy/NOTICE`), compiled to C via `wasm2c` before the
+  same `dynruntime.mk` flow every other natmod uses takes over — proof the
+  natmod contract (**D2**) is genuinely source-language-agnostic, not just
+  validated against a plain-C example. Builds for 7 of its 8 documented
+  arches; `xtensa` (ESP8266) is left out with a comment in
+  `examples/wasm2mpy/cibuildmp.toml` explaining why (a real symbol clash
+  between the vendored `esp8266-rom.S` and `LINK_RUNTIME=1`, not a
+  `cibuildmp` bug). cibuildmp's own integration test: green here means the
+  real build path (M3) works end to end, not just that `--dry-run` prints
+  a plausible plan.
 
 ### Changed
 
@@ -73,6 +104,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "install gcc-multilib" error this probe exists to give. Now compiles
   and links `#include <stdio.h>\nint main(void) { return 0; }`, which
   actually exercises the missing header chain.
+- `.mpy` header arch decoding was an unmasked `header[2] >> 2` —
+  `py/persistentcode.h`'s own `MPY_FEATURE_DECODE_ARCH` masks with
+  `0x2F` after the shift to exclude the arch-flags marker bit (bit 6).
+  Without the mask, `rv32imc` (native-code 11) with that bit set decoded
+  as 27. Latent until **D15** added a real way to set that bit; caught
+  while implementing it, before it ever affected a real build.
+- The `BUILD=` scoping fix noted above (`BUILD = .obj/$(ARCH)`) only
+  accounted for `$(ARCH)`, not `$(ARCH_FLAGS)` — building **D15**'s
+  `arch-flags` list back to back in one invocation reused the first
+  variant's cached `.o`/`.mpy` for every later one, since `$(ARCH)` never
+  changes across those targets and `rv32imc`'s own object file doesn't
+  depend on `ARCH_FLAGS` at all. Same bug, second axis; found the same
+  way, by actually running the variant list rather than trusting the
+  single-value case already worked.
+  `examples/template/natmod/Makefile` now scopes
+  `BUILD = .obj/$(ARCH)$(if $(ARCH_FLAGS),+$(ARCH_FLAGS))`.
 
 ## [0.3.0a1] - 2026-08-24
 

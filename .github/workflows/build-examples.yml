@@ -1,0 +1,65 @@
+name: Build examples
+
+# cibuildmp's own integration tests: examples/* are real natmod modules,
+# built here with this repo's own root action.yml -- the same `uses:` a
+# consumer like bclibc or a7p would write. Green here means the actual
+# build path (M3: make, collect, verify, package) works end to end, not
+# just that --dry-run prints a plausible plan.
+#
+#   template  -- natmod's own C, the minimal case.
+#   wasm2mpy  -- native source is WebAssembly, compiled to C via wasm2c
+#                before the normal dynruntime.mk flow takes over (see
+#                examples/wasm2mpy/cibuildmp.toml). Proves the natmod
+#                contract (D2) is genuinely source-language-agnostic.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "LICENSE"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # x86 cannot self-provision (docs/BACKLOG.md M2): the host gcc is
+      # always there but ubuntu-latest ships no 32-bit glibc headers/libs
+      # by default. Same package .github/actions/build-natmod's own "Install
+      # cross-compiler" step already apt-installs for ARCH=x86 -- this repo
+      # just doesn't go through that action here, so it needs its own copy.
+      #
+      # wabt: examples/wasm2mpy's own toolchain (wasm2c), pinned to the
+      # exact version its vendored runtime.c was written against -- newer
+      # wasm2c changes its generated-code API shape (verified for real:
+      # 1.0.41 fails to compile that file, 1.0.36 -- what Ubuntu's own repo
+      # carries -- works). Not a cross-toolchain cibuildmp itself resolves
+      # (docs/BACKLOG.md D3 only covers the ten natmod ARCH= toolchains).
+      - run: sudo apt-get update -q && sudo apt-get install -y gcc-multilib wabt
+
+      - name: Build examples/template
+        uses: ./
+        env:
+          # Exercises D14's packaging step (extra-files + package.json) on
+          # every push -- no real release tag needed for that, this repo
+          # ships no module of its own to version.
+          CIBMP_VERSION: 0.0.0-ci
+        with:
+          package-dir: examples/template
+
+      - name: Build examples/wasm2mpy
+        uses: ./
+        env:
+          CIBMP_VERSION: 0.0.0-ci
+        with:
+          package-dir: examples/wasm2mpy
+
+      - name: List built artifacts
+        run: |
+          ls -laR examples/template/mpyhouse
+          ls -laR examples/wasm2mpy/mpyhouse
+          cat examples/template/mpyhouse/*/package.json

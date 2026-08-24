@@ -1,3 +1,4 @@
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -12,6 +13,7 @@ from cibuildmp.build import (
     collect_output,
     make_command,
     output_name,
+    read_mpy_header,
     read_native_arch,
     run_make,
     run_pre_build_command,
@@ -24,9 +26,11 @@ from cibuildmp.toolchains import ResolvedToolchain
 HOST_CHAIN = ResolvedToolchain("none", "", "", None)
 
 
-def build_options(arch: str = "armv7emsp", **overrides) -> BuildOptions:
+def build_options(
+    arch: str = "armv7emsp", arch_flags: int = 0, **overrides
+) -> BuildOptions:
     defaults = {
-        "target": Target(abi="6.3", mode="natmod", arch=arch),
+        "target": Target(abi="6.3", mode="natmod", arch=arch, arch_flags=arch_flags),
         "micropython": "v1.28.0",
         "output_dir": Path("mpyhouse"),
         "module_dir": "natmod",
@@ -36,12 +40,35 @@ def build_options(arch: str = "armv7emsp", **overrides) -> BuildOptions:
     return BuildOptions(**defaults)
 
 
+def _encode_varint(value: int) -> bytes:
+    """Inverse of build._read_varint -- big-endian 7-bit groups, MSB=more."""
+    if value == 0:
+        return bytes([0])
+    chunks = []
+    v = value
+    while v:
+        chunks.append(v & 0x7F)
+        v >>= 7
+    chunks.reverse()
+    return bytes(c | 0x80 for c in chunks[:-1]) + bytes([chunks[-1]])
+
+
 def write_mpy(
-    path: Path, *, native_code: int, version: int = 6, sub_version: int = 3
+    path: Path,
+    *,
+    native_code: int,
+    version: int = 6,
+    sub_version: int = 3,
+    arch_flags: int = 0,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     header_flags = (native_code << 2) | sub_version
-    path.write_bytes(bytes([ord("M"), version, header_flags, 31]) + b"\x00" * 8)
+    data = bytearray([ord("M"), version, header_flags, 31])
+    if arch_flags:
+        data[2] |= 0x40  # MPY_ARCH_FLAGS_BIT
+        data += _encode_varint(arch_flags)
+    data += b"\x00" * 8
+    path.write_bytes(bytes(data))
 
 
 # -- make_command -----------------------------------------------------------
@@ -141,6 +168,28 @@ def test_read_native_arch_rejects_bad_magic(tmp_path):
         read_native_arch(mpy)
 
 
+def test_read_native_arch_masks_out_the_arch_flags_marker_bit(tmp_path):
+    # Regression: MPY_FEATURE_DECODE_ARCH is ((feat >> 2) & 0x2F), not a
+    # bare shift. Without the mask, rv32imc (11) with the arch-flags marker
+    # bit set decodes as 27 instead of 11.
+    mpy = tmp_path / "m.mpy"
+    write_mpy(mpy, native_code=11, arch_flags=3)
+    assert read_native_arch(mpy) == 11
+
+
+def test_read_mpy_header_round_trips_arch_flags(tmp_path):
+    mpy = tmp_path / "m.mpy"
+    write_mpy(mpy, native_code=11, arch_flags=3)
+    version, arch, arch_flags = read_mpy_header(mpy)
+    assert (version, arch, arch_flags) == (6, 11, 3)
+
+
+def test_read_mpy_header_no_arch_flags_bit_reads_zero(tmp_path):
+    mpy = tmp_path / "m.mpy"
+    write_mpy(mpy, native_code=7)
+    assert read_mpy_header(mpy) == (6, 7, 0)
+
+
 def test_verify_output_accepts_matching_arch(tmp_path):
     mpy = tmp_path / "m.mpy"
     write_mpy(mpy, native_code=7)  # armv7emsp
@@ -154,6 +203,19 @@ def test_verify_output_rejects_mismatched_arch(tmp_path):
         verify_output(build_options("armv7emsp"), mpy)
 
 
+def test_verify_output_accepts_matching_arch_flags(tmp_path):
+    mpy = tmp_path / "m.mpy"
+    write_mpy(mpy, native_code=11, arch_flags=3)
+    verify_output(build_options("rv32imc", arch_flags=3), mpy)  # must not raise
+
+
+def test_verify_output_rejects_mismatched_arch_flags(tmp_path):
+    mpy = tmp_path / "m.mpy"
+    write_mpy(mpy, native_code=11, arch_flags=1)
+    with pytest.raises(BuildError, match="arch_flags"):
+        verify_output(build_options("rv32imc", arch_flags=3), mpy)
+
+
 # -- output_name / build_target -----------------------------------------------
 
 
@@ -162,50 +224,105 @@ def test_output_name_is_unambiguous():
     assert output_name(build_options(), mpy) == "mymodule-mpy6.3-natmod-armv7emsp.mpy"
 
 
-def test_build_target_end_to_end(tmp_path, monkeypatch):
-    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
-
+def _stub_make(tmp_path, native_code=7, arch_flags=0):
     def fake_make(*a, **k):
         write_mpy(
             tmp_path / "natmod" / "build" / "armv7emsp-eabi" / "mymodule.mpy",
-            native_code=7,
+            native_code=native_code,
+            arch_flags=arch_flags,
         )
 
-    monkeypatch.setattr(build, "run_make", fake_make)
+    return fake_make
+
+
+def test_build_target_writes_into_its_own_identifier_directory(tmp_path, monkeypatch):
+    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
+    monkeypatch.setattr(build, "run_make", _stub_make(tmp_path))
 
     opts = build_options()
     result = build_target(
-        opts,
-        HOST_CHAIN,
-        tmp_path / "mpy",
-        tmp_path / "natmod",
-        tmp_path / "out",
-        set(),
+        opts, HOST_CHAIN, tmp_path / "mpy", tmp_path / "natmod", tmp_path / "out"
     )
     assert isinstance(result, BuildResult)
-    assert result.output == tmp_path / "out" / "mymodule-mpy6.3-natmod-armv7emsp.mpy"
+    expected = (
+        tmp_path
+        / "out"
+        / "mpy6.3-natmod-armv7emsp"
+        / "mymodule-mpy6.3-natmod-armv7emsp.mpy"
+    )
+    assert result.output == expected
     assert result.output.exists()
     assert result.size > 0
 
 
-def test_build_target_rejects_duplicate_output_name(tmp_path, monkeypatch):
+def test_build_target_skips_package_json_without_a_version(tmp_path, monkeypatch):
     monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
+    monkeypatch.setattr(build, "run_make", _stub_make(tmp_path))
 
-    def fake_make(*a, **k):
-        write_mpy(
-            tmp_path / "natmod" / "build" / "armv7emsp-eabi" / "mymodule.mpy",
-            native_code=7,
-        )
+    result = build_target(
+        build_options(),
+        HOST_CHAIN,
+        tmp_path / "mpy",
+        tmp_path / "natmod",
+        tmp_path / "out",
+    )
+    assert not (result.output.parent / "package.json").exists()
 
-    monkeypatch.setattr(build, "run_make", fake_make)
 
-    seen = {"mymodule-mpy6.3-natmod-armv7emsp.mpy"}
-    with pytest.raises(BuildError, match="two targets"):
+def test_build_target_writes_package_json_with_a_version(tmp_path, monkeypatch):
+    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
+    monkeypatch.setattr(build, "run_make", _stub_make(tmp_path))
+
+    result = build_target(
+        build_options(),
+        HOST_CHAIN,
+        tmp_path / "mpy",
+        tmp_path / "natmod",
+        tmp_path / "out",
+        version="0.3.0",
+    )
+    manifest_path = result.output.parent / "package.json"
+    manifest = json.loads(manifest_path.read_text())
+    assert manifest["version"] == "0.3.0"
+    # target_path ("mymodule.mpy", what `import mymodule` needs on-device)
+    # is deliberately not the same as url (the qualified, collision-safe
+    # filename this package.json sits next to).
+    assert manifest["urls"] == [["mymodule.mpy", result.output.name]]
+
+
+def test_build_target_copies_extra_files_and_lists_them(tmp_path, monkeypatch):
+    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
+    monkeypatch.setattr(build, "run_make", _stub_make(tmp_path))
+
+    facade = tmp_path / "src" / "facade.py"
+    facade.parent.mkdir(parents=True, exist_ok=True)
+    facade.write_text("# facade\n")
+
+    result = build_target(
+        build_options(),
+        HOST_CHAIN,
+        tmp_path / "mpy",
+        tmp_path / "natmod",
+        tmp_path / "out",
+        extra_files=[facade],
+        version="0.3.0",
+    )
+    assert (result.output.parent / "facade.py").read_text() == "# facade\n"
+    manifest = json.loads((result.output.parent / "package.json").read_text())
+    assert ["facade.py", "facade.py"] in manifest["urls"]
+
+
+def test_build_target_missing_extra_file_is_a_build_error(tmp_path, monkeypatch):
+    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
+    monkeypatch.setattr(build, "run_make", _stub_make(tmp_path))
+
+    with pytest.raises(BuildError, match="extra-files entry not found"):
         build_target(
             build_options(),
             HOST_CHAIN,
             tmp_path / "mpy",
             tmp_path / "natmod",
             tmp_path / "out",
-            seen,
+            extra_files=[tmp_path / "nope.py"],
+            version="0.3.0",
         )

@@ -9,6 +9,7 @@ must not need a MicroPython checkout.
 from __future__ import annotations
 
 import fnmatch
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -34,6 +35,10 @@ NATMOD_ARCHS: tuple[str, ...] = tuple(NATMOD_CROSS)
 NATIVE_ARCH_CODE: dict[str, int] = {
     arch: row["native-code"] for arch, row in _ARCH_TABLE.items()
 }
+
+# rv32imc's named ARCH_FLAGS= values (mpy_ld.py's own RV32_EXTENSIONS).
+# Nothing else accepts arch-flags at all -- see parse_arch_flags().
+RV32_ARCH_FLAGS: dict[str, int] = dict(natmod_data()["arch-flags"]["rv32imc"])
 
 # ── .mpy ABI ──────────────────────────────────────────────────────────────
 _ABI_TABLE: dict[str, str] = dict(natmod_data()["mpy-abi"])
@@ -88,6 +93,39 @@ def is_abi_known(tag: str) -> bool:
     return tag in MPY_ABI
 
 
+def parse_arch_flags(arch: str, value: str) -> int:
+    """Parse an `arch-flags` config value the way mpy_ld.py's own
+    validate_arch_flags() does: a bare numeric string (0b/0x/decimal), or a
+    comma-separated list of named RV32 extensions (`RV32_ARCH_FLAGS`).
+
+    Only `rv32imc` accepts this -- mpy_ld.py raises for every other arch,
+    and py/persistentcode.h's mp_raw_code_load() only validates arch_flags
+    for MP_NATIVE_ARCH_RV32IMC (any other arch with the bit set is an
+    unconditional "incompatible .mpy file" on load).
+    """
+    if not value:
+        return 0
+    if arch != "rv32imc":
+        raise UnknownArchError(
+            f"arch-flags is only valid for rv32imc, not {arch!r} -- "
+            f"mpy_ld.py itself rejects it for every other arch"
+        )
+    stripped = value.strip()
+    prefix = stripped[:2].lower()
+    if prefix in ("0b", "0x") or stripped.isdigit():
+        base = {"0b": 2, "0x": 16}.get(prefix, 10)
+        return int(stripped, base)
+    flags = 0
+    for flag in stripped.lower().split(","):
+        if flag not in RV32_ARCH_FLAGS:
+            raise UnknownArchError(
+                f"unknown rv32imc arch-flag {flag!r}. Known: "
+                f"{', '.join(sorted(RV32_ARCH_FLAGS))}"
+            )
+        flags |= RV32_ARCH_FLAGS[flag]
+    return flags
+
+
 def resolve_micropython_tags(
     tags: list[str], override: str | None = None
 ) -> list[tuple[str, str]]:
@@ -120,13 +158,27 @@ class Target:
     # -- not part of the identifier (that's ABI, the compatibility axis),
     # but the build itself needs to know which checkout to run against.
     tag: str = ""
+    # rv32imc's ARCH_FLAGS=, packed the way the .mpy header itself packs it
+    # (RV32_ARCH_FLAGS bits OR'd together). Zero for every other arch: it is
+    # part of the identifier because it is a real compatibility axis
+    # dynruntime.mk supports (micropython/micropython#19479) -- two rv32imc
+    # builds that differ only here are not interchangeable, so they must not
+    # share an identifier.
+    arch_flags: int = 0
 
     @property
     def identifier(self) -> str:
         # Shaped after cibuildwheel's cp311-manylinux_x86_64, i.e.
         # {ABI}-{platform}_{arch}, with '-' throughout so that both
-        # "mpy6.3-*" and "*-armv7em*" are useful globs.
-        return f"mpy{self.abi}-{self.mode}-{self.arch}"
+        # "mpy6.3-*" and "*-armv7em*" are useful globs. arch_flags, when
+        # present, is an opaque `+0x..` suffix rather than named flags: it
+        # would otherwise have to stay in lockstep with RV32_ARCH_FLAGS to
+        # remain accurate, and the identifier must still mean the same thing
+        # if that table grows a flag this build predates.
+        base = f"mpy{self.abi}-{self.mode}-{self.arch}"
+        if self.arch_flags:
+            base += f"+0x{self.arch_flags:x}"
+        return base
 
     @property
     def cross(self) -> str:
@@ -142,8 +194,20 @@ class Target:
         return self.identifier
 
 
-def natmod_targets(archs: list[str], abi: str, tag: str) -> list[Target]:
-    """Build a Target per arch, preserving NATMOD_ARCHS order."""
+def natmod_targets(
+    archs: list[str], abi: str, tag: str, arch_flags: Sequence[int] = (0,)
+) -> list[Target]:
+    """Build a Target per arch, preserving NATMOD_ARCHS order.
+
+    `arch_flags` only ever lands on the rv32imc target(s), if `rv32imc` is
+    selected -- every other arch's Target gets 0 regardless, since
+    dynruntime.mk itself only accepts ARCH_FLAGS= for rv32imc. rv32imc
+    itself gets one Target *per* `arch_flags` entry, not one overall --
+    "build every arch-flags variant" is a real, distinct request from
+    "build every arch" (both select on the same `archs`/`arch-flags` list
+    shape everywhere else in this config), so a `[0x1, 0x3]` list produces
+    two rv32imc identifiers, `+0x1` and `+0x3`, side by side.
+    """
     unknown = [a for a in archs if a not in NATMOD_CROSS]
     if unknown:
         raise UnknownArchError(
@@ -151,11 +215,18 @@ def natmod_targets(archs: list[str], abi: str, tag: str) -> list[Target]:
             f"py/dynruntime.mk supports: {', '.join(NATMOD_ARCHS)}"
         )
     selected = set(archs)
-    return [
-        Target(abi=abi, mode="natmod", arch=a, tag=tag)
-        for a in NATMOD_ARCHS
-        if a in selected
-    ]
+    targets = []
+    for a in NATMOD_ARCHS:
+        if a not in selected:
+            continue
+        if a == "rv32imc":
+            targets += [
+                Target(abi=abi, mode="natmod", arch=a, tag=tag, arch_flags=flags)
+                for flags in arch_flags
+            ]
+        else:
+            targets.append(Target(abi=abi, mode="natmod", arch=a, tag=tag))
+    return targets
 
 
 # ── Selectors ─────────────────────────────────────────────────────────────

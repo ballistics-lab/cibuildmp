@@ -197,7 +197,15 @@ def build(options: Options, targets: list[Target], *, toolchain: str = "auto") -
         print("  " + _plan_line(index, total, build_options, chain))
         print(f"        {chain.describe()}")
 
-    seen_names: set[str] = set()
+    # Resolved once, not per target: the same files and version apply to
+    # every identifier's own package.json (D14). Checked up front so a
+    # missing extra-files entry fails before any target builds, not after
+    # the first one succeeds.
+    extra_files = [options.package_dir / f for f in options.extra_files()]
+    for extra in extra_files:
+        if not extra.is_file():
+            raise BuildError(f"extra-files entry not found: {extra}")
+
     results: list[BuildResult] = []
     index = 0
     # Preserves first-appearance order (options.targets() emits one ABI
@@ -244,7 +252,8 @@ def build(options: Options, targets: list[Target], *, toolchain: str = "auto") -
                 mpy_dir,
                 module_root,
                 output_dir,
-                seen_names,
+                extra_files=extra_files,
+                version=options.version,
             )
             results.append(result)
             print(f"        done in {result.duration:.1f}s -> {result.output}")
