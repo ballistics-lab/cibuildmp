@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **This project moved to `ballistics-lab/cibuildmp` and absorbed
+  `ballistics-lab/micropython-native-ci` entirely.** Every composite action
+  is here now, unchanged in behaviour, inputs and outputs — only the repo in
+  the `uses:` path differs. The old repository is deprecated and will be
+  archived once its consumers have repinned; the version line continues
+  rather than restarting, so this release's actions are `v0.2.0`'s, moved.
+
+  ```diff
+  - uses: ballistics-lab/micropython-native-ci/.github/actions/build-natmod@v0.2.0
+  + uses: ballistics-lab/cibuildmp/.github/actions/build-natmod@v0.3.0
+  ```
+
+### Added
+
+- **`cibuildmp`, a CLI** that builds a module's whole natmod target matrix
+  from one `cibuildmp.toml`, on CI and locally alike — `cibuildwheel` for
+  MicroPython. See [`docs/BACKLOG.md`](docs/BACKLOG.md) for the design
+  decisions behind it. Implemented so far:
+  - Target selection: build identifiers shaped `mpy6.3-natmod-armv7emsp`
+    ({.mpy ABI}-{mode}-{arch}), `build`/`skip` globs, a single
+    `[[overrides]]` mechanism, `CIBMP_*` environment overrides, and
+    `pyproject.toml [tool.cibuildmp]` as a fallback config location.
+  - MicroPython and `mpy-cross` provisioning, cached under
+    `~/.cache/cibuildmp/`. Uses the release *asset* tarball (which vendors
+    every `lib/` submodule) with a shallow-clone fallback for refs that
+    publish none, and `urllib` rather than `wget` — which is what made
+    `fetch-micropython` unusable on a Windows runner outside MSYS2.
+  - Cross-toolchain resolution: already on `PATH` first, then a pinned,
+    checksummed tarball into the cache. **`xtensawin` no longer needs
+    ESP-IDF** — `dynruntime.mk` only ever wanted `xtensa-esp32-elf-` on
+    `PATH`, so the toolchain is fetched straight from
+    `espressif/crosstool-NG` releases instead of cloning IDF to run its
+    installer.
+  - `--print-build-identifiers`, `--print-build-matrix`, `--dry-run`,
+    `--only`, `--archs`, `--toolchain`, `--clean-cache`, `--allow-empty`,
+    `--debug-traceback`.
+- `action.yml` at the repo root — installs and runs `cibuildmp`.
+- `.github/actions/cibuildmp-matrix` — resolves a config into a
+  `strategy.matrix` of `{only, os}` entries. Optional: the default layout is
+  one job looping over every target, since all ten natmod arches
+  cross-compile on the same runner.
+
+### Not yet implemented
+
+- Running the per-target build and collecting the `.mpy` files. Until that
+  lands, the composite actions remain the supported path for every target.
+
+
 ## [0.2.0] - 2026-08-24
 
 ### Added

@@ -11,6 +11,10 @@ scheme they imply, and the order of work. It is not a changelog — see
 
 ## Positioning
 
+This repository is `ballistics-lab/cibuildmp`, and it superseded
+`ballistics-lab/micropython-native-ci` (**D11**): the composite actions and
+the tool live together, one version line, one place a fix lands.
+
 The composite actions in `.github/actions/` solve the toolchain problem, but
 only inside GitHub Actions. Everything around them stays hand-copied in each
 consuming repo:
@@ -83,11 +87,14 @@ not competing — `cibuildmp` owns the natmod path mpbuild does not have, and
 drives mpbuild for firmware.
 
 **D8 — distribution of the tool itself is deferred.**
-The PyPI name `cibuildmp` is currently free (404 on the JSON API) but is not
-reserved yet. Until it is, `action.yml` installs from the action's own ref:
-`uv tool install git+https://…@<ref>` or `uv tool install .`. The current
-`uv tool install cibuildmp` line in `action.yml` is a placeholder and must be
-changed before the action is usable.
+The PyPI name `cibuildmp` is free (404 on the JSON API) but not reserved.
+Until it is, both actions install from their own checkout —
+`uv tool install ${{ github.action_path }}` — so the version that runs is
+exactly the ref the caller pinned, with no package index to keep in sync
+with the action tag. Under **D11** this is no longer a workaround so much as
+the natural arrangement: the action root and the package root are the same
+directory. Reserving the name is still worth doing, if only to stop someone
+else taking it.
 
 **D9 — one job looping over targets is the default; fan-out is opt-in.**
 Verified against cibuildwheel rather than assumed: its canonical workflow
@@ -127,6 +134,23 @@ reviewable data diff a script can make, not a patch to resolver logic.
 (from `py/persistentcode.h`), and the toolchain download pins. A cross-check
 runs at import and fails loudly if the arch table and the toolchain table
 disagree about a prefix.
+
+**D11 — one repository: `cibuildmp` absorbed `micropython-native-ci`.**
+The tool and the composite actions ship together, on one version line
+continuing the old repository's (`v0.3.0` follows `v0.2.0`; the actions in
+it are the same actions, moved). The old repository is deprecated and gets
+archived once its three consumers have repinned.
+
+The alternative — tool in one repo, actions in the other — split a thing
+that is converging, not diverging: M5 turns `build-natmod` into a wrapper
+over `cibuildmp --only`, which is awkward across a repo boundary and
+impossible to release atomically. Keeping both copies alive, meanwhile, was
+exactly the drift this whole project exists to end.
+
+The cost is real and falls on consumers: bclibc, a7p and micropython-wasm3
+each have ~15 `uses:` paths to repin. That is a one-line-per-reference
+change with no behaviour difference, and old pins keep working until they
+make it.
 
 ## Identifier scheme
 
@@ -400,7 +424,13 @@ build fail later with a confusing compiler diagnostic.
 
 ### M5 — adopt in the three repos
 
-- [ ] `micropython-bclibc`, `a7p`, `micropython-wasm3`: replace the natmod
+- [ ] `micropython-bclibc`, `a7p`, `micropython-wasm3`: repin every
+      `uses:` path from `micropython-native-ci@v0.2.0` to
+      `cibuildmp@v0.3.0` (**D11**) — mechanical, no behaviour change, and
+      independent of everything else here, so it can go first.
+- [ ] Archive `ballistics-lab/micropython-native-ci` once all three have
+      repinned.
+- [ ] The same three repos: replace the natmod
       matrix with `cibuildmp`. a7p is the interesting one — non-default
       `module-dir` (`micropython/natmod`) and a `pre-build-command`.
 - [ ] Reduce `build-natmod` to a wrapper over `cibuildmp --only <id>` so

@@ -1,11 +1,43 @@
-# micropython-native-ci
+# cibuildmp
 
-Shared GitHub Actions building blocks for building and testing MicroPython
-**natmod** (dynamically loadable native `.mpy` modules, built against
+Build MicroPython native C extensions for every target they support, from
+one declarative config -- on CI and on your own machine. `cibuildwheel`, for
+MicroPython.
+
+Covers **natmod** (dynamically loadable native `.mpy` modules, built against
 `py/dynruntime.mk`) and **usermod** (`USER_C_MODULES`, compiled straight
 into a port's own firmware build) C extensions.
 
-## Why this repo exists
+> **This repository supersedes
+> [`ballistics-lab/micropython-native-ci`](https://github.com/ballistics-lab/micropython-native-ci).**
+> Every composite action that lived there now lives here, unchanged in
+> behaviour but on new paths -- see [Migrating](#migrating) below. The old
+> repository is deprecated and will be archived once its consumers have
+> repinned; nothing new lands there.
+
+## Two layers
+
+**`cibuildmp`, the CLI.** One `cibuildmp.toml` in a module's own repo
+describes its whole target matrix. The tool resolves it into build
+identifiers, fetches MicroPython, builds `mpy-cross`, provisions each
+target's cross toolchain, and runs the build -- the same way locally as on a
+runner. This is the direction the project is going; see
+[`docs/BACKLOG.md`](docs/BACKLOG.md) for the design decisions and what is
+implemented so far.
+
+```console
+$ cibuildmp --dry-run
+cibuildmp: 10 target(s) against MicroPython v1.28.0 (.mpy ABI 6.3)
+  [ 1/10] mpy6.3-natmod-x86       CROSS=(host)              make -C natmod ARCH=x86 dist
+  [ 2/10] mpy6.3-natmod-x64       CROSS=(host)              make -C natmod ARCH=x64 dist
+  ...
+```
+
+**The composite actions.** The original building blocks, still the way every
+usermod target is built today. `cibuildmp` is absorbing them one at a time
+(natmod first); until it does, they remain fully supported.
+
+## Why this exists
 
 MicroPython itself already defines two standard, unrelated build
 mechanisms for a native C extension:
@@ -35,6 +67,24 @@ across all three -- so a fix or an improvement lands once, and every
 consuming repo picks it up deliberately by bumping the tag it's pinned to,
 instead of by hand-patching three YAML files that have already started to
 disagree with each other.
+
+The composite actions solved that for the *steps*. They could not solve it
+for everything around them: the arch matrix itself still had to be spelled
+out in each repo, a composite action structurally cannot choose its own
+`runs-on:`, artifact globs stayed caller-side, and none of it could be run
+on a laptop. That is what `cibuildmp` is for.
+
+## Migrating
+
+Action paths change repo, nothing else. Behaviour, inputs and outputs are
+identical:
+
+```diff
+- uses: ballistics-lab/micropython-native-ci/.github/actions/build-natmod@v0.2.0
++ uses: ballistics-lab/cibuildmp/.github/actions/build-natmod@v0.3.0
+```
+
+Pin a tag, as before -- not `@main`, not a commit SHA.
 
 ## What's here
 
@@ -311,11 +361,11 @@ jobs:
         with:
           submodules: recursive
 
-      - uses: ballistics-lab/micropython-native-ci/.github/actions/fetch-micropython@v0.2.0
+      - uses: ballistics-lab/cibuildmp/.github/actions/fetch-micropython@v0.3.0
         with:
           mpy_tag: v1.28.0
 
-      - uses: ballistics-lab/micropython-native-ci/.github/actions/build-natmod@v0.2.0
+      - uses: ballistics-lab/cibuildmp/.github/actions/build-natmod@v0.3.0
         with:
           arch: ${{ matrix.arch }}
           # natmod_dir: natmod              # default; a7p passes micropython/natmod
@@ -358,16 +408,18 @@ those stay in the consuming repo.
 
 ## Roadmap
 
-Not done yet, deliberately -- each of these needs to be verified against
-real CI in the consuming repo, not just written and trusted:
+`cibuildmp` is the roadmap. [`docs/BACKLOG.md`](docs/BACKLOG.md) is the
+plan of record: the decisions taken (and why), what is implemented, and
+what is deliberately deferred.
 
-- A reusable `workflow_call` for the full natmod build+test matrix
-  (build-natmod already covers the highest-drift part of it).
-- A reusable `workflow_call` for the "armv7emsp / armv7emdp on real ARM
-  Linux" test job -- currently near-identical hand-copied YAML in all
-  three source repos.
-- A small scaffolding script to generate a new `natmod/` + `usermod/`
-  skeleton for a fresh module, wired to the actions above.
+Where it stands: target selection, MicroPython and `mpy-cross`
+provisioning, and cross-toolchain resolution are done for natmod. Running
+the build and collecting the `.mpy` files is next. usermod will be driven by
+[`mpbuild`](https://github.com/mattytrentini/mpbuild) rather than
+reimplemented, and test runners are deferred outright.
+
+Until each piece lands and is verified against real CI in a consuming repo,
+the composite actions below stay the supported path.
 
 ## Versioning
 
@@ -376,12 +428,19 @@ a consumer references is a deliberate, visible edit in that repo, same as
 bumping any other CI dependency -- a change here never silently changes
 what three other repos' builds do.
 
-`v0.2.0` is the current tag; each of bclibc, a7p and micropython-wasm3
-pin every action reference to it. `v0.1.0` is still around for anyone
-who hasn't repinned yet -- it only has `fetch-micropython`,
-`clone-micropython`, `build-natmod-arch` and `build-usermod-unix-arch`
-(each still under their pre-rename `-arch`-suffixed names, since that
-rename happened after `v0.1.0` was cut). Everything added since
-(`build-usermod-windows`, `-webassembly`, `-rp2040`, `-armv7m`, `-esp32`,
-plus the `-arch` suffix drop itself, including `build-natmod-arch` →
-`build-natmod`) is part of `v0.2.0`.
+`v0.3.0` is this repository's first tag, and it continues
+`micropython-native-ci`'s version line rather than restarting it: `v0.3.0`'s
+composite actions are `v0.2.0`'s, moved. Consumers pinned to
+`micropython-native-ci@v0.2.0` keep working until they repin -- that
+repository is deprecated, not deleted.
+
+Older tags, on the old repository: `v0.2.0` added `build-usermod-windows`,
+`-webassembly`, `-rp2040`, `-armv7m` and `-esp32`, and dropped the `-arch`
+name suffix (`build-natmod-arch` → `build-natmod`). `v0.1.0` had only
+`fetch-micropython`, `clone-micropython`, `build-natmod-arch` and
+`build-usermod-unix-arch`.
+
+The `cibuildmp` package and the actions share one version. The package is
+not on PyPI yet, so both actions install it from their own checkout
+(`uv tool install ${{ github.action_path }}`) -- which means the tool that
+runs is exactly the ref you pinned, with no index to keep in sync.

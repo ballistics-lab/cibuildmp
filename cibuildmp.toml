@@ -3,9 +3,9 @@
 # drives its whole target matrix, resolved by the `cibuildmp` CLI instead of
 # hand-wired GitHub Actions per repo.
 #
-# This particular file is a reference example, not a live config —
-# micropython-native-ci is not itself a MicroPython C module and has no
-# natmod/ directory. The values below are drawn from micropython-bclibc,
+# This particular file is a reference example, not a live config — this
+# repository ships the tool, it is not itself a MicroPython C module and has
+# no natmod/ directory. The values below are drawn from micropython-bclibc,
 # the most demanding of the three consuming repos.
 #
 # See docs/BACKLOG.md for the decisions behind this schema (D1-D8) and for
