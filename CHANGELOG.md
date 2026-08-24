@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-24
+
 ### Added
 
 - `variant` input on `build-usermod-unix` (default `standard`) — needed so
@@ -62,10 +64,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per-architecture dispatch on its own (`build-natmod`,
   `build-usermod-unix` both still take one) — the suffix added nothing
   there, and on actions with no `arch:` input at all it was never
-  anything but copied naming. Consumers pinned to the `v0.1.0` tag (an
-  immutable point that predates this rename) keep using the old
-  `-arch`-suffixed names until a new tag is cut; only branch-ref
-  consumers (`@<this-branch>`) see the new names.
+  anything but copied naming. Consumers still pinned to the `v0.1.0` tag
+  (an immutable point that predates this rename) keep using the old
+  `-arch`-suffixed names for `build-natmod-arch` until they repin to
+  `v0.2.0` or later.
 - `build-usermod-qemu-armv7m` (the name it launched under) renamed again,
   almost immediately, to `build-usermod-armv7m`: QEMU is a runtime test
   mechanism this action never installs or touches (see its own entry
