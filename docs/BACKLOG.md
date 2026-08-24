@@ -246,6 +246,38 @@ runner. `examples/template/cibuildmp.toml` stays single-tag for exactly
 this reason — its job is to keep CI green on M3's build path, not to
 chase every historical tag's own build health.
 
+**D14 — `cibuildmp publish` accepts untagged companion files, not just
+per-arch `.mpy`s.**
+Found inspecting a real second module in `../micropython-bclibc`:
+`ffimod/` builds a native `.so` plus facade `.py` files (`ffi.py`,
+`_tiny_bclibc.py`) that stay separate, unlike `natmod/`, where
+`SRC = tiny_bclibc_mp.c tiny_bclibc.py` already gets merged by
+`dynruntime.mk`'s own `SRC_MPY`/`--merge` rule into one `.mpy` per arch —
+that merged case needs nothing from `cibuildmp`, it is `natmod/Makefile`'s
+own business (**D2**). What is not covered: a facade or any other file
+meant to install identically regardless of target arch, alongside the
+per-arch native entries.
+
+The [micropython#19532](https://github.com/micropython/micropython/pull/19532)
+/ [micropython-lib#1144](https://github.com/micropython/micropython-lib/pull/1144)
+schema M4 already builds on supports this natively — each `package.json`
+`urls` entry carries its own compat tag, and an entry with no tag installs
+unconditionally. `tools/build_release_assets.py`, the tool M4 absorbs,
+does not use that: it only ever takes built `.mpy` files as positional
+args, one tagged entry each.
+
+So M4 needs one more config surface: a way to name extra files (an
+`extra-files` list, scope TBD — global or per-`[publish]`) that
+`cibuildmp publish` copies into the release assets as-is and lists in
+`package.json` with no compat tag, using the same schema's own
+"universal entry" case rather than inventing a second mechanism.
+Confirmed as real, not hypothetical (bclibc's own `ffimod/` needs
+exactly this), but bclibc does not publish `ffimod`'s output today
+(`release.yml` only ever calls `build_release_assets.py` on
+`tiny_bclibc.mpy`), so there is no existing package.json to match
+against — the shape above is proposed, not yet verified against a real
+consumer.
+
 ## Identifier scheme
 
 Shaped after `cp311-manylinux_x86_64` = *{ABI}-{platform}\_{arch}*:
@@ -559,6 +591,11 @@ the `seen_names` check below copy.
       / [micropython-lib#1144](https://github.com/micropython/micropython-lib/pull/1144).
 - [ ] Keep relative `urls` (resolved by `mip` against wherever it fetched
       `package.json`), with `--repo` for absolute ones.
+- [ ] `extra-files` (**D14**): named files copied into the release assets
+      and listed in `package.json` with no compat tag, for a facade or any
+      other file meant to install identically regardless of target arch
+      (found via `../micropython-bclibc`'s `ffimod/`, which is not
+      natmod's merged-`.mpy` case).
 - [ ] **Isolate this behind one module.** The upstream schema is still a
       proposal; if it changes, exactly one file should need rewriting.
 
