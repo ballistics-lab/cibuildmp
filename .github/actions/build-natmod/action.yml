@@ -63,7 +63,7 @@ runs:
             PKGS="gcc-riscv64-unknown-elf picolibc-riscv64-unknown-elf"
             ;;
           *)
-            echo "::error::build-natmod-arch: unknown ARCH '${{ inputs.arch }}'"
+            echo "::error::build-natmod: unknown ARCH '${{ inputs.arch }}'"
             exit 1
             ;;
         esac

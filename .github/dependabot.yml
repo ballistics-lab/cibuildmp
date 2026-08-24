@@ -23,11 +23,11 @@ updates:
       interval: "weekly"
 
   - package-ecosystem: "github-actions"
-    directory: "/.github/actions/build-natmod-arch"
+    directory: "/.github/actions/build-natmod"
     schedule:
       interval: "weekly"
 
   - package-ecosystem: "github-actions"
-    directory: "/.github/actions/build-usermod-unix-arch"
+    directory: "/.github/actions/build-usermod-unix"
     schedule:
       interval: "weekly"

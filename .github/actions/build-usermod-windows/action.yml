@@ -1,0 +1,133 @@
+name: Build usermod windows arch
+description: >
+  Builds a MicroPython ports/windows "usermod" .exe (a C module compiled
+  straight into the port via USER_C_MODULES=) inside an MSYS2 shell --
+  the mpy-cross + main-build recipe shared across this repo's consuming
+  projects, including the four CLANGARM64-only overrides
+  (LDFLAGS_ARCH/COMPILER_TARGET/STRIP/SIZE) every one of them needs, none
+  of which were guessed here -- see each override's own comment below.
+
+  Requires MPY_DIR to already be exported to a POSIX-style path (no
+  backslashes -- MSYS2 bash's own escape character eats them on any
+  unquoted command line built from a native "D:\a\..." value, a real
+  failure documented in every caller this was extracted from) and
+  msys2/setup-msys2 to have already run with the target msystem, both
+  still the caller's own responsibility: a composite action's `shell:
+  bash` steps run under plain Git Bash on a Windows runner, not inside
+  the MSYS2 environment, so this action cannot set up either one for
+  itself. Every path input below defaults to a $(pwd)-relative value for
+  the same backslash reason -- not an absolute default.
+
+inputs:
+  user_c_modules:
+    description: Value for USER_C_MODULES=. Defaults to $(pwd) (the workspace root).
+    required: false
+    default: "$(pwd)"
+  frozen_manifest:
+    description: >
+      Value for FROZEN_MANIFEST=. Defaults to $(pwd)/usermod/manifest.py.
+    required: false
+    default: "$(pwd)/usermod/manifest.py"
+  extra_make_args:
+    description: >
+      Extra space-separated VAR=value pairs appended to the build command,
+      e.g. a module's own precision define or a custom PROG=.
+    required: false
+    default: ""
+  build_dir:
+    description: >
+      Value for BUILD=. Defaults to build-standard -- a bare relative
+      value, resolving against $MPY_DIR/ports/windows the same way a bare
+      BUILD= on the command line always did (this action's own steps run
+      `make -C "$MPY_DIR/ports/windows"`, same as every caller this was
+      extracted from).
+    required: false
+    default: "build-standard"
+  cflags_extra:
+    description: >
+      Value for CFLAGS_EXTRA= on the main build only (not mpy-cross) --
+      e.g. -Wno-error for CLANGARM64, where MicroPython's own sources
+      (py/binary.c's _Float16 promotion, shared/runtime/gchelper_generic.c's
+      deliberately uninitialized register captures) don't survive that
+      port's -Werror under clang.
+    required: false
+    default: ""
+  variant:
+    description: >
+      Value for VARIANT= on the main build only (not mpy-cross). Empty by
+      default and then omitted from the command line entirely, matching
+      every caller this was extracted from -- none of them ever passed
+      VARIANT= for ports/windows (unlike build-usermod-unix's own
+      `variant`, ports/windows has no variants/<name>/ split in any of
+      those three repos, just a bare variants/manifest.py default). Here
+      for a future caller whose own fork of the port does define one.
+    required: false
+    default: ""
+
+outputs:
+  build_dir:
+    description: The BUILD= directory actually used (the input, verbatim).
+    value: ${{ inputs.build_dir }}
+
+runs:
+  using: composite
+  steps:
+    - name: Build mpy-cross
+      shell: msys2 {0}
+      # Built explicitly first, same reason as every other job in the
+      # callers this was extracted from: py/mkenv.mk's auto-build rule for
+      # mpy-cross resets USER_C_MODULES= for that recursive make but not
+      # FROZEN_MANIFEST=, which then leaks through MAKEFLAGS.
+      #
+      # The four overrides are CLANGARM64-specific, applied unconditionally
+      # because they are harmless no-ops on MINGW32/64:
+      #
+      #   LDFLAGS_ARCH -- mpy-cross/Makefile hardcodes
+      #     "-Wl,-Map=$@.map,--cref -Wl,--gc-sections" for every non-Darwin
+      #     host. Fine for GNU ld; CLANGARM64 links via clang+lld, and lld
+      #     rejects --cref outright ("unknown argument"). The map file's
+      #     cross-reference table is diagnostic-only.
+      #   COMPILER_TARGET -- mpy-cross/Makefile decides whether to compile
+      #     in ports/windows/fmode.c (which defines set_fmode_binary(),
+      #     called unconditionally under #ifdef _WIN32 in main.c) by
+      #     grepping `$(CC) -dumpmachine` for "mingw". The CLANGARM64
+      #     gcc-compat wrapper is clang underneath and reports a triple
+      #     that doesn't contain it, so fmode.c silently drops out and the
+      #     link fails on "undefined symbol: set_fmode_binary".
+      #   STRIP="" -- py/mkenv.mk sets STRIP = $(CROSS_COMPILE)strip
+      #     unconditionally and py/mkrules.mk runs it whenever the variable
+      #     is non-empty; CLANGARM64's gcc-compat ships no
+      #     aarch64-w64-mingw32-strip. Emptying it skips the step outright
+      #     (GNU Make's ifdef treats an empty value as undefined).
+      #   SIZE="true" -- same missing binary, but that recipe line has no
+      #     ifdef guard, so an empty value would break the shell syntax
+      #     rather than skip it. `true` is a real no-op that swallows its
+      #     arguments and exits 0.
+      run: |
+        make -C "$MPY_DIR/mpy-cross" \
+          LDFLAGS_ARCH="-Wl,--gc-sections" \
+          COMPILER_TARGET="mingw-forced" \
+          STRIP="" SIZE="true" -j"$(nproc)"
+
+    - name: Build usermod (windows)
+      shell: msys2 {0}
+      # No CROSS_COMPILE= anywhere: inside an MSYS2 environment the
+      # toolchain is already the target's, under unprefixed names -- same
+      # reason every caller this was extracted from leaves it empty too.
+      # STRIP/SIZE/COMPILER_TARGET: same missing-binary reasons as the
+      # mpy-cross step above; ports/windows reaches the identical generic
+      # py/mkrules.mk link recipe.
+      run: |
+        VARIANT_ARG=""
+        if [ -n "${{ inputs.variant }}" ]; then
+          VARIANT_ARG="VARIANT=${{ inputs.variant }}"
+        fi
+        make -C "$MPY_DIR/ports/windows" \
+          $VARIANT_ARG \
+          BUILD="${{ inputs.build_dir }}" \
+          COMPILER_TARGET="mingw-forced" \
+          STRIP="" SIZE="true" \
+          CFLAGS_EXTRA="${{ inputs.cflags_extra }}" \
+          USER_C_MODULES="${{ inputs.user_c_modules }}" \
+          FROZEN_MANIFEST="${{ inputs.frozen_manifest }}" \
+          ${{ inputs.extra_make_args }} -j"$(nproc)"

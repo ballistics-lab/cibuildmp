@@ -1,0 +1,162 @@
+name: Build usermod esp32
+description: >
+  Builds a MicroPython ports/esp32 "usermod" (a C module compiled straight
+  into the port via USER_C_MODULES=) into a firmware.bin/micropython.bin
+  for the given BOARD= (default ESP32_GENERIC). Installs ESP-IDF, builds
+  mpy-cross, then runs the port build under it.
+
+  --recursive on the esp-idf clone, unlike a natmod build of the same
+  chip: a natmod only borrows the xtensa compiler install.sh downloads,
+  while a usermod compiles into a firmware built against IDF's own
+  components. install.sh <idf_target> limits the toolchain download to
+  the one chip family rather than every one IDF supports.
+
+  idf_target and board are deliberately separate inputs, not derived from
+  one another: install.sh's argument is the chip family (esp32, esp32s3,
+  ...), while BOARD= is the actual MicroPython board definition -- more
+  than one board can exist per chip family, so string-deriving one from
+  the other would silently break the day a second board per chip shows up.
+
+  No caching yet: every consumer's original recipe had none either, so
+  this preserves behavior exactly rather than mixing an extraction with a
+  new capability. Left as a known follow-up, not forgotten -- see this
+  repo's own README/CHANGELOG.
+
+  Requires MPY_DIR to already be exported (fetch-micropython or
+  clone-micropython) and the calling repo already checked out, same
+  contract as build-usermod-unix/build-usermod-rp2040.
+
+inputs:
+  board:
+    description: Value for BOARD=. Defaults to ESP32_GENERIC, the mainstream target.
+    required: false
+    default: ESP32_GENERIC
+  idf_target:
+    description: >
+      Chip family passed to esp-idf's install.sh (e.g. esp32, esp32s3).
+      Defaults to esp32. Kept separate from board -- see this action's own
+      header for why they must not be derived from one another.
+    required: false
+    default: esp32
+  idf_ver:
+    description: ESP-IDF version tag to clone (e.g. v5.5.1).
+    required: false
+    default: v5.5.1
+  user_c_modules:
+    description: >
+      Value for USER_C_MODULES=. Defaults to usermod/micropython.cmake
+      under the workspace root -- a *file*, like build-usermod-rp2040's own
+      user_c_modules: CMake's USER_C_MODULES takes a single .cmake entry
+      point, not a directory to glob.
+    required: false
+    default: ''
+  frozen_manifest:
+    description: Value for FROZEN_MANIFEST=. Defaults to usermod/manifest.py under the workspace root.
+    required: false
+    default: ''
+  extra_make_args:
+    description: >
+      Extra space-separated VAR=value pairs appended to the build command,
+      e.g. a module's own precision define.
+    required: false
+    default: ''
+
+outputs:
+  build_dir:
+    description: >
+      The port's own default build-$(BOARD) directory (relative to
+      $MPY_DIR/ports/esp32), so the caller can find
+      micropython.bin/firmware.bin without recomputing it. No build_dir
+      input to override this: see the "Build usermod" step's own comment
+      for why passing BUILD= at all -- not what it's set to -- breaks the
+      port's internal CMake-driven mpy-cross sub-build.
+    value: ${{ steps.vars.outputs.build_dir }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve build settings
+      id: vars
+      shell: bash
+      run: |
+        set -e
+        FM="${{ inputs.frozen_manifest }}"
+        UCM="${{ inputs.user_c_modules }}"
+        {
+          echo "user_c_modules=${UCM:-$GITHUB_WORKSPACE/usermod/micropython.cmake}"
+          echo "frozen_manifest=${FM:-$GITHUB_WORKSPACE/usermod/manifest.py}"
+          echo "build_dir=build-${{ inputs.board }}"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Install esp-idf
+      shell: bash
+      run: |
+        git clone --depth 1 --recursive --branch "${{ inputs.idf_ver }}" \
+          https://github.com/espressif/esp-idf.git
+        ./esp-idf/install.sh "${{ inputs.idf_target }}"
+
+    - name: Build mpy-cross
+      shell: bash
+      # Before export.sh is sourced anywhere: mpy-cross is a host tool and
+      # has no business being built inside IDF's own python/toolchain
+      # environment. Explicit for the usual reason -- see build-usermod-unix's
+      # own comment on py/mkenv.mk's auto-build rule.
+      run: make -C "$MPY_DIR/mpy-cross" -j"$(nproc)"
+
+    - name: Build usermod (esp32, ${{ inputs.board }})
+      shell: bash
+      # source + make in the same step, not two: export.sh's env doesn't
+      # survive a composite action step boundary (each step is a fresh
+      # shell invocation), unlike $GITHUB_ENV-based exports.
+      # No BUILD= override, even though it would resolve to the exact same
+      # value (build-$(BOARD)) the port already defaults to: a real CI
+      # failure showed that passing it explicitly -- not what it's set to,
+      # the mere presence of BUILD= on the command line -- makes the port's
+      # own internal CMake-driven mpy-cross sub-build (build-$(BOARD)/mpy-cross,
+      # a separate copy from $MPY_DIR/mpy-cross above) pick up
+      # FROZEN_MANIFEST through MAKEFLAGS and fail with "undefined reference
+      # to mp_qstr_frozen_const_pool" -- the same symptom the explicit
+      # pre-build of $MPY_DIR/mpy-cross exists to prevent, just not reachable
+      # by that fix here since this is CMake's own separate copy, not
+      # py/mkrules.mk's auto-build rule. Every real caller wants the port's
+      # own default anyway (see build_dir's own description above), so this
+      # isn't a capability loss in practice.
+      run: |
+        source esp-idf/export.sh
+        make -C "$MPY_DIR/ports/esp32" \
+          BOARD="${{ inputs.board }}" \
+          USER_C_MODULES="${{ steps.vars.outputs.user_c_modules }}" \
+          FROZEN_MANIFEST="${{ steps.vars.outputs.frozen_manifest }}" \
+          ${{ inputs.extra_make_args }}
+
+    - name: Dump the IDF build logs on failure
+      if: failure()
+      shell: bash
+      # idf.py redirects the compiler's own stderr into
+      # build-*/log/idf_py_stderr_output_<pid> and prints only "ninja failed
+      # with exit code 1" to the console, so a failing compile leaves no
+      # diagnostic in the Actions log at all -- found on a real failure
+      # (o-murphy/micropython-wasm3's esp32 job, stopped in
+      # wasm3/source/m3_compile.c with nothing to say why). Surfaced here so
+      # every caller gets this for free, not just the one that hit it first.
+      #
+      # The log files turned out not to carry the diagnostic at all: idf.py's
+      # idf_py_stderr_output_* holds only its own bookkeeping ("Command:
+      # ninja all"), and the stdout copy of ninja's stream shows the failing
+      # target and then "ninja: build stopped" with nothing in between. So
+      # dump them for context, then get the real answer by re-running ninja
+      # verbosely in the same build directory: everything is already built
+      # except the one object that failed, so this recompiles just that and
+      # prints both the exact command line and the compiler's own output.
+      # `|| true` so this step reports rather than re-failing the job.
+      run: |
+        BUILD="${{ steps.vars.outputs.build_dir }}"
+        for f in "$BUILD"/log/idf_py_std*_output_*; do
+          [ -f "$f" ] || continue
+          echo "::group::$f"
+          tail -n 60 "$f"
+          echo "::endgroup::"
+        done
+        echo "--- re-running ninja verbosely to surface the diagnostic:"
+        source esp-idf/export.sh
+        ninja -C "$BUILD" -v -k 0 2>&1 | tail -n 120 || true

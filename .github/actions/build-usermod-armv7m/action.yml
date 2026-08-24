@@ -1,0 +1,98 @@
+name: Build usermod armv7m
+description: >
+  Builds a MicroPython ports/qemu "usermod" (a C module compiled straight
+  into the port via USER_C_MODULES=) into a firmware.elf for the given
+  BOARD= (default MPS2_AN385, a Cortex-M3). Installs the arm-none-eabi
+  toolchain, builds mpy-cross, then runs the port build under it.
+
+  QEMU itself is deliberately NOT installed here: it is a runtime emulator
+  for testing the resulting firmware.elf, not a build dependency -- same
+  split build-usermod-rp2040 uses for the rp2040py emulator. Callers
+  install qemu-system-arm (and whatever their own test harness needs,
+  e.g. pyserial) themselves, alongside their own run_qemu.py-equivalent.
+
+  Requires MPY_DIR to already be exported (fetch-micropython or
+  clone-micropython) and the calling repo already checked out, same
+  contract as build-usermod-unix/build-usermod-rp2040.
+
+inputs:
+  board:
+    description: Value for BOARD=. Defaults to MPS2_AN385 (Cortex-M3, no FPU).
+    required: false
+    default: MPS2_AN385
+  user_c_modules:
+    description: Value for USER_C_MODULES=. Defaults to the workspace root.
+    required: false
+    default: ''
+  frozen_manifest:
+    description: >
+      Value for FROZEN_MANIFEST=. Defaults to usermod/manifest.py under the
+      workspace root. ports/qemu ships no boards/manifest.py of its own --
+      unlike unix/rp2/esp32, there is no port default to combine with, so a
+      caller-written manifest here only ever needs to freeze its own module.
+    required: false
+    default: ''
+  extra_make_args:
+    description: >
+      Extra space-separated VAR=value pairs appended to the build command,
+      e.g. a module's own precision define.
+    required: false
+    default: ''
+  build_dir:
+    description: >
+      Value for BUILD=. Defaults to usermod/build/armv7m under the
+      workspace root. A bare relative value (no leading /) resolves against
+      $MPY_DIR/ports/qemu instead, same as make -C's own relative-path
+      handling -- pass one when the caller wants the port's own
+      board-named default (build-$(BOARD)) instead.
+    required: false
+    default: ''
+
+outputs:
+  build_dir:
+    description: >
+      The BUILD= directory actually used (resolved default included), so
+      the caller can find firmware.elf without recomputing it.
+    value: ${{ steps.vars.outputs.build_dir }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve build settings
+      id: vars
+      shell: bash
+      run: |
+        set -e
+        BUILD="${{ inputs.build_dir }}"
+        FM="${{ inputs.frozen_manifest }}"
+        UCM="${{ inputs.user_c_modules }}"
+        {
+          echo "user_c_modules=${UCM:-$GITHUB_WORKSPACE}"
+          echo "frozen_manifest=${FM:-$GITHUB_WORKSPACE/usermod/manifest.py}"
+          echo "build_dir=${BUILD:-$GITHUB_WORKSPACE/usermod/build/armv7m}"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Install toolchain
+      shell: bash
+      # apt-get update first -- a bare apt-get install against the runner
+      # image's stale package index intermittently 404s on a mirror.
+      run: |
+        sudo apt-get update -q
+        sudo apt-get install -y --no-install-recommends \
+          gcc-arm-none-eabi libnewlib-arm-none-eabi
+
+    - name: Build mpy-cross
+      shell: bash
+      # Explicitly, before FROZEN_MANIFEST ever appears on a command line --
+      # py/mkenv.mk's auto-build rule for it races/leaks under -j. Same fix
+      # every other action here uses.
+      run: make -C "$MPY_DIR/mpy-cross" -j"$(nproc)"
+
+    - name: Build usermod (armv7m, ${{ inputs.board }})
+      shell: bash
+      run: |
+        make -C "$MPY_DIR/ports/qemu" BOARD="${{ inputs.board }}" \
+          BUILD="${{ steps.vars.outputs.build_dir }}" \
+          USER_C_MODULES="${{ steps.vars.outputs.user_c_modules }}" \
+          FROZEN_MANIFEST="${{ steps.vars.outputs.frozen_manifest }}" \
+          ${{ inputs.extra_make_args }} -j"$(nproc)"

@@ -1,0 +1,145 @@
+name: Build usermod rp2040
+description: >
+  Builds a MicroPython ports/rp2 "usermod" (a C module compiled straight
+  into the port via USER_C_MODULES=) into a firmware.uf2 for the given
+  BOARD=. Installs the arm-none-eabi + CMake toolchain, builds mpy-cross,
+  then runs the port build under it.
+
+  Requires MPY_DIR to already be exported (fetch-micropython -- proven
+  sufficient for this port, see below -- or clone-micropython) and the
+  calling repo already checked out, same contract as build-usermod-unix
+  and build-usermod-webassembly.
+
+  Checkout note for callers migrating off clone-micropython +
+  pico_sdk_submodules: neither is required. ports/rp2/CMakeLists.txt
+  redirects PICO_TINYUSB_PATH/PICO_LWIP_PATH/PICO_BTSTACK_PATH/
+  PICO_CYW43_DRIVER_PATH at ${MICROPY_DIR}/lib/<name> -- MicroPython's own
+  top-level submodules, which the release tarball already vendors -- not
+  at pico-sdk's own nested vendored copies, so pico-sdk's internal
+  submodule tree is never actually touched by this build. Proven green
+  first on o-murphy/micropython-wasm3's rp2 row (plain fetch-micropython,
+  no submodule handling at all), then on ballistics-lab/micropython-bclibc
+  and o-murphy/a7p after switching off their original clone-micropython +
+  explicit submodule list + pico_sdk_submodules: "true".
+
+inputs:
+  board:
+    description: Value for BOARD=. Defaults to RPI_PICO.
+    required: false
+    default: RPI_PICO
+  user_c_modules:
+    description: >
+      Value for USER_C_MODULES=. Defaults to usermod/micropython.cmake
+      under the workspace root -- unlike build-usermod-unix/
+      build-usermod-webassembly's own user_c_modules, this one is a *file*,
+      not a directory: CMake's USER_C_MODULES takes a single .cmake entry
+      point to include, not a directory to glob.
+    required: false
+    default: ''
+  frozen_manifest:
+    description: Value for FROZEN_MANIFEST=. Defaults to usermod/manifest.py under the workspace root.
+    required: false
+    default: ''
+  extra_make_args:
+    description: >
+      Extra space-separated VAR=value pairs appended to the build command,
+      e.g. a module's own precision define.
+    required: false
+    default: ''
+  extra_cmake_args:
+    description: >
+      Extra arguments for a direct `cmake -S . -B <build_dir>` reconfigure
+      step run after the port's own first configure. Left empty (the
+      default), this action runs the port build in a single make
+      invocation. Needed because ports/rp2/Makefile builds its own cmake
+      arguments with `CMAKE_ARGS +=`, so a define passed straight on the
+      make command line replaces the whole accumulated set -- including
+      MICROPY_BOARD, USER_C_MODULES and MICROPY_FROZEN_MANIFEST -- rather
+      than adding to it. o-murphy/micropython-wasm3 needs
+      -DMICROPY_C_HEAP_SIZE=131072 here: rp2 defaults that to 0, and its
+      module allocates through the port's calloc(), which fails the
+      configure outright at 0.
+    required: false
+    default: ''
+  build_dir:
+    description: >
+      Value for BUILD=. Defaults to usermod/build/rp2040 under the
+      workspace root. A bare relative value (no leading /) resolves
+      against $MPY_DIR/ports/rp2 instead, same as make -C's own
+      relative-path handling -- pass one when the caller wants the port's
+      own board-named default (e.g. build-RPI_PICO) instead.
+    required: false
+    default: ''
+
+outputs:
+  build_dir:
+    description: >
+      The BUILD= directory actually used (resolved default included), so
+      the caller can find firmware.uf2 without recomputing it.
+    value: ${{ steps.vars.outputs.build_dir }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve build settings
+      id: vars
+      shell: bash
+      run: |
+        set -e
+        BUILD="${{ inputs.build_dir }}"
+        FM="${{ inputs.frozen_manifest }}"
+        UCM="${{ inputs.user_c_modules }}"
+        {
+          echo "user_c_modules=${UCM:-$GITHUB_WORKSPACE/usermod/micropython.cmake}"
+          echo "frozen_manifest=${FM:-$GITHUB_WORKSPACE/usermod/manifest.py}"
+          echo "build_dir=${BUILD:-$GITHUB_WORKSPACE/usermod/build/rp2040}"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Install toolchain
+      shell: bash
+      # apt-get update first -- a bare apt-get install against the runner
+      # image's stale package index intermittently 404s on a mirror.
+      #
+      # libstdc++-arm-none-eabi-newlib: pico-sdk compiles one .cpp of its
+      # own, which fails with "cstdlib: No such file or directory" without
+      # it (a real CI failure on o-murphy/micropython-wasm3's rp2 row) --
+      # included here even though not every caller's build happens to
+      # exercise that file, since whether it does depends on pico-sdk
+      # internals no caller should have to know.
+      run: |
+        sudo apt-get update -q
+        sudo apt-get install -y \
+          cmake \
+          gcc-arm-none-eabi \
+          libnewlib-arm-none-eabi \
+          libstdc++-arm-none-eabi-newlib \
+          python3
+
+    - name: Build mpy-cross
+      shell: bash
+      # Explicitly, before FROZEN_MANIFEST ever appears on a command line --
+      # py/mkenv.mk's auto-build rule for mpy-cross resets USER_C_MODULES=
+      # for that recursive make but not FROZEN_MANIFEST=, which leaks
+      # through MAKEFLAGS and fails the sub-build. Same fix as
+      # build-usermod-unix/build-usermod-webassembly.
+      run: make -C "$MPY_DIR/mpy-cross"
+
+    - name: Build usermod (rp2040, ${{ inputs.board }})
+      shell: bash
+      # cd, not make -C: the extra_cmake_args branch below needs `cmake -S
+      # . -B $BUILD` to run from inside ports/rp2, same as
+      # o-murphy/micropython-wasm3's own recipe this was extracted from.
+      run: |
+        cd "$MPY_DIR/ports/rp2"
+        if [ -n "${{ inputs.extra_cmake_args }}" ]; then
+          make BOARD="${{ inputs.board }}" \
+            BUILD="${{ steps.vars.outputs.build_dir }}" \
+            USER_C_MODULES="${{ steps.vars.outputs.user_c_modules }}" \
+            FROZEN_MANIFEST="${{ steps.vars.outputs.frozen_manifest }}" || true
+          cmake -S . -B "${{ steps.vars.outputs.build_dir }}" ${{ inputs.extra_cmake_args }}
+        fi
+        make BOARD="${{ inputs.board }}" \
+          BUILD="${{ steps.vars.outputs.build_dir }}" \
+          USER_C_MODULES="${{ steps.vars.outputs.user_c_modules }}" \
+          FROZEN_MANIFEST="${{ steps.vars.outputs.frozen_manifest }}" \
+          ${{ inputs.extra_make_args }} -j"$(nproc)"

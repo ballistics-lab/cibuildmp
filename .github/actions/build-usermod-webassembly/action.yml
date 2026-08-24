@@ -1,0 +1,114 @@
+name: Build usermod webassembly
+description: >
+  Builds a MicroPython ports/webassembly "usermod" (a C module compiled
+  straight into the port via USER_C_MODULES=) as a browser/Node .mjs+.wasm
+  pair: installs emsdk, builds mpy-cross, then runs the port build under it.
+
+  Requires MPY_DIR to already be exported (fetch-micropython or
+  clone-micropython) and the calling repo already checked out -- same
+  contract as build-usermod-unix. Combining FROZEN_MANIFEST with the
+  port's own default (variants/<variant>/manifest.py) is deliberately left
+  to the caller, not done here: usermod/manifest.py's own try/except only
+  ever probes $(PORT_DIR)/boards/manifest.py, which doesn't exist for this
+  port (it has variants/, not boards/) -- passing that file straight
+  through as FROZEN_MANIFEST silently drops the variant's own default
+  (e.g. pyscript's asyncio + a require() list of stdlib/utility modules).
+  Every consuming repo now writes its own combined manifest first and
+  passes that as frozen_manifest instead.
+
+inputs:
+  variant:
+    description: >
+      Value for VARIANT=. Defaults to pyscript -- the standard variant's
+      -s ASYNCIFY is broken against modern emsdk in multiple ways (tracked
+      upstream at micropython/micropython#19380), and pyscript is upstream's
+      own recommended workaround since it doesn't use ASYNCIFY at all.
+    required: false
+    default: pyscript
+  emsdk_ref:
+    description: >
+      emsdk install/activate ref (e.g. a version tag). Defaults to latest,
+      matching every caller today -- upstream's own tools/ci.sh
+      (ci_webassembly_setup) pins to it too, not a version this repo chose.
+      A moving target: some future emsdk release could break a build with
+      no change on either side of this action. Override to pin once that
+      actually happens.
+    required: false
+    default: latest
+  user_c_modules:
+    description: Value for USER_C_MODULES=. Defaults to the workspace root.
+    required: false
+    default: ''
+  frozen_manifest:
+    description: >
+      Value for FROZEN_MANIFEST=. Defaults to usermod/manifest.py under the
+      workspace root -- pass a combined manifest instead (see the note
+      above) unless the module genuinely needs nothing from the variant's
+      own default.
+    required: false
+    default: ''
+  extra_make_args:
+    description: >
+      Extra space-separated VAR=value pairs appended to the build command,
+      e.g. a module's own precision define or a custom PROG=.
+    required: false
+    default: ''
+  build_dir:
+    description: >
+      Value for BUILD=. Defaults to usermod/build/wasm under the workspace
+      root. A bare relative value (no leading /) resolves against
+      $MPY_DIR/ports/webassembly instead, same as make -C's own
+      relative-path handling -- pass one when the caller wants a
+      differently-named default rather than an absolute path.
+    required: false
+    default: ''
+
+outputs:
+  build_dir:
+    description: >
+      The BUILD= directory actually used (resolved default included), so
+      the caller can find micropython.mjs/.wasm without recomputing it.
+    value: ${{ steps.vars.outputs.build_dir }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve build settings
+      id: vars
+      shell: bash
+      run: |
+        set -e
+        BUILD="${{ inputs.build_dir }}"
+        FM="${{ inputs.frozen_manifest }}"
+        UCM="${{ inputs.user_c_modules }}"
+        {
+          echo "user_c_modules=${UCM:-$GITHUB_WORKSPACE}"
+          echo "frozen_manifest=${FM:-$GITHUB_WORKSPACE/usermod/manifest.py}"
+          echo "build_dir=${BUILD:-$GITHUB_WORKSPACE/usermod/build/wasm}"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Install emsdk
+      shell: bash
+      # Same recipe every caller this was extracted from already used --
+      # matches upstream MicroPython's own tools/ci.sh (ci_webassembly_setup).
+      run: |
+        git clone --depth 1 https://github.com/emscripten-core/emsdk.git
+        (cd emsdk && ./emsdk install "${{ inputs.emsdk_ref }}" && ./emsdk activate "${{ inputs.emsdk_ref }}")
+
+    - name: Build mpy-cross
+      shell: bash
+      run: make -C "$MPY_DIR/mpy-cross"
+
+    - name: Build usermod (webassembly, ${{ inputs.variant }} variant)
+      shell: bash
+      # BUILD is a local shell var, not a job/step env -- see
+      # build-usermod-unix's identical reasoning (leaks into the
+      # "Build mpy-cross" step above otherwise, via py/mkenv.mk's
+      # BUILD ?= build).
+      run: |
+        source emsdk/emsdk_env.sh
+        make -C "$MPY_DIR/ports/webassembly" VARIANT="${{ inputs.variant }}" \
+          BUILD="${{ steps.vars.outputs.build_dir }}" \
+          USER_C_MODULES="${{ steps.vars.outputs.user_c_modules }}" \
+          FROZEN_MANIFEST="${{ steps.vars.outputs.frozen_manifest }}" \
+          ${{ inputs.extra_make_args }} -j"$(nproc)"

@@ -38,9 +38,19 @@ inputs:
   build_dir:
     description: >
       Value for BUILD=. Defaults to usermod/build/<arch> under the
-      workspace root.
+      workspace root. A bare relative value (no leading /) resolves against
+      $MPY_DIR/ports/unix, same as make -C's own relative-path handling --
+      pass one when the caller wants a variant-named default like
+      build-standard/build-coverage rather than an absolute path.
     required: false
     default: ''
+  variant:
+    description: >
+      Value for VARIANT=. Defaults to standard; a caller building against
+      upstream's own VARIANT=coverage recipe (e.g. the armhf/mipsel qemu
+      legs tools/ci.sh uses) overrides this.
+    required: false
+    default: standard
 
 outputs:
   build_dir:
@@ -81,7 +91,7 @@ runs:
             STANDALONE=1
             ;;
           *)
-            echo "::error::build-usermod-unix-arch: unknown arch '$ARCH'"
+            echo "::error::build-usermod-unix: unknown arch '$ARCH'"
             exit 1
             ;;
         esac
@@ -116,7 +126,7 @@ runs:
         esac
         # apt-get update first -- the runner image's baked-in package index
         # can already be stale by the time a job runs (404 Not Found on
-        # install rather than a version error) -- same issue build-natmod-arch
+        # install rather than a version error) -- same issue build-natmod
         # guards against.
         sudo apt-get update -q
         sudo apt-get install -y $PKGS
@@ -146,7 +156,7 @@ runs:
       if: steps.vars.outputs.standalone == '1'
       shell: bash
       run: |
-        make -C "$MPY_DIR/ports/unix" VARIANT=standard \
+        make -C "$MPY_DIR/ports/unix" VARIANT="${{ inputs.variant }}" \
           BUILD="${{ steps.vars.outputs.build_dir }}" \
           CROSS_COMPILE="${{ steps.vars.outputs.cross_compile }}" \
           MICROPY_STANDALONE=1 deplibs
@@ -158,7 +168,7 @@ runs:
       # "Build mpy-cross" / "Build libffi" steps above too, and
       # py/mkenv.mk's BUILD ?= build only applies when nothing else set it.
       run: |
-        make -C "$MPY_DIR/ports/unix" VARIANT=standard \
+        make -C "$MPY_DIR/ports/unix" VARIANT="${{ inputs.variant }}" \
           BUILD="${{ steps.vars.outputs.build_dir }}" \
           CROSS_COMPILE="${{ steps.vars.outputs.cross_compile }}" \
           ${{ steps.vars.outputs.link_opts }} \
