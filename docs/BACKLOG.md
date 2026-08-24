@@ -820,28 +820,48 @@ shape `collect_output()`/`verify_output()` copy.
 
 ### Later — usermod
 
-Not scheduled. `cibuildmp` drives every usermod port itself, not just the
-ones `mpbuild` has a board database for — correcting an earlier version of
-this section, which wrongly had `unix`/`windows`/`webassembly` staying on
-the composite actions permanently. That contradicts Positioning, above:
-every composite action (`build-usermod-unix`/`-windows`/`-webassembly`/
-`-rp2040`/`-esp32`/`-qemu`, not just `build-natmod`) is the low-level
-layer until `cibuildmp` covers its ground, then becomes a thin wrapper
-over it — no port gets carved out as a permanent exception.
+Not scheduled as tool work, but the prerequisite layer is **done and
+proven**, which changes what "not scheduled" means here. `.github/actions/
+build-usermod-{unix,windows,webassembly,armv7m,esp32,rp2040}` all exist in
+this repo, and `o-murphy/a7p`'s own `.github/workflows/mp-usermod.yml` now
+drives all six directly, across twelve identifiers (`unix` × x64/x86/
+aarch64, `windows` × x86/x64/arm64, `webassembly`, `unix-cross` × armhf/
+mipsel, `qemu`/armv7m, `esp32`, `rp2040`) — every job green. That is
+exactly the position natmod was in before M0: a working low-level layer,
+hand-driven per consumer, nothing yet absorbing the parts that are
+identical across all of them. The difference is usermod now has a real
+reference implementation to design the identifier/config scheme against,
+instead of reasoning from the cibuildwheel analogy alone the way natmod's
+M0 had to.
+
+`cibuildmp` drives every usermod port itself, not just the ones `mpbuild`
+has a board database for — correcting an earlier version of this section,
+which wrongly had `unix`/`windows`/`webassembly` staying on the composite
+actions permanently. That contradicts Positioning, above: every composite
+action here is the low-level layer until `cibuildmp` covers its ground,
+then becomes a thin wrapper over it (**M5**'s own open item for
+`build-natmod`) — no port gets carved out as a permanent exception.
 
 Two different selector axes, not the same thing under two names:
 
-- **Board-based ports** (`rp2`/`esp32`/`stm32`/etc.) select a `BOARD=`
-  (`ESP32_GENERIC`, `RPI_PICO`, …) and resolve it to a Docker
-  image/toolchain via the data vendored from `mpbuild` (**D7**).
+- **Board-based ports** (`qemu`/`esp32`/`rp2040`, and `stm32`/etc. when
+  added) select a `board:` (`MPS2_AN385`, `ESP32_GENERIC`, `RPI_PICO`, …)
+  and resolve it to a toolchain via the data vendored from `mpbuild`
+  (**D7**) — confirmed as a real, present-tense input on all three
+  existing board-based actions, each with its own default.
 - **`unix`/`windows`/`webassembly` have no board concept at all** — they
-  select a `VARIANT=` instead: `ports/unix/variants/` (`standard`,
-  `coverage`, …; `build-usermod-unix`'s own `variant` input already
-  exposes this), `ports/webassembly`'s `standard`/`pyscript`
-  (`build-usermod-webassembly`'s `variant` input, `pyscript` default
-  since `standard`'s `-s ASYNCIFY` is broken on modern emsdk). `mpbuild`'s
-  board database was never going to cover these regardless of the
-  dependency-vs-vendor question **D7** is actually about — a variant
+  select a `variant:` instead: `ports/unix/variants/` (`standard` default;
+  `build-usermod-unix`'s own `variant` input), `ports/webassembly`'s
+  `standard`/`pyscript` (`build-usermod-webassembly`'s `variant` input,
+  `pyscript` default since `standard`'s `-s ASYNCIFY` is broken on modern
+  emsdk, tracked upstream at micropython/micropython#19380).
+  `build-usermod-windows` carries a `variant` input too, but every real
+  caller leaves it empty and it is omitted from the command line entirely
+  — `ports/windows` has no `variants/<name>/` split in any consumer today,
+  just one `variants/manifest.py`; the input exists for a future fork that
+  adds one, not a fourth real value alongside `standard`/`pyscript`.
+  `mpbuild`'s board database was never going to cover these regardless of
+  the dependency-vs-vendor question **D7** is actually about — a variant
   isn't a board missing from the list, it's a different axis entirely.
 
 `cibuildmp` drives `unix`/`windows`/`webassembly`'s own port Makefile
@@ -851,6 +871,138 @@ the board-based ports. Either way `cibuildmp` resolves the port → build
 command itself and treats firmware as a verification output rather than a
 published artifact by default.
 
+Six more findings, real rather than anticipated, surfaced by the actions
+themselves and by a7p's workflow actually driving them — worth locking now
+even though M6+ isn't scheduled, so the eventual tool absorbs what's
+already known instead of re-deriving it:
+
+**D16 — `USER_C_MODULES` is a directory on Make-driven ports, a single
+`.cmake` file on CMake-driven ones — same variable name, two incompatible
+shapes.** `unix`/`windows`/`webassembly`/`qemu` glob a directory (`make`'s
+own `USER_C_MODULES` convention, `py/py.mk`); `esp32`/`rp2040` are
+CMake-driven ports and take one `.cmake` entry point to `include()` —
+stated directly in `build-usermod-rp2040`'s own input doc ("unlike
+build-usermod-unix/build-usermod-webassembly's own user_c_modules, this
+one is a *file*... CMake's USER_C_MODULES takes a single .cmake entry
+point to include, not a directory to glob") and mirrored in
+`build-usermod-esp32`'s. A consumer therefore needs *two* files for one
+module tree (`usermod/` for the directory form, `usermod/micropython.cmake`
+for the CMake form) — a7p's own tree carries both. `cibuildmp` should
+resolve this itself once it already knows which port it's driving (the
+same D7 board-database lookup that already knows Make vs. CMake per port),
+not leave a consumer to notice the split by reading a composite action's
+own doc comment the way today's three consumers had to.
+
+**D17 — combining `FROZEN_MANIFEST` with the port's own default manifest
+is real, per-port, and explicitly *not* solved by the action layer.**
+`build-usermod-webassembly`'s own header says so outright: "Combining
+FROZEN_MANIFEST with the port's own default... is deliberately left to
+the caller, not done here... Every consuming repo now writes its own
+combined manifest first and passes that as frozen_manifest instead." In
+`mp-usermod.yml` this is a hand-written `cat > manifest.py <<EOF` +
+`include()` pair, duplicated three times for the differently-shaped ports
+(`variants/<x>/manifest.py` for unix/webassembly, `boards/manifest.py` for
+esp32/rp2040, nothing at all for qemu — `ports/qemu` ships no default
+manifest, so combining is skipped there) and a fourth time for Windows
+with its own escaping story (below). This is exactly the class of
+hand-copied-and-drifting logic Positioning says `cibuildmp` exists to
+absorb. Fix: extend the **D7** vendored board/variant database to also
+record each port's default manifest path per board/variant
+(`$(PORT_DIR)/variants/pyscript/manifest.py`, `$(PORT_DIR)/boards/
+manifest.py`, or none), and have `cibuildmp` generate the combined
+manifest itself from that plus the consumer's own module manifest — a
+consumer supplies only the fragment that freezes their module, same shape
+`natmod`'s `pre-build-command` already lets a consumer opt into
+project-specific setup without owning the whole recipe.
+
+**D18 — Windows provisioning is a fourth story, not a variant of
+`download`/`docker`/`host` (**D3**).** `build-usermod-windows` cannot set
+up its own MSYS2 environment: its own contract says plainly that a
+composite action's `shell: bash` steps "run under plain Git Bash on a
+Windows runner, not inside the MSYS2 environment, so this action cannot
+set up either one for itself" — `msys2/setup-msys2` has to run as the
+caller's own step first, and every path fed into the action has to be a
+`$(pwd)`-relative MSYS2 path, never `$GITHUB_WORKSPACE`/`$RUNNER_TEMP`
+verbatim (both are native `D:\a\...` paths; MSYS2 bash's own unquoted
+backslash-escaping silently mangles them — a real failure hit and fixed in
+`mp-usermod.yml`, see its own "Write combined FROZEN_MANIFEST (windows)"
+step comment). `cibuildmp`'s toolchain resolver (**M2**) has no MSYS2
+awareness at all today; this is real orchestration work, not config, since
+it spans installing an environment *and* how every subsequent path is
+formed.
+
+**D19 — ESP-IDF provisioning is the heaviest, least locally-reproducible
+step of any target here, and has no caching.** `build-usermod-esp32`'s own
+header calls this out directly: "No caching yet... Left as a known
+follow-up, not forgotten." A `--recursive` clone of `esp-idf` plus
+`install.sh <chip>` per run is a materially stronger Docker-strategy case
+than natmod's `x86` ever was (**M2**'s own "why not docker" note is
+specific to x86's narrow `gcc-multilib` gap and says usermod is where that
+tradeoff flips) — Espressif ships its own `espressif/idf` Docker images
+built for exactly this. Revisit **D3**'s `docker` strategy here first, not
+as a general-purpose escape hatch.
+
+**D20 (revisits D9) — usermod runner selection is structural, confirmed
+live, not a hypothetical "different targets need different runners."**
+`mp-usermod.yml`'s matrix already needs four distinct `runs_on:` values
+(`ubuntu-latest`, `ubuntu-24.04-arm` ×2 rows, `windows-latest` ×2,
+`windows-11-arm`), and unlike natmod's ten-cross-compiles-on-one-host,
+several of these are load-bearing rather than a preference: aarch64 and
+armhf both need to *execute* what they build (a native run, not qemu), so
+the wrong runner doesn't just cost time, it silently stops proving
+anything. `Target.default_runner` and `--print-build-matrix` (**M0**)
+already exist for exactly this; usermod is the build mode where per-target
+fan-out should probably be the default rather than **D9**'s opt-in, not
+because sharing the fetch-MicroPython/mpy-cross cost stops mattering, but
+because the runner constraint dominates it the way it does for
+cibuildwheel's own OS axis.
+
+**D21 — execution, not just linking, is central to usermod's value, and
+is already real infrastructure — this does not fit under D6's blanket
+"no test runners" deferral without saying so explicitly.** Every port in
+`mp-usermod.yml` except `esp32` (build-only by design — there is no esp32
+emulator to hand a firmware image to, stated directly in that job's own
+header) already runs something after building: Node for `webassembly`,
+the built interpreter directly for `unix`/`windows`, and two bespoke
+Python harnesses (`micropython/ci/run_qemu.py`,
+`micropython/ci/run_rp2040py.py`) for the bare-metal/emulated targets —
+both of which shadow `open()` to inline the test fixture, since neither
+target has a writable filesystem to copy one onto (`ports/qemu` links
+`-nostdlib` with no VFS at all; the rp2040py path pushes a script over the
+raw REPL instead of a real file). A natmod really is closer to a wheel — a
+binary artifact whose job ends at "loads and the symbols resolve." A
+usermod *is* the runtime; "compiles" proves much less about it than
+"boots and imports" does, and the qemu/rp2040 jobs exist specifically
+because a usermod that links cleanly but fails to boot is a real, observed
+failure class, not a hypothetical one. This does not overturn **D6** for
+natmod. It does mean usermod's own eventual phase should decide this
+question on purpose rather than inherit D6's answer by default.
+
+**Rough phase outline, unscheduled.** Not detailed the way M0–M5 are —
+none of this is implemented yet, and giving it that treatment now would
+repeat the exact mistake D16–D21 above just corrected in this section
+(reasoning presented as verified fact before any code exists). Names and
+one line each, so M6 doesn't start from a blank page; each gets its own
+citations and "verified live" notes once it's actually underway:
+
+- **M6** — extend the **D7** vendored board/variant database with each
+  port's default-manifest path and its Make-vs-CMake `USER_C_MODULES`
+  shape (**D16**).
+- **M7** — combined-`FROZEN_MANIFEST` generation + `USER_C_MODULES`
+  resolution off that database (**D17**).
+- **M8** — the build driver itself, for the ports that need no exotic
+  provisioning first (`unix`, `windows` once MSYS2 is handled, `webassembly`,
+  `qemu`/armv7m) — the natmod `build.py` shape, pointed at the composite
+  actions' own recipes.
+- **M9** — toolchain provisioning: MSYS2 orchestration (**D18**), ESP-IDF
+  fetch + caching, `docker` strategy revisit for it (**D19**).
+- **M10** — runner/matrix integration, fan-out-by-default for usermod
+  identifiers (**D20**).
+- **M11** — execution axis: qemu-system, rp2040py, node, native — four of
+  seven already proven working, just not owned by `cibuildmp` yet
+  (**D21**).
+- **M12** — adopt in the three consuming repos, mirroring **M5**.
+
 ### Later — tests
 
 Not scheduled (**D6**). When it lands, the design is an explicit runner axis:
@@ -858,8 +1010,23 @@ Not scheduled (**D6**). When it lands, the design is an explicit runner axis:
 `mpremote` — tests on real hardware attached to a self-hosted runner — is the
 one with no cibuildwheel analogue and the most value for embedded.
 
+Four of these seven (`native`, `qemu-system`, `node`, `rp2040py`) are no
+longer hypothetical: `mp-usermod.yml` already runs all four today, hand-driven
+per job (**D21**). That doesn't move this out of "not scheduled" on its own —
+D6 still holds for natmod, where a build-only artifact is the actual
+deliverable — but it does mean usermod's own runner-axis design, when it
+happens, has four of seven cases to transcribe from a working reference
+rather than design from scratch.
+
 ## Open questions
 
+- **MSYS2 and ESP-IDF orchestration for usermod (D18, D19).** Neither fits
+  the existing `host`/`download`/`docker` toolchain-strategy shape as-is —
+  MSYS2 is an environment a caller sets up around the job, not a toolchain
+  `cibuildmp` fetches into a cache directory, and ESP-IDF's own install is
+  heavy enough that it may need its own strategy rather than reusing
+  `download` unmodified. Not designed yet; flagged so M6+ doesn't rediscover
+  the gap from scratch.
 - **Windows/macOS hosts.** The download strategy makes a macOS host plausible
   for the arm/riscv/xtensa arches; `x86`'s multilib and the whole
   `docker` strategy are Linux-only. Decide whether phase 1 claims anything
@@ -881,7 +1048,14 @@ one with no cibuildwheel analogue and the most value for embedded.
 
 ## Non-goals
 
-- Being a general MicroPython firmware builder — that is `mpbuild`.
+- Being a general-purpose stock-firmware builder/browser with no module
+  attached — that is `mpbuild`. This is not a limit on which boards
+  `cibuildmp` can target: **D7** vendors `mpbuild`'s whole board database,
+  not a curated subset, precisely so any board it knows can be a usermod
+  target. The line is that every `cibuildmp` firmware build always has a
+  project's own module baked in via `USER_C_MODULES=` and is treated as a
+  verification output, never a bare "give me board X's stock firmware"
+  product with no module involved.
 - Compiling anything itself. `dynruntime.mk` and the project's Makefile own
   that (**D2**).
 - Replacing `mpremote`/`mip` on the install side.
