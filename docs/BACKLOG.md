@@ -49,7 +49,8 @@ own, and what no consuming repo should write again:
 - fetching/checking out MicroPython at the configured tag,
 - building `mpy-cross`,
 - resolving and provisioning the cross toolchain for each target,
-- installing `mpy_ld.py`'s host deps (`pyelftools`, `ar`),
+- pointing `mpy_ld.py` at its own interpreter (`PYTHON=`) so its host deps
+  (`pyelftools`, `ar`) resolve from `cibuildmp`'s own dependencies (**D12**),
 - collecting outputs into an output directory with unambiguous names.
 
 **D3 — toolchain resolution is per-target, chosen by the tool (variant C).**
@@ -77,14 +78,41 @@ over `mpremote`) are a genuinely hard axis and are deferred. Phase 1 is
 build-only. `[test]` keys are not parsed yet; do not ship a half-working
 version of them.
 
-**D7 — usermod will be built on `mpbuild`, not reimplemented.**
+**D7 — usermod vendors `mpbuild`'s board database, not depends on the
+package.**
 [`mattytrentini/mpbuild`](https://github.com/mattytrentini/mpbuild) (PyPI
-`mpbuild`, 1.2.0) already builds any port/board in per-port Docker images and
-carries a board database. Verified constraints: it requires a MicroPython
-*git checkout* (its `board_database` scans `ports/*/boards`), it is
-Docker-only, and it has no natmod support whatsoever. So it is complementary,
-not competing — `cibuildmp` owns the natmod path mpbuild does not have, and
-drives mpbuild for firmware.
+`mpbuild`, 1.2.0) has a board database worth reusing, but the package itself
+is not worth the dependency it costs. `board_database.py` is 293 lines,
+stdlib-only (`glob`, `json`, `dataclasses`, `Path`), MIT-licensed (© 2024
+Matt Trentini) — not enough code to justify pulling `mpbuild` itself, which
+drags in `rich` + `textual` + `typer` and requires Python ≥3.12, a TUI stack
+on top of a build driver that has stayed standard-library-only since M1/M2
+for exactly this reason.
+
+Extract into one vendored module (`usermod/boards.py`, MIT header kept, with
+a comment naming the origin repo and the commit it was taken from — the same
+discipline **M4** applies to the `package.json` schema):
+
+- `Port`/`Board`/`Variant` plus the `ports/*/boards/*/board.json` scan,
+- `check_board_json`.
+
+Do **not** take the port → Docker-image map or command construction: that
+layer is exactly what **D3** wants `cibuildmp` to resolve itself, and it is
+coupled to mpbuild's own CLI.
+
+Correction to a constraint this decision previously rested on: mpbuild does
+**not** require a MicroPython git checkout. `Database.__post_init__` only
+checks `(root / "ports").is_dir()`; nothing else in the module touches git,
+and M1's release tarball satisfies that condition. That removes one of the
+three original reasons mpbuild was called "complementary, not competing," so
+it should not be repeated as a reason to keep the dependency.
+
+Honest tradeoff: `board.json`'s schema and the variant convention drift
+upstream, and vendoring means tracking that drift by hand. Pinning
+`mpbuild==1.2.0` would not avoid tracking it either, just tie it to someone
+else's release cadence instead. This is not pinned data in the **D10**
+sense — it is read from the checkout at runtime, so nothing goes into
+`resources/`.
 
 **D8 — distribution of the tool itself is deferred.**
 The PyPI name `cibuildmp` is free (404 on the JSON API) but not reserved.
@@ -151,6 +179,33 @@ The cost is real and falls on consumers: bclibc, a7p and micropython-wasm3
 each have ~15 `uses:` paths to repin. That is a one-line-per-reference
 change with no behaviour difference, and old pins keep working until they
 make it.
+
+**D12 — `pyelftools` and `ar` are `cibuildmp`'s own dependencies, not
+something it installs at build time.**
+Neither is binutils. `ar` (PyPI `ar`, 1.0.1, "Access ar archive files") is a
+pure-Python package that `mpy_ld.py` imports via `from ar import Archive` in
+a `try`/`except`; `pyelftools` is imported directly as `elftools.elf`. No
+system binary involved for either.
+
+`ar` is formally optional in `mpy_ld.py` (`Archive = None` when the import
+fails) but not practically optional for `cibuildmp`: it is needed whenever
+`MPY_LD_FLAGS` contains `-l...a`, which is always true under
+`LINK_RUNTIME=1` — the case bclibc uses to link `libm.a`. So both are
+ordinary dependencies, not an `extra`; both are small and pure-Python, so the
+cost is low. `pyelftools` should be pinned wide (`pyelftools>=0.29`), not
+exact — the pin is shared across every MicroPython tag a user's config
+builds, and the surface `mpy_ld.py` actually uses is narrow and stable, but a
+tight pin would let one old tag break the whole tool.
+
+Mechanism is the one already verified for `CROSS=` under M2:
+`py/dynruntime.mk` line 10 assigns `PYTHON = python3` with a plain `=`, never
+`override`, so a command-line variable wins. `cibuildmp` passes
+`PYTHON=<sys.executable>` alongside `CROSS=`, and `make` runs `mpy_ld.py`
+under the interpreter that already has both packages — the "isolated
+environment" this used to require comes for free, since `uv tool install`
+(**D8**) already puts `cibuildmp` in its own venv and the system interpreter
+is never touched. This removes the first M3 checkbox as separate work; it is
+one more argument on the `make` command line.
 
 ## Identifier scheme
 
@@ -391,24 +446,44 @@ empty translation unit with `-m32` (a `probe-args` entry in the resource
 file) and, on failure, errors naming `gcc-multilib` rather than letting the
 build fail later with a confusing compiler diagnostic.
 
-### M3 — the build itself
+### M3 — the build itself — **done**
 
-- [ ] Install `mpy_ld.py`'s host deps (`pyelftools`, `ar`) into an isolated
-      env, not the system interpreter.
-- [ ] Run `pre-build-command` in `module-dir`.
-- [ ] Invoke `make -C <module-dir> ARCH=<arch> MPY_DIR=<…> <extra-make-args>
-      <make-target>`.
-- [ ] Collect the produced `.mpy` into `output-dir`, named unambiguously.
-      Every arch's build otherwise emits the same basename — flatten using
-      the file's own header, not the build-dir name (the approach already
-      proven in bclibc's `tools/build_release_assets.py`).
-- [ ] Verify each output's header arch against the requested identifier and
-      fail loudly on mismatch. This is `cibuildmp`'s equivalent of
-      `auditwheel`: cheap, and it catches a whole class of "built the wrong
-      thing into the right directory" bugs.
-- [ ] Readable per-target logging and a summary table. The loop is already
-      in place in `cli.build()`; M1's shared setup goes before it and M2/M3's
-      per-target work inside it.
+`src/cibuildmp/build.py`. Checked against cibuildwheel's own
+`platforms/linux.py` rather than assumed: it is fail-fast per identifier too
+(a `subprocess.CalledProcessError` from one platform config aborts the whole
+invocation, no per-target continue-and-report), and its
+`BuildProducedNoWheelError`/`RepairStepProducedMultipleWheelsError`/
+`AlreadyBuiltWheelError` are the shape `collect_output()`/`verify_output()`/
+the `seen_names` check below copy.
+
+- [x] Run `pre-build-command` in `module-dir` (`shell=True`, matching what
+      `build-natmod`'s own `pre_build_command` input already does).
+- [x] Invoke `make -C <module-dir> ARCH=<arch> MPY_DIR=<…>
+      PYTHON=<sys.executable> <extra-make-args> <make-target>` — `mpy_ld.py`
+      resolves `pyelftools`/`ar` from `cibuildmp`'s own dependencies
+      (**D12**), verified for real against a live `make dist` run, not just
+      by inspection.
+- [x] Collect the produced `.mpy` into `output-dir`, named unambiguously:
+      `<module-stem>-<identifier>.mpy`, found by globbing
+      `<module-dir>/build/<arch>*/*.mpy` — the layout `build-natmod`'s own
+      artifact-upload step already assumes. Zero or more-than-one match is a
+      `BuildError` naming what was found, cibuildwheel's
+      `BuildProducedNoWheelError`/`RepairStepProducedMultipleWheelsError`
+      shape. Two targets landing on the same output name within one
+      invocation is also a `BuildError` (`AlreadyBuiltWheelError`'s
+      equivalent), tracked in a `seen_names` set threaded through the loop.
+- [x] Verify each output's header arch against the requested identifier and
+      fail loudly on mismatch — `cibuildmp`'s equivalent of `auditwheel`.
+      `native-code` was added to `resources/natmod.toml`'s `[arch]` table
+      (the `MP_NATIVE_ARCH_*` values `tools/mpy_ld.py` bakes into byte 2 of
+      every native `.mpy`'s header, bits 2-5) so this reads the same pinned
+      table the CROSS/toolchain resolution already does.
+- [x] Readable per-target logging and a summary table, in `cli.build()`:
+      each target prints its plan line and a `done in Ns` line as it
+      finishes; a full run ends with a total duration and one line per
+      built `.mpy` (identifier, filename, size) — cibuildwheel's
+      `BuildInfo`/`print_summary` shape, minus the `humanize`/SHA256 parts
+      that would cost a dependency for no real natmod need.
 
 ### M4 — publish
 
@@ -439,10 +514,12 @@ build fail later with a confusing compiler diagnostic.
 
 ### Later — usermod
 
-Not scheduled. Built on `mpbuild` (**D7**): drive it for `rp2`/`esp32`/
-`stm32`/etc., keep the existing composite actions for the ports mpbuild does
-not cover (`unix`, `windows`, `webassembly`), and treat firmware as a
-verification output rather than a published artifact by default.
+Not scheduled. Built on board data vendored from `mpbuild` (**D7**):
+`cibuildmp` resolves the port → Docker-image map and build command itself
+for `rp2`/`esp32`/`stm32`/etc., keeps the existing composite actions for the
+ports mpbuild does not cover (`unix`, `windows`, `webassembly`), and treats
+firmware as a verification output rather than a published artifact by
+default.
 
 ### Later — tests
 

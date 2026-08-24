@@ -413,10 +413,11 @@ plan of record: the decisions taken (and why), what is implemented, and
 what is deliberately deferred.
 
 Where it stands: target selection, MicroPython and `mpy-cross`
-provisioning, and cross-toolchain resolution are done for natmod. Running
-the build and collecting the `.mpy` files is next. usermod will be driven by
-[`mpbuild`](https://github.com/mattytrentini/mpbuild) rather than
-reimplemented, and test runners are deferred outright.
+provisioning, cross-toolchain resolution, and the natmod build itself
+(running `make`, collecting the `.mpy`, verifying its header) are done.
+Publishing (`cibuildmp publish`) is next. usermod will vendor board data
+from [`mpbuild`](https://github.com/mattytrentini/mpbuild) rather than
+depend on the package, and test runners are deferred outright.
 
 Until each piece lands and is verified against real CI in a consuming repo,
 the composite actions below stay the supported path.

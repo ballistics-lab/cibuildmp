@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import fnmatch
 from dataclasses import dataclass
+from typing import Any
 
 from .resources import natmod_data
 
@@ -21,11 +22,18 @@ from .resources import natmod_data
 #   [arch]     py/dynruntime.mk's ifeq chain: the ten ARCH values it accepts
 #              and the CROSS prefix each selects. Ten arches, five toolchains.
 #   [mpy-abi]  py/persistentcode.h's MPY_VERSION/MPY_SUB_VERSION per tag.
-_ARCH_TABLE: dict[str, dict[str, str]] = natmod_data()["arch"]
+_ARCH_TABLE: dict[str, dict[str, Any]] = natmod_data()["arch"]
 
 NATMOD_CROSS: dict[str, str] = {arch: row["cross"] for arch, row in _ARCH_TABLE.items()}
 
 NATMOD_ARCHS: tuple[str, ...] = tuple(NATMOD_CROSS)
+
+# The MP_NATIVE_ARCH_* code tools/mpy_ld.py bakes into a native .mpy's own
+# header. Used to verify a produced file against the identifier it was built
+# for -- see build.verify_output().
+NATIVE_ARCH_CODE: dict[str, int] = {
+    arch: row["native-code"] for arch, row in _ARCH_TABLE.items()
+}
 
 # ── .mpy ABI ──────────────────────────────────────────────────────────────
 _ABI_TABLE: dict[str, str] = dict(natmod_data()["mpy-abi"])

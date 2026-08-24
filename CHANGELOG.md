@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`cibuildmp` can now actually build natmod targets**, not just plan them:
+  `cli.build()` runs each target's `pre-build-command`, invokes
+  `make -C <module-dir> ARCH=<arch> MPY_DIR=<…> PYTHON=<sys.executable>
+  <extra-make-args> <make-target>`, collects the produced `.mpy` from
+  `<module-dir>/build/<arch>*/`, verifies its header's native-arch code
+  against the requested identifier (`cibuildmp`'s `auditwheel` equivalent),
+  and copies it into `output-dir` as `<module-stem>-<identifier>.mpy`. Ends
+  with a per-target `done in Ns` line and a summary table. See
+  [`docs/BACKLOG.md`](docs/BACKLOG.md) M3 and **D12**.
+- `pyelftools`/`ar` are now `cibuildmp`'s own dependencies (**D12** in
+  `docs/BACKLOG.md`) rather than something installed at build time: both are
+  pure-Python packages `tools/mpy_ld.py` itself needs, and `PYTHON=` on the
+  `make` command line points it at the interpreter that already has them.
+
+### Changed
+
+- `docs/BACKLOG.md` **D7** — usermod now vendors `mpbuild`'s board-database
+  module rather than depending on the `mpbuild` package, which would have
+  pulled `rich`/`textual`/`typer` and Python ≥3.12 onto a build driver that
+  has stayed standard-library-only otherwise.
+
 ## [0.3.0a1] - 2026-08-24
 
 First alpha. Ships the composite actions unchanged and the first working

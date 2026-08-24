@@ -16,19 +16,25 @@
 # prefix it hardcodes and the toolchain that supplies it. Ten arches, five
 # toolchains.
 #
+# `native-code` is the MP_NATIVE_ARCH_* value tools/mpy_ld.py bakes into
+# every native .mpy's header (byte 2, arch in bits 2-5): the verification
+# step reads it back out of the produced file and checks it against the
+# identifier that was supposed to build it, the natmod equivalent of
+# auditwheel.
+#
 # No aarch64: dynruntime.mk has no ARCH=aarch64 branch at all as of
 # MicroPython v1.28, so natmod cannot target it under any configuration.
 [arch]
-x86       = { cross = "",                      toolchain = "host-multilib" }
-x64       = { cross = "",                      toolchain = "" }
-armv6m    = { cross = "arm-none-eabi-",        toolchain = "arm-none-eabi" }
-armv7m    = { cross = "arm-none-eabi-",        toolchain = "arm-none-eabi" }
-armv7emsp = { cross = "arm-none-eabi-",        toolchain = "arm-none-eabi" }
-armv7emdp = { cross = "arm-none-eabi-",        toolchain = "arm-none-eabi" }
-xtensa    = { cross = "xtensa-lx106-elf-",     toolchain = "xtensa-lx106-elf" }
-xtensawin = { cross = "xtensa-esp32-elf-",     toolchain = "xtensa-esp-elf" }
-rv32imc   = { cross = "riscv64-unknown-elf-",  toolchain = "riscv-none-elf" }
-rv64imc   = { cross = "riscv64-unknown-elf-",  toolchain = "riscv-none-elf" }
+x86       = { cross = "",                      toolchain = "host-multilib",   native-code = 1 }
+x64       = { cross = "",                      toolchain = "",                native-code = 2 }
+armv6m    = { cross = "arm-none-eabi-",        toolchain = "arm-none-eabi",   native-code = 4 }
+armv7m    = { cross = "arm-none-eabi-",        toolchain = "arm-none-eabi",   native-code = 5 }
+armv7emsp = { cross = "arm-none-eabi-",        toolchain = "arm-none-eabi",   native-code = 7 }
+armv7emdp = { cross = "arm-none-eabi-",        toolchain = "arm-none-eabi",   native-code = 8 }
+xtensa    = { cross = "xtensa-lx106-elf-",     toolchain = "xtensa-lx106-elf", native-code = 9 }
+xtensawin = { cross = "xtensa-esp32-elf-",     toolchain = "xtensa-esp-elf",  native-code = 10 }
+rv32imc   = { cross = "riscv64-unknown-elf-",  toolchain = "riscv-none-elf",  native-code = 11 }
+rv64imc   = { cross = "riscv64-unknown-elf-",  toolchain = "riscv-none-elf",  native-code = 12 }
 
 # ── .mpy ABI per MicroPython tag ──────────────────────────────────────────
 # "<MPY_VERSION>.<MPY_SUB_VERSION>" from py/persistentcode.h at that tag.

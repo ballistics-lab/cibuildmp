@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
+from .build import BuildError, BuildResult, build_target
 from .options import BuildOptions, ConfigError, Options
 from .sources import (
     SourceError,
@@ -207,16 +208,31 @@ def build(options: Options, targets: list[Target], *, toolchain: str = "auto") -
             f"cibuildmp.targets.MPY_ABI."
         )
 
-    # M3 lands here: run make under that toolchain, then collect and verify
-    # the output.
-    sys.stdout.flush()  # keep the output above ahead of the stderr note below
-    print(
-        "\ncibuildmp: the per-target build is not implemented yet (M2 ships "
-        "toolchain resolution). Re-run with --dry-run to get the plan as a "
-        "success.",
-        file=sys.stderr,
-    )
-    return 1
+    print(f"\ncibuildmp: building {total} target(s)")
+    seen_names: set[str] = set()
+    results: list[BuildResult] = []
+    for index, (build_options, chain) in enumerate(
+        zip(resolved, chains, strict=True), 1
+    ):
+        print("\n  " + _plan_line(index, total, build_options, chain))
+        module_root = options.package_dir / build_options.module_dir
+        output_dir = options.package_dir / build_options.output_dir
+        result = build_target(
+            build_options,
+            chain,
+            mpy_dir,
+            module_root,
+            output_dir,
+            seen_names,
+        )
+        results.append(result)
+        print(f"        done in {result.duration:.1f}s -> {result.output}")
+
+    total_duration = sum(r.duration for r in results)
+    print(f"\ncibuildmp: {total} target(s) built in {total_duration:.1f}s")
+    for result in results:
+        print(f"  {result.identifier}: {result.output.name} ({result.size} bytes)")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -315,7 +331,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         return build(options, targets, toolchain=args.toolchain)
-    except (SourceError, ToolchainError) as exc:
+    except (SourceError, ToolchainError, BuildError) as exc:
         if args.debug_traceback:
             raise
         print(f"cibuildmp: error: {exc}", file=sys.stderr)

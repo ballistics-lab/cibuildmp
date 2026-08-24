@@ -36,10 +36,17 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
     "Programming Language :: Python :: Implementation :: CPython",
 ]
-# Standard library only, deliberately: a build tool that has to resolve its
-# own dependency tree before it can fetch anything is harder to trust, and
-# `wget` not being everywhere is the exact class of problem this replaces.
-dependencies = []
+# Standard library otherwise, deliberately: a build tool that has to resolve
+# its own dependency tree before it can fetch anything is harder to trust,
+# and `wget` not being everywhere is the exact class of problem this
+# replaces. pyelftools/ar are the one exception (docs/BACKLOG.md D12): both
+# are pure Python, both are what tools/mpy_ld.py itself needs to link a
+# native .mpy, and declaring them here -- rather than pip-installing them at
+# build time -- is what lets `make PYTHON=<sys.executable>` just work.
+dependencies = [
+    "pyelftools>=0.29",
+    "ar",
+]
 dynamic = ["version"]
 
 [project.scripts]
