@@ -120,6 +120,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   single-value case already worked.
   `examples/template/natmod/Makefile` now scopes
   `BUILD = .obj/$(ARCH)$(if $(ARCH_FLAGS),+$(ARCH_FLAGS))`.
+- `riscv-none-elf` was the one toolchain in `resources/natmod.toml` with no
+  pinned `sha256` — it relied on fetching xpack's own `<asset>.sha` sidecar
+  at runtime instead, unlike `arm-none-eabi`/`xtensa-lx106-elf`/
+  `xtensa-esp-elf`, which all pin literally. A real CI run (a cold-cache
+  `rv64imc` build in `ballistics-lab/micropython-bclibc`'s own natmod.yml)
+  hit `riscv-none-elf: no pinned sha256 and its .sha sidecar is unavailable
+  (HTTP Error 500: Internal Server Error)` — a transient GitHub
+  release-asset failure with nothing here to retry it, and every other
+  arch in the same job matrix went green regardless, since none of them
+  depend on that second live network call. Pinned literally now too
+  (cross-checked: the sidecar's own published digest against a fresh
+  `sha256sum` of the tarball itself, not copied blind), removing the
+  runtime fetch entirely rather than adding a retry around it.
 
 ## [0.3.0a1] - 2026-08-24
 

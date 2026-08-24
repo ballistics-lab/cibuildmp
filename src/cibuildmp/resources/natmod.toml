@@ -112,10 +112,16 @@ provided-prefix = "riscv-none-elf-"
 apt-packages = "gcc-riscv64-unknown-elf picolibc-riscv64-unknown-elf"
 version = "15.2.0-1"     # xpack-dev-tools/riscv-none-elf-gcc-xpack
 url = "https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack/releases/download/v15.2.0-1/xpack-riscv-none-elf-gcc-15.2.0-1-linux-x64.tar.gz"
-# Empty: xpack publishes a `<asset>.sha` sidecar in sha256sum format, which
-# is fetched and used instead. Espressif and micropython.org publish none,
-# so those are pinned literally.
-sha256 = ""
+# Pinned literally, same as every other toolchain here -- xpack does publish
+# a `<asset>.sha` sidecar, and this used to rely on fetching that at runtime
+# instead of pinning, but that made every cold-cache build of rv32imc/
+# rv64imc depend on a second live network call with no retry. A real CI
+# failure surfaced it: "no pinned sha256 and its .sha sidecar is unavailable
+# (HTTP Error 500: Internal Server Error)" -- GitHub's release-asset CDN,
+# transient, gone on the next request, but with nothing here to retry it.
+# This value is that same sidecar's own content, cross-checked against a
+# fresh sha256sum of the tarball itself, not just copied blind.
+sha256 = "aaaa8060c914851a3e5ee1ba82cc3d6f80972f90638a05c6e823a37557a33758"
 
 [[toolchain]]
 name = "xtensa-lx106-elf"
