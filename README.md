@@ -81,7 +81,7 @@ identical:
 
 ```diff
 - uses: ballistics-lab/micropython-native-ci/.github/actions/build-natmod@v0.2.0
-+ uses: ballistics-lab/cibuildmp/.github/actions/build-natmod@v0.3.0
++ uses: ballistics-lab/cibuildmp/.github/actions/build-natmod@v0.3.0a1
 ```
 
 Pin a tag, as before -- not `@main`, not a commit SHA.
@@ -361,11 +361,11 @@ jobs:
         with:
           submodules: recursive
 
-      - uses: ballistics-lab/cibuildmp/.github/actions/fetch-micropython@v0.3.0
+      - uses: ballistics-lab/cibuildmp/.github/actions/fetch-micropython@v0.3.0a1
         with:
           mpy_tag: v1.28.0
 
-      - uses: ballistics-lab/cibuildmp/.github/actions/build-natmod@v0.3.0
+      - uses: ballistics-lab/cibuildmp/.github/actions/build-natmod@v0.3.0a1
         with:
           arch: ${{ matrix.arch }}
           # natmod_dir: natmod              # default; a7p passes micropython/natmod
@@ -428,9 +428,10 @@ a consumer references is a deliberate, visible edit in that repo, same as
 bumping any other CI dependency -- a change here never silently changes
 what three other repos' builds do.
 
-`v0.3.0` is this repository's first tag, and it continues
-`micropython-native-ci`'s version line rather than restarting it: `v0.3.0`'s
-composite actions are `v0.2.0`'s, moved. Consumers pinned to
+`v0.3.0a1` is this repository's first tag, and it continues
+`micropython-native-ci`'s version line rather than restarting it: its
+composite actions are `v0.2.0`'s, moved. The alpha marks the CLI, not the
+actions -- those are as stable as they were. Consumers pinned to
 `micropython-native-ci@v0.2.0` keep working until they repin -- that
 repository is deprecated, not deleted.
 

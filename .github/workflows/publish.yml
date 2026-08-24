@@ -1,74 +1,207 @@
 name: Upload Python Package
 
-# Publishes to PyPI via Trusted Publishing (OIDC) -- no API token stored in
-# this repository at all. Requires, on the PyPI side, a trusted publisher
-# configured for this repo, this workflow filename, and the `pypi`
-# environment named below.
-
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - "v*"
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "LICENSE"
   workflow_dispatch:
+    inputs:
+      testpypi:
+        description: "Publish to TestPyPI"
+        required: false
+        type: boolean
+        default: false
+      version:
+        description: "Override version (e.g. 0.3.0b1) — required for TestPyPI to get a clean version instead of a dev suffix"
+        required: false
+        type: string
+        default: ""
+
+# pull_request here is deliberately build-only: none of the deploy job's environment/if:
+# conditions match a pull_request event, so no publish permissions are ever granted or used.
+# It exists so a packaging change (a missing resources/*.toml in the wheel, a metadata error
+# twine rejects) surfaces on the PR instead of at release time, when the version number is
+# already spent — PyPI will not let the same version be uploaded twice, even after a delete.
+run-name: >
+  Build & Publish → ${{ github.event_name == 'push' && 'PyPI' ||
+      github.event_name == 'workflow_dispatch' && inputs.testpypi && 'TestPyPI' ||
+      'Build Only' }}
+
+concurrency:
+  group: publish-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  build-and-deploy:
+  # One job, not a matrix: cibuildmp is pure Python with no compiled
+  # extensions and no dependencies, so a single `uv build` produces the sdist
+  # and the one py3-none-any wheel that serves every platform. Nothing here
+  # needs cibuildwheel, QEMU, or a per-OS runner.
+  build:
+    name: Test and build
     runs-on: ubuntu-latest
-    environment:
-      name: pypi
-    permissions:
-      id-token: write
+    env:
+      SETUPTOOLS_SCM_PRETEND_VERSION: ${{ inputs.version }}
+      # setuptools-scm appends a local version segment (+g<sha>) to anything
+      # that is not exactly a tagged commit, and PyPI/TestPyPI reject local
+      # segments outright. Strip it only on runs that will actually publish;
+      # build-only runs keep it, because there it is useful traceability.
+      SETUPTOOLS_SCM_OVERRIDES: ${{ (github.event_name == 'push' || inputs.testpypi) && '{local_scheme = "no-local-version"}' || '' }}
 
     steps:
       - uses: actions/checkout@v7
         with:
-          # Load-bearing, not a default worth trimming: the version comes
-          # from setuptools-scm, which derives it from the nearest git tag.
-          # A shallow checkout has no tags, so the build would silently
-          # produce 0.0.0.dev0 (pyproject's fallback_version) instead of the
-          # release's own version.
-          fetch-depth: 0
+          fetch-depth: 0 # required for setuptools-scm to see tags
 
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
-          # 3.11 is this package's own floor (tomllib); 3.14 matches what
-          # action.yml and cibuildmp-matrix pin, so every runner in this repo
-          # is on one version.
+          # 3.11 is this package's floor (tomllib); 3.14 is what action.yml
+          # and cibuildmp-matrix pin, so every runner here is on one version.
           python-version: "3.14"
+          github-token: ${{ github.token }}
 
       - name: Install the project
         run: uv sync
 
+      - name: Lint
+        run: |
+          uv run ruff check src tests
+          uv run ruff format --check src tests
+
+      - name: Type check
+        run: uv run pyright src
+
       - name: Test
-        # A publish workflow that cannot fail is a publish workflow that can
-        # ship anything. These are seconds, and a released version cannot be
-        # replaced on PyPI once it is up.
         run: uv run pytest -q
 
       - name: Build
-        run: uv build
+        run: uv build --out-dir dist
 
-      - name: Check the version is a real release
-        # setuptools-scm produces a .devN version whenever HEAD is not
-        # exactly on a tag, or the tree is dirty, and a local-version suffix
-        # (+g<sha>) which PyPI rejects outright. Read it off the built
-        # artifact rather than the installed metadata: the filename is
-        # exactly what gets uploaded.
+      - name: Check the built distributions
+        # Catches metadata PyPI would reject (a malformed README, a bad
+        # classifier) here rather than after the tag is already pushed.
+        run: uvx twine check dist/*
+
+      - name: Check the wheel is complete
+        # resources/natmod.toml carries every pinned toolchain URL, checksum
+        # and arch table. A wheel without it imports and then fails, so
+        # assert on it rather than trusting package-data config to stay right.
         run: |
           set -euo pipefail
-          WHEEL=$(ls dist/*.whl)
-          VERSION=$(basename "$WHEEL" | cut -d- -f2)
-          echo "built version: $VERSION"
-          case "$VERSION" in
-            *dev*|*+*|0.0.0*)
-              echo "::error::refusing to publish $VERSION -- HEAD is not on a tag, or the working tree is dirty"
-              exit 1
-              ;;
-          esac
+          python3 - <<'PY'
+          import glob, sys, zipfile
+          wheel = glob.glob("dist/*.whl")[0]
+          names = zipfile.ZipFile(wheel).namelist()
+          missing = [n for n in ("cibuildmp/resources/natmod.toml",) if n not in names]
+          if missing:
+              sys.exit(f"::error::{wheel} is missing {missing}")
+          print(f"{wheel}: resources present")
+          PY
 
-      - name: Publish
-        if: github.event_name == 'release'
-        run: uv publish --trusted-publishing always
+      - name: list ./dist
+        run: ls ./dist
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: ./dist
+          retention-days: 14
+
+  deploy:
+    needs: [build]
+    runs-on: ubuntu-latest
+
+    # Dynamic: real PyPI on a tag push, TestPyPI on an explicit opt-in
+    # dispatch, otherwise a plain build that needs no publish permissions.
+    environment: ${{ github.event_name == 'push' && 'pypi' ||
+      (github.event_name == 'workflow_dispatch' && inputs.testpypi) && 'testpypi' || 'build' }}
+    permissions:
+      # Job-level permissions replace the workflow-level block rather than
+      # merging with it, so everything this job needs is listed here.
+      contents: write # required to create the GitHub Release
+      id-token: write # mandatory for trusted publishing
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # github.ref_name is the bare tag on a push (what we want), but on a
+          # pull_request it is the short "<PR>/merge" form, which is not a
+          # fetchable ref on its own. github.head_ref is the PR's real source
+          # branch, and is empty for every other event this workflow handles.
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: ./dist
+
+      - name: list ./dist
+        run: ls ./dist
+
+      - name: Resolve tag and version
+        id: meta
+        run: |
+          set -euo pipefail
+          TAG="${{ github.ref_name }}"
+          VERSION="${TAG#v}"
+          # PEP 440 spells pre-releases 0.3.0a1 / 0.3.0b2 / 0.3.0rc1 -- the
+          # words "alpha"/"beta" never appear, so matching on those alone
+          # would mark every alpha as a full release.
+          if [[ "$VERSION" =~ ^[0-9.]+((a|b|rc)[0-9]+|\.dev[0-9]+)$ ]]; then
+            PRERELEASE=true
+          else
+            PRERELEASE=false
+          fi
+          echo "tag=$TAG"               >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION"       >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+
+      - name: Extract changelog section
+        id: changelog
+        run: |
+          VERSION=${{ steps.meta.outputs.version }}
+          # Stops at the next section *and* at the link-definition block, so
+          # extracting the oldest entry does not sweep up every comparison
+          # link at the bottom of the file.
+          BODY=$(awk "/^## \[${VERSION}\]/{found=1; next} /^## \[/{found=0} /^<!--/{found=0} /^\[.*\]: /{found=0} found" CHANGELOG.md | sed '/^[[:space:]]*$/d' | head -50)
+          if [ -z "$BODY" ]; then
+            BODY="See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/${{ github.event.repository.default_branch }}/CHANGELOG.md) for details."
+          fi
+          {
+            echo "body<<EOF"
+            echo "$BODY"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        if: ${{ github.event_name == 'push' }}
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.tag }}
+          body: ${{ steps.changelog.outputs.body }}
+          prerelease: ${{ steps.meta.outputs.prerelease }}
+          files: ./dist/*
+
+      - name: Publish package distributions to PyPI
+        if: ${{ github.event_name == 'push' }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
+
+      - name: Publish package distributions to TestPyPI
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.testpypi == true }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
+          repository-url: https://test.pypi.org/legacy/

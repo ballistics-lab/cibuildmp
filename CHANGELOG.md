@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0a1] - 2026-08-24
+
+First alpha. Ships the composite actions unchanged and the first working
+slice of the `cibuildmp` CLI; the CLI cannot build a module yet, so the
+actions remain the supported path for every target.
+
 ### Changed
 
 - **This project moved to `ballistics-lab/cibuildmp` and absorbed
@@ -158,3 +164,13 @@ hand-copied and then independently drifted on the same
 toolchain-install and MicroPython-checkout logic. Verified against real
 CI on all three consuming repos before this squash: bclibc (natmod +
 usermod), a7p (natmod), micropython-wasm3 (natmod + usermod) all green.
+
+<!-- Comparison links. v0.1.0 and v0.2.0 were cut in
+ballistics-lab/micropython-native-ci, but both tags exist here too, so every
+link resolves inside this repository -- the version line continues rather
+than restarting (see the 0.3.0a1 entry). -->
+
+[Unreleased]: https://github.com/ballistics-lab/cibuildmp/compare/v0.3.0a1...HEAD
+[0.3.0a1]: https://github.com/ballistics-lab/cibuildmp/compare/v0.2.0...v0.3.0a1
+[0.2.0]: https://github.com/ballistics-lab/cibuildmp/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/ballistics-lab/cibuildmp/releases/tag/v0.1.0
