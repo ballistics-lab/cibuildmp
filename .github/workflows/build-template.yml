@@ -21,6 +21,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # x86 cannot self-provision (docs/BACKLOG.md M2): the host gcc is
+      # always there but ubuntu-latest ships no 32-bit glibc headers/libs
+      # by default. Same package .github/actions/build-natmod's own "Install
+      # cross-compiler" step already apt-installs for ARCH=x86 -- this repo
+      # just doesn't go through that action here, so it needs its own copy.
+      - run: sudo apt-get update -q && sudo apt-get install -y gcc-multilib
+
       - uses: ./
         with:
           package-dir: examples/template

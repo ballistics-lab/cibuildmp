@@ -181,19 +181,28 @@ def _find_on_path(spec: ToolchainSpec) -> ResolvedToolchain | None:
 
 
 def _probe(gcc: str, args: tuple[str, ...]) -> bool:
-    """Compile an empty translation unit, to check the target really works.
+    """Compile and link a minimal program, to check the target really works.
 
     Only meaningful where a compiler's presence does not imply it can build
     for the target -- x86, where the host gcc is always there but its 32-bit
     runtime may not be. Skipped entirely when no probe args are configured,
     so a cross toolchain still costs nothing to detect.
+
+    Includes a real header and links (does not just `-c` compile) an empty
+    translation unit on purpose: `-m32` alone is always a valid codegen
+    flag, so compiling one with no #include ever succeeds even when the
+    32-bit glibc headers and libs are missing entirely -- found for real
+    when examples/template's CI hit "bits/wordsize.h: No such file or
+    directory" deep inside dynruntime.mk's own build, on a runner where
+    this probe had already returned True with the old empty-input version.
     """
     if not args:
         return True
+    source = b"#include <stdio.h>\nint main(void) { return 0; }\n"
     try:
         result = subprocess.run(
-            [gcc, *args, "-xc", "-c", "-", "-o", os.devnull],
-            input=b"",
+            [gcc, *args, "-xc", "-", "-o", os.devnull],
+            input=source,
             capture_output=True,
             timeout=30,
             check=False,

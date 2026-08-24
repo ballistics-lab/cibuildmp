@@ -55,6 +55,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   any real C source of its own — it silently excluded
   `examples/template/natmod/template.c`. Narrowed to natmod's own build
   byproducts (`**/build`, `*.mpy`, `.mpy_ld_cache`) instead.
+- `dynruntime.mk` defaults `BUILD ?= build`, not scoped by `$(ARCH)` — a
+  real problem only under `cibuildmp`'s own default (`--only`-less)
+  invocation, which runs every target sequentially in one `natmod/` tree
+  (**D9**): a second `ARCH=` found the first arch's own object files "up
+  to date" and skipped rebuilding, so the merged `.mpy` silently stayed
+  the first arch's binary. Not a `cibuildmp` code fix (the consuming
+  Makefile owns `BUILD`), but real enough to need documenting as a
+  requirement: `examples/template/natmod/Makefile` now sets
+  `BUILD = .obj/$(ARCH)`, and README.md's "Conventions this repo assumes"
+  says so for every other natmod Makefile too.
+- The `x86` toolchain probe compiled an *empty* translation unit, which
+  `-m32` always accepts even with the 32-bit glibc headers/libs entirely
+  missing — so it reported `x86` buildable on a bare `ubuntu-latest`
+  runner, and the real build then failed deep inside `dynruntime.mk`
+  with `bits/wordsize.h: No such file or directory` instead of the clear
+  "install gcc-multilib" error this probe exists to give. Now compiles
+  and links `#include <stdio.h>\nint main(void) { return 0; }`, which
+  actually exercises the missing header chain.
 
 ## [0.3.0a1] - 2026-08-24
 

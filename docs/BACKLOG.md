@@ -513,10 +513,41 @@ against different libcs, which is invisible until something misbehaves.
 
 **`x86` is the one arch that cannot provision itself.** What it needs is the
 host compiler's 32-bit runtime, which no cross-toolchain tarball supplies.
-Finding `gcc` on `PATH` proves nothing there, so the resolver compiles an
-empty translation unit with `-m32` (a `probe-args` entry in the resource
+Finding `gcc` on `PATH` proves nothing there, so the resolver compiles
+a real translation unit with `-m32` (a `probe-args` entry in the resource
 file) and, on failure, errors naming `gcc-multilib` rather than letting the
 build fail later with a confusing compiler diagnostic.
+
+**Fixed after M3 caught it live:** the probe originally compiled an
+*empty* translation unit (`-xc -c -` on empty stdin). `-m32` alone is
+always a valid codegen flag, so that always succeeds even when the 32-bit
+glibc headers/libs are entirely absent — the probe never actually touches
+a header. `examples/template`'s CI hit exactly this on `ubuntu-latest`
+(no 32-bit multilib by default): resolution reported `x86` fine, then the
+real build failed deep inside `dynruntime.mk` with `bits/wordsize.h: No
+such file or directory`. The probe now compiles *and links* `#include
+<stdio.h>\nint main(void) { return 0; }`, which exercises the same header
+chain and the 32-bit crt/libc a real natmod build needs.
+`build-template.yml` also needed its own `apt-get install gcc-multilib`
+step — `.github/actions/build-natmod` already apt-installs it for `ARCH=x86`
+in its own "Install cross-compiler" step, but `build-template.yml` goes
+through the CLI (`action.yml`) instead of that composite action, so it
+does not inherit it.
+
+**Why not just add a `docker` strategy for `x86` and be done with it?**
+It would work — `x86` is in fact the *one* natmod arch where a container's
+isolation is worth something, since it is not a cross-compile at all but
+the host's own `gcc -m32`, which genuinely needs an isolated 32-bit
+userland the way the other nine arches' downloaded toolchain tarballs
+already carry their own target sysroot without one. Not done anyway: a
+container engine dependency, image pulls, and losing "runs on a laptop
+with no root and no mutation of the host" (**D3**) is a real cost to pay
+for one arch out of ten, when the fix is the one-line `apt-get install
+gcc-multilib` every real consumer's CI already runs today (and a laptop
+user hits once, not per build). `docker` stays dropped from natmod scope
+for the same reason recorded above and revisits only for usermod, where
+port builds have real system dependencies a cross-toolchain tarball
+cannot express at all — not just x86's narrower one.
 
 ### M3 — the build itself — **done**
 
