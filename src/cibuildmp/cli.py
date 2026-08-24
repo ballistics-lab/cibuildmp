@@ -4,12 +4,21 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import shutil
 import sys
 from pathlib import Path
 
 from .options import BuildOptions, ConfigError, Options
-from .sources import SourceError, build_mpy_cross, fetch_micropython, read_mpy_abi
-from .targets import Target, UnknownArchError, is_abi_known
+from .sources import (
+    SourceError,
+    build_mpy_cross,
+    cache_root,
+    fetch_micropython,
+    read_mpy_abi,
+)
+from .targets import NATMOD_ARCHS, Target, UnknownArchError, is_abi_known
+from .toolchains import ResolvedToolchain, ToolchainError, resolve
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -17,6 +26,8 @@ def build_parser() -> argparse.ArgumentParser:
         prog="cibuildmp",
         description="Build MicroPython native C extensions across every target "
         "a module supports, from one declarative config.",
+        epilog="Most options are supplied via cibuildmp.toml or CIBMP_* environment "
+        "variables. See docs/BACKLOG.md for the design and what is implemented.",
     )
     parser.add_argument(
         "package_dir",
@@ -46,6 +57,27 @@ def build_parser() -> argparse.ArgumentParser:
         "the default is one invocation building every selected target.",
     )
     parser.add_argument(
+        "--archs",
+        default=None,
+        help="Comma-separated list of architectures to build, or 'all'. Overrides "
+        "the config's own archs. There is no 'auto': every natmod arch is a "
+        "cross-compile, so none of them depends on what this machine is.",
+    )
+    parser.add_argument(
+        "--toolchain",
+        default="auto",
+        choices=["auto", "host", "download"],
+        help="How to obtain each target's cross toolchain. auto (default) uses "
+        "one already on PATH and downloads a pinned tarball otherwise; host "
+        "refuses to download; download ignores what is on PATH.",
+    )
+    parser.add_argument(
+        "--clean-cache",
+        action="store_true",
+        help="Delete cibuildmp's cache (MicroPython checkouts, mpy-cross builds "
+        "and downloaded toolchains) and exit",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print the resolved build plan and exit without building",
@@ -68,6 +100,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="With --print-build-identifiers, emit a JSON array instead of lines",
     )
     parser.add_argument(
+        "--allow-empty",
+        action="store_true",
+        help="Do not report an error code if no target is selected",
+    )
+    parser.add_argument(
+        "--debug-traceback",
+        action="store_true",
+        default=os.environ.get("CIBMP_DEBUG_TRACEBACK", "") not in {"", "0"},
+        help="Print a full traceback for all errors",
+    )
+    parser.add_argument(
         "--platform",
         default="natmod",
         choices=["natmod"],
@@ -77,20 +120,29 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _plan_line(index: int, total: int, options: BuildOptions) -> str:
+def _plan_line(
+    index: int,
+    total: int,
+    options: BuildOptions,
+    chain: ResolvedToolchain | None = None,
+) -> str:
     make = ["make", "-C", options.module_dir, f"ARCH={options.target.arch}"]
     make += options.extra_make_args
     make.append(options.make_target)
+    # The prefix actually in play, which is not always the one dynruntime.mk
+    # hardcodes -- showing target.cross here would contradict the CROSS=
+    # override sitting in the same line's make command.
+    prefix = chain.prefix if chain is not None else options.target.cross
     # Right-align the counter so the columns after it stay put once the
     # index gains a digit ([10/10] is wider than [9/10]).
     counter = f"[{index:>{len(str(total))}}/{total}]"
     return (
         f"{counter} {options.target.identifier:<28} "
-        f"CROSS={options.target.cross or '(host)':<22} {' '.join(make)}"
+        f"CROSS={prefix or '(host)':<22} {' '.join(make)}"
     )
 
 
-def build(options: Options, targets: list[Target]) -> int:
+def build(options: Options, targets: list[Target], *, toolchain: str = "auto") -> int:
     """Build every selected target in one invocation.
 
     Sequential and in-process on purpose (D9), the same shape cibuildwheel
@@ -104,12 +156,29 @@ def build(options: Options, targets: list[Target]) -> int:
     resolved = [options.build_options(t) for t in targets]
     total = len(resolved)
 
+    # Toolchains are resolved before the plan is printed, not after: where a
+    # toolchain's prefix is not the one dynruntime.mk hardcodes, resolution
+    # adds a CROSS= override, and a plan printed first would show a make
+    # command that is not the one about to run.
+    print(f"cibuildmp: resolving toolchains for {total} target(s)")
+    chains = []
+    for build_options in resolved:
+        chain = resolve(build_options.target.arch, strategy=toolchain)
+        chains.append(chain)
+        build_options.extra_make_args = [
+            *chain.make_overrides,
+            *build_options.extra_make_args,
+        ]
+
     print(
-        f"cibuildmp: {total} target(s) against MicroPython {options.micropython} "
+        f"\ncibuildmp: {total} target(s) against MicroPython {options.micropython} "
         f"(.mpy ABI {options.abi})"
     )
-    for index, build_options in enumerate(resolved, 1):
-        print("  " + _plan_line(index, total, build_options))
+    for index, (build_options, chain) in enumerate(
+        zip(resolved, chains, strict=True), 1
+    ):
+        print("  " + _plan_line(index, total, build_options, chain))
+        print(f"        {chain.describe()}")
 
     # Shared setup, paid once for the whole invocation rather than once per
     # matrix leg -- see build()'s own docstring and D9.
@@ -132,13 +201,13 @@ def build(options: Options, targets: list[Target]) -> int:
             f"cibuildmp.targets.MPY_ABI."
         )
 
-    # M2-M3 land here, inside the loop: resolve each target's toolchain, run
-    # make, then collect and verify the output.
+    # M3 lands here: run make under that toolchain, then collect and verify
+    # the output.
     sys.stdout.flush()  # keep the output above ahead of the stderr note below
     print(
-        "\ncibuildmp: the per-target build is not implemented yet (M1 ships "
-        "MicroPython and mpy-cross provisioning). Re-run with --dry-run to get "
-        "the plan as a success.",
+        "\ncibuildmp: the per-target build is not implemented yet (M2 ships "
+        "toolchain resolution). Re-run with --dry-run to get the plan as a "
+        "success.",
         file=sys.stderr,
     )
     return 1
@@ -148,12 +217,29 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    if args.clean_cache:
+        root = cache_root()
+        if not root.exists():
+            print(f"cibuildmp: nothing to clean ({root} does not exist)")
+            return 0
+        shutil.rmtree(root)
+        print(f"cibuildmp: removed {root}")
+        return 0
+
     try:
         options = Options.load(args.package_dir, args.config_file)
         if args.output_dir is not None:
             options.output_dir = args.output_dir
+        if args.archs is not None:
+            options.archs = (
+                list(NATMOD_ARCHS)
+                if args.archs.strip() == "all"
+                else [a.strip() for a in args.archs.split(",") if a.strip()]
+            )
         targets = options.targets()
     except (ConfigError, UnknownArchError, SourceError) as exc:
+        if args.debug_traceback:
+            raise
         print(f"cibuildmp: error: {exc}", file=sys.stderr)
         return 2
 
@@ -192,7 +278,14 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if not targets:
-        print("cibuildmp: error: no targets selected", file=sys.stderr)
+        if args.allow_empty:
+            print("cibuildmp: no targets selected")
+            return 0
+        print(
+            "cibuildmp: error: no targets selected. Pass --allow-empty if that "
+            "is expected.",
+            file=sys.stderr,
+        )
         return 2
 
     if not is_abi_known(options.micropython):
@@ -215,7 +308,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     try:
-        return build(options, targets)
-    except SourceError as exc:
+        return build(options, targets, toolchain=args.toolchain)
+    except (SourceError, ToolchainError) as exc:
+        if args.debug_traceback:
+            raise
         print(f"cibuildmp: error: {exc}", file=sys.stderr)
         return 2

@@ -11,72 +11,33 @@ from __future__ import annotations
 import fnmatch
 from dataclasses import dataclass
 
+from .resources import natmod_data
+
 # ── Architectures ─────────────────────────────────────────────────────────
-# The ten ARCH values py/dynruntime.mk actually accepts, with the CROSS
-# prefix each one selects there. Read straight off dynruntime.mk's own
-# ifeq chain -- ten arches, but only five distinct toolchains.
+# Both tables below are transcriptions of MicroPython's own source, and both
+# live in resources/natmod.toml rather than here -- see resources.py for
+# why pinned data is kept out of the source.
 #
-# No aarch64: dynruntime.mk has no ARCH=aarch64 branch at all as of
-# MicroPython v1.28, so natmod cannot target it under any configuration.
-NATMOD_CROSS: dict[str, str] = {
-    "x86": "",  # host gcc, -m32
-    "x64": "",  # host gcc
-    "armv6m": "arm-none-eabi-",
-    "armv7m": "arm-none-eabi-",
-    "armv7emsp": "arm-none-eabi-",
-    "armv7emdp": "arm-none-eabi-",
-    "xtensa": "xtensa-lx106-elf-",
-    "xtensawin": "xtensa-esp32-elf-",
-    "rv32imc": "riscv64-unknown-elf-",
-    "rv64imc": "riscv64-unknown-elf-",
-}
+#   [arch]     py/dynruntime.mk's ifeq chain: the ten ARCH values it accepts
+#              and the CROSS prefix each selects. Ten arches, five toolchains.
+#   [mpy-abi]  py/persistentcode.h's MPY_VERSION/MPY_SUB_VERSION per tag.
+_ARCH_TABLE: dict[str, dict[str, str]] = natmod_data()["arch"]
+
+NATMOD_CROSS: dict[str, str] = {arch: row["cross"] for arch, row in _ARCH_TABLE.items()}
 
 NATMOD_ARCHS: tuple[str, ...] = tuple(NATMOD_CROSS)
 
 # ── .mpy ABI ──────────────────────────────────────────────────────────────
-# MicroPython release tag -> "<MPY_VERSION>.<MPY_SUB_VERSION>", read out of
-# py/persistentcode.h at that tag.
-#
-# This is the compatibility axis, and it is deliberately not the release
-# tag: a native .mpy loads into any runtime whose MPY_VERSION *and*
-# MPY_SUB_VERSION both match (py/persistentcode.h's own rule -- a
-# bytecode-only .mpy needs only the former). ABI 6.3 alone spans v1.23.0
-# through v1.29.0-preview, so pinning a matrix to a release tag would claim
-# far narrower compatibility than the artifact actually has.
-#
-# A table rather than a lookup in the checkout because identifier
-# generation must work with no checkout at all. Tags missing here are not
-# an error: see abi_for_tag().
-MPY_ABI: dict[str, str] = {
-    "v1.20.0": "6.1",
-    "v1.21.0": "6.1",
-    "v1.22.0-preview": "6.1",
-    "v1.22.0": "6.2",
-    "v1.22.1": "6.2",
-    "v1.22.2": "6.2",
-    "v1.23.0-preview": "6.2",
-    "v1.23.0": "6.3",
-    "v1.24.0-preview": "6.3",
-    "v1.24.0": "6.3",
-    "v1.24.1": "6.3",
-    "v1.25.0-preview": "6.3",
-    "v1.25.0": "6.3",
-    "v1.26.0-preview": "6.3",
-    "v1.26.0": "6.3",
-    "v1.26.1": "6.3",
-    "v1.27.0-preview": "6.3",
-    "v1.27.0": "6.3",
-    "v1.28.0-preview": "6.3",
-    "v1.28.0": "6.3",
-    "v1.29.0-preview": "6.3",
-}
+_ABI_TABLE: dict[str, str] = dict(natmod_data()["mpy-abi"])
 
-# Used when a tag is not in MPY_ABI. Every release since v1.23.0 has been
-# 6.3, so assuming it for an unknown (i.e. newer, or a branch name) tag is
-# right far more often than it is wrong -- and when it is wrong the build
-# catches it: the arch/ABI actually encoded in each produced .mpy header is
+# Used when a tag is not listed. Every release since v1.23.0 has been 6.3,
+# so assuming the latest for an unknown (i.e. newer, or a branch name) tag
+# is right far more often than it is wrong -- and when it is wrong the build
+# catches it: the ABI actually encoded in each produced .mpy header is
 # verified against its identifier before the file is collected.
-LATEST_KNOWN_ABI = "6.3"
+LATEST_KNOWN_ABI: str = _ABI_TABLE.pop("latest")
+
+MPY_ABI: dict[str, str] = _ABI_TABLE
 
 
 # ── Runners ───────────────────────────────────────────────────────────────

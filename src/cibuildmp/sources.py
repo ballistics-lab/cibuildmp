@@ -13,6 +13,7 @@ dependency tree resolved before it can fetch anything is harder to trust.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import subprocess
@@ -21,6 +22,7 @@ import tarfile
 import tempfile
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
 
 # The release *asset*, not GitHub's auto-generated archive: only the former
@@ -48,6 +50,65 @@ def cache_root() -> Path:
     return base / "cibuildmp"
 
 
+# -- Shared primitives ----------------------------------------------------
+
+
+def verify_sha256(path: Path, expected: str) -> None:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(1 << 20):
+            digest.update(chunk)
+    actual = digest.hexdigest()
+    if actual != expected:
+        raise SourceError(
+            f"checksum mismatch for {path.name}: expected {expected}, got {actual}"
+        )
+
+
+def extract_archive(archive: Path, into: Path) -> None:
+    """Extract a .tar.gz/.tar.xz, refusing paths that escape `into`."""
+    with tarfile.open(archive) as tar:
+        # filter="data" refuses absolute paths and traversal out of the
+        # destination. Guarded because it landed mid-3.11.
+        kwargs = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}
+        tar.extractall(into, **kwargs)  # type: ignore[arg-type]
+
+
+def sole_directory(parent: Path, what: str) -> Path:
+    roots = [p for p in parent.iterdir() if p.is_dir()]
+    if len(roots) != 1:
+        raise SourceError(
+            f"expected one top-level directory in {what}, found {len(roots)}"
+        )
+    return roots[0]
+
+
+def cached_dir(
+    dest: Path, populate: Callable[[Path], Path], *, force: bool
+) -> tuple[Path, bool]:
+    """Ensure `dest` holds a complete tree, building it via `populate`.
+
+    `populate` receives a staging directory and returns the subdirectory of
+    it that should become `dest`. The move is atomic and gated on a stamp
+    file, so a run killed midway leaves nothing the next run will trust.
+    Returns (dest, was_cached).
+    """
+    if dest.joinpath(STAMP).exists() and not force:
+        return dest, True
+    if dest.exists():
+        shutil.rmtree(dest)
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=".staging-", dir=dest.parent))
+    try:
+        built = populate(staging)
+        built.joinpath(STAMP).touch()
+        os.replace(built, dest)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+    return dest, False
+
+
 # -- MicroPython ----------------------------------------------------------
 
 
@@ -69,26 +130,15 @@ def fetch_micropython(
     already vendors every one of them, which is the whole reason it is
     preferred. See _clone().
     """
-    dest = micropython_dir(tag, root)
-
-    if dest.joinpath(STAMP).exists() and not force:
-        if not quiet:
-            print(f"  MicroPython {tag}: cached at {dest}")
-        return dest
-    if dest.exists():
-        # Either --force, or a previous run died mid-extract. Neither leaves
-        # anything worth keeping.
-        shutil.rmtree(dest)
-
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    staging = Path(tempfile.mkdtemp(prefix=".staging-", dir=dest.parent))
-    try:
-        extracted = _fetch_into(tag, staging, submodules=submodules or [], quiet=quiet)
-        extracted.joinpath(STAMP).touch()
-        os.replace(extracted, dest)
-    finally:
-        shutil.rmtree(staging, ignore_errors=True)
-
+    dest, was_cached = cached_dir(
+        micropython_dir(tag, root),
+        lambda staging: _fetch_into(
+            tag, staging, submodules=submodules or [], quiet=quiet
+        ),
+        force=force,
+    )
+    if was_cached and not quiet:
+        print(f"  MicroPython {tag}: cached at {dest}")
     return dest
 
 
@@ -98,7 +148,7 @@ def _fetch_into(tag: str, staging: Path, *, submodules: list[str], quiet: bool) 
     archive = staging / "micropython.tar.xz"
 
     try:
-        _download(url, archive, quiet=quiet)
+        download_file(url, archive, quiet=quiet)
     except urllib.error.HTTPError as exc:
         if exc.code != 404:
             raise SourceError(f"downloading {url} failed: {exc}") from exc
@@ -110,19 +160,9 @@ def _fetch_into(tag: str, staging: Path, *, submodules: list[str], quiet: bool) 
 
     if not quiet:
         print(f"  MicroPython {tag}: extracting")
-    with tarfile.open(archive) as tar:
-        # filter="data" refuses absolute paths and traversal out of the
-        # destination. Guarded because it landed mid-3.11.
-        kwargs = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}
-        tar.extractall(staging, **kwargs)  # type: ignore[arg-type]
+    extract_archive(archive, staging)
     archive.unlink()
-
-    roots = [p for p in staging.iterdir() if p.is_dir()]
-    if len(roots) != 1:
-        raise SourceError(
-            f"expected one top-level directory in the {tag} tarball, found {len(roots)}"
-        )
-    return roots[0]
+    return sole_directory(staging, f"the {tag} tarball")
 
 
 def _clone(tag: str, staging: Path, *, submodules: list[str], quiet: bool) -> Path:
@@ -161,7 +201,7 @@ def _clone(tag: str, staging: Path, *, submodules: list[str], quiet: bool) -> Pa
     return dest
 
 
-def _download(url: str, dest: Path, *, quiet: bool) -> None:
+def download_file(url: str, dest: Path, *, quiet: bool) -> None:
     with urllib.request.urlopen(url) as response:
         total = int(response.headers.get("Content-Length") or 0)
         show = not quiet and sys.stderr.isatty() and total > 0

@@ -65,7 +65,7 @@ def test_fetch_extracts_and_stamps(tmp_path, monkeypatch):
         calls.append(url)
         _tarball(dest)
 
-    monkeypatch.setattr(sources, "_download", fake_download)
+    monkeypatch.setattr(sources, "download_file", fake_download)
     mpy_dir = sources.fetch_micropython("v1.28.0", tmp_path, quiet=True)
 
     assert mpy_dir == micropython_dir("v1.28.0", tmp_path)
@@ -91,7 +91,7 @@ def test_incomplete_checkout_is_not_reused(tmp_path, monkeypatch):
     (stale / "junk").write_text("half a tarball")
 
     monkeypatch.setattr(
-        sources, "_download", lambda url, dest, *, quiet: _tarball(dest)
+        sources, "download_file", lambda url, dest, *, quiet: _tarball(dest)
     )
     mpy_dir = sources.fetch_micropython("v1.28.0", tmp_path, quiet=True)
 
@@ -103,7 +103,7 @@ def test_failed_fetch_leaves_no_cache_entry(tmp_path, monkeypatch):
     def boom(url, dest, *, quiet):
         raise OSError("network down")
 
-    monkeypatch.setattr(sources, "_download", boom)
+    monkeypatch.setattr(sources, "download_file", boom)
     with pytest.raises(OSError, match="network down"):
         sources.fetch_micropython("v1.28.0", tmp_path, quiet=True)
 

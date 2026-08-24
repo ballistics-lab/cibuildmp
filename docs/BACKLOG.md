@@ -112,6 +112,22 @@ generator feeds. Revisit for usermod, where different targets genuinely need
 different runners and the fan-out becomes structural rather than a
 preference.
 
+**D10 — pinned data lives in `resources/`, not in Python.**
+Checked against cibuildwheel rather than invented: it keeps
+`resources/build-platforms.toml` (identifiers and interpreter versions),
+`resources/pinned_docker_images.cfg` (image digests, pinned by `@sha256:`
+with a dated comment), `nodejs.toml` and
+`python-build-standalone-releases.json` out of its source — which is why its
+`--only` reads its `choices` from `read_all_configs()`. Everything in those
+files goes stale on someone else's schedule, so bumping one should be a
+reviewable data diff a script can make, not a patch to resolver logic.
+
+`src/cibuildmp/resources/natmod.toml` holds all three of ours: the arch →
+`CROSS` map (transcribed from `py/dynruntime.mk`), the tag → `.mpy` ABI map
+(from `py/persistentcode.h`), and the toolchain download pins. A cross-check
+runs at import and fails loudly if the arch table and the toolchain table
+disagree about a prefix.
+
 ## Identifier scheme
 
 Shaped after `cp311-manylinux_x86_64` = *{ABI}-{platform}\_{arch}*:
@@ -299,20 +315,57 @@ Measured on this machine, `CIBMP_BUILD="*-x64" cibuildmp`: **37 s cold**
 whole argument for D9 — under a ten-leg matrix the cold path is paid ten
 times over.
 
-### M2 — toolchain resolver
+### M2 — toolchain resolver — **done**
 
-- [ ] Resolver interface: given an identifier, return an environment
-      (`CROSS_COMPILE`, `PATH` additions) or raise a clear "not available
-      here" error.
-- [ ] Strategies in priority order: `host` (already on `PATH` — always tried
-      first, and the whole story for `x64`), `download` (tarball into
-      `~/.cache/cibuildmp/toolchains/<name>/<version>/`), `docker` (opt-in).
-- [ ] `--toolchain=host|download|docker` to force one.
-- [ ] arm-none-eabi tarball source + pinned version.
-- [ ] riscv tarball source + pinned version, **picolibc verified**.
-- [ ] xtensa-lx106 tarball (port the URL from `build-natmod`).
-- [ ] xtensa-esp32 standalone tarball (see the ESP-IDF finding above).
-- [ ] Checksum verification for every download.
+`src/cibuildmp/toolchains.py`, with every pin in
+`src/cibuildmp/resources/natmod.toml`.
+
+- [x] Resolver returning a `ResolvedToolchain` (strategy, prefix, `bin_dir`
+      for `PATH`, and any `make` overrides) or a clear "not available here"
+      error naming the apt package.
+- [x] Strategies `host` → `download`, `--toolchain=auto|host|download`.
+      `host` is tried first so a CI runner with the apt packages installed
+      behaves exactly as `build-natmod` does today and downloads nothing.
+- [x] Pins verified against the real releases, not assumed: arm-none-eabi
+      15.2.1-1.1 and riscv-none-elf 15.2.0-1 from xpack, xtensa-esp-elf
+      16.1.0_20260609 from `espressif/crosstool-NG`, xtensa-lx106 from
+      micropython.org (the tarball `ci_esp8266_setup` uses).
+- [x] sha256 for every download — xpack's own `<asset>.sha` sidecar where it
+      exists, a literal pin (computed locally) for Espressif and
+      micropython.org, which publish none.
+- [x] **Confirmed: `xtensawin` does not need ESP-IDF.** `dynruntime.mk` asks
+      only for `xtensa-esp32-elf-` on `PATH`, and the `build-natmod` action's
+      own comment already says `install.sh` just downloads the toolchain from
+      GitHub releases. Fetching that release directly replaces an
+      `esp-idf` clone plus installer — the heaviest step in this repo's CI —
+      with an 84 MiB tarball. Measured end to end: 21 s cold, including the
+      download.
+- [ ] `docker` strategy. Dropped from natmod scope, not forgotten: every
+      natmod arch is a cross-compile running on the build host, so a
+      container adds isolation but no capability. It belongs to usermod.
+
+**Prefix reconciliation.** `dynruntime.mk` hardcodes `riscv64-unknown-elf-`
+(Debian's naming) and `xtensa-esp32-elf-`, while the tarballs ship
+`riscv-none-elf-` and a unified `xtensa-esp-elf-`. Rather than symlinking a
+fake prefix into the cache, the resolver appends `CROSS=<actual>` to the
+`make` command line: `dynruntime.mk` assigns `CROSS` with `=` inside its
+per-ARCH `ifeq` chain and never marks it `override`, so a command-line
+variable wins — including for the `$(shell $(CROSS)gcc …)` picolibc probe
+evaluated while the makefile is parsed.
+
+**picolibc.** Resolved, and it is not the risk it looked like.
+`dynruntime.mk` probes `--print-file-name=picolibc.specs` and adds `-specs=`
+only when the toolchain has it; the apt path installs
+`picolibc-riscv64-unknown-elf` explicitly, and the xpack build falls back to
+its own newlib. Worth keeping an eye on: the two paths therefore link
+against different libcs, which is invisible until something misbehaves.
+
+**`x86` is the one arch that cannot provision itself.** What it needs is the
+host compiler's 32-bit runtime, which no cross-toolchain tarball supplies.
+Finding `gcc` on `PATH` proves nothing there, so the resolver compiles an
+empty translation unit with `-m32` (a `probe-args` entry in the resource
+file) and, on failure, errors naming `gcc-multilib` rather than letting the
+build fail later with a confusing compiler diagnostic.
 
 ### M3 — the build itself
 
