@@ -1172,6 +1172,33 @@ style, now that a slice of it is actually implemented:
   provisioning first (`unix`, `windows` once MSYS2 is handled, `webassembly`,
   `qemu`/armv7m) — the natmod `build.py` shape, pointed at the composite
   actions' own recipes.
+  - [x] `usermod/build.py`: `build_unix()`, for `x64`/`x86`/`aarch64` only.
+        `UNIX_ARCH_SETTINGS` (`CROSS_COMPILE`/`link_opts`/`standalone` per
+        arch) is transcribed from `.github/actions/build-usermod-unix`'s
+        own case statement and cross-checked against a real `v1.28.0`
+        `ports/unix/Makefile` directly — `CROSS_COMPILE`,
+        `MICROPY_FORCE_32BIT`, `MICROPY_STANDALONE` are that Makefile's
+        own variables, not the action's invention. `x86` reuses
+        `toolchains.resolve("x86")` — natmod's own `-m32` multilib probe
+        — rather than re-implementing detection, since "x86" means the
+        same thing in both places. Output collection is a plain
+        `$(BUILD)/micropython` path check (`PROG ?= micropython`'s own
+        default), no globbing needed the way natmod's `.mpy` collection
+        needs. `tests/test_usermod_build.py` (13 cases, hermetic,
+        `subprocess.run` mocked the same way `tests/test_build.py`
+        already does) plus a live build: a real `v1.28.0` checkout, `make
+        -C ports/unix` run for real (not `--dry-run`), 40s, a genuine
+        825768-byte linked binary.
+  - [ ] `armhf`/`mipsel`: settings are pinned (same table above) but
+        `build_unix()` raises rather than attempting either — both need a
+        cross-toolchain no resolver here provisions yet
+        (`arm-linux-gnueabihf-`/`mipsel-linux-gnu-`, glibc-hosted, not
+        natmod's bare-metal pins) plus the `deplibs` static-libffi
+        pre-step wired to a real toolchain. Real work, not attempted in
+        this slice.
+  - [ ] `webassembly`, `qemu`/armv7m, `windows` — not started. `windows`
+        specifically waits on **M9**'s MSYS2 orchestration (**D18**), not
+        just a toolchain pin.
 - **M9** — toolchain provisioning: MSYS2 orchestration (**D18**), ESP-IDF
   fetch + caching, `docker` strategy revisit for it (**D19**).
 - **M10** — runner/matrix integration, fan-out-by-default for usermod
