@@ -1150,6 +1150,24 @@ style, now that a slice of it is actually implemented:
         M7.
 - **M7** — combined-`FROZEN_MANIFEST` generation + `USER_C_MODULES`
   resolution off that database (**D17**).
+  - [x] `usermod/manifests.py`'s `combined_manifest(port, module_manifest)`
+        and `usermod/portinfo.py`'s `resolve_user_c_modules(port,
+        module_dir)`. Verified byte-for-byte against `a7p`'s own
+        `mp-usermod.yml` — its `cat > manifest.py <<EOF ... EOF` bodies
+        and `user_c_modules:` inputs, not just the paths already pinned in
+        **D16**/**D17** — before writing either function, at the user's
+        own request: that check is what caught the `default-manifest` bug
+        one commit up (see **D17**'s own addendum), so it ran again here
+        rather than trusting the now-corrected table alone.
+        `tests/test_manifests.py` and the new cases in
+        `tests/test_portinfo.py` assert the exact literal strings that
+        workflow's own heredocs and `with:` blocks produce today, for
+        every one of the six ports, `qemu`'s no-default-line case
+        included.
+  - [ ] Not in this slice: actually writing the combined manifest to a
+        file and invoking a build with it (**M8**'s own job) — `M7` stops
+        at generating the *text* and the *value*, the same string-in
+        string-out shape `targets.py`'s own resolvers already have.
 - **M8** — the build driver itself, for the ports that need no exotic
   provisioning first (`unix`, `windows` once MSYS2 is handled, `webassembly`,
   `qemu`/armv7m) — the natmod `build.py` shape, pointed at the composite

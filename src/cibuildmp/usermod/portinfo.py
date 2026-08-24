@@ -57,3 +57,21 @@ def known_ports() -> tuple[str, ...]:
     every port MicroPython ships.
     """
     return tuple(sorted(_PORTS))
+
+
+def resolve_user_c_modules(port: str, module_dir: str) -> str:
+    """The USER_C_MODULES value to pass for `port`'s build, given the
+    directory holding a consumer's own module (D16).
+
+    "make" ports take `module_dir` as-is -- py/py.mk globs
+    `<module_dir>/*/micropython.mk`. "cmake" ports take the module's own
+    `micropython.cmake` file directly: py/usermod.cmake would also accept
+    a bare directory there (it appends `/micropython.cmake` itself), but
+    every real cmake-port consumer (a7p's own mp-usermod.yml, for both
+    esp32 and rp2) always passes the file, so this mirrors that rather
+    than relying on the directory form nothing here has actually
+    exercised.
+    """
+    if build_system(port) == "cmake":
+        return f"{module_dir}/micropython.cmake"
+    return module_dir

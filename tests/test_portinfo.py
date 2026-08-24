@@ -5,6 +5,7 @@ from cibuildmp.usermod.portinfo import (
     build_system,
     default_manifest,
     known_ports,
+    resolve_user_c_modules,
 )
 
 
@@ -45,3 +46,23 @@ def test_unknown_port_raises_with_the_known_list():
         build_system("stm32")
     with pytest.raises(UnknownPortError):
         default_manifest("stm32")
+
+
+def test_resolve_user_c_modules_matches_a7p_workflow_literal():
+    # a7p's own `user_c_modules:` inputs, byte for byte:
+    #   unix/webassembly/windows: .../micropython/usermod  (a directory)
+    #   esp32/rp2:                .../micropython/usermod/micropython.cmake
+    module_dir = "/gh/ws/micropython/usermod"
+
+    assert resolve_user_c_modules("unix", module_dir) == module_dir
+    assert resolve_user_c_modules("webassembly", module_dir) == module_dir
+    assert resolve_user_c_modules("windows", module_dir) == module_dir
+    assert resolve_user_c_modules("qemu", module_dir) == module_dir
+    assert (
+        resolve_user_c_modules("esp32", module_dir)
+        == "/gh/ws/micropython/usermod/micropython.cmake"
+    )
+    assert (
+        resolve_user_c_modules("rp2", module_dir)
+        == "/gh/ws/micropython/usermod/micropython.cmake"
+    )
