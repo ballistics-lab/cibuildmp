@@ -100,6 +100,36 @@ Do **not** take the port → Docker-image map or command construction: that
 layer is exactly what **D3** wants `cibuildmp` to resolve itself, and it is
 coupled to mpbuild's own CLI.
 
+Verified directly against mpbuild's source (`src/mpbuild/build.py` and
+`board_database.py`), not assumed: the boundary above holds exactly at the
+file level. `board_database.py` has zero Docker references — its own
+`Board.images` field is board *photographs* from the `micropython-media`
+repo, easy to misread as a hit on first grep, not container images. The
+port → image resolution mpbuild actually uses lives entirely in
+`build.py`, as a small, mostly-static `BUILD_CONTAINERS` dict keyed by
+**port**, not by board: `"stm32"`/`"rp2"` → `micropython/build-micropython-arm`
+(`ARM_BUILD_CONTAINER`), `"esp32"` → `espressif/idf:v5.4.2`
+(`ESP_IDF_CONTAINER:ESP_IDF_FALLBACK_VERSION`), and so on per port. Two
+special cases sit on top of the static table rather than folding into it:
+`rp2` switches to `micropython/build-micropython-rp2350riscv` when its
+`variant == "RISCV"` (the ARM image otherwise), and `esp32` runs a
+three-tier version probe (lockfile → CI workflow → the hardcoded `v5.4.2`
+fallback above) instead of one fixed tag — the only place this map is not
+pure data. `docker_build_cmd()` then assembles an ordinary `docker run
+--rm -v <mpy_dir>:<mpy_dir> -w <mpy_dir> --user <uid>:<gid> -e HOME=/tmp
+<image> ...` — nothing mpbuild-specific in the invocation shape itself.
+
+This narrows what "do not take the command construction" means in
+practice: the `docker run` shape is generic enough not to need
+transcribing at all, and the image table is small enough to fit **D10**'s
+pattern directly rather than D7's own vendored-module treatment — a
+`resources/usermod-images.toml` (port → image, with the `rp2` RISCV
+variant as an override entry) plus one small hand-written function for the
+esp32 version probe, sourced by hand from `build.py` rather than imported.
+Feeds directly into **D19**: the same table this describes is exactly what
+an eventual `docker` strategy for `esp32` (and `rp2`/`stm32` too, if D20's
+runner story puts them on it) would pin.
+
 Correction to a constraint this decision previously rested on: mpbuild does
 **not** require a MicroPython git checkout. `Database.__post_init__` only
 checks `(root / "ports").is_dir()`; nothing else in the module touches git,
@@ -940,7 +970,9 @@ than natmod's `x86` ever was (**M2**'s own "why not docker" note is
 specific to x86's narrow `gcc-multilib` gap and says usermod is where that
 tradeoff flips) — Espressif ships its own `espressif/idf` Docker images
 built for exactly this. Revisit **D3**'s `docker` strategy here first, not
-as a general-purpose escape hatch.
+as a general-purpose escape hatch. mpbuild's own fallback tag
+(`espressif/idf:v5.4.2`, **D7**) and its lockfile/CI-workflow version-probe
+are a concrete starting pin, not a new lookup to invent.
 
 **D20 (revisits D9) — usermod runner selection is structural, confirmed
 live, not a hypothetical "different targets need different runners."**
