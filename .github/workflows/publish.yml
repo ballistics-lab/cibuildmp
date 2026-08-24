@@ -1,0 +1,74 @@
+name: Upload Python Package
+
+# Publishes to PyPI via Trusted Publishing (OIDC) -- no API token stored in
+# this repository at all. Requires, on the PyPI side, a trusted publisher
+# configured for this repo, this workflow filename, and the `pypi`
+# environment named below.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+    permissions:
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Load-bearing, not a default worth trimming: the version comes
+          # from setuptools-scm, which derives it from the nearest git tag.
+          # A shallow checkout has no tags, so the build would silently
+          # produce 0.0.0.dev0 (pyproject's fallback_version) instead of the
+          # release's own version.
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
+        with:
+          # 3.11 is this package's own floor (tomllib); 3.14 matches what
+          # action.yml and cibuildmp-matrix pin, so every runner in this repo
+          # is on one version.
+          python-version: "3.14"
+
+      - name: Install the project
+        run: uv sync
+
+      - name: Test
+        # A publish workflow that cannot fail is a publish workflow that can
+        # ship anything. These are seconds, and a released version cannot be
+        # replaced on PyPI once it is up.
+        run: uv run pytest -q
+
+      - name: Build
+        run: uv build
+
+      - name: Check the version is a real release
+        # setuptools-scm produces a .devN version whenever HEAD is not
+        # exactly on a tag, or the tree is dirty, and a local-version suffix
+        # (+g<sha>) which PyPI rejects outright. Read it off the built
+        # artifact rather than the installed metadata: the filename is
+        # exactly what gets uploaded.
+        run: |
+          set -euo pipefail
+          WHEEL=$(ls dist/*.whl)
+          VERSION=$(basename "$WHEEL" | cut -d- -f2)
+          echo "built version: $VERSION"
+          case "$VERSION" in
+            *dev*|*+*|0.0.0*)
+              echo "::error::refusing to publish $VERSION -- HEAD is not on a tag, or the working tree is dirty"
+              exit 1
+              ;;
+          esac
+
+      - name: Publish
+        if: github.event_name == 'release'
+        run: uv publish --trusted-publishing always
