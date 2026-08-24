@@ -893,6 +893,8 @@ Two different selector axes, not the same thing under two names:
   `mpbuild`'s board database was never going to cover these regardless of
   the dependency-vs-vendor question **D7** is actually about — a variant
   isn't a board missing from the list, it's a different axis entirely.
+- **`zephyr` fits neither axis above** — no `board.json`, no `variant:`,
+  and no `mpbuild` coverage at all. See **D22**.
 
 `cibuildmp` drives `unix`/`windows`/`webassembly`'s own port Makefile
 directly, the same delegate-the-compile shape **D2** already uses for
@@ -1009,6 +1011,50 @@ because a usermod that links cleanly but fails to boot is a real, observed
 failure class, not a hypothetical one. This does not overturn **D6** for
 natmod. It does mean usermod's own eventual phase should decide this
 question on purpose rather than inherit D6's answer by default.
+
+**D22 — `zephyr` is a third selector axis, not a board-based port that
+just needs its boards added, and has no reference implementation to
+design against.** Checked directly against upstream
+(`ports/zephyr/boards/`), not assumed: there is no `board.json` anywhere
+in it — board selection is `<board>.conf` (a Kconfig fragment) plus an
+optional `<board>.overlay` (devicetree), a flat per-board-name file pair
+that is MicroPython's own zephyr-specific convention, unrelated to the
+`board.json` shape **D7**'s vendored `board_database.py` scans for. The
+"two selector axes" split above (board.json vs. `variant:`) does not have
+a third slot for this — enumerating zephyr's boards means globbing
+`boards/*.conf` directly, not extending the vendored scanner, since there
+is nothing in that shape for the scanner to find.
+
+`mpbuild` itself has no opinion here either: checked its `BUILD_CONTAINERS`
+dict directly (the same one **D7**'s own addendum above transcribes for
+`stm32`/`rp2`/`esp32`/…) — fifteen port keys, no `zephyr` among them. So
+unlike the six ports **D16–D21** rest on (all live, all proven in
+`a7p`'s `mp-usermod.yml`), zephyr has neither an existing composite
+action nor a working consumer workflow to design the identifier/config
+scheme against — the exact position natmod's own M0 was in before it had
+`cibuildwheel` to reason from by analogy, except here there is no
+analogous tool at all to lean on, mpbuild included.
+
+Build tooling is a fourth story on top of **D3**'s `host`/`download`/
+`docker`, not a variant of the three already known: `west` (Zephyr's own
+meta-tool) driving CMake, which in turn expects a full Zephyr SDK /
+module workspace on the machine — heavier than **D19**'s ESP-IDF case,
+which at least resolves to one `--recursive` clone plus one installer
+script; `west`'s own workspace model pulls in Zephyr's own multi-repo
+manifest. `boards/manifest.py` does exist (confirms **D17**'s
+default-manifest-per-port pattern generalizes here too), but whether
+`CMakeLists.txt` accepts a `USER_C_MODULES`-style entry point the way
+esp32/rp2040 do (**D16**) is unverified — not read yet, and should not be
+assumed either way before it is.
+
+Not scheduled, and deliberately left out of the **M6–M12** outline below
+rather than folded into `boards.py`'s (D7) or the build driver's (M8)
+work: doing either now would repeat the mistake D16–D21 just corrected
+in this section, reasoning about a fourth axis as if it were already
+understood before any of it has been read from `west`/CMake directly.
+Revisit once a real consumer wants a zephyr usermod build, the same way
+the six existing ports got their own findings from `a7p` actually driving
+them rather than from reading upstream cold.
 
 **Rough phase outline, unscheduled.** Not detailed the way M0–M5 are —
 none of this is implemented yet, and giving it that treatment now would
