@@ -85,6 +85,7 @@ class Options:
     build: list[str]
     skip: list[str]
     archs: list[str]
+    micropython_submodules: list[str]
     mpy_abi: str | None
     natmod: dict[str, Any]
     overrides: list[dict[str, Any]]
@@ -125,6 +126,9 @@ class Options:
             build=parse_selector(opt("build", "*")),
             skip=parse_selector(opt("skip", "")),
             archs=_as_list(archs_value, "archs"),
+            micropython_submodules=_as_list(
+                opt("micropython-submodules"), "micropython-submodules"
+            ),
             mpy_abi=(str(opt("mpy-abi")) if opt("mpy-abi") is not None else None),
             natmod=natmod,
             overrides=overrides,

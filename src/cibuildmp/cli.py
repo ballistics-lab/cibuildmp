@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from .options import BuildOptions, ConfigError, Options
+from .sources import SourceError, build_mpy_cross, fetch_micropython, read_mpy_abi
 from .targets import Target, UnknownArchError, is_abi_known
 
 
@@ -110,13 +111,34 @@ def build(options: Options, targets: list[Target]) -> int:
     for index, build_options in enumerate(resolved, 1):
         print("  " + _plan_line(index, total, build_options))
 
-    # M1-M3 land here, around this loop: fetch MicroPython and build
-    # mpy-cross once, before it; resolve each target's toolchain, run make,
-    # then collect and verify the output, inside it.
-    sys.stdout.flush()  # keep the plan above ahead of the stderr note below
+    # Shared setup, paid once for the whole invocation rather than once per
+    # matrix leg -- see build()'s own docstring and D9.
+    print("\ncibuildmp: preparing MicroPython")
+    mpy_dir = fetch_micropython(
+        options.micropython, submodules=options.micropython_submodules
+    )
+    build_mpy_cross(mpy_dir)
+
+    # The checkout is authoritative about the ABI; targets.MPY_ABI's table
+    # is only a way to answer the question without one. A disagreement means
+    # the identifiers already printed are wrong, so it stops here rather
+    # than producing files labelled with an ABI they do not have.
+    actual_abi = read_mpy_abi(mpy_dir)
+    if actual_abi != options.abi:
+        raise SourceError(
+            f"MicroPython {options.micropython} has .mpy ABI {actual_abi}, but the "
+            f"identifiers were built assuming {options.abi}. Set `mpy-abi = "
+            f'"{actual_abi}"` in the config, or report the stale entry in '
+            f"cibuildmp.targets.MPY_ABI."
+        )
+
+    # M2-M3 land here, inside the loop: resolve each target's toolchain, run
+    # make, then collect and verify the output.
+    sys.stdout.flush()  # keep the output above ahead of the stderr note below
     print(
-        "\ncibuildmp: building is not implemented yet (M0 ships target selection "
-        "only). Re-run with --dry-run to get this plan as a success.",
+        "\ncibuildmp: the per-target build is not implemented yet (M1 ships "
+        "MicroPython and mpy-cross provisioning). Re-run with --dry-run to get "
+        "the plan as a success.",
         file=sys.stderr,
     )
     return 1
@@ -131,7 +153,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.output_dir is not None:
             options.output_dir = args.output_dir
         targets = options.targets()
-    except (ConfigError, UnknownArchError) as exc:
+    except (ConfigError, UnknownArchError, SourceError) as exc:
         print(f"cibuildmp: error: {exc}", file=sys.stderr)
         return 2
 
@@ -192,4 +214,8 @@ def main(argv: list[str] | None = None) -> int:
             print("  " + _plan_line(index, total, options.build_options(target)))
         return 0
 
-    return build(options, targets)
+    try:
+        return build(options, targets)
+    except SourceError as exc:
+        print(f"cibuildmp: error: {exc}", file=sys.stderr)
+        return 2

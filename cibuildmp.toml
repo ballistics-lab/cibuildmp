@@ -32,6 +32,16 @@ micropython = "v1.28.0"
 # Where built .mpy files are collected. cibuildwheel's "wheelhouse".
 output-dir = "mpyhouse"
 
+# Submodules to initialise in the MicroPython checkout. Almost always empty:
+# a release tag is fetched as its release tarball, which already vendors
+# every lib/ submodule. This only takes effect on the fallback path -- a
+# preview tag or a branch publishes no tarball and is shallow-cloned
+# instead, and a --depth 1 clone vendors none of them. Most natmods need
+# nothing here (py/ and tools/mpy_ld.py are in-tree), but upstream's own
+# examples/natmod/btree builds against lib/berkeley-db-1.xx, which is a
+# submodule.
+# micropython-submodules = ["lib/berkeley-db-1.xx"]
+
 # ── Build selectors ───────────────────────────────────────────────────────
 # Globs over the flat build identifier, which is shaped after
 # cibuildwheel's cp311-manylinux_x86_64 = {ABI}-{platform}_{arch}:
