@@ -13,10 +13,16 @@ from functools import cache
 from importlib.resources import files
 from typing import Any
 
-RESOURCE = "natmod.toml"
-
 
 @cache
-def natmod_data() -> dict[str, Any]:
-    raw = (files(__package__).joinpath("resources", RESOURCE)).read_bytes()
+def _load(resource: str) -> dict[str, Any]:
+    raw = (files(__package__).joinpath("resources", resource)).read_bytes()
     return tomllib.loads(raw.decode())
+
+
+def natmod_data() -> dict[str, Any]:
+    return _load("natmod.toml")
+
+
+def usermod_data() -> dict[str, Any]:
+    return _load("usermod.toml")

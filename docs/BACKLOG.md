@@ -925,6 +925,28 @@ same D7 board-database lookup that already knows Make vs. CMake per port),
 not leave a consumer to notice the split by reading a composite action's
 own doc comment the way today's three consumers had to.
 
+Corrected after reading `py/usermod.cmake` directly rather than trusting
+`build-usermod-rp2040`'s own doc comment: the "a file, not a directory to
+glob" framing above is the action author's own convention, not what CMake
+actually enforces. `USER_C_MODULES` on the CMake side is a *list* of
+paths, and `usermod.cmake`'s own loop accepts a directory too — it just
+appends `/micropython.cmake` to it (`if (IS_DIRECTORY ...)`) rather than
+globbing every subdirectory the way `py/py.mk`'s `$(wildcard
+$(USER_C_MODULES)/*/micropython.mk)` does on the make side. So the real
+difference is not file-vs-directory, it's *how many modules one entry can
+resolve to*: one `make`-side directory can hold several modules side by
+side (one per subdirectory with its own `micropython.mk`), one `cmake`-side
+entry always resolves to exactly one `micropython.cmake`, whether given as
+a direct path or as a directory. Verified against a real `v1.28.0`
+checkout, not transcribed from a doc comment: `unix`/`webassembly`/
+`windows`/`qemu` all `include $(TOP)/py/py.mk`; `esp32`/`rp2040` both
+forward `-DUSER_C_MODULES=` from their own `Makefile` into `cmake`, which
+then includes the single, shared `py/usermod.cmake` — not a per-port CMake
+file each writes its own copy of. `build-system` per port is now pinned
+data (**D10**'s own pattern) in `resources/usermod.toml`, read through
+`usermod/portinfo.py`, scoped to the same six ports **D16–D21** already
+has a reference for.
+
 **D17 — combining `FROZEN_MANIFEST` with the port's own default manifest
 is real, per-port, and explicitly *not* solved by the action layer.**
 `build-usermod-webassembly`'s own header says so outright: "Combining
@@ -938,14 +960,30 @@ esp32/rp2040, nothing at all for qemu — `ports/qemu` ships no default
 manifest, so combining is skipped there) and a fourth time for Windows
 with its own escaping story (below). This is exactly the class of
 hand-copied-and-drifting logic Positioning says `cibuildmp` exists to
-absorb. Fix: extend the **D7** vendored board/variant database to also
-record each port's default manifest path per board/variant
-(`$(PORT_DIR)/variants/pyscript/manifest.py`, `$(PORT_DIR)/boards/
-manifest.py`, or none), and have `cibuildmp` generate the combined
-manifest itself from that plus the consumer's own module manifest — a
-consumer supplies only the fragment that freezes their module, same shape
-`natmod`'s `pre-build-command` already lets a consumer opt into
-project-specific setup without owning the whole recipe.
+absorb. Fix: record each port's default manifest path, and have
+`cibuildmp` generate the combined manifest itself from that plus the
+consumer's own module manifest — a consumer supplies only the fragment
+that freezes their module, same shape `natmod`'s `pre-build-command`
+already lets a consumer opt into project-specific setup without owning
+the whole recipe.
+
+Corrected after reading the paths directly off a real `v1.28.0` checkout
+rather than guessing from the shape above: it is **one shared
+`manifest.py` per port**, not per-board or per-variant.
+`ports/unix/variants/manifest.py` is a single file covering every unix
+variant, not `variants/<name>/manifest.py` (the `pyscript` guess this
+decision originally made); same shape for `webassembly` and `windows`.
+Board-based ports match the original guess: `ports/esp32/boards/
+manifest.py` and `ports/rp2/boards/manifest.py`, one file each, not
+per-board. `qemu` was right the first time — confirmed no `manifest.py`
+anywhere under `ports/qemu` on disk, not assumed from the action's own
+behaviour. Deliberately kept out of this table (not covered by **D7**'s
+vendored scan either): every port not in **D16–D21**'s six — a `stm32`
+default manifest, say, is a real thing to add later, not something this
+decision claims to already know. Landed as `resources/usermod.toml` +
+`usermod/portinfo.py`'s `default_manifest()`, alongside `build_system()`
+from **D16** above — the generation step itself (the actual
+`FROZEN_MANIFEST` combine) is still M7, not this.
 
 **D18 — Windows provisioning is a fourth story, not a variant of
 `download`/`docker`/`host` (**D3**).** `build-usermod-windows` cannot set
@@ -1076,11 +1114,24 @@ style, now that a slice of it is actually implemented:
         alone already has 5 real variants (`minimal`, `longlong`,
         `nanbox`, `coverage`, `standard`), more than the two this file's
         own "Two different selector axes" section illustrates.
-  - [ ] The two fields **D16** actually asks for beyond what mpbuild's own
-        `board_database.py` carries — default-manifest path, Make-vs-CMake
-        `USER_C_MODULES` shape — not added yet, deliberately: this first
-        slice is the vendored scan alone, kept reviewable on its own
-        rather than bundled with cibuildmp-specific additions.
+  - [x] The two fields **D16**/**D17** ask for, kept as their own pinned
+        table rather than folded into `boards.py`: `resources/usermod.toml`
+        (`build-system` per port, `default-manifest` per port) +
+        `usermod/portinfo.py` (`build_system()`, `default_manifest()`,
+        `known_ports()`). Scoped to exactly the six ports **D16–D21**
+        cover — `unix`, `webassembly`, `windows`, `qemu`, `esp32`, `rp2` —
+        not every port MicroPython ships. Verified live against the same
+        `v1.28.0` checkout as the boards.py slice above: grepped
+        `USER_C_MODULES` in `py/py.mk` and `py/usermod.cmake` directly
+        rather than trusting a composite action's doc comment (which
+        corrected **D16**'s own "file, not directory" framing — see its
+        own addendum above), and `find`-verified every `manifest.py` path
+        (which corrected **D17**'s per-variant guess to the real
+        one-shared-file-per-port shape — see its own addendum too).
+        `tests/test_portinfo.py` (10 cases) covers both accessors and the
+        unknown-port error path. **Not** in this slice: the actual
+        combined-`FROZEN_MANIFEST` generation this data feeds — that stays
+        M7.
 - **M7** — combined-`FROZEN_MANIFEST` generation + `USER_C_MODULES`
   resolution off that database (**D17**).
 - **M8** — the build driver itself, for the ports that need no exotic

@@ -1,0 +1,64 @@
+# Pinned per-port data for usermod builds (docs/BACKLOG.md D16, D17).
+#
+# Neither field comes from `mpbuild`'s board_database.py (D7 vendors that
+# separately, in usermod/boards.py) -- USER_C_MODULES shape and manifest
+# layout are cibuildmp's own concern, not something mpbuild ever resolves.
+#
+# Scoped to the six ports usermod's own D16-D21 already has a working
+# reference for (a7p's mp-usermod.yml): unix, webassembly, windows, qemu,
+# esp32, rp2. Every other port (stm32, samd, nrf, mimxrt, ...) is
+# deliberately absent -- adding them now, unverified, would repeat the
+# exact "reasoning presented as fact before code exists" mistake D16-D21
+# corrected in docs/BACKLOG.md. Extend this table, one verified port at a
+# time, when a real consumer needs one.
+#
+# Verified live against a real v1.28.0 checkout, not transcribed from a
+# composite action's doc comment: grep for "USER_C_MODULES" in py/py.mk and
+# py/usermod.cmake, and `find ports/*/{boards,variants}/manifest.py`.
+
+# ── USER_C_MODULES shape (D16) ─────────────────────────────────────────────
+# "make"  -- py/py.mk: USER_C_MODULES must be a directory; every
+#            <dir>/*/micropython.mk one level under it is auto-included, so
+#            one directory can hold several modules side by side.
+# "cmake" -- py/usermod.cmake: USER_C_MODULES is a *list* of paths, each
+#            either a .cmake file directly, or a directory that gets
+#            /micropython.cmake appended -- exactly one module per list
+#            entry, no auto-discovery of subdirectories the way "make" has.
+#            Corrects D16's original framing ("this one is a file, not a
+#            directory to glob"), which came from one composite action's
+#            own doc comment rather than from py/usermod.cmake directly:
+#            the directory form is legal on the cmake side too, it just
+#            resolves to one file (<dir>/micropython.cmake) instead of
+#            globbing every subdirectory the make side does.
+#
+# ── Default manifest path (D17) ────────────────────────────────────────────
+# Relative to $(PORT_DIR). Empty means the port ships no default manifest to
+# combine a consumer's own FROZEN_MANIFEST with -- confirmed for qemu by its
+# absence on disk, not assumed. One shared file per port, not per-board or
+# per-variant: e.g. ports/unix/variants/manifest.py covers every unix
+# variant from one file, not variants/<name>/manifest.py as D17 originally
+# guessed before this table was verified against real source.
+
+[port.unix]
+build-system = "make"
+default-manifest = "variants/manifest.py"
+
+[port.webassembly]
+build-system = "make"
+default-manifest = "variants/manifest.py"
+
+[port.windows]
+build-system = "make"
+default-manifest = "variants/manifest.py"
+
+[port.qemu]
+build-system = "make"
+default-manifest = ""
+
+[port.esp32]
+build-system = "cmake"
+default-manifest = "boards/manifest.py"
+
+[port.rp2]
+build-system = "cmake"
+default-manifest = "boards/manifest.py"
