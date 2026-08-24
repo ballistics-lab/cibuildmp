@@ -1,13 +1,18 @@
 name: cibuildmp matrix
 description: >
-  Resolves a cibuildmp.toml into the list of build identifiers it selects,
-  as JSON, for use as a strategy.matrix via fromJSON(). This is what removes
-  the hand-copied arch matrix from each consuming repo's workflow: the list
-  lives in that repo's cibuildmp.toml, in one place, next to the rest of its
-  build config.
+  Resolves a cibuildmp.toml into a GitHub Actions matrix -- one {only, os}
+  entry per build target -- for a job-per-target CI layout.
 
-  Needs no MicroPython checkout and no toolchain -- identifier generation is
-  pure config resolution, so this runs in a few seconds on a plain runner.
+  Optional. The default cibuildmp layout is one job that loops over every
+  selected target (see D9 in docs/BACKLOG.md), which is cheaper for natmod:
+  all ten arches cross-compile on the same runner, so fanning out pays for
+  fetching MicroPython and building mpy-cross once per leg instead of once
+  in total. Use this action when you specifically want per-target failure
+  isolation or wall-clock parallelism -- or, later, when usermod targets
+  genuinely need different runners, which is the case this exists for.
+
+  Needs no MicroPython checkout and no toolchain: resolving a config is pure
+  computation, so this runs in seconds on a plain runner.
 
 inputs:
   package-dir:
@@ -20,13 +25,16 @@ inputs:
     default: ""
 
 outputs:
-  identifiers:
+  include:
     description: >
-      JSON array of build identifiers, e.g.
-      ["mpy6.3-natmod-x64","mpy6.3-natmod-armv6m"]. Feed it to a matrix with
-      `matrix: { identifier: ${{ fromJSON(needs.<job>.outputs.identifiers) }} }`
-      and pass each leg back to the cibuildmp action's `only` input.
-    value: ${{ steps.resolve.outputs.identifiers }}
+      JSON array of {only, os} objects, e.g.
+      [{"only":"mpy6.3-natmod-x64","os":"ubuntu-latest"}]. Use it as
+      `matrix: { include: ${{ fromJSON(needs.<job>.outputs.include) }} }`,
+      then pass ${{ matrix.only }} to the cibuildmp action's `only` input and
+      ${{ matrix.os }} to the job's `runs-on`. Carrying the runner in the
+      matrix entry is what lets a target choose its own runner at all -- a
+      composite action cannot set `runs-on` for the job that calls it.
+    value: ${{ steps.resolve.outputs.include }}
 
 runs:
   using: composite
@@ -39,19 +47,27 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        # This action lives at .github/actions/cibuildmp-matrix/ inside
-        # the cibuildmp repo, so the package root is three levels up from
+
+        # This action lives at .github/actions/cibuildmp-matrix/ inside the
+        # cibuildmp repo, so the package root is three levels up from
         # github.action_path. Resolved rather than passed through with ../
-        # so uv sees a clean path.
+        # so uv sees a clean path. Once the package has a released name this
+        # becomes a plain `uv tool install cibuildmp==<version>` (D8).
         REPO_ROOT=$(cd "${{ github.action_path }}/../../.." && pwd)
         uv tool install "$REPO_ROOT"
 
-        ARGS=("${{ inputs.package-dir }}" --print-build-identifiers --json)
+        ARGS=("${{ inputs.package-dir }}" --print-build-matrix)
         if [ -n "${{ inputs.config-file }}" ]; then
           ARGS+=(--config-file "${{ inputs.config-file }}")
         fi
 
-        IDENTIFIERS=$(cibuildmp "${ARGS[@]}")
-        echo "identifiers=$IDENTIFIERS" >> "$GITHUB_OUTPUT"
-        echo "Resolved $(echo "$IDENTIFIERS" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))') target(s):"
-        echo "$IDENTIFIERS" | python3 -c 'import json,sys; [print("  "+i) for i in json.load(sys.stdin)]'
+        INCLUDE=$(cibuildmp "${ARGS[@]}")
+        echo "include=$INCLUDE" >> "$GITHUB_OUTPUT"
+
+        echo "$INCLUDE" | python3 -c '
+        import json, sys
+        entries = json.load(sys.stdin)
+        print(f"Resolved {len(entries)} target(s):")
+        for entry in entries:
+            print(f"  {entry[\"only\"]:<32} runs-on: {entry[\"os\"]}")
+        '

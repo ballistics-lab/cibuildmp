@@ -65,6 +65,7 @@ class BuildOptions:
     output_dir: Path
     module_dir: str
     make_target: str
+    runs_on: str = ""
     extra_make_args: list[str] = field(default_factory=list)
     pre_build_command: str = ""
 
@@ -169,6 +170,7 @@ class Options:
             output_dir=self.output_dir,
             module_dir=str(opt("module-dir", DEFAULT_MODULE_DIR)),
             make_target=str(opt("make-target", DEFAULT_MAKE_TARGET)),
+            runs_on=str(opt("runs-on", target.default_runner)),
             extra_make_args=_as_list(opt("extra-make-args"), "extra-make-args"),
             pre_build_command=str(opt("pre-build-command", "")),
         )

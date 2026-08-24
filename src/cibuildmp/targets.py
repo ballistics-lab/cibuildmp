@@ -79,6 +79,30 @@ MPY_ABI: dict[str, str] = {
 LATEST_KNOWN_ABI = "6.3"
 
 
+# ── Runners ───────────────────────────────────────────────────────────────
+# Which GitHub Actions runner a target needs.
+#
+# For natmod this is genuinely one value: every one of the ten arches is a
+# cross-compile that runs on x86-64 Linux, so nothing here forces a job per
+# target the way building a macOS wheel forces a macOS runner in
+# cibuildwheel. That absence is why the default is a single job looping over
+# targets (D9) rather than a matrix leg per identifier -- fetching
+# MicroPython and building mpy-cross are identical for all ten and get paid
+# once instead of ten times.
+#
+# usermod is where this table starts earning its keep (aarch64/armhf on
+# ubuntu-24.04-arm, windows-latest, ...), which is also when the matrix
+# generator becomes load-bearing rather than optional.
+NATMOD_RUNNER = "ubuntu-latest"
+
+
+def default_runner(mode: str, arch: str) -> str:
+    del arch  # every natmod arch cross-compiles on the same runner
+    if mode == "natmod":
+        return NATMOD_RUNNER
+    raise ValueError(f"no runner mapping for build mode {mode!r}")
+
+
 class UnknownArchError(ValueError):
     pass
 
@@ -114,6 +138,11 @@ class Target:
     def cross(self) -> str:
         """The CROSS prefix dynruntime.mk will use for this arch."""
         return NATMOD_CROSS[self.arch]
+
+    @property
+    def default_runner(self) -> str:
+        """The runner this target builds on, absent a `runs-on` override."""
+        return default_runner(self.mode, self.arch)
 
     def __str__(self) -> str:
         return self.identifier

@@ -7,8 +7,8 @@ import json
 import sys
 from pathlib import Path
 
-from .options import ConfigError, Options
-from .targets import UnknownArchError, is_abi_known
+from .options import BuildOptions, ConfigError, Options
+from .targets import Target, UnknownArchError, is_abi_known
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -40,13 +40,26 @@ def build_parser() -> argparse.ArgumentParser:
         "--only",
         default=None,
         metavar="IDENTIFIER",
-        help="Build exactly this one identifier, ignoring build/skip selectors",
+        help="Build exactly this one identifier, overriding the config's own "
+        "build/skip selectors. Opt into a job-per-target CI layout with this; "
+        "the default is one invocation building every selected target.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the resolved build plan and exit without building",
     )
     parser.add_argument(
         "--print-build-identifiers",
         action="store_true",
-        help="Print the identifiers this config selects, then exit. Use --json "
-        "to feed a GitHub Actions matrix via fromJSON().",
+        help="Print the identifiers this config selects, one per line, then exit",
+    )
+    parser.add_argument(
+        "--print-build-matrix",
+        action="store_true",
+        help="Print a JSON array of {only, os} objects, then exit. Feed it to a "
+        "GitHub Actions `strategy.matrix.include` via fromJSON() to get one job "
+        "per target. Only worth it when targets need different runners.",
     )
     parser.add_argument(
         "--json",
@@ -63,29 +76,70 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _plan_line(index: int, total: int, options: BuildOptions) -> str:
+    make = ["make", "-C", options.module_dir, f"ARCH={options.target.arch}"]
+    make += options.extra_make_args
+    make.append(options.make_target)
+    # Right-align the counter so the columns after it stay put once the
+    # index gains a digit ([10/10] is wider than [9/10]).
+    counter = f"[{index:>{len(str(total))}}/{total}]"
+    return (
+        f"{counter} {options.target.identifier:<28} "
+        f"CROSS={options.target.cross or '(host)':<22} {' '.join(make)}"
+    )
+
+
+def build(options: Options, targets: list[Target]) -> int:
+    """Build every selected target in one invocation.
+
+    Sequential and in-process on purpose (D9), the same shape cibuildwheel
+    uses for the Python versions inside one runner. Fetching MicroPython and
+    building mpy-cross are identical for every natmod arch, so doing them
+    once here is strictly cheaper than paying for them in each of ten matrix
+    legs -- and unlike cibuildwheel, no natmod target needs a runner any
+    other target cannot use, so nothing forces a fan-out. Callers who want
+    one anyway (failure isolation, wall-clock) opt in with --only.
+    """
+    resolved = [options.build_options(t) for t in targets]
+    total = len(resolved)
+
+    print(
+        f"cibuildmp: {total} target(s) against MicroPython {options.micropython} "
+        f"(.mpy ABI {options.abi})"
+    )
+    for index, build_options in enumerate(resolved, 1):
+        print("  " + _plan_line(index, total, build_options))
+
+    # M1-M3 land here, around this loop: fetch MicroPython and build
+    # mpy-cross once, before it; resolve each target's toolchain, run make,
+    # then collect and verify the output, inside it.
+    sys.stdout.flush()  # keep the plan above ahead of the stderr note below
+    print(
+        "\ncibuildmp: building is not implemented yet (M0 ships target selection "
+        "only). Re-run with --dry-run to get this plan as a success.",
+        file=sys.stderr,
+    )
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
     try:
         options = Options.load(args.package_dir, args.config_file)
+        if args.output_dir is not None:
+            options.output_dir = args.output_dir
+        targets = options.targets()
     except (ConfigError, UnknownArchError) as exc:
         print(f"cibuildmp: error: {exc}", file=sys.stderr)
         return 2
 
-    if args.output_dir is not None:
-        options.output_dir = args.output_dir
-
-    try:
-        targets = options.targets()
-    except UnknownArchError as exc:
-        print(f"cibuildmp: error: {exc}", file=sys.stderr)
-        return 2
-
     if args.only is not None:
-        # --only bypasses build/skip on purpose: it is what a matrix leg
-        # passes back in, and that leg was already selected when the matrix
-        # was generated.
+        # --only overrides build/skip, matching cibuildwheel's own semantics
+        # for the flag: the caller has already decided what this invocation
+        # is for, and a matrix leg that reached here was selected when the
+        # matrix was generated.
         targets = [t for t in targets if t.identifier == args.only]
         if not targets:
             print(
@@ -94,6 +148,17 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 2
+
+    if args.print_build_matrix:
+        print(
+            json.dumps(
+                [
+                    {"only": bo.target.identifier, "os": bo.runs_on}
+                    for bo in (options.build_options(t) for t in targets)
+                ]
+            )
+        )
+        return 0
 
     if args.print_build_identifiers:
         identifiers = [t.identifier for t in targets]
@@ -117,20 +182,14 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
 
-    # M1-M3 land here: fetch MicroPython, build mpy-cross, resolve each
-    # target's toolchain, run make, collect and verify the outputs.
-    print(
-        "cibuildmp: building is not implemented yet (M0 ships selection only).\n"
-        "Selected targets:",
-        file=sys.stderr,
-    )
-    for target in targets:
-        build_options = options.build_options(target)
-        make = ["make", "-C", build_options.module_dir, f"ARCH={target.arch}"]
-        make += build_options.extra_make_args
-        make.append(build_options.make_target)
+    if args.dry_run:
+        total = len(targets)
         print(
-            f"  {target.identifier:<28} CROSS={target.cross or '(host)':<22} {' '.join(make)}",
-            file=sys.stderr,
+            f"cibuildmp: {total} target(s) against MicroPython "
+            f"{options.micropython} (.mpy ABI {options.abi})"
         )
-    return 1
+        for index, target in enumerate(targets, 1):
+            print("  " + _plan_line(index, total, options.build_options(target)))
+        return 0
+
+    return build(options, targets)

@@ -100,3 +100,21 @@ def test_standalone_wins_over_pyproject(tmp_path):
     options = Options.load(tmp_path, env={})
     assert options.config_path.name == "cibuildmp.toml"
     assert options.abi == "6.3"
+
+
+def test_runs_on_defaults_and_can_be_overridden(tmp_path):
+    write(
+        tmp_path,
+        """
+        [natmod]
+        archs = ["x64", "armv6m"]
+        [[overrides]]
+        select = "*-armv6m"
+        runs-on = "ubuntu-24.04-arm"
+        """,
+    )
+    options = Options.load(tmp_path, env={})
+    resolved = {
+        t.arch: options.build_options(t, env={}).runs_on for t in options.targets()
+    }
+    assert resolved == {"x64": "ubuntu-latest", "armv6m": "ubuntu-24.04-arm"}

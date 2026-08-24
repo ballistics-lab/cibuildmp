@@ -89,6 +89,29 @@ reserved yet. Until it is, `action.yml` installs from the action's own ref:
 `uv tool install cibuildmp` line in `action.yml` is a placeholder and must be
 changed before the action is usable.
 
+**D9 — one job looping over targets is the default; fan-out is opt-in.**
+Verified against cibuildwheel rather than assumed: its canonical workflow
+(`examples/github-minimal.yml`) puts *runners* in `strategy.matrix` — `os:
+[ubuntu-latest, ubuntu-24.04-arm, windows-latest, windows-11-arm,
+macos-15-intel, macos-14]` — and loops over the Python versions inside each
+job. There is no matrix over `cp311`/`cp312`/… at all, and
+`--print-build-identifiers` appears in its docs exactly once, under
+`build`/`skip`, as introspection; the widely copied `jq` matrix recipe is a
+community pattern, not something cibuildwheel documents.
+
+The reason is that the runner is a hard constraint there: a macOS wheel
+cannot be built on Linux. **That constraint does not exist for natmod** —
+all ten arches are cross-compiles on x86-64 Linux. What *does* cost is
+fetching MicroPython and building `mpy-cross`, which are identical for every
+arch, so a ten-leg matrix pays for them ten times.
+
+So `cibuildmp` with no `--only` builds every selected target sequentially in
+one invocation. `--only` remains for callers who want a job per target
+anyway — failure isolation, wall-clock parallelism — and is what the matrix
+generator feeds. Revisit for usermod, where different targets genuinely need
+different runners and the fan-out becomes structural rather than a
+preference.
+
 ## Identifier scheme
 
 Shaped after `cp311-manylinux_x86_64` = *{ABI}-{platform}\_{arch}*:
@@ -180,6 +203,30 @@ Two findings worth acting on:
   Whichever tarball the resolver picks must ship picolibc, or `rv32imc` /
   `rv64imc` silently build against a different libc than CI does today.
 
+## Local use
+
+Running the same build on a laptop that CI runs is a goal, not a
+side effect — it is most of why the tool exists rather than more composite
+actions (**D3**). From M2 on, `cibuildmp --dry-run` and `cibuildmp` behave
+the same locally as on a runner, with the same config.
+
+What that means per arch, on a Linux host:
+
+| Target | Local story |
+| --- | --- |
+| `x64` | works with the host gcc, nothing to install |
+| `armv6m` `armv7m` `armv7emsp` `armv7emdp` | toolchain downloaded into `~/.cache/cibuildmp/` on first use |
+| `xtensa` `xtensawin` `rv32imc` `rv64imc` | same, once each tarball source is pinned |
+| `x86` | needs `gcc-multilib` on the host; cannot be fixed by a download |
+
+`x86` is the one that will not be self-provisioning, so it must fail with a
+message naming the package rather than a compiler error. Non-Linux hosts are
+an open question below.
+
+Nothing about this is CI-specific: the cache directory, the toolchain
+resolver and the build loop are the same code path in both places. The only
+thing a runner adds is that its cache starts empty.
+
 ## Phases
 
 ### M0 — skeleton — **done**
@@ -198,15 +245,23 @@ Two findings worth acting on:
 - [x] `--print-build-identifiers`, with `--json` for `fromJSON`.
 - [x] `action.yml` installs from `${{ github.action_path }}` per **D8**, so
       the running version is exactly the ref the caller pinned.
-- [x] New `.github/actions/cibuildmp-matrix` composite action: resolves a
-      config into an `identifiers` JSON output for `strategy.matrix`. Needs
-      no checkout and no toolchain.
+- [x] `--dry-run`, printing the resolved plan and exiting 0 — the M0
+      success path, since building itself is not implemented.
+- [x] `--print-build-matrix`, emitting `{only, os}` objects, and a
+      `runs-on` option resolved through the same override chain as
+      everything else (`Target.default_runner` supplies the default).
+- [x] `.github/actions/cibuildmp-matrix` composite action, emitting those
+      objects as an `include` output. **Optional by D9**, not the default
+      path: it exists for per-target failure isolation now, and for usermod's
+      genuinely different runners later. Carrying the runner in the matrix
+      entry is also the answer to the "a composite action cannot pick its own
+      `runs-on`" limitation `README.md` documents for `build-usermod-unix`.
 
 `--print-build-identifiers` alone removes the duplicated matrix from all
 three repos, which is why M0 shipped before any build logic exists. Running
-`cibuildmp` without `--print-build-identifiers` currently prints the
-resolved build plan and exits 1 — deliberately, so the action fails loudly
-rather than appearing to succeed while building nothing.
+`cibuildmp` without `--dry-run` currently prints the resolved build plan and
+exits 1 — deliberately, so the action fails loudly rather than appearing to
+succeed while building nothing.
 
 ### M1 — MicroPython + mpy-cross provisioning
 
@@ -250,7 +305,9 @@ rather than appearing to succeed while building nothing.
       fail loudly on mismatch. This is `cibuildmp`'s equivalent of
       `auditwheel`: cheap, and it catches a whole class of "built the wrong
       thing into the right directory" bugs.
-- [ ] Readable per-target logging and a summary table.
+- [ ] Readable per-target logging and a summary table. The loop is already
+      in place in `cli.build()`; M1's shared setup goes before it and M2/M3's
+      per-target work inside it.
 
 ### M4 — publish
 
