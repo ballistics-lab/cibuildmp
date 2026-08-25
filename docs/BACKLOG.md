@@ -2040,9 +2040,95 @@ the user's own framing, directly: real builds should not be able to
 break each other across ports the way **D25**'s six bugs all did within
 `unix` alone, and CI's own cache story needs a documented, deliberate
 answer before the migration starts, not discovered mid-flight the way
-**D25**'s bugs were. Nothing below has been implemented past **D26**'s
-own `unix`-only proof-of-concept and **D27**'s two orchestrate.py
-fixes -- this is a plan, not a status report.
+**D25**'s bugs were. Originally written as a plan, not a status report
+-- since substantially updated in place, this same session, as steps 1
+through most of 3 actually landed. The **"Handoff: exact state as of
+this session's end"** block immediately below is the one to read first
+if picking this up fresh; everything after "Why isolation is the real
+driver" is the original plan text, kept (and updated in place) as the
+detailed record of *why* each piece looks the way it does, not
+re-derived from scratch.
+
+---
+
+**Handoff: exact state as of this session's end, for whoever (or
+whatever session) picks this up next.**
+
+**Done and verified on real CI:**
+- Migration step 1 -- `action.yml` is a composite action, not a
+  Docker action. Live-verified: natmod + all 5 `unix` usermod arches
+  build correctly through it.
+- Migration step 2 -- `usermod/dockerrun.py`'s resolver is real:
+  `image_for(port, arch, libc=None)`, `PORT_IMAGES: dict[str, str]`
+  keyed `"{port}-{arch}"` / `"{port}-{arch}-{libc}"`, env var override
+  `CIBMP_<PORT>_<ARCH>[_<LIBC>]_DOCKER_IMAGE`. Covered by
+  `tests/test_usermod_dockerrun.py` (6 cases). **`PORT_IMAGES` is still
+  empty** -- nothing is registered as any caller's default yet, on
+  purpose (see "the one real gap" below).
+- Migration step 3, six of seven Dockerfiles written and building green
+  in CI (`build-examples.yml`'s `verify-docker-images` matrix job,
+  build-only + push on `push:` events):
+  `unix-manylinux-{x64,x86,aarch64,armhf,mipsel}`, `windows` (x64+x86
+  only, arm64 stays bare-host), `qemu`, `webassembly` (emsdk baked in,
+  ~1.5GB image). **Not started: `esp32`** -- the one remaining port,
+  and the one genuinely open bake-vs-mount call (ESP-IDF is
+  multi-gigabyte, unlike every other port's toolchain here).
+- Every Dockerfile that builds green also gets pushed to
+  `ghcr.io/ballistics-lab/cibuildmp-<dockerfile>:sha-<gitsha>` on every
+  real push (not gated behind a release tag -- the user's own explicit
+  call, reversing an earlier "leave publish as a TODO" answer once the
+  actual cost of that became clear: without a real pullable image,
+  `PORT_IMAGES` could never be exercised end to end on a dev branch at
+  all).
+- `resources/docker/*.Dockerfile` all live as real package resources
+  (`pyproject.toml`'s own `package-data`), not a top-level `docker/`
+  directory -- verified live by building a real wheel and confirming
+  every file lands inside it.
+- Two real CI bugs found and fixed this session, both root-caused from
+  actual job logs, neither guessed: (1) the `CIBMP_*`/`ACTION_*` env
+  var collision (the composite action's own plumbing vars silently
+  overrode `cibuildmp.toml` config -- see the ninth-bug writeup under
+  migration step 1's own detail below); (2) the apt-archives GHA cache
+  never actually saved even once (`Failed to save: Unable to reserve
+  cache with key ..., another job may be creating this cache`, on
+  every run checked) -- root cause: rapid-fire pushes left multiple
+  `build-examples.yml` runs racing each other for the identical
+  hash-derived cache key. Fixed by adding real `concurrency:` blocks to
+  `build-examples.yml`/`usermod-dev.yml` (matching `publish.yml`'s own
+  existing pattern) -- **not yet confirmed live that the very next push
+  actually gets a clean cache hit**, watch for a real "Cache
+  restored"/hit line in the next run's own logs before trusting it.
+
+**The one real gap left before this stops being "images exist" and
+starts being "the feature works": nobody has ever run a real usermod
+build *through* `dockerrun.run()` against one of these pushed images.**
+Every image proven so far only proves `docker build` (and `docker
+push`) succeeded -- not that `cibuildmp` can actually use one to
+produce a real binary. The concrete next step: pick the most proven,
+simplest case (`unix`/`x64`), set
+`CIBMP_UNIX_X64_MANYLINUX_DOCKER_IMAGE` to the real
+`ghcr.io/ballistics-lab/cibuildmp-unix-manylinux-x64:sha-<gitsha>` tag
+a real CI run just pushed, and run a genuine `usermod-unix-x64` build
+through it in CI -- confirming the whole chain (`dockerrun.run()` →
+bind mounts → `make` inside the container → a real `micropython`
+binary landing back on the host) end to end, for the first time ever.
+Only after that succeeds does registering anything in `PORT_IMAGES` as
+a real default become a reasonable next move.
+
+**Explicitly not started at all:** `esp32.Dockerfile` (needs its own
+bake-vs-mount decision first, ESP-IDF is multi-gigabyte); `natmod`'s
+own single combined Dockerfile (**D30**'s own point 2 -- a genuinely
+separate track from this port-per-image work, confirmed out of scope
+for the manylinux/musllinux split specifically: a `.mpy` loads into an
+already-running target interpreter, no build-host libc linkage
+involved at all); the musllinux identifier axis and any real musl
+toolchain (**D31** -- large, multi-session, not attempted); registering
+anything real in `PORT_IMAGES`; wiring `--platform usermod` or any CLI
+flag to actually select a Docker-backed build by default (today it's
+still opt-in only, via the env var, and not reachable from the CLI or
+`action.yml` at all).
+
+---
 
 **Why isolation is the real driver, restated plainly.** Today, one
 combined image (`action.Dockerfile`, and the standalone `Dockerfile`)
