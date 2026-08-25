@@ -97,7 +97,12 @@ def test_pre_build_command_noop_when_empty(tmp_path):
 
 
 def test_pre_build_command_runs_in_module_root(tmp_path):
-    run_pre_build_command(tmp_path, "touch marker", {})
+    # "echo hi > marker", not "touch marker": both /bin/sh -c and
+    # cmd.exe /c understand echo + redirection, so this actually tests
+    # cwd handling on every host shell=True picks, not just Unix ones --
+    # touch has no cmd.exe equivalent (found by a real windows-latest CI
+    # run of this same test, docs/BACKLOG.md's own "Windows/macOS hosts").
+    run_pre_build_command(tmp_path, "echo hi > marker", {})
     assert (tmp_path / "marker").exists()
 
 

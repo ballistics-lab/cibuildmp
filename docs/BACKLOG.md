@@ -1296,15 +1296,27 @@ rather than design from scratch.
   for the arm/riscv/xtensa arches; `x86`'s multilib and the whole
   `docker` strategy are Linux-only. Decide whether phase 1 claims anything
   beyond Linux, or explicitly does not. A real `windows-latest` CI run
-  (`usermod-dev.yml`, added for M9's own D18 work) already surfaced one
-  concrete data point either way this gets decided: `tests/test_build.py`'s
-  `test_pre_build_command_runs_in_module_root` fails there today --
-  `run_pre_build_command()`'s `touch marker` runs via `subprocess.run(...,
-  shell=True)`, which is `cmd.exe` on Windows, and `cmd.exe` has no
-  `touch`. Not fixed here: it is natmod's own test, out of scope for M9's
-  usermod work, and this project has not decided natmod claims Windows at
-  all yet -- flagged so that decision, whenever it happens, does not have
-  to rediscover this.
+  (`usermod-dev.yml`, added for M9's own D18 work) already surfaced two
+  concrete data points either way this gets decided, both fixed on sight
+  rather than left for whenever that decision happens:
+  - `tests/test_build.py`'s `test_pre_build_command_runs_in_module_root`
+    used `touch marker` as its example `pre-build-command` -- `touch` has
+    no `cmd.exe` equivalent, so it failed there, not because
+    `run_pre_build_command()` itself is Windows-broken (`subprocess.run(...,
+    shell=True)` correctly uses whatever shell the host has), but because
+    the test's own example command happened to be Unix-only when the
+    behaviour under test (does it run in `module_root`, with the given
+    `env`) doesn't require that. Fixed to `echo hi > marker`, which
+    `/bin/sh -c` and `cmd.exe /c` both understand identically.
+  - `usermod/build.py`'s `unix_make_command()`/`run_unix_deplibs()`/
+    `qemu_make_command()`/`webassembly_make_command()` all embedded `Path`
+    objects via bare `str()`, which is backslash-separated on Windows --
+    real breakage, not a test artifact, since GNU Make (native or MSYS2)
+    wants forward slashes regardless of host OS. This is the exact bug
+    **D18** already documented for `a7p`'s own hand-written workflow
+    (`$GITHUB_WORKSPACE`'s native form, mangled by MSYS2 bash's own
+    escaping) -- caught here before it shipped instead of after. Fixed to
+    `.as_posix()` everywhere a `Path` reaches a `make` command line.
 - **Old tags vs. a modern host `gcc`.** Found while verifying **D13** live:
   `v1.21.0` fails to build `mpy-cross` under a recent `gcc`
   (`-Werror=unterminated-string-initialization` on upstream's own
