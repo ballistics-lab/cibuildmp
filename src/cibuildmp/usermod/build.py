@@ -38,8 +38,14 @@ part of **M8**'s original port list (`unix`/`webassembly`/`qemu`/
 since a resolver with nothing driving a build through it proves less than
 one that does.
 
-`windows` is **M8**'s own remaining scope, not started (waits on **M9**'s
-MSYS2 orchestration, **D18**).
+`windows` (**D18**) is the fifth and last port here: `usermod/msys2.py`'s
+`ResolvedMsys2` runs commands through MSYS2's own `bash.exe`, not a plain
+`subprocess.run()` with `PATH` prepended -- see that module's own
+docstring for why, and for the one honest caveat every other resolver in
+this package doesn't carry: it cannot be verified in a Linux sandbox at
+all, so this port's own code should be expected to need real
+`windows-latest` CI correction rounds the other four already had before
+this one, not after.
 
 Every `Path` embedded into a `make` command line here goes through
 `.as_posix()`, never a bare `str()`: a real `usermod-dev.yml` run on
@@ -59,7 +65,7 @@ from pathlib import Path
 
 from .. import toolchains
 from ..toolchains import ResolvedToolchain
-from . import emsdk, espidf
+from . import emsdk, espidf, msys2
 
 
 class UsermodBuildError(Exception):
@@ -432,3 +438,97 @@ def build_esp32(
             f"esp32/{opts.board}: build reported success but {firmware} is missing"
         )
     return firmware
+
+
+# ── windows (MSYS2) ─────────────────────────────────────────────────────
+
+# MSYSTEM -> the compiler package a7p's own mp-usermod.yml installs
+# alongside it (its own matrix.msys_install), transcribed directly, not
+# guessed. CLANGARM64 needs both the gcc-compat wrapper and clang itself.
+WINDOWS_MSYS_INSTALL: dict[str, str] = {
+    "MINGW32": "mingw-w64-i686-gcc",
+    "MINGW64": "mingw-w64-x86_64-gcc",
+    "CLANGARM64": "mingw-w64-clang-aarch64-gcc-compat mingw-w64-clang-aarch64-clang",
+}
+
+
+@dataclass(frozen=True)
+class WindowsBuildOptions:
+    user_c_modules: str
+    frozen_manifest: str
+    msystem: str = "MINGW64"
+    build_dir: str = "build-standard"
+    variant: str = ""
+    cflags_extra: str = ""
+    extra_make_args: tuple[str, ...] = ()
+
+
+def _windows_mpy_cross_command(mpy_dir_posix: str) -> str:
+    # The four overrides are CLANGARM64-specific, applied unconditionally
+    # because they are harmless no-ops on MINGW32/64 -- see
+    # build-usermod-windows/action.yml's own "Build mpy-cross" step for
+    # the full reasoning behind each (LDFLAGS_ARCH: lld rejects GNU ld's
+    # --cref; COMPILER_TARGET: the gcc-compat wrapper's own -dumpmachine
+    # doesn't contain "mingw", which fmode.c's inclusion is grepped for;
+    # STRIP/SIZE: CLANGARM64 ships neither binary under the expected name).
+    return (
+        f'make -C "{mpy_dir_posix}/mpy-cross" '
+        'LDFLAGS_ARCH="-Wl,--gc-sections" COMPILER_TARGET="mingw-forced" '
+        'STRIP="" SIZE="true" -j"$(nproc)"'
+    )
+
+
+def windows_make_command(opts: WindowsBuildOptions, mpy_dir_posix: str) -> str:
+    # No CROSS_COMPILE=: inside an MSYS2 environment the toolchain is
+    # already the target's own, under unprefixed names.
+    variant_arg = f"VARIANT={opts.variant}" if opts.variant else ""
+    extra = " ".join(opts.extra_make_args)
+    return (
+        f'make -C "{mpy_dir_posix}/ports/windows" {variant_arg} '
+        f'BUILD="{opts.build_dir}" COMPILER_TARGET="mingw-forced" '
+        f'STRIP="" SIZE="true" CFLAGS_EXTRA="{opts.cflags_extra}" '
+        f'USER_C_MODULES="{opts.user_c_modules}" '
+        f'FROZEN_MANIFEST="{opts.frozen_manifest}" {extra} -j"$(nproc)"'
+    )
+
+
+def build_windows(
+    opts: WindowsBuildOptions,
+    mpy_dir: Path,
+    *,
+    msys2_root: Path | None = None,
+    quiet: bool = False,
+) -> Path:
+    """Build ports/windows under MSYS2, returning the produced `.exe`.
+
+    `mpy_dir` is a native Windows path; converted to MSYS2's own POSIX
+    form via `ResolvedMsys2.to_posix_path()` (real `cygpath -u`, not
+    `.as_posix()` -- see that method's own docstring for why `.as_posix()`
+    is not enough here specifically). `opts.user_c_modules`/
+    `frozen_manifest`/`build_dir` are left as the caller already formatted
+    them -- same contract every other port's `*BuildOptions` already has.
+
+    The output path is `mpy_dir / "ports" / "windows" / opts.build_dir /
+    "micropython.exe"` -- `ports/windows/Makefile`'s own `PROG ?=
+    micropython` plus its `.exe` suffix on this port specifically.
+    """
+    root = msys2.resolve_msys2(root=msys2_root, quiet=quiet)
+    session = msys2.ResolvedMsys2(root=root, msystem=opts.msystem)
+
+    packages = ["make", "git", "python3", *WINDOWS_MSYS_INSTALL[opts.msystem].split()]
+    session.install_packages(packages)
+
+    mpy_dir_posix = session.to_posix_path(str(mpy_dir))
+
+    try:
+        session.run(_windows_mpy_cross_command(mpy_dir_posix))
+        session.run(windows_make_command(opts, mpy_dir_posix))
+    except msys2.Msys2Error as exc:
+        raise UsermodBuildError(f"windows/{opts.msystem}: {exc}") from exc
+
+    binary = mpy_dir / "ports" / "windows" / opts.build_dir / "micropython.exe"
+    if not binary.exists():
+        raise UsermodBuildError(
+            f"windows/{opts.msystem}: build reported success but {binary} is missing"
+        )
+    return binary

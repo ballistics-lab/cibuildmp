@@ -1070,6 +1070,57 @@ resolution by hand -- delegated, not reimplemented, matching `D2`. Not
 either (**D16**'s own M8 addendum): there is no single `<prefix>gcc` to
 find on `PATH` here.
 
+**D18 addendum — MSVC investigated and rejected as an alternative to MSYS2,
+verified live against the real `ports/windows` build files, not assumed from
+the port's own README alone.** `ports/windows/README.md` documents a fourth
+build method beside MinGW-via-Makefile and MSYS2: MSVC, via
+`msbuild micropython.vcxproj` (`msvc/paths.props`, `msvc/sources.props`,
+`msvc/*.targets`). Simpler to orchestrate on a real `windows-latest` runner
+on paper — MSVC/Build Tools ship pre-installed, no MSYS2 provisioning, no
+`bash.exe`/`cygpath` indirection — so it was worth checking against the
+Makefile path this project had already mostly written before committing to
+either. It does not work for usermod specifically: `msvc/sources.props` is
+a static `<ClCompile Include=...>` file list, fixed at project-file-authoring
+time, and neither it nor `micropython.vcxproj` references `USER_C_MODULES`
+or `FROZEN_MANIFEST` anywhere (confirmed by grep across the whole `msvc/`
+tree and the `.vcxproj` itself — zero hits, versus real hits in `Makefile`
+and `variants/dev/mpconfigvariant.mk`). The Makefile path carries both
+natively: `ports/windows/Makefile`'s own `FROZEN_MANIFEST ?=
+variants/manifest.py` plus `include $(TOP)/py/mkrules.mk`, which is what
+actually wires `USER_C_MODULES` into the build (`py/mkrules.mk`'s own
+`vpath %.c . $(TOP) $(USER_C_MODULES)` and friends). Passing a usermod's
+own C sources or manifest through the MSVC path would mean hand-editing
+`micropython.vcxproj` per module, defeating the point of a driver that
+takes them as parameters — so MSYS2 is not a preference here, it is the
+only one of MicroPython's own three Windows build methods that actually
+takes a `USER_C_MODULES`/`FROZEN_MANIFEST` input at all, and it is also
+what `a7p`'s own `mp-usermod.yml` already uses in production.
+
+Landed as `usermod/msys2.py` (`find_msys2()`/`install_msys2()`/
+`resolve_msys2()`, `ResolvedMsys2.run()`/`.install_packages()`/
+`.to_posix_path()`) and `build.py`'s `build_windows()`. `find_msys2()`
+checks `C:\msys64` first — `msys2/setup-msys2`'s own default (`release:
+false`) path, already present on every GitHub-hosted `windows-latest`
+runner — and only falls back to downloading its own sha256-pinned
+standalone installer for a host with nothing there (a local dev machine).
+Commands run through `bash.exe -leo pipefail -c` under the target
+`MSYSTEM` (`MINGW32`/`MINGW64`/`CLANGARM64`, each installing its own
+compiler package via `pacman`, transcribed from `a7p`'s own
+`matrix.msys_install`), not a plain `subprocess.run()` with `PATH`
+prepended — `MSYSTEM` alone does not select the right toolchain without
+going through bash's own login-shell startup scripts. `mpy_dir` is
+converted to MSYS2's own POSIX form via real `cygpath -u`
+(`ResolvedMsys2.to_posix_path()`), not `.as_posix()` — the same
+`D:\a\mpy` → `D:/a/mpy` (still wrong) vs `/d/a/mpy` (correct) distinction
+**D18**'s own top-level entry already documented for `a7p`'s hand-written
+workflow, now built in rather than a bug waiting to be found by CI a
+second time. The one honest caveat every other resolver in this package
+doesn't carry: this cannot be verified in a Linux sandbox at all, so it is
+hermetically tested (`tests/test_msys2.py`, `tests/test_usermod_build.py`)
+but not yet proven against a real `windows-latest` run the way `unix`/
+`qemu`/`webassembly`/`esp32` already were — `usermod-dev.yml`'s `windows`
+job is the next real feedback loop for it.
+
 **D20 (revisits D9) — usermod runner selection is structural, confirmed
 live, not a hypothetical "different targets need different runners."**
 `mp-usermod.yml`'s matrix already needs four distinct `runs_on:` values
@@ -1300,8 +1351,13 @@ style, now that a slice of it is actually implemented:
         earlier manual PATH-only proof done before any of this code
         existed) plus its `.wasm` — through the actual production code
         path, not the manual proof.
-  - [ ] `windows` — not started, waits on **M9**'s MSYS2 orchestration
-        (**D18**), not just a toolchain pin.
+  - [x] `windows` — `usermod/msys2.py` + `usermod/build.py`'s
+        `build_windows()`, driving `ports/windows` under MSYS2. MSVC (the
+        port's own fourth build method) was investigated and rejected
+        first, not assumed away — see **D18**'s own addendum. Not yet
+        proven against real `windows-latest` CI the way the other four
+        ports were (hermetic tests only); see **M9**'s own MSYS2 line
+        below.
 - **M9** — toolchain provisioning: MSYS2 orchestration (**D18**), ESP-IDF
   fetch + caching, `docker` strategy revisit for it (**D19**).
   - [x] ESP-IDF side: `usermod/espidf.py` (`fetch_esp_idf()`,
@@ -1320,22 +1376,27 @@ style, now that a slice of it is actually implemented:
         BOARD=ESP32_GENERIC`, a genuine `micropython.bin` — through the
         official recipe run by hand first, then again through the actual
         `espidf.py`/`build_esp32()` code path.
-  - [ ] MSYS2 (**D18**), still unstarted — waits on real `windows-latest`
-        CI feedback (`usermod-dev.yml`, a plain on-push scratch workflow
-        added for exactly this — MSYS2 cannot be verified in a Linux
-        sandbox at all). Already earning its keep before any MSYS2 code
-        exists: caught and fixed three real bugs on its first few runs —
-        `usermod/build.py`'s `Path` handling used bare `str()`, which is
-        backslash-separated on Windows and breaks any GNU Make invocation
-        (fixed to `.as_posix()` everywhere); two of `test_emsdk.py`'s own
-        tests were silently coupled to the CI host actually being
-        linux-x64; and `tests/test_build.py`'s own
+  - [x] MSYS2 (**D18**): `usermod/msys2.py` (`find_msys2()`/
+        `install_msys2()`/`resolve_msys2()`, `ResolvedMsys2.run()`/
+        `.install_packages()`/`.to_posix_path()`) + `build_windows()`,
+        20 hermetic cases across `tests/test_msys2.py` and
+        `tests/test_usermod_build.py`. `usermod-dev.yml`'s `windows` job
+        (a plain on-push scratch workflow, no PR — MSYS2 cannot be
+        verified in a Linux sandbox at all) already earned its keep before
+        this code existed: caught and fixed three real bugs on its first
+        few runs — `usermod/build.py`'s `Path` handling used bare `str()`,
+        which is backslash-separated on Windows and breaks any GNU Make
+        invocation (fixed to `.as_posix()` everywhere); two of
+        `test_emsdk.py`'s own tests were silently coupled to the CI host
+        actually being linux-x64; and `tests/test_build.py`'s own
         `test_pre_build_command_runs_in_module_root` used `touch`, which
         `cmd.exe` has no equivalent for (fixed to `echo hi > marker`,
         which both `/bin/sh -c` and `cmd.exe /c` understand identically).
         None of these were "not this work's problem" — a bug found while
         doing this work got fixed as part of it, whoever's line it
-        originally was.
+        originally was. `msys2.py`/`build_windows()` itself is still
+        unverified against a real run — the obvious next `usermod-dev.yml`
+        push to check.
 - **M10** — runner/matrix integration, fan-out-by-default for usermod
   identifiers (**D20**).
 - **M11** — execution axis: qemu-system, rp2040py, node, native — four of
