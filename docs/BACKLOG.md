@@ -1977,9 +1977,11 @@ whatever session) picks this up next.**
   build-only + push on `push:` events):
   `unix-manylinux-{x64,x86,aarch64,armhf,mipsel}`, `windows` (x64+x86
   only, arm64 stays bare-host), `qemu`, `webassembly` (emsdk baked in,
-  ~1.5GB image). **Not started: `esp32`** -- the one remaining port.
-  Bake-vs-mount is decided (bake ESP-IDF in, same as `webassembly`'s
-  emsdk, per **D19**); the Dockerfile itself just hasn't been written.
+  ~1.5GB image, **now wired to `ensure_image()` -- see D32's own
+  "webassembly landed next" note below**). **Not started: `esp32`** --
+  the one remaining port. Bake-vs-mount is decided (bake ESP-IDF in,
+  same as `webassembly`'s emsdk, per **D19**); the Dockerfile itself
+  just hasn't been written.
 - Every Dockerfile that builds green also gets pushed to
   `ghcr.io/ballistics-lab/cibuildmp-<dockerfile>:sha-<gitsha>` on every
   real push (not gated behind a release tag -- the user's own explicit
@@ -2696,6 +2698,40 @@ this repo's own CI exercises the way `examples/usermod-unix` does for
 `unix` (**D26**'s own "one port, proven live, before the next"
 precedent) -- wiring them blind, with no real build ever run through
 them, is the wrong order.
+
+**`webassembly` landed next, following exactly that precedent.**
+`examples/usermod-webassembly` (a trivial `USER_C_MODULES` module,
+mirroring `examples/usermod-unix`'s own `mymod`) plus a
+`build-usermod-webassembly` job in `build-examples.yml`, `needs:
+verify-docker-images`, same shape as `build-usermod-unix`'s own job
+(env-var override pointed at the pushed `ghcr.io/.../cibuildmp-webassembly:
+sha-<gitsha>` tag on a push, empty on a `pull_request` so
+`ensure_image()`'s own local-build fallback runs instead). No per-arch
+matrix needed -- `webassembly` has no axis at all, one combined image.
+`build_webassembly()` now calls `ensure_image("webassembly")` and
+`dockerrun.run()` directly, with no bare-host branch at all (unlike
+`build_unix()`'s still-conditional shape): `webassembly` ships a
+Dockerfile with emsdk already baked in, so `ensure_image()` never
+returns `None` for it, and this decision's own Docker-only call (D30)
+means there is nothing for a bare-host branch to fall back to any more.
+A `docker_image is None` guard still exists, but only as the hard,
+clearly-worded error this document's own "concrete follow-up" note
+(under D30's usermod bullet) called for -- not a fallback path.
+`emsdk.resolve_emsdk()`'s bare-host call is gone from this function
+entirely: the image's own baked-in `ENV PATH` covers what `sdk.env()`
+used to inject, so `usermod/emsdk.py` now only pins what the packaged
+Dockerfile's own `RUN` step downloads at image-build time, verified by
+running the real CLI against `examples/usermod-webassembly` in this
+session's own sandbox: `--dry-run` needed no Docker at all (confirming
+the earlier "scoped to an actual build only" note holds), and a real
+(non-dry-run) build reached `ensure_image()` and failed with a clean,
+expected `docker build ... failed with exit code 1` /
+`failed to connect to the docker API` message -- this sandbox has no
+reachable Docker daemon (same limitation `unix-manylinux-x64.Dockerfile`'s
+own header already records), so the actual image build and `make`
+invocation are proven live in this repo's own CI
+(`build-usermod-webassembly`), not locally. All 253 tests pass, `ruff
+check`/`ruff format --check` clean, `pyright` 0 errors.
 
 **A real caching conflict, caught before it shipped, not after.** Naively
 wiring `ensure_image()` into `build_unix()` and leaving

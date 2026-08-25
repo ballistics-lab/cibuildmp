@@ -1,6 +1,10 @@
 """Sibling-container execution for usermod port builds -- D26's own
-design, `unix` only so far, opt-in, not wired into the CLI or action.yml
-yet.
+design, Docker-only for every port (D30). `unix` and `webassembly` are
+wired to `ensure_image()` today, reachable through the real CLI/
+action.yml (`build_unix()`/`build_webassembly()`); `windows`/`qemu`/
+`esp32` still need their own real example project proven live first
+(D26's own "one port, proven live, before the next" precedent) before
+their own `build_<port>()` calls this too.
 
 The design this exists to prove out: `cibuildmp` itself stays on the bare
 host (no Docker-in-Docker) and launches an ordinary sibling `docker run`

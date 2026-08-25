@@ -293,12 +293,16 @@ deliberately not wired yet — `[[overrides]]`, `extra-files`).
 `unix` arches (`x64`/`x86`/`aarch64`/`armhf`/`mipsel`) through the
 actual action on every push (`build-examples.yml`), not just the
 hermetic test suite — real linked binaries, collected with their
-executable bit intact, confirmed live on CI. `windows`/`qemu`/
-`webassembly`/`esp32` are not wired into `action.yml`'s own apt
-prerequisites yet — see `docs/BACKLOG.md`'s own **D28** for the plan
-(one Docker image per port, `unix`'s own proof-of-concept first). The
-composite actions above (`build-usermod-*`) remain the supported,
-verified production path for the ports `action.yml` doesn't cover yet.
+executable bit intact, confirmed live on CI. `unix` and `webassembly`
+now build **Docker-only** (`docs/BACKLOG.md`'s own **D28**/**D30**: one
+Docker image per port, no bare-host fallback for either) —
+[`examples/usermod-webassembly`](examples/usermod-webassembly) proves
+the same path for `webassembly`, which has no arch axis and one
+combined image with emsdk baked in. `windows`/`qemu`/`esp32` are not
+wired into `action.yml` yet — see `docs/BACKLOG.md`'s own **D28** for
+the plan. The composite actions above (`build-usermod-*`) remain the
+supported, verified production path for the ports `action.yml` doesn't
+cover yet.
 
 | Port          | Target                    | Provisioning                    | Status |
 |---------------|----------------------------|-----------------------------------|--------|

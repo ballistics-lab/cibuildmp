@@ -26,6 +26,10 @@ name: Build examples
 #                   gcc-mipsel-linux-gnu, libltdl-dev, libtool) work
 #                   through the real composite action, not just in a bare
 #                   dev sandbox.
+#   usermod-webassembly -- the second usermod port wired to
+#                   ensure_image()'s Docker path (D26/D30). No arch axis
+#                   at all (one combined image, emsdk baked in), and
+#                   Docker-only with no bare-host fallback, unlike unix.
 #
 # push: (no branches: filter) rather than push: branches: [main] -- this
 # needs to run on every push to a dev branch too, not just main, the same
@@ -199,3 +203,44 @@ jobs:
 
       - name: List built artifacts
         run: ls -laR examples/usermod-unix/mpyhouse
+
+  # webassembly is the second usermod port wired to ensure_image()'s
+  # Docker path (D26's own "one port, proven live, before the next" --
+  # unix was the first slice, above). Docker-only (docs/BACKLOG.md's
+  # D30): unlike unix there is no bare-host fallback to fall back to at
+  # all here, so this job is what proves build_webassembly() actually
+  # works end to end against a real pushed image, not just that the
+  # Dockerfile builds.
+  build-usermod-webassembly:
+    runs-on: ubuntu-latest
+    needs: verify-docker-images
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v7
+
+      # Same reasoning as build-usermod-unix's own login step: GHCR
+      # packages are private by default, even to this same repo's own
+      # pull.
+      - uses: docker/login-action@v3
+        if: ${{ github.event_name == 'push' }}
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build examples/usermod-webassembly
+        # Same reasoning as build-usermod-unix's own step: only has a
+        # real value to point at on a push event (verify-docker-images
+        # only pushes to GHCR there); on a pull_request run this stays
+        # unset and ensure_image() falls through to its own local-build
+        # fallback instead.
+        uses: ./
+        env:
+          CIBMP_WEBASSEMBLY_DOCKER_IMAGE: ${{ github.event_name == 'push' && format('ghcr.io/{0}/cibuildmp-webassembly:sha-{1}', github.repository_owner, github.sha) || '' }}
+        with:
+          package-dir: examples/usermod-webassembly
+
+      - name: List built artifacts
+        run: ls -laR examples/usermod-webassembly/mpyhouse

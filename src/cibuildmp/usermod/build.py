@@ -50,7 +50,10 @@ attempted now since nothing here exercises it yet.
 
 `webassembly` is the third port here: its toolchain (`emsdk`) needs its
 own resolver, `usermod/emsdk.py` -- not `toolchains.py`'s shape, see that
-module's own docstring for why.
+module's own docstring for why. `build_webassembly()` itself is
+Docker-only (docs/BACKLOG.md's D30): `emsdk.py`'s resolver now only pins
+what the packaged `webassembly.Dockerfile` bakes in at image-build time,
+not something a build invokes directly.
 
 `esp32` (**D19**) is the fourth port: its toolchain (ESP-IDF) is a whole
 environment, not one `<prefix>gcc` -- `usermod/espidf.py` is its own
@@ -100,7 +103,7 @@ from pathlib import Path
 
 from .. import toolchains
 from ..toolchains import ResolvedToolchain
-from . import emsdk, espidf, llvmmingw
+from . import espidf, llvmmingw
 
 
 class UsermodBuildError(Exception):
@@ -449,24 +452,42 @@ def build_webassembly(
     """Build ports/webassembly for `opts.variant`, returning the produced
     `micropython.mjs`.
 
-    emsdk is resolved via `emsdk.resolve_emsdk()` -- a pinned download,
-    not a `git clone emsdk` + installer run; see `usermod/emsdk.py`'s own
-    docstring and `resources/usermod.toml`'s `[emsdk]` table for why this
-    needs its own resolver rather than `toolchains.resolve()`.
+    Docker-only (D30's own later call: no bare-host path for any usermod
+    port, `unix` included). `dockerrun.ensure_image("webassembly")` builds
+    (or reuses, via Docker's own layer cache) cibuildmp's own packaged
+    `resources/docker/webassembly.Dockerfile` unless an explicit
+    `CIBMP_WEBASSEMBLY_DOCKER_IMAGE` override or a `dockerrun.PORT_IMAGES`
+    default is set -- either way this always resolves to a real image:
+    unlike `windows`/`esp32`, `webassembly` has a packaged Dockerfile
+    today, so `ensure_image()` never returns `None` here. emsdk itself is
+    baked into that image (`usermod/emsdk.py`'s own resolver stays what
+    pins/verifies the same download for the Dockerfile's own `RUN` step
+    to match, not something a build invokes directly any more -- no
+    `sdk.env()` to inject, the image's own `ENV PATH` already covers it).
+    `toolchain_root`/`quiet` are accepted only for the same call shape
+    every `build_<port>()` shares (`orchestrate.py`'s `build_one()`
+    passes them uniformly); neither is used on this Docker-only path.
 
     The output path is `opts.build_dir / "micropython.mjs"` --
     `ports/webassembly/Makefile`'s own `all:` target.
     """
-    sdk = emsdk.resolve_emsdk(root=toolchain_root, quiet=quiet)
+    from . import dockerrun
+
+    docker_image = dockerrun.ensure_image("webassembly")
+    if docker_image is None:
+        raise UsermodBuildError(
+            "webassembly: cibuildmp ships no Docker image for this port "
+            "and usermod builds are Docker-only -- this should not happen "
+            "unless resources/docker/webassembly.Dockerfile was removed"
+        )
 
     command = webassembly_make_command(opts, mpy_dir)
-    try:
-        subprocess.run(command, env=sdk.env(), check=True)
-    except subprocess.CalledProcessError as exc:
-        raise UsermodBuildError(
-            f"webassembly/{opts.variant}: `{' '.join(command)}` failed "
-            f"with exit code {exc.returncode}"
-        ) from exc
+    dockerrun.run(
+        command,
+        mounts=[mpy_dir, Path(opts.user_c_modules)],
+        workdir=mpy_dir / "ports" / "webassembly",
+        image=docker_image,
+    )
 
     produced = opts.build_dir / "micropython.mjs"
     if not produced.exists():

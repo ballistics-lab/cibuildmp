@@ -24,7 +24,6 @@ from cibuildmp.usermod.build import (
     webassembly_make_command,
     windows_make_command,
 )
-from cibuildmp.usermod.emsdk import ResolvedEmsdk
 from cibuildmp.usermod.espidf import ResolvedEspIdf
 from cibuildmp.usermod.llvmmingw import ResolvedLlvmMingw
 
@@ -407,54 +406,86 @@ def test_webassembly_command_matches_build_usermod_webassembly_shape():
     ]
 
 
-def test_webassembly_resolves_emsdk_before_building(monkeypatch, tmp_path):
-    """Must go through emsdk.resolve_emsdk() -- not toolchains.resolve(),
-    which has no emsdk entry at all."""
+def test_webassembly_builds_through_docker_and_returns_mjs_path(monkeypatch, tmp_path):
+    # Docker-only (D30): no CIBMP_WEBASSEMBLY_DOCKER_IMAGE / PORT_IMAGES
+    # entry set here either -- cibuildmp ships
+    # resources/docker/webassembly.Dockerfile, so ensure_image() builds
+    # (or reuses) that image itself, the same default-to-container
+    # behaviour build_unix() already has.
+    monkeypatch.delenv("CIBMP_WEBASSEMBLY_DOCKER_IMAGE", raising=False)
+    monkeypatch.setattr("cibuildmp.usermod.dockerrun.PORT_IMAGES", {})
+    build_dir = tmp_path / "build-wasm"
+    build_dir.mkdir()
+    (build_dir / "micropython.mjs").write_bytes(b"")
+
     calls = []
-
-    def fake_resolve(**kwargs):
-        calls.append(kwargs)
-        return ResolvedEmsdk(install_dir=tmp_path / "sdk")
-
-    monkeypatch.setattr(build.emsdk, "resolve_emsdk", fake_resolve)
-    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
-
-    build_dir = tmp_path / "build-wasm"
-    build_dir.mkdir()
-    (build_dir / "micropython.mjs").write_bytes(b"")
-
-    build_webassembly(wasm_opts(build_dir=build_dir), tmp_path / "mpy")
-
-    assert len(calls) == 1
-
-
-def test_webassembly_builds_and_returns_mjs_path(monkeypatch, tmp_path):
-    build_dir = tmp_path / "build-wasm"
-    build_dir.mkdir()
-    (build_dir / "micropython.mjs").write_bytes(b"")
-
     monkeypatch.setattr(
-        build.emsdk,
-        "resolve_emsdk",
-        lambda **k: ResolvedEmsdk(install_dir=tmp_path / "sdk"),
+        "cibuildmp.usermod.dockerrun.subprocess.run",
+        lambda cmd, **k: calls.append(cmd) or None,
     )
-    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
 
     result = build_webassembly(wasm_opts(build_dir=build_dir), tmp_path / "mpy")
 
     assert result == build_dir / "micropython.mjs"
+    assert calls[0][:2] == ["docker", "build"]
+    assert calls[0][-1].endswith("resources/docker")
+    assert calls[1][:3] == ["docker", "run", "--rm"]
+    assert "make" in calls[1]
+
+
+def test_webassembly_docker_image_override_skips_own_dockerfile_build(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("CIBMP_WEBASSEMBLY_DOCKER_IMAGE", "cibuildmp-webassembly:local")
+    build_dir = tmp_path / "build-wasm"
+    build_dir.mkdir()
+    (build_dir / "micropython.mjs").write_bytes(b"")
+
+    calls = []
+    monkeypatch.setattr(
+        "cibuildmp.usermod.dockerrun.subprocess.run",
+        lambda cmd, **k: calls.append(cmd) or None,
+    )
+
+    build_webassembly(wasm_opts(build_dir=build_dir), tmp_path / "mpy")
+
+    assert len(calls) == 1
+    docker_command = calls[0]
+    assert docker_command[:3] == ["docker", "run", "--rm"]
+    assert "cibuildmp-webassembly:local" in docker_command
+    assert "make" in docker_command
+
+
+def test_webassembly_docker_image_mounts_mpy_dir_and_user_c_modules(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("CIBMP_WEBASSEMBLY_DOCKER_IMAGE", "cibuildmp-webassembly:local")
+    build_dir = tmp_path / "build-wasm"
+    build_dir.mkdir()
+    (build_dir / "micropython.mjs").write_bytes(b"")
+
+    calls = []
+    monkeypatch.setattr(
+        "cibuildmp.usermod.dockerrun.subprocess.run",
+        lambda cmd, **k: calls.append(cmd) or None,
+    )
+
+    mpy_dir = tmp_path / "mpy"
+    build_webassembly(wasm_opts(build_dir=build_dir), mpy_dir)
+
+    docker_command = calls[0]
+    assert f"{mpy_dir}:{mpy_dir}" in docker_command
+    assert "/gh/ws/micropython/usermod:/gh/ws/micropython/usermod" in docker_command
 
 
 def test_webassembly_missing_mjs_after_success_is_an_error(monkeypatch, tmp_path):
+    monkeypatch.setenv("CIBMP_WEBASSEMBLY_DOCKER_IMAGE", "cibuildmp-webassembly:local")
     build_dir = tmp_path / "build-wasm"
     build_dir.mkdir()
 
     monkeypatch.setattr(
-        build.emsdk,
-        "resolve_emsdk",
-        lambda **k: ResolvedEmsdk(install_dir=tmp_path / "sdk"),
+        "cibuildmp.usermod.dockerrun.subprocess.run", lambda *a, **k: None
     )
-    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
 
     with pytest.raises(UsermodBuildError, match="build reported success but"):
         build_webassembly(wasm_opts(build_dir=build_dir), tmp_path / "mpy")
@@ -463,17 +494,30 @@ def test_webassembly_missing_mjs_after_success_is_an_error(monkeypatch, tmp_path
 def test_webassembly_build_failure_names_the_command(monkeypatch, tmp_path):
     import subprocess as sp
 
+    monkeypatch.setenv("CIBMP_WEBASSEMBLY_DOCKER_IMAGE", "cibuildmp-webassembly:local")
+
     def fake_run(cmd, **kwargs):
         raise sp.CalledProcessError(1, cmd)
 
-    monkeypatch.setattr(
-        build.emsdk,
-        "resolve_emsdk",
-        lambda **k: ResolvedEmsdk(install_dir=tmp_path / "sdk"),
-    )
-    monkeypatch.setattr(build.subprocess, "run", fake_run)
+    monkeypatch.setattr("cibuildmp.usermod.dockerrun.subprocess.run", fake_run)
 
     with pytest.raises(UsermodBuildError, match="failed with exit code"):
+        build_webassembly(
+            wasm_opts(build_dir=tmp_path / "build-wasm"), tmp_path / "mpy"
+        )
+
+
+def test_webassembly_no_docker_daemon_raises_clear_error(monkeypatch, tmp_path):
+    # Docker-only means "docker unavailable" is a hard, clearly-worded
+    # error, not a silent bare-host fallback -- the user's own call.
+    monkeypatch.setenv("CIBMP_WEBASSEMBLY_DOCKER_IMAGE", "cibuildmp-webassembly:local")
+
+    def fake_run(cmd, **kwargs):
+        raise FileNotFoundError("docker")
+
+    monkeypatch.setattr("cibuildmp.usermod.dockerrun.subprocess.run", fake_run)
+
+    with pytest.raises(UsermodBuildError, match="docker CLI itself is not on PATH"):
         build_webassembly(
             wasm_opts(build_dir=tmp_path / "build-wasm"), tmp_path / "mpy"
         )
