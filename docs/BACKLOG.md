@@ -2374,31 +2374,44 @@ followed by one big wiring pass at the end.
    same pass as this migration (composite `action.yml` pulls the
    pinned per-port image by default), not stay open a second time.
    - **Real correctness gap in this trigger, caught by the user's own
-     question, not yet fixed:** copying `publish-docker`'s own trigger
-     as-is (`if: github.event_name == 'push'`, and `publish.yml`'s only
-     `push:` trigger is `tags: v*`) would mean per-port images publish
-     *only* on a real release tag. But `cibuildmp` itself installs from
+     question -- resolved, but not the way this bullet first
+     described.** Copying `publish-docker`'s own trigger as-is (`if:
+     github.event_name == 'push'`, and `publish.yml`'s only `push:`
+     trigger is `tags: v*`) would mean per-port images publish *only*
+     on a real release tag. But `cibuildmp` itself installs from
      `$GITHUB_ACTION_PATH` fresh on every ref (`uv tool install`
      already gives this reproducibility for the Python side) -- once
      `PORT_IMAGES` actually references a GHCR tag, a consumer on
      `@main` or any commit SHA that isn't an exact release tag would
      hit a real code/image mismatch: `dockerrun.py`'s own registered
      tag either doesn't exist yet, or points at a stale image built
-     from an older Dockerfile. The correct fix is publishing on every
-     push to the default branch too, tagged `:sha-<gitsha>` (immutable,
-     matches the checked-out commit exactly), with `:vX.Y.Z`/`:latest`
-     staying reserved for real releases as an additional, stable alias.
-     **Deliberately not implemented yet, on the user's own call** (asked
-     directly: publish on every default-branch push, every branch, or
-     leave undecided -- chose to leave this as a documented TODO here
-     rather than wire real GHCR pushes into CI on the spot, since
-     publishing to a shared org registry on every commit is a real,
-     visible infra decision, not one to make unilaterally from a
-     feature branch). Whoever implements step 5 for real must resolve
-     this before registering anything in `PORT_IMAGES` that consumers
-     might reach from a non-tagged ref -- otherwise this decision's own
-     "isolation and correctness" framing gets undercut by a silent
-     image/code version-skew bug on day one.
+     from an older Dockerfile. First asked directly and answered "leave
+     this as a TODO, don't wire real pushes yet" -- then revised in the
+     same session once the actual cost of that became concrete: without
+     a real, currently-pullable image, `PORT_IMAGES` can never be
+     exercised end to end on a dev branch at all, and waiting for a
+     real release just to prove the mechanism this decision exists to
+     build isn't reasonable ("щоб не чекати по пів року").
+     **Implemented, in `build-examples.yml`'s own `verify-docker-images`
+     job, not `publish.yml`** -- every `push:` event (never
+     `pull_request`, so a fork's own PR never needs registry
+     credentials) now also pushes each Dockerfile that builds green to
+     `ghcr.io/ballistics-lab/cibuildmp-<dockerfile>:sha-<gitsha>`,
+     `docker/build-push-action` with `cache-from/cache-to:
+     type=gha,scope=<dockerfile>` (per-leg cache scope, so one image's
+     rebuild can't invalidate another's). Deliberately `:sha-<gitsha>`
+     only, no `:latest` -- a shared mutable tag across arbitrary
+     branches would let one branch's push silently clobber what another
+     branch, or a real release, expects `:latest` to mean; a real
+     stable `:vX.Y.Z`/`:latest` alias still belongs to `publish.yml`'s
+     own release-tag-gated job specifically, not here -- so this step's
+     own "extends from one image to six" work above is still real,
+     separate work, not superseded by this. `PORT_IMAGES` itself is
+     still empty -- this only makes a real image reachable by an exact
+     sha tag; registering one as every unopted-in caller's default is a
+     separate, deliberate step once a specific `(port, arch[, libc])`
+     combination has actually been proven end to end through
+     `dockerrun.run()`, not just built.
 
 **Cache strategy -- the direct answer to "we need a `CIBW_CACHE_PATH`
 equivalent," in two genuinely separate parts.** cibuildwheel's own

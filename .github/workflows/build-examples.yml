@@ -42,19 +42,28 @@ on:
 
 jobs:
   # D28's own per-(port, arch) Docker images
-  # (resources/docker/*.Dockerfile) -- build-only, no push, no GHCR
-  # credentials needed at all: this proves each Dockerfile actually
-  # builds (the still-open gap every one of these files' own header
-  # comments flags -- "not yet built for real via docker build") on
-  # every push, independent of publish.yml's own publish-docker job,
-  # which is deliberately gated behind a real `v*` release tag and
-  # stays that way (image *publishing* is a maintainer decision; image
-  # *building* is not, and shouldn't wait on one). `unix` is one image
-  # per arch (D26/D31 -- no combined image any more, manylinux only so
-  # far); `windows` stays one combined x64+x86 image (no
-  # manylinux/musllinux-shaped axis for this port at all).
+  # (resources/docker/*.Dockerfile). Builds every one of them on every
+  # push (PR too, but never pushes there -- a fork's own PR gets no
+  # registry credentials, and shouldn't); on a direct push, a
+  # successful build is also pushed to GHCR, tagged by this exact
+  # commit's own sha -- immutable, and reachable the moment a build
+  # goes green, not gated behind a real `v*` release tag the way
+  # publish.yml's own publish-docker job is. The user's own call,
+  # revising an earlier "leave this as a TODO" answer: without a real,
+  # currently-pullable image, PORT_IMAGES can never actually be
+  # exercised end to end on a dev branch -- waiting for a release just
+  # to test the mechanism this decision exists to prove isn't
+  # reasonable. Deliberately `:sha-<sha>` only, no `:latest` -- a
+  # shared mutable tag across arbitrary branches would let one branch's
+  # push silently clobber what another branch (or a real release)
+  # expects `:latest` to mean; a real stable alias belongs to
+  # publish.yml's own release-tag-gated job instead (D28 step 5), not
+  # here.
   verify-docker-images:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     strategy:
       matrix:
         dockerfile:
@@ -67,12 +76,24 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        if: ${{ github.event_name == 'push' }}
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
       - name: docker build resources/docker/${{ matrix.dockerfile }}.Dockerfile
-        run: |
-          docker build \
-            -t cibuildmp-${{ matrix.dockerfile }}:ci \
-            -f src/cibuildmp/resources/docker/${{ matrix.dockerfile }}.Dockerfile \
-            .
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: src/cibuildmp/resources/docker/${{ matrix.dockerfile }}.Dockerfile
+          push: ${{ github.event_name == 'push' }}
+          tags: ghcr.io/${{ github.repository_owner }}/cibuildmp-${{ matrix.dockerfile }}:sha-${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.dockerfile }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.dockerfile }}
 
   build:
     runs-on: ubuntu-latest
