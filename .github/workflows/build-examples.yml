@@ -132,17 +132,53 @@ jobs:
         with:
           package-dir: examples/wasm2mpy
 
-      - name: Build examples/usermod-unix
-        # No CIBMP_VERSION here -- usermod output has no package.json to
-        # version at all (D23: it's a full port binary, not a
-        # mip.install()-able .mpy), so the env var would just be unused.
-        uses: ./
-        with:
-          package-dir: examples/usermod-unix
-
       - name: List built artifacts
         run: |
           ls -laR examples/template/mpyhouse
           ls -laR examples/wasm2mpy/mpyhouse
-          ls -laR examples/usermod-unix/mpyhouse
           cat examples/template/mpyhouse/*/package.json
+
+  # Split from `build` above rather than added as one more step there:
+  # dockerrun.ensure_image() (D28's own next step) now backs
+  # usermod-unix's Docker path by default, so this needs verify-docker-images
+  # to actually be worth anything -- without that dependency, this job's
+  # own five docker builds would just redo, uncached, on a second GitHub
+  # runner with no shared Docker daemon, the exact work verify-docker-images
+  # already did *with* a real cache (type=gha) and already pushed to GHCR.
+  # template/wasm2mpy above have nothing to do with any of that, so they
+  # stay in their own job rather than getting pulled into this wait too.
+  build-usermod-unix:
+    runs-on: ubuntu-latest
+    needs: verify-docker-images
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build examples/usermod-unix
+        # No CIBMP_VERSION here -- usermod output has no package.json to
+        # version at all (D23: it's a full port binary, not a
+        # mip.install()-able .mpy), so the env var would just be unused.
+        #
+        # The five overrides below only have a real value to point at on
+        # a push event -- verify-docker-images only pushes to GHCR there
+        # (a fork's own pull_request gets no registry credentials, by
+        # design). On a pull_request run these stay unset (empty-string
+        # env vars, correctly ignored: image_for()'s own `if override:`
+        # check is truthiness-based, not the `is not None` check that bit
+        # ACTION_OUTPUT_DIR under this exact "GHA always sets a step's
+        # own env:, even empty" shape -- D28's own ninth bug), so
+        # ensure_image() falls through to its own local-build fallback
+        # instead -- slower (no gha cache reachable outside that job),
+        # but correct, and exactly the same path a consumer with no
+        # published image of their own would take.
+        uses: ./
+        env:
+          CIBMP_UNIX_X64_MANYLINUX_DOCKER_IMAGE: ${{ github.event_name == 'push' && format('ghcr.io/{0}/cibuildmp-unix-manylinux-x64:sha-{1}', github.repository_owner, github.sha) || '' }}
+          CIBMP_UNIX_X86_MANYLINUX_DOCKER_IMAGE: ${{ github.event_name == 'push' && format('ghcr.io/{0}/cibuildmp-unix-manylinux-x86:sha-{1}', github.repository_owner, github.sha) || '' }}
+          CIBMP_UNIX_AARCH64_MANYLINUX_DOCKER_IMAGE: ${{ github.event_name == 'push' && format('ghcr.io/{0}/cibuildmp-unix-manylinux-aarch64:sha-{1}', github.repository_owner, github.sha) || '' }}
+          CIBMP_UNIX_ARMHF_MANYLINUX_DOCKER_IMAGE: ${{ github.event_name == 'push' && format('ghcr.io/{0}/cibuildmp-unix-manylinux-armhf:sha-{1}', github.repository_owner, github.sha) || '' }}
+          CIBMP_UNIX_MIPSEL_MANYLINUX_DOCKER_IMAGE: ${{ github.event_name == 'push' && format('ghcr.io/{0}/cibuildmp-unix-manylinux-mipsel:sha-{1}', github.repository_owner, github.sha) || '' }}
+        with:
+          package-dir: examples/usermod-unix
+
+      - name: List built artifacts
+        run: ls -laR examples/usermod-unix/mpyhouse

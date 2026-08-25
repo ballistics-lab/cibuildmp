@@ -243,10 +243,13 @@ def build_unix(
     ports/unix/Makefile's own `PROG ?= micropython` default, unambiguous
     with no globbing needed, unlike natmod's build.collect_output().
 
-    D26's own design: if CIBMP_UNIX_<ARCH>_MANYLINUX_DOCKER_IMAGE is set
-    (or dockerrun.PORT_IMAGES has "unix-<arch>-manylinux" registered),
-    the actual make/deplibs commands run inside that image as a sibling
-    container instead of directly on this host -- see
+    D26/D28's own design, via `dockerrun.ensure_image()`: the actual
+    make/deplibs commands run inside a per-(arch, libc) container instead
+    of directly on this host, by default -- an explicit
+    CIBMP_UNIX_<ARCH>_MANYLINUX_DOCKER_IMAGE override or a
+    dockerrun.PORT_IMAGES-registered default wins first if either is set,
+    otherwise cibuildmp builds (or reuses, via Docker's own layer cache)
+    its own packaged Dockerfile for this arch and uses that -- see
     usermod/dockerrun.py's own docstring for why this is keyed by
     (port, arch, libc), not port alone (D31: unix's own five
     architectures do not share one image, and glibc/musl are a real
@@ -258,8 +261,7 @@ def build_unix(
     resolver itself needs no change. The host-side toolchain probe
     below is skipped whenever an image is selected: the toolchain lives
     inside the image, not on this host's PATH, so shutil.which() would
-    reject a perfectly good docker-based build. Opt-in only, not
-    reachable from the CLI or action.yml yet.
+    reject a perfectly good docker-based build.
     """
     if opts.arch not in UNIX_ARCH_SETTINGS:
         raise UsermodBuildError(
@@ -269,7 +271,7 @@ def build_unix(
 
     from . import dockerrun
 
-    docker_image = dockerrun.image_for("unix", opts.arch, "manylinux")
+    docker_image = dockerrun.ensure_image("unix", opts.arch, "manylinux")
 
     if docker_image is None:
         if opts.arch == "x86":

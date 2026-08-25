@@ -103,6 +103,13 @@ def test_unknown_arch_rejected():
 def test_armhf_mipsel_missing_toolchain_names_apt_package(
     monkeypatch, tmp_path, arch, cross, apt_package
 ):
+    # Forces the bare-host fallback (as if cibuildmp shipped no Dockerfile
+    # for this arch): these tests are about the host toolchain probe's own
+    # apt-package hint, not about ensure_image()'s new docker-by-default
+    # routing, which would otherwise skip shutil.which() entirely.
+    monkeypatch.setattr(
+        "cibuildmp.usermod.dockerrun.ensure_image", lambda *a, **k: None
+    )
     monkeypatch.setattr(build.shutil, "which", lambda name: None)
 
     with pytest.raises(UsermodBuildError, match=f"apt install {apt_package}"):
@@ -113,6 +120,9 @@ def test_armhf_mipsel_missing_toolchain_names_apt_package(
 def test_armhf_mipsel_probes_toolchain_before_deplibs_and_build(
     monkeypatch, tmp_path, arch
 ):
+    monkeypatch.setattr(
+        "cibuildmp.usermod.dockerrun.ensure_image", lambda *a, **k: None
+    )
     which_calls = []
     monkeypatch.setattr(
         build.shutil,
@@ -184,6 +194,12 @@ def test_build_failure_names_the_command(tmp_path, monkeypatch):
 def test_x86_probes_toolchain_before_building(tmp_path, monkeypatch):
     """x86 must reuse toolchains.resolve("x86"), natmod's own -m32 probe --
     not re-implement multilib detection here."""
+    # Forces the bare-host fallback -- see the armhf/mipsel tests above for
+    # why: this test is about toolchains.resolve() being called, which
+    # ensure_image()'s new docker-by-default routing would otherwise skip.
+    monkeypatch.setattr(
+        "cibuildmp.usermod.dockerrun.ensure_image", lambda *a, **k: None
+    )
     calls = []
     monkeypatch.setattr(
         build.toolchains, "resolve", lambda arch, **k: calls.append(arch)
@@ -200,6 +216,10 @@ def test_x86_probes_toolchain_before_building(tmp_path, monkeypatch):
 
 def test_x86_toolchain_error_propagates_unwrapped(tmp_path, monkeypatch):
     from cibuildmp.toolchains import ToolchainError
+
+    monkeypatch.setattr(
+        "cibuildmp.usermod.dockerrun.ensure_image", lambda *a, **k: None
+    )
 
     def boom(arch, **k):
         raise ToolchainError("x86 needs gcc-multilib")
@@ -221,6 +241,9 @@ def test_aarch64_command_cross_compiles_not_host_gcc():
 
 
 def test_aarch64_missing_toolchain_names_apt_package(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "cibuildmp.usermod.dockerrun.ensure_image", lambda *a, **k: None
+    )
     monkeypatch.setattr(build.shutil, "which", lambda name: None)
 
     with pytest.raises(
@@ -232,6 +255,9 @@ def test_aarch64_missing_toolchain_names_apt_package(monkeypatch, tmp_path):
 
 
 def test_aarch64_probes_toolchain_before_building(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "cibuildmp.usermod.dockerrun.ensure_image", lambda *a, **k: None
+    )
     calls = []
     monkeypatch.setattr(
         build.shutil, "which", lambda name: calls.append(name) or f"/usr/bin/{name}"
@@ -838,11 +864,46 @@ def test_unix_docker_image_mounts_mpy_dir_and_user_c_modules(monkeypatch, tmp_pa
     assert "/gh/ws/micropython/usermod:/gh/ws/micropython/usermod" in docker_command
 
 
-def test_unix_no_docker_image_env_uses_bare_host_as_before(monkeypatch, tmp_path):
-    # No CIBMP_UNIX_X64_MANYLINUX_DOCKER_IMAGE set: every existing
-    # caller's behaviour is unchanged -- the default stays a bare
-    # subprocess.run(), not docker.
+def test_unix_no_registered_image_builds_cibuildmps_own_dockerfile(
+    monkeypatch, tmp_path
+):
+    # No CIBMP_UNIX_X64_MANYLINUX_DOCKER_IMAGE / PORT_IMAGES entry set:
+    # this is no longer a bare host.subprocess.run() build. cibuildmp
+    # ships resources/docker/unix-manylinux-x64.Dockerfile, so
+    # ensure_image() builds (or reuses) that image and every command
+    # after routes through it -- the new default, matching
+    # cibuildwheel's own default-to-container behaviour.
     monkeypatch.delenv("CIBMP_UNIX_X64_MANYLINUX_DOCKER_IMAGE", raising=False)
+    monkeypatch.setattr(
+        "cibuildmp.usermod.dockerrun.PORT_IMAGES",
+        {},
+    )
+    build_dir = tmp_path / "build-x64"
+    build_dir.mkdir()
+    (build_dir / "micropython").write_bytes(b"\x7fELF")
+
+    calls = []
+    monkeypatch.setattr(
+        "cibuildmp.usermod.dockerrun.subprocess.run",
+        lambda cmd, **k: calls.append(cmd) or None,
+    )
+
+    build_unix(opts("x64", build_dir=build_dir), tmp_path / "mpy")
+
+    assert calls[0][:2] == ["docker", "build"]
+    assert calls[0][-1].endswith("resources/docker")
+    assert calls[1][:3] == ["docker", "run", "--rm"]
+    assert "make" in calls[1]
+
+
+def test_unix_no_dockerfile_available_falls_back_to_bare_host(monkeypatch, tmp_path):
+    # The one case that still means a plain subprocess.run(): a port/arch
+    # cibuildmp ships no packaged Dockerfile for at all (today, that's
+    # windows/arm64 and esp32 -- simulated here by emptying _DOCKERFILES
+    # rather than adding a sixth real "no Dockerfile" unix arch).
+    monkeypatch.delenv("CIBMP_UNIX_X64_MANYLINUX_DOCKER_IMAGE", raising=False)
+    monkeypatch.setattr("cibuildmp.usermod.dockerrun.PORT_IMAGES", {})
+    monkeypatch.setattr("cibuildmp.usermod.dockerrun._DOCKERFILES", {})
     build_dir = tmp_path / "build-x64"
     build_dir.mkdir()
     (build_dir / "micropython").write_bytes(b"\x7fELF")

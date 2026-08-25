@@ -2107,16 +2107,14 @@ starts being "the feature works": nobody has ever run a real usermod
 build *through* `dockerrun.run()` against one of these pushed images.**
 Every image proven so far only proves `docker build` (and `docker
 push`) succeeded -- not that `cibuildmp` can actually use one to
-produce a real binary. The concrete next step: pick the most proven,
-simplest case (`unix`/`x64`), set
-`CIBMP_UNIX_X64_MANYLINUX_DOCKER_IMAGE` to the real
-`ghcr.io/ballistics-lab/cibuildmp-unix-manylinux-x64:sha-<gitsha>` tag
-a real CI run just pushed, and run a genuine `usermod-unix-x64` build
-through it in CI -- confirming the whole chain (`dockerrun.run()` →
-bind mounts → `make` inside the container → a real `micropython`
-binary landing back on the host) end to end, for the first time ever.
-Only after that succeeds does registering anything in `PORT_IMAGES` as
-a real default become a reasonable next move.
+produce a real binary. **Closed by D32, below**, in a slightly different
+shape than the paragraph originally proposed here: rather than a
+one-off manual env-var pointed at `unix`/`x64` alone, `unix` now
+defaults to Docker for every one of its five arches via
+`ensure_image()`, and `build-examples.yml`'s own CI proves the real
+`ghcr.io/...:sha-<gitsha>` pull-and-run path on every push. Only after
+that succeeds does registering anything in `PORT_IMAGES` as a real
+pinned-release default become a reasonable next move.
 
 **Explicitly not started at all:** `esp32.Dockerfile` (needs its own
 bake-vs-mount decision first, ESP-IDF is multi-gigabyte); `natmod`'s
@@ -2730,6 +2728,83 @@ not after:**
   the right shape to keep following -- `windows` is the natural next
   slice (apt-only toolchain, no large download like `esp32`'s
   ESP-IDF or `webassembly`'s emsdk, closest in shape to `unix`).
+
+**D32 — closing D28's own "one real gap": `unix` usermod now defaults to
+Docker whenever cibuildmp ships that arch's own Dockerfile, instead of
+requiring an explicit override or a maintainer-registered `PORT_IMAGES`
+entry first.** The user's own framing, directly: cibuildmp should call
+`docker` itself and build (or reuse a local cache of) its own packaged
+Dockerfile when nothing more specific is named, the same way
+cibuildwheel defaults every manylinux/musllinux identifier through its
+own pinned container rather than treating a container as an opt-in
+fallback for a host missing packages.
+
+`usermod/dockerrun.py`'s `image_for()` stays the pure, side-effect-free
+lookup (env override, then `PORT_IMAGES`) it always was -- `arch` is now
+optional there too, so a no-axis port (`qemu`/`webassembly`) can resolve
+a key with no dangling `-` segment. A new `ensure_image()` wraps it with
+a third fallback: if neither an override nor a registered default is
+set, but cibuildmp ships this `(port, arch[, libc])`'s own Dockerfile
+(`_DOCKERFILES`, mirroring the five `unix-manylinux-*` plus
+`windows`/`qemu`/`webassembly` files already on disk from D28's own
+migration), it runs `docker build -f <packaged Dockerfile> -t
+cibuildmp-<key>:local <dockerfile's own dir>` and returns that tag --
+relying on Docker's own layer cache for "reuse if already there" rather
+than reinventing one. Returns `None` only where cibuildmp genuinely
+ships no Dockerfile at all yet (`windows/arm64`, `esp32`), which still
+falls all the way through to a bare host build exactly as before.
+`build_unix()` now calls `ensure_image()`, not `image_for()` directly --
+the only call site changed this round; `windows`/`qemu`/`webassembly`
+own Dockerfiles exist and are in `_DOCKERFILES` too, but their
+`build_windows()`/`build_qemu()`/`build_webassembly()` are not wired to
+call `ensure_image()` yet, since none of them has a real example project
+this repo's own CI exercises the way `examples/usermod-unix` does for
+`unix` (**D26**'s own "one port, proven live, before the next"
+precedent) -- wiring them blind, with no real build ever run through
+them, is the wrong order.
+
+**A real caching conflict, caught before it shipped, not after.** Naively
+wiring `ensure_image()` into `build_unix()` and leaving
+`build-examples.yml` untouched would have meant `build-examples.yml`'s
+own `build` job -- a separate job, on a separate runner, from
+`verify-docker-images` -- redoing all five `unix-manylinux-*`
+`docker build`s from a cold layer cache on every single push, duplicating
+work `verify-docker-images` already does *with* a real cache
+(`cache-from`/`cache-to: type=gha`) and already pushes to GHCR moments
+earlier in the same workflow run. Two jobs, two runners, no shared Docker
+daemon: nothing about `ensure_image()`'s own plain `docker build` call
+could have reached that cache by accident. Fixed by splitting
+`usermod-unix` out of `build` into its own `build-usermod-unix` job
+(`template`/`wasm2mpy` have nothing to do with any of this and stay
+independent), `needs: verify-docker-images`, with the five
+`CIBMP_UNIX_<ARCH>_MANYLINUX_DOCKER_IMAGE` env vars pointed at the exact
+`ghcr.io/.../cibuildmp-unix-manylinux-<arch>:sha-<gitsha>` tags
+`verify-docker-images` just built and pushed -- so `image_for()`'s own
+override wins immediately and `ensure_image()`'s local-build fallback
+never triggers in this repo's own CI at all, on a push. This is also,
+finally, the real end-to-end proof D28's own handoff called the "one
+real gap": a real `usermod-unix-x64` (and the other four arches) build
+running *through* `dockerrun.run()` against one of these pushed images,
+not just `docker build`/`docker push` succeeding. On a `pull_request`
+run those five env vars stay unset (empty string, not absent --
+`image_for()`'s own `if override:` check is truthiness-based, so this
+does not repeat D28's own ninth bug where `ACTION_OUTPUT_DIR=""` read as
+an explicit override), so `ensure_image()`'s local-build fallback runs
+instead there -- slower, no GHA cache reachable from that job, but
+correct, and exactly the path a consumer with no published image of
+their own takes too.
+
+**Not yet done, flagged rather than assumed:** confirmed green on real
+CI as of this commit landing, not yet re-confirmed after -- there is no
+reachable Docker daemon in the sandbox this was written in (`docker
+info` fails to reach `/var/run/docker.sock`), so, same as every
+Dockerfile in D28's own migration, this is inferred correct from a live
+test run and unit coverage, not locally verified end to end by hand.
+`windows`/`qemu`/`webassembly` wiring, and `PORT_IMAGES` actually being
+registered (still empty -- `ensure_image()`'s local build is the thing
+proving the path works at all now, registering a maintained default on
+top of that is a separate, later step) remain open, same as D28 left
+them.
 
 **D29 — a real GitHub Actions job summary, the way cibuildwheel's own
 action already does it: a table of what got built, visible directly on
