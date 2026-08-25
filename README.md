@@ -27,10 +27,14 @@ primary way to use it going forward -- run directly, via the root
 Windows too -- see [Target support](#target-support) below for why no
 target needs a native Windows or macOS host), or in CI via this repo's
 own root `action.yml` (`uses: ballistics-lab/cibuildmp@<tag>`) -- a
-Docker action, not composite, built from
-[`action.Dockerfile`](action.Dockerfile)
-(a separate image from the standalone `Dockerfile` above -- see that
-file's own header for why they can't share one). See
+composite action that installs `cibuildmp` fresh on the runner and
+invokes it directly, not a Docker action any more (moved off that on
+purpose: `cibuildmp` itself launches sibling Docker containers for
+usermod's own per-port builds, which needs to run on the bare runner
+rather than inside one already, see `docs/BACKLOG.md`'s own D26/D28).
+[`action.Dockerfile`](action.Dockerfile) still exists and is still
+published to GHCR for standalone use, mirroring the root `Dockerfile`
+above, but is no longer what `action.yml` itself runs. See
 [`docs/BACKLOG.md`](docs/BACKLOG.md) for the design decisions and what is
 implemented so far.
 
@@ -284,19 +288,17 @@ See `docs/BACKLOG.md`'s **D23**/**M9b** for the full design (identifier
 scheme, why there's no `package.json` for usermod output, what's
 deliberately not wired yet — `[[overrides]]`, `extra-files`).
 
-**Not yet exercised through `action.yml`'s own Docker action** — a
-separate, still-open gap from the CLI wiring above: `entrypoint.sh`
-already just calls `cibuildmp "$@"` with no hardcoded `--platform`, so
-a usermod config plausibly already dispatches correctly through it, but
-this has not been tried, and `action.Dockerfile`'s own apt-get list
-only bakes in `unix`'s `x64`/`x86` toolchains (the host gcc) and
-`windows`'s three arches — not `unix`/`aarch64`'s
-`gcc-aarch64-linux-gnu`/`libffi-dev:arm64` (the same `ports.ubuntu.com`
-mirror step `build-examples.yml`'s own wabt fix needed), so that one
-target would fail inside the container specifically until that is
-added. Until this is tried and fixed, the composite actions above
-(`build-usermod-*`) remain the supported, verified production path for
-the six ports they cover.
+**Exercised through the real `action.yml` end to end** —
+[`examples/usermod-unix`](examples/usermod-unix) builds all five real
+`unix` arches (`x64`/`x86`/`aarch64`/`armhf`/`mipsel`) through the
+actual action on every push (`build-examples.yml`), not just the
+hermetic test suite — real linked binaries, collected with their
+executable bit intact, confirmed live on CI. `windows`/`qemu`/
+`webassembly`/`esp32` are not wired into `action.yml`'s own apt
+prerequisites yet — see `docs/BACKLOG.md`'s own **D28** for the plan
+(one Docker image per port, `unix`'s own proof-of-concept first). The
+composite actions above (`build-usermod-*`) remain the supported,
+verified production path for the ports `action.yml` doesn't cover yet.
 
 | Port          | Target                    | Provisioning                    | Status |
 |---------------|----------------------------|-----------------------------------|--------|
@@ -697,32 +699,24 @@ name suffix (`build-natmod-arch` → `build-natmod`). `v0.1.0` had only
 
 The `cibuildmp` package and the actions share one version. The package is
 not on PyPI yet, so every action installs it from its own checkout --
-`cibuildmp-matrix` still does this directly
-(`uv tool install ${{ github.action_path }}`), and the root `action.yml`
-does the same thing one layer down, inside `action.Dockerfile`'s
-own `COPY . /opt/cibuildmp` + `uv tool install` (a Docker action now, not
-composite -- see that action's own comment for why: cibuildmp's toolchain
-provisioning needs real apt packages baked into an image, not re-installed
-on every job). Either way, the tool that runs is exactly the ref you
-pinned, with no index to keep in sync. The root `Dockerfile` (the
-standalone/WSL2 one, not the action's) pins the same way, just explicitly
-instead of implicitly: `uv tool install git+https://github.com/ballistics-lab/cibuildmp.git@${CIBUILDMP_REF}`,
+`cibuildmp-matrix` and the root `action.yml` both do this directly
+(`uv tool install "$GITHUB_ACTION_PATH"` -- a composite action's own
+`github.action_path` is already the pinned ref's own source, checked out
+by GitHub Actions itself before any step runs, so this is a real install
+from that exact ref, not a second network fetch). The tool that runs is
+exactly the ref you pinned, with no index to keep in sync. The root
+`Dockerfile` (the standalone/WSL2 one, not the action's) pins the same
+way, just explicitly instead of implicitly: `uv tool install
+git+https://github.com/ballistics-lab/cibuildmp.git@${CIBUILDMP_REF}`,
 `CIBUILDMP_REF` defaulting to the latest tag at the time the Dockerfile
 was last touched -- override it with `--build-arg CIBUILDMP_REF=vX.Y.Z`
 for a different one, the same "pin a tag, not `@main`" rule as everywhere
 else on this page.
 
 `publish.yml`'s own `publish-docker` job builds and pushes
-`action.Dockerfile` to
-`ghcr.io/ballistics-lab/cibuildmp:<tag>` on every real release tag --
-infrastructure for a pre-built, pulled-not-built action image, not yet
-wired into `action.yml` itself. Switching `runs.image` over to
-`docker://ghcr.io/ballistics-lab/cibuildmp:vX.Y.Z` has to be a deliberate
-step in cutting the *next* release, not automatic: build-from-source and
-a published image are both correct today, but a published one can only
-be referenced by the exact tag that already has a matching image behind
-it (`action.yml`'s own Docker-action syntax takes a literal string, not
-an expression, so it cannot compute "whatever tag this is" at resolve
-time) -- bump that reference, commit it, *then* tag the release, so the
-image `publish-docker` builds from that same tag push is the one
-`action.yml` (as committed at that tag) already points at.
+`action.Dockerfile` to `ghcr.io/ballistics-lab/cibuildmp:<tag>` on every
+real release tag -- a standalone published image (`docker run
+ghcr.io/ballistics-lab/cibuildmp`, mirroring the root `Dockerfile`'s own
+usage), not something `action.yml` itself consumes: `action.yml` moved
+off being a Docker action entirely (`docs/BACKLOG.md`'s own **D28**/
+**D30**), so there is no `runs.image` left for a published tag to feed.

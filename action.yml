@@ -29,23 +29,128 @@ inputs:
     required: false
     default: ""
 
-# Docker, not composite: cibuildmp's own toolchain provisioning needs real
-# apt packages on the runner (gcc-multilib for x86, gcc-mingw-w64 for
-# windows/x64/x86, libusb1 for esp32 -- action.Dockerfile's own comment
-# has the full per-package reasoning, shared with the root Dockerfile). A
-# composite action can only apt-install those as a step that runs, and
-# re-runs, on every single job -- a Docker action bakes them into the
-# image once, at build/cache time, instead. Inputs become INPUT_<NAME>
-# env vars in the container; entrypoint.sh (in the image) reads them and
-# builds the exact same cibuildmp command line the old composite step's
-# own bash did.
+# Composite, not Docker -- docs/BACKLOG.md's own D28/D30 (container-per-port
+# migration, step 1). The Docker action this used to be ran *inside* one
+# container; cibuildmp itself is meant to launch sibling per-port containers
+# for usermod builds (D26's own "no Docker-in-Docker" reasoning), which needs
+# this action to run directly on the bare runner instead, where the runner's
+# own Docker daemon is reachable from a plain step with no setup at all --
+# confirmed live, not assumed (a real `docker info`/`docker run --rm
+# hello-world` from an ordinary `run:` step on ubuntu-latest, D28's own former
+# "open question", now resolved).
 #
-# image: 'action.Dockerfile', not '.github/docker/action.Dockerfile' --
-# GitHub's own Docker-action build uses *the Dockerfile's own directory*
-# as the build context, not this file's directory, confirmed the hard
-# way (a real build failure: COPY . only saw .github/docker/'s own two
-# files when the Dockerfile lived there, missing the rest of the repo
-# entirely). Has to live at the repo root for `COPY .` to reach it.
+# The apt list below is unchanged from action.Dockerfile's own (byte for
+# byte, every one of D25's six real bugs and D20/D24's own findings still
+# apply) -- this step is deliberately scoped to the shell conversion alone,
+# not yet the toolchain-isolation payoff that conversion unlocks (D28's own
+# step 2: the usermod docker-image resolver becoming real/config-driven, and
+# D30's own point 2: most of this apt list moving into per-port sibling
+# images so a natmod-only caller stops paying for windows/esp32/unix cross
+# toolchains it never uses). Slimming this list before that wiring exists
+# would break every existing usermod-unix build outright -- kept in full
+# here on purpose, one verified increment at a time, the same discipline
+# every fix in D25 already followed.
 runs:
-  using: "docker"
-  image: "action.Dockerfile"
+  using: "composite"
+  steps:
+    - name: Install cibuildmp's own apt prerequisites
+      shell: bash
+      run: |
+        set -eu
+        sudo dpkg --add-architecture arm64
+        sudo dpkg --add-architecture i386
+        sudo sed -i '/^Types: deb$/a Architectures: amd64,i386' /etc/apt/sources.list.d/ubuntu.sources
+        {
+          echo
+          echo 'Types: deb'
+          echo 'URIs: http://ports.ubuntu.com/ubuntu-ports'
+          echo 'Suites: noble noble-updates noble-backports'
+          echo 'Components: main universe restricted multiverse'
+          echo 'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg'
+          echo 'Architectures: arm64'
+          echo
+          echo 'Types: deb'
+          echo 'URIs: http://ports.ubuntu.com/ubuntu-ports'
+          echo 'Suites: noble-security'
+          echo 'Components: main universe restricted multiverse'
+          echo 'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg'
+          echo 'Architectures: arm64'
+        } | sudo tee -a /etc/apt/sources.list.d/ubuntu.sources >/dev/null
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          build-essential \
+          git \
+          ca-certificates \
+          curl \
+          python3 \
+          gcc-13-multilib \
+          gcc-mingw-w64-x86-64 \
+          gcc-mingw-w64-i686 \
+          gcc-aarch64-linux-gnu \
+          libffi-dev \
+          libffi-dev:i386 \
+          linux-libc-dev:i386 \
+          libffi-dev:arm64 \
+          libc6-dev-arm64-cross \
+          gcc-arm-linux-gnueabihf \
+          libc6-dev-armhf-cross \
+          gcc-mipsel-linux-gnu \
+          libc6-dev-mipsel-cross \
+          libltdl-dev \
+          libtool \
+          pkg-config \
+          libusb-1.0-0 \
+          wabt
+
+    - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+
+    - name: Install cibuildmp
+      shell: bash
+      # Installed from this exact checkout, not a git fetch --
+      # github.action_path is already the pinned ref's own source (GitHub
+      # Actions checks out a composite action's own repo before running it,
+      # the same guarantee action.Dockerfile's own `COPY .` used to rely on
+      # for a Docker action): no separate network round-trip, no
+      # version-drift risk. extras (unknowable at publish time) get folded
+      # into this one install directly -- no separate reinstall pass, unlike
+      # the old Docker action's own two-step dance, since this installs
+      # fresh on every job regardless.
+      run: |
+        set -eu
+        spec="$GITHUB_ACTION_PATH"
+        if [ -n "$CIBMP_EXTRAS" ]; then
+          spec="${spec}[${CIBMP_EXTRAS}]"
+        fi
+        uv tool install "$spec"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      env:
+        CIBMP_EXTRAS: ${{ inputs.extras }}
+
+    - name: Run cibuildmp
+      shell: bash
+      # Clean, explicitly-chosen env var names (CIBMP_PACKAGE_DIR, not
+      # INPUT_PACKAGE-DIR) -- a composite action's own step-level env: block
+      # can map ${{ inputs.package-dir }} to any name it wants, sidestepping
+      # entirely the hyphen problem the old Docker action's own entrypoint.sh
+      # had to work around with `printenv 'INPUT_PACKAGE-DIR'` (GitHub's own
+      # Docker-action INPUT_<NAME> auto-generation keeps input hyphens
+      # verbatim, undocumented, found the hard way). Confirmed against
+      # pypa/cibuildwheel's own real action.yml, which does exactly this.
+      run: |
+        set -eu
+        args=("$CIBMP_PACKAGE_DIR")
+        if [ -n "$CIBMP_OUTPUT_DIR" ]; then
+          args+=(--output-dir "$CIBMP_OUTPUT_DIR")
+        fi
+        if [ -n "$CIBMP_CONFIG_FILE" ]; then
+          args+=(--config-file "$CIBMP_CONFIG_FILE")
+        fi
+        if [ -n "$CIBMP_ONLY" ]; then
+          args+=(--only "$CIBMP_ONLY")
+        fi
+        cibuildmp "${args[@]}"
+      env:
+        CIBMP_PACKAGE_DIR: ${{ inputs.package-dir }}
+        CIBMP_OUTPUT_DIR: ${{ inputs.output-dir }}
+        CIBMP_CONFIG_FILE: ${{ inputs.config-file }}
+        CIBMP_ONLY: ${{ inputs.only }}

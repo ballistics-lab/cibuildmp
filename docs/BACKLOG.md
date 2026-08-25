@@ -2056,12 +2056,26 @@ unconditionally).
   main `make` invocation through `dockerrun.run()` instead of a bare
   `subprocess.run()`; unset (every real caller today), behaviour is
   byte-for-byte unchanged.
-- **Not yet wired into the CLI or `action.yml` at all.** `--platform
-  usermod` still always builds on the bare host; there is no flag or
-  config key that makes a caller's own build actually go through
-  `docker/unix.Dockerfile`. This is the single largest remaining gap
-  before the `unix` slice is a real, usable feature rather than a
-  proof-of-concept.
+- **`action.yml` is now a composite action -- migration step 1, done.**
+  `runs: using: "docker"` → `"composite"`, `entrypoint.sh` deleted
+  (dead code, nothing references it any more), the apt-prerequisite
+  list kept byte-for-byte identical to `action.Dockerfile`'s own
+  (deliberately -- see migration step 1's own note on why slimming it
+  now would have broken every existing usermod build), env vars
+  renamed to clean, explicit names (`CIBMP_PACKAGE_DIR`, not
+  `INPUT_PACKAGE-DIR`) per the cibuildwheel-confirmed win noted above.
+  `publish.yml`'s own `publish-docker` job and `action.Dockerfile`
+  itself both still exist, now explicitly standalone (no longer
+  feeding `action.yml`'s own `runs.image`, since there is no longer
+  one). README updated to match. **Still not yet done:** `--platform
+  usermod` still always builds on the bare host inside this new
+  composite action too -- there is no flag or config key yet that
+  makes a caller's own build actually go through
+  `docker/unix.Dockerfile` as a sibling container (migration step 2).
+  This remains the single largest gap before the `unix` slice is a
+  real, usable feature rather than a proof-of-concept -- step 1 only
+  removed the *structural* blocker (Docker-in-Docker), it did not yet
+  wire the mechanism through.
 - `windows`/`qemu`/`webassembly`/`esp32` have no Dockerfile of their
   own at all yet -- only `unix` has been attempted.
 

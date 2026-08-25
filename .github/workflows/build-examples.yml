@@ -5,9 +5,13 @@ name: Build examples
 # `uses:` a consumer like bclibc or a7p would write. Green here means the
 # actual build path works end to end, not just that --dry-run prints a
 # plausible plan. This is also the only real feedback loop for action.yml
-# itself (a Docker action since D18's own CI-conversion work): `uses: ./`
-# below builds action.Dockerfile for real, something no amount of
-# YAML-syntax checking or local shell testing can substitute for.
+# itself: `uses: ./` below runs it for real, something no amount of
+# YAML-syntax checking or local shell testing can substitute for. action.yml
+# is a composite action (docs/BACKLOG.md's own D28/D30 -- moved off being a
+# Docker action so cibuildmp itself can launch sibling per-port containers
+# for usermod builds without Docker-in-Docker); its own apt-prerequisites
+# step below runs directly on this job's own bare runner now, not inside a
+# separate container image.
 #
 #   template     -- natmod's own C, the minimal case.
 #   wasm2mpy     -- native source is WebAssembly, compiled to C via wasm2c
@@ -16,26 +20,17 @@ name: Build examples
 #                   contract (D2) is genuinely source-language-agnostic.
 #   usermod-unix -- usermod's own build path (M9b), all five real unix
 #                   arches (x64/x86/aarch64/armhf/mipsel, D20/D24) --
-#                   this is what actually proves action.Dockerfile's own
-#                   toolchain set (the ports.ubuntu.com mirror fix,
+#                   this is what actually proves action.yml's own apt
+#                   prerequisites (the ports.ubuntu.com mirror fix,
 #                   gcc-aarch64-linux-gnu, gcc-arm-linux-gnueabihf,
-#                   gcc-mipsel-linux-gnu, libltdl-dev) works inside the
-#                   real Docker action, not just in a bare dev sandbox.
+#                   gcc-mipsel-linux-gnu, libltdl-dev, libtool) work
+#                   through the real composite action, not just in a bare
+#                   dev sandbox.
 #
 # push: (no branches: filter) rather than push: branches: [main] -- this
 # needs to run on every push to a dev branch too, not just main, the same
 # "no PR without explicit permission" reasoning usermod-dev.yml's own
 # header already documents.
-#
-# No runner-level apt-get step here anymore (there used to be one, for
-# gcc-multilib + wabt): `uses: ./` runs the actual `make dist` build
-# *inside* action.Dockerfile's own container now, not on this bare
-# runner -- confirmed live, the hard way, when converting action.yml to a
-# Docker action left wabt only on the runner and examples/wasm2mpy's build
-# failed inside the container with "wasm2c: not found" (gcc-multilib was
-# already redundant the same way, just silently so). Both packages now
-# live in action.Dockerfile itself instead -- see that file's own comments
-# for the per-package reasoning.
 
 on:
   push:

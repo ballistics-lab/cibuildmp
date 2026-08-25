@@ -208,16 +208,16 @@ jobs:
           skip-existing: true
           repository-url: https://test.pypi.org/legacy/
 
-  # The root action.yml's own Docker action (action.Dockerfile)
-  # builds from source on every consuming job today -- correct, but it
-  # re-installs cibuildmp's own apt prerequisites (gcc-multilib,
-  # gcc-mingw-w64-x86-64/i686, libusb1) from scratch every single run, since
-  # GitHub-hosted runners are fresh VMs with no layer cache persisting
-  # between different consuming repos' jobs. A pre-built image, pulled
-  # instead of built, is the real fix -- this job is that: only the
-  # infrastructure, not yet wired into action.yml itself (see that file's
-  # own comment for why flipping runs.image to reference this needs to be
-  # its own deliberate, versioned step, not automatic).
+  # Publishes action.Dockerfile's own image to GHCR for standalone use
+  # (docker run ghcr.io/ballistics-lab/cibuildmp, mirroring the root
+  # Dockerfile's own README-documented usage) -- NOT consumed by the root
+  # action.yml itself any more. docs/BACKLOG.md's own D28/D30: action.yml
+  # moved off being a Docker action entirely (a composite action now, so
+  # cibuildmp itself can launch sibling per-port containers for usermod
+  # builds without Docker-in-Docker), so there is no more `runs.image` for
+  # this to feed. Kept publishing anyway -- action.Dockerfile itself is
+  # still a real, useful artifact independent of how action.yml invokes
+  # cibuildmp, the same way the root Dockerfile is.
   #
   # cache-from/cache-to: type=gha is GitHub's own Actions cache backend --
   # unlike the runner's local Docker layer cache (gone the moment the VM is
