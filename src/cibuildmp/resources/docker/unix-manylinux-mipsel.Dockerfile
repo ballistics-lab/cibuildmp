@@ -6,7 +6,7 @@
 # `mipsel-linux-gnu-` instead of `arm-linux-gnueabihf-`).
 #
 # Build: docker build -t cibuildmp-unix-manylinux-mipsel -f src/cibuildmp/resources/docker/unix-manylinux-mipsel.Dockerfile .
-# Use:   CIBMP_UNIX_MIPSEL_DOCKER_IMAGE=cibuildmp-unix-manylinux-mipsel cibuildmp ...
+# Use:   CIBMP_UNIX_MIPSEL_MANYLINUX_DOCKER_IMAGE=cibuildmp-unix-manylinux-mipsel cibuildmp ...
 #
 # Not yet built for real via `docker build` -- see
 # unix-manylinux-x64.Dockerfile's own header for the same open

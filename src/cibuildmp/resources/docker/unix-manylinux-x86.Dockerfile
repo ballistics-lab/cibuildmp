@@ -15,7 +15,7 @@
 # Ubuntu's own default archive mirror already.
 #
 # Build: docker build -t cibuildmp-unix-manylinux-x86 -f src/cibuildmp/resources/docker/unix-manylinux-x86.Dockerfile .
-# Use:   CIBMP_UNIX_X86_DOCKER_IMAGE=cibuildmp-unix-manylinux-x86 cibuildmp ...
+# Use:   CIBMP_UNIX_X86_MANYLINUX_DOCKER_IMAGE=cibuildmp-unix-manylinux-x86 cibuildmp ...
 #
 # Not yet built for real via `docker build` -- see
 # unix-manylinux-x64.Dockerfile's own header for the same open

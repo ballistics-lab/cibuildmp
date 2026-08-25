@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from importlib.resources import as_file, files
 from pathlib import Path
 
 from .build import UsermodBuildError
@@ -68,12 +69,22 @@ from .build import UsermodBuildError
 PORT_IMAGES: dict[str, str] = {}
 
 
-def image_for(port: str, arch: str, libc: str | None = None) -> str | None:
-    """The image to run `port`/`arch`'s own build command in (optionally
-    qualified by `libc`, for ports where that's a real axis -- `unix`
-    only, today), or None to build directly on the host (today's
-    default for every port/arch, since PORT_IMAGES is still empty and
-    no caller sets the env var).
+def image_for(
+    port: str, arch: str | None = None, libc: str | None = None
+) -> str | None:
+    """An explicitly *named* image for `port`/`arch` (optionally qualified
+    by `libc`) -- an env-var override or a `PORT_IMAGES`-registered
+    default -- or None if neither is set. `arch` is optional for a port
+    with no per-build axis at all (`qemu`, `webassembly`): omit it rather
+    than passing `""`, so the key/env name don't carry a trailing
+    separator that means nothing.
+
+    This is one half of image resolution, not the whole story any more --
+    see `ensure_image()` for the other half (building `cibuildmp`'s own
+    packaged Dockerfile when neither of these is set). Kept separate
+    because it is pure and side-effect-free (no `docker` invocation, no
+    filesystem access), which is what lets `tests/test_usermod_dockerrun.py`
+    cover its precedence rules without a Docker daemon at all.
 
     `CIBMP_<PORT>_<ARCH>_DOCKER_IMAGE` (e.g.
     `CIBMP_WINDOWS_X64_DOCKER_IMAGE=cibuildmp-windows:local`), or
@@ -83,12 +94,91 @@ def image_for(port: str, arch: str, libc: str | None = None) -> str | None:
     against a freshly-built image, or swapping in a different image
     entirely, without touching source.
     """
-    parts = [port, arch, *([libc] if libc else [])]
+    parts = [port, *([arch] if arch else []), *([libc] if libc else [])]
     env_key = "CIBMP_" + "_".join(p.upper() for p in parts) + "_DOCKER_IMAGE"
     override = os.environ.get(env_key)
     if override:
         return override
     return PORT_IMAGES.get("-".join(parts))
+
+
+# Every port/arch[/libc] cibuildmp ships its own Dockerfile for, keyed the
+# same way PORT_IMAGES is. windows/arm64 (llvm-mingw), esp32 (no Dockerfile
+# at all yet, D28's own still-open item) are deliberately absent -- those
+# stay host builds until either a Dockerfile is written for them or a
+# caller points CIBMP_<...>_DOCKER_IMAGE at an image of their own.
+_DOCKERFILES: dict[str, str] = {
+    "unix-x64-manylinux": "unix-manylinux-x64.Dockerfile",
+    "unix-x86-manylinux": "unix-manylinux-x86.Dockerfile",
+    "unix-aarch64-manylinux": "unix-manylinux-aarch64.Dockerfile",
+    "unix-armhf-manylinux": "unix-manylinux-armhf.Dockerfile",
+    "unix-mipsel-manylinux": "unix-manylinux-mipsel.Dockerfile",
+    "windows-x64": "windows.Dockerfile",
+    "windows-x86": "windows.Dockerfile",
+    "qemu": "qemu.Dockerfile",
+    "webassembly": "webassembly.Dockerfile",
+}
+
+
+def ensure_image(
+    port: str, arch: str | None = None, libc: str | None = None
+) -> str | None:
+    """The image `port`/`arch`'s own build command should run in, building
+    it first if nobody has already: `image_for()`'s explicit override or
+    registered default wins first, same as before; failing that, if
+    cibuildmp ships this (port, arch[, libc])'s own Dockerfile
+    (`_DOCKERFILES` above), build it -- or reuse Docker's own layer cache
+    if an unchanged image already exists locally under this tag -- and
+    return that. Returns None only when none of the three apply (no
+    override, nothing registered, no packaged Dockerfile), which today
+    means windows/arm64 and esp32 only.
+
+    This is the actual behaviour change from `image_for()`'s original,
+    opt-in-only design: cibuildmp now defaults to a container for every
+    port/arch it ships a Dockerfile for, the same way cibuildwheel
+    defaults every manylinux/musllinux identifier through its own pinned
+    container rather than treating it as a fallback for a host missing
+    packages. D2's own framing -- cibuildmp owns provisioning, a caller
+    should not have to `apt-get install` a cross-toolchain by hand -- was
+    already true for the toolchain-tarball ports; this is that same
+    argument applied to the ports whose provisioning is a container
+    instead of a tarball.
+    """
+    explicit = image_for(port, arch, libc)
+    if explicit is not None:
+        return explicit
+
+    parts = [port, *([arch] if arch else []), *([libc] if libc else [])]
+    key = "-".join(parts)
+    dockerfile_name = _DOCKERFILES.get(key)
+    if dockerfile_name is None:
+        return None
+
+    tag = f"cibuildmp-{key}:local"
+    resource = files("cibuildmp").joinpath("resources", "docker", dockerfile_name)
+    with as_file(resource) as dockerfile_path:
+        command = [
+            "docker",
+            "build",
+            "-f",
+            str(dockerfile_path),
+            "-t",
+            tag,
+            str(dockerfile_path.parent),
+        ]
+        try:
+            subprocess.run(command, check=True)
+        except subprocess.CalledProcessError as exc:
+            raise UsermodBuildError(
+                f"docker build -f {dockerfile_path} -t {tag} failed with "
+                f"exit code {exc.returncode}"
+            ) from exc
+        except FileNotFoundError as exc:
+            raise UsermodBuildError(
+                f"cibuildmp needs to build its own Docker image for "
+                f"{key} but the docker CLI itself is not on PATH"
+            ) from exc
+    return tag
 
 
 def run(command: list[str], *, mounts: list[Path], workdir: Path, image: str) -> None:

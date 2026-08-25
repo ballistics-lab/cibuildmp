@@ -12,7 +12,7 @@
 # is D20's own fix for that, transcribed unchanged.
 #
 # Build: docker build -t cibuildmp-unix-manylinux-aarch64 -f src/cibuildmp/resources/docker/unix-manylinux-aarch64.Dockerfile .
-# Use:   CIBMP_UNIX_AARCH64_DOCKER_IMAGE=cibuildmp-unix-manylinux-aarch64 cibuildmp ...
+# Use:   CIBMP_UNIX_AARCH64_MANYLINUX_DOCKER_IMAGE=cibuildmp-unix-manylinux-aarch64 cibuildmp ...
 #
 # Not yet built for real via `docker build` -- see
 # unix-manylinux-x64.Dockerfile's own header for the same open

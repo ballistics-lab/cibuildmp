@@ -17,7 +17,7 @@
 # transcribed here unchanged).
 #
 # Build: docker build -t cibuildmp-unix-manylinux-armhf -f src/cibuildmp/resources/docker/unix-manylinux-armhf.Dockerfile .
-# Use:   CIBMP_UNIX_ARMHF_DOCKER_IMAGE=cibuildmp-unix-manylinux-armhf cibuildmp ...
+# Use:   CIBMP_UNIX_ARMHF_MANYLINUX_DOCKER_IMAGE=cibuildmp-unix-manylinux-armhf cibuildmp ...
 #
 # Not yet built for real via `docker build` -- see
 # unix-manylinux-x64.Dockerfile's own header for the same open
