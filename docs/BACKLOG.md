@@ -1096,30 +1096,87 @@ only one of MicroPython's own three Windows build methods that actually
 takes a `USER_C_MODULES`/`FROZEN_MANIFEST` input at all, and it is also
 what `a7p`'s own `mp-usermod.yml` already uses in production.
 
-Landed as `usermod/msys2.py` (`find_msys2()`/`install_msys2()`/
+First landed as `usermod/msys2.py` (`find_msys2()`/`install_msys2()`/
 `resolve_msys2()`, `ResolvedMsys2.run()`/`.install_packages()`/
-`.to_posix_path()`) and `build.py`'s `build_windows()`. `find_msys2()`
-checks `C:\msys64` first — `msys2/setup-msys2`'s own default (`release:
-false`) path, already present on every GitHub-hosted `windows-latest`
-runner — and only falls back to downloading its own sha256-pinned
-standalone installer for a host with nothing there (a local dev machine).
-Commands run through `bash.exe -leo pipefail -c` under the target
-`MSYSTEM` (`MINGW32`/`MINGW64`/`CLANGARM64`, each installing its own
-compiler package via `pacman`, transcribed from `a7p`'s own
-`matrix.msys_install`), not a plain `subprocess.run()` with `PATH`
-prepended — `MSYSTEM` alone does not select the right toolchain without
-going through bash's own login-shell startup scripts. `mpy_dir` is
-converted to MSYS2's own POSIX form via real `cygpath -u`
-(`ResolvedMsys2.to_posix_path()`), not `.as_posix()` — the same
-`D:\a\mpy` → `D:/a/mpy` (still wrong) vs `/d/a/mpy` (correct) distinction
-**D18**'s own top-level entry already documented for `a7p`'s hand-written
-workflow, now built in rather than a bug waiting to be found by CI a
-second time. The one honest caveat every other resolver in this package
-doesn't carry: this cannot be verified in a Linux sandbox at all, so it is
-hermetically tested (`tests/test_msys2.py`, `tests/test_usermod_build.py`)
-but not yet proven against a real `windows-latest` run the way `unix`/
-`qemu`/`webassembly`/`esp32` already were — `usermod-dev.yml`'s `windows`
-job is the next real feedback loop for it.
+`.to_posix_path()`) and a `build.py`'s `build_windows()` that ran through
+it for all three arches — this genuinely worked: a real `windows-latest`
+run of `usermod-dev.yml` produced a real `micropython.exe` with a real
+usermod module linked in, catching and fixing real bugs along the way
+(three in the surrounding code before any MSYS2 code even ran, then a
+fourth in `ResolvedMsys2.to_posix_path()` itself — its first real
+invocation on a fresh runner captured MSYS2's own one-time "Copying
+skeleton files..." login-shell notice into what was supposed to be a
+clean `cygpath -u` result, silently corrupting a real `USER_C_MODULES`
+value fed to `make`; fixed by trusting only the last non-empty stdout
+line rather than the whole captured output).
+
+Superseded in two stages, both live-verified rather than assumed, not
+one clean cutover. **Stage one:** a comparison against upstream
+MicroPython's own CI (`.github/workflows/ports_windows.yml`) turned up a
+fourth build method this project had not considered: `cross-build-on-linux`,
+`tools/ci.sh`'s own `ci_windows_setup`/`ci_windows_build` — `apt install
+gcc-mingw-w64-x86-64`/`gcc-mingw-w64-i686` plus a plain
+`make -C ports/windows CROSS_COMPILE=x86_64-w64-mingw32-`/
+`i686-w64-mingw32-`, no Windows host at all. Verified live in this
+project's own dev sandbox exactly like `unix`/`qemu`/`webassembly`/
+`esp32` already were — the one thing MSYS2 could never get — with a real
+custom C module (`USER_C_MODULES` pointed at an actual `mymod.c`/
+`micropython.mk`, not an empty directory): a genuine `micropython.exe`
+for both `x64` (PE32+, 549376 bytes) and `x86` (PE32, 568792 bytes),
+`strings` confirming the module's own `mymod`/`hello` symbols linked in.
+`x64`/`x86` moved to this; `arm64` initially stayed on MSYS2 (its own
+`CLANGARM64` environment, `mingw-w64-clang-aarch64-gcc-compat`/`-clang`
+— no apt equivalent exists for that target), reasoned at the time to be
+an acceptable gap since nothing in this project's scope appeared to need
+Windows ARM64 usermod builds. That reasoning was wrong, corrected within
+the same session by an explicit statement of a real requirement (a
+consumer's own libraries build Windows ARM64 usermod targets today) —
+recorded here as a real example of why "nothing exercises this yet" is
+worth double-checking against actual consumers before it becomes a
+design decision, not just a placeholder note.
+
+**Stage two:** mingw-w64's own documentation (https://www.mingw-w64.org,
+"Pre-built Toolchains") names the real fix directly: `llvm-mingw`
+(`mstorsjo/llvm-mingw`) is the one toolchain that both targets ARM64
+Windows and "can be run on Linux, compiling binaries for any of the 4
+target Windows architectures" (its own README). Verified live, the same
+standard this project holds every toolchain resolver to: downloaded a
+real release tarball (`llvm-mingw-20260616-ucrt-ubuntu-22.04-x86_64.tar.xz`),
+cross-compiled `ports/windows` with `CROSS_COMPILE=aarch64-w64-mingw32-`
+and a real custom C module, and got a genuine PE32+ Aarch64
+`micropython.exe` with that module's own symbols linked in via `strings`.
+Getting there took three real, live-found compatibility fixes, not a
+clean first try — worth recording since they are exactly the kind of
+detail a "should be a drop-in GCC replacement" assumption would have
+missed: `-Wno-double-promotion` (`py/binary.c`'s `_Float16`↔`float` union
+trick reads as an implicit precision-increasing promotion to Clang
+specifically), `-Wno-uninitialized` and `-Wno-default-const-init-var-unsafe`
+(`shared/runtime/gchelper_generic.c`'s own `const register long x19
+asm("x19")` idiom — reading a callee-saved register an asm stub already
+wrote — trips two different Clang diagnostics GCC does not apply to a
+bare asm-tied register declaration), and `COMPILER_TARGET=mingw-forced`/
+`STRIP=`/`SIZE=true` (the same overrides MSYS2's own CLANGARM64
+environment already needed — this Clang's own `-dumpmachine` doesn't
+contain "mingw" either, which `ports/windows/Makefile`'s `.exe`-suffix
+and post-link strip logic both grep for). None of these apply to
+`x64`/`x86`'s plain GNU cross-gcc, which needs none of them.
+
+It is the *same* `ports/windows/Makefile` in every case (MSYS2, apt-gcc,
+llvm-mingw) — `USER_C_MODULES`/`FROZEN_MANIFEST` work identically
+throughout; the differences are entirely in what compiler diagnostics
+each toolchain enforces and how each is provisioned. Landed as `build.py`'s
+current `build_windows()` (`WindowsArchSettings`, `WINDOWS_ARCH_SETTINGS`
+for `x64`/`x86`/`arm64`, one function dispatching per arch the same way
+`build_unix()` already dispatches its own standalone/x86 special cases)
+plus `usermod/llvmmingw.py` (pinned in `resources/usermod.toml`'s own
+`[llvm-mingw]` table, same `cached_dir`/`download_file`/`verify_sha256`
+shape `emsdk.py` already uses). `usermod/msys2.py` and its own
+`usermod-dev.yml` `windows`/`windows-live-build`/`windows-arm64-live-build`
+jobs were deleted outright, twice, not kept as a fallback: a second
+working path to the same Makefile is not a hedge, it is surface area
+nothing exercises. `windows` needs no `windows-latest` runner at all now,
+for any of its three arches — relevant to **D20** below, which had
+assumed one for all of them.
 
 **D20 (revisits D9) — usermod runner selection is structural, confirmed
 live, not a hypothetical "different targets need different runners."**
@@ -1135,6 +1192,32 @@ fan-out should probably be the default rather than **D9**'s opt-in, not
 because sharing the fetch-MicroPython/mpy-cross cost stops mattering, but
 because the runner constraint dominates it the way it does for
 cibuildwheel's own OS axis.
+
+**D20 addendum — `windows` no longer needs `windows-latest` at all, for
+any of its three arches — a deliberate divergence from `a7p`'s own matrix
+above, not an oversight.** **D18**'s own two-stage supersession (MSYS2 →
+Linux-hosted cross-compiles: apt-gcc for `x64`/`x86`, a downloaded
+`llvm-mingw` for `arm64`) means `build_windows()` runs on the same host
+every other usermod port here does — `ubuntu-latest`, all three arches,
+no ARM host needed either (the `llvm-mingw` resolver is itself pinned to
+a `linux-x64`-hosted release tarball, `usermod/llvmmingw.py`'s own
+`_host_platform_key()`). The `runs_on:` table above still accurately
+describes what `a7p`'s own workflow needs, matched target-for-target; it
+does not describe what this project's own `--print-build-matrix` should
+emit for the `windows` identifiers once **M10** wires this up — that
+table should list `ubuntu-latest` for all three, not `windows-latest`/
+`windows-11-arm`. Left as a note for whoever implements **M10**, not
+acted on here.
+
+Does not generalize to "usermod needs only `ubuntu-latest`": `unix`'s
+own `aarch64` arch (`UNIX_ARCH_SETTINGS["aarch64"]`, an *empty*
+`cross_compile`) assumes a native ARM64 host already, exactly the same
+"needs to execute what it builds" constraint **D20**'s own top-level
+entry already names for that arch — a real, separate, still-open
+requirement this addendum does not touch. `armhf`/`mipsel` remain
+unbuildable at all (**M8**'s own acknowledged gap). `windows` specifically
+is what stopped needing a special-case runner; the runner matrix as a
+whole still has real, load-bearing entries beyond `ubuntu-latest`.
 
 **D21 — execution, not just linking, is central to usermod's value, and
 is already real infrastructure — this does not fit under D6's blanket
@@ -1351,15 +1434,31 @@ style, now that a slice of it is actually implemented:
         earlier manual PATH-only proof done before any of this code
         existed) plus its `.wasm` — through the actual production code
         path, not the manual proof.
-  - [x] `windows` — `usermod/msys2.py` + `usermod/build.py`'s
-        `build_windows()`, driving `ports/windows` under MSYS2. MSVC (the
-        port's own fourth build method) was investigated and rejected
-        first, not assumed away — see **D18**'s own addendum. Not yet
-        proven against real `windows-latest` CI the way the other four
-        ports were (hermetic tests only); see **M9**'s own MSYS2 line
-        below.
-- **M9** — toolchain provisioning: MSYS2 orchestration (**D18**), ESP-IDF
-  fetch + caching, `docker` strategy revisit for it (**D19**).
+  - [x] `windows` — `usermod/build.py`'s `build_windows()`, one function
+        dispatching per arch (`WINDOWS_ARCH_SETTINGS`), all three (`x64`/
+        `x86`/`arm64`) now cross-compiling from a plain `ubuntu-latest`
+        host, no Windows runner or MSYS2 for any of them: `x64`/`x86` via
+        an apt-installed mingw-w64 GCC, `arm64` via a downloaded
+        `llvm-mingw` toolchain (`usermod/llvmmingw.py`) — no Linux distro
+        packages a GCC targeting `aarch64-w64-mingw32` at all, and
+        `llvm-mingw` is the one alternative mingw-w64's own documentation
+        names. Three approaches investigated in sequence, not assumed
+        away, each corrected by the next live finding rather than
+        guessed past — see **D18**'s own addenda for the full history:
+        MSVC (no `USER_C_MODULES`/`FROZEN_MANIFEST` hook at all, ruled
+        out for every arch), MSYS2 for all three arches (worked, proven
+        live on real `windows-latest` CI), narrowed to `x64`/`x86`
+        cross-compiling from Linux once upstream's own CI showed that
+        works too (`arm64` kept on MSYS2 at that point — reasoned to be
+        an acceptable gap, which was wrong, corrected the same session
+        once a real consumer requirement was stated directly), then
+        `arm64` itself moved off MSYS2 once `llvm-mingw` was confirmed
+        live to build it from Linux too, with the exact Clang-vs-GCC
+        `CFLAGS_EXTRA` fixes that took.
+- **M9** — toolchain provisioning: ESP-IDF fetch + caching, `docker`
+  strategy revisit for it (**D19**). MSYS2's own D18 role (windows
+  provisioning) ended up superseded entirely — see the `windows` bullet
+  above and **D18**'s own addenda.
   - [x] ESP-IDF side: `usermod/espidf.py` (`fetch_esp_idf()`,
         `resolve_esp_idf()`, `ResolvedEspIdf.env()`) + `usermod/build.py`'s
         `build_esp32()`, driving `ports/esp32` the same way the other
@@ -1376,27 +1475,33 @@ style, now that a slice of it is actually implemented:
         BOARD=ESP32_GENERIC`, a genuine `micropython.bin` — through the
         official recipe run by hand first, then again through the actual
         `espidf.py`/`build_esp32()` code path.
-  - [x] MSYS2 (**D18**): `usermod/msys2.py` (`find_msys2()`/
-        `install_msys2()`/`resolve_msys2()`, `ResolvedMsys2.run()`/
-        `.install_packages()`/`.to_posix_path()`) + `build_windows()`,
-        20 hermetic cases across `tests/test_msys2.py` and
-        `tests/test_usermod_build.py`. `usermod-dev.yml`'s `windows` job
-        (a plain on-push scratch workflow, no PR — MSYS2 cannot be
-        verified in a Linux sandbox at all) already earned its keep before
-        this code existed: caught and fixed three real bugs on its first
-        few runs — `usermod/build.py`'s `Path` handling used bare `str()`,
-        which is backslash-separated on Windows and breaks any GNU Make
-        invocation (fixed to `.as_posix()` everywhere); two of
-        `test_emsdk.py`'s own tests were silently coupled to the CI host
-        actually being linux-x64; and `tests/test_build.py`'s own
+  - [x] `windows` toolchain provisioning (**D18**), final state:
+        `usermod/llvmmingw.py` (`resolve_llvm_mingw()`, pinned in
+        `resources/usermod.toml`'s own `[llvm-mingw]` table, same
+        `cached_dir`/`download_file`/`verify_sha256` shape `emsdk.py`
+        already uses) for `arm64`; `x64`/`x86` need no dedicated resolver
+        at all, just a `shutil.which()` PATH probe for an apt-installed
+        `<prefix>gcc` (`build.py`'s own `_resolve_windows_toolchain`
+        logic, inlined into `build_windows()`). MSYS2 (`usermod/msys2.py`)
+        did real, credited work before being fully superseded: its own
+        `usermod-dev.yml` `windows` job (a plain on-push scratch workflow,
+        no PR — MSYS2 could not be verified in a Linux sandbox at all)
+        caught and fixed four real bugs across its runs before this
+        supersession — `usermod/build.py`'s `Path` handling used bare
+        `str()`, which is backslash-separated on Windows and breaks any
+        GNU Make invocation (fixed to `.as_posix()` everywhere, still the
+        rule for every port here); two of `test_emsdk.py`'s own tests
+        were silently coupled to the CI host actually being linux-x64;
+        `tests/test_build.py`'s own
         `test_pre_build_command_runs_in_module_root` used `touch`, which
-        `cmd.exe` has no equivalent for (fixed to `echo hi > marker`,
-        which both `/bin/sh -c` and `cmd.exe /c` understand identically).
-        None of these were "not this work's problem" — a bug found while
-        doing this work got fixed as part of it, whoever's line it
-        originally was. `msys2.py`/`build_windows()` itself is still
-        unverified against a real run — the obvious next `usermod-dev.yml`
-        push to check.
+        `cmd.exe` has no equivalent for (fixed to `echo hi > marker`);
+        and `ResolvedMsys2.to_posix_path()`'s own first-login-shell
+        skeleton-banner bug (**D18**'s own addendum has the detail). None
+        of these were "not this work's problem" — a bug found while doing
+        this work got fixed as part of it, whoever's line it originally
+        was. 13 hermetic cases across `tests/test_usermod_build.py` for
+        the final `windows`/`x64`/`x86`/`arm64` shape, plus the live
+        proofs **D18**'s own addendum records for all three arches.
 - **M10** — runner/matrix integration, fan-out-by-default for usermod
   identifiers (**D20**).
 - **M11** — execution axis: qemu-system, rp2040py, node, native — four of

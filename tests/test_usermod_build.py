@@ -26,7 +26,7 @@ from cibuildmp.usermod.build import (
 )
 from cibuildmp.usermod.emsdk import ResolvedEmsdk
 from cibuildmp.usermod.espidf import ResolvedEspIdf
-from cibuildmp.usermod.msys2 import ResolvedMsys2
+from cibuildmp.usermod.llvmmingw import ResolvedLlvmMingw
 
 
 def opts(arch: str = "x64", **overrides) -> UnixBuildOptions:
@@ -457,127 +457,222 @@ def test_esp32_custom_board_and_target():
     assert "BOARD=ESP32S3_GENERIC" in command
 
 
-# ── windows (MSYS2) ──────────────────────────────────────────────────────
+# ── windows ──────────────────────────────────────────────────────────────
 
 
 def windows_opts(**overrides) -> WindowsBuildOptions:
     defaults = {
-        "user_c_modules": "/d/a/mpy/micropython/usermod",
-        "frozen_manifest": "/d/a/mpy/a7p_manifest.py",
+        "arch": "x64",
+        "user_c_modules": "/gh/ws/micropython/usermod",
+        "frozen_manifest": "/gh/ws/a7p_manifest.py",
+        "build_dir": Path("/gh/ws/usermod/build/windows-x64"),
     }
     defaults.update(overrides)
     return WindowsBuildOptions(**defaults)
 
 
-def test_windows_make_command_matches_build_usermod_windows_shape():
-    # build-usermod-windows/action.yml's own "Build usermod" step -- no
-    # CROSS_COMPILE=, the MSYS2 environment's own toolchain is unprefixed.
-    command = windows_make_command(windows_opts(), "/d/a/mpy")
+def test_windows_x64_command_matches_upstream_cross_build_shape():
+    # tools/ci.sh's own ci_windows_build: CROSS_COMPILE=x86_64-w64-mingw32-,
+    # no MSYS2-specific overrides (STRIP/SIZE/COMPILER_TARGET) -- a plain
+    # GNU mingw-w64 cross-gcc needs none of them.
+    command = windows_make_command(windows_opts(arch="x64"), Path("/gh/ws/mpy"))
 
-    assert command == (
-        'make -C "/d/a/mpy/ports/windows"  BUILD="build-standard" '
-        'COMPILER_TARGET="mingw-forced" STRIP="" SIZE="true" '
-        'CFLAGS_EXTRA="" USER_C_MODULES="/d/a/mpy/micropython/usermod" '
-        'FROZEN_MANIFEST="/d/a/mpy/a7p_manifest.py"  -j"$(nproc)"'
-    )
-
-
-def test_windows_make_command_variant_adds_variant_arg():
-    command = windows_make_command(windows_opts(variant="dev"), "/d/a/mpy")
-
-    assert 'VARIANT="dev"' not in command  # no quoting -- Makefile shape
-    assert "VARIANT=dev" in command
-
-
-def test_windows_resolves_msys2_installs_packages_and_converts_path(
-    monkeypatch, tmp_path
-):
-    resolve_calls = []
-    install_calls = []
-    posix_calls = []
-    run_calls = []
-
-    monkeypatch.setattr(
-        build.msys2,
-        "resolve_msys2",
-        lambda **k: resolve_calls.append(k) or (tmp_path / "msys64"),
-    )
-    monkeypatch.setattr(
-        ResolvedMsys2, "install_packages", lambda self, pkgs: install_calls.append(pkgs)
-    )
-    monkeypatch.setattr(
-        ResolvedMsys2,
-        "to_posix_path",
-        lambda self, native: posix_calls.append(native) or "/d/a/mpy",
-    )
-    monkeypatch.setattr(
-        ResolvedMsys2, "run", lambda self, cmd, **k: run_calls.append(cmd)
-    )
-
-    mpy_dir = tmp_path / "mpy"
-    build_dir = mpy_dir / "ports" / "windows" / "build-standard"
-    build_dir.mkdir(parents=True)
-    (build_dir / "micropython.exe").write_bytes(b"MZ")
-
-    result = build_windows(windows_opts(), mpy_dir)
-
-    assert result == build_dir / "micropython.exe"
-    assert resolve_calls == [{"root": None, "quiet": False}]
-    assert install_calls == [["make", "git", "python3", "mingw-w64-x86_64-gcc"]]
-    assert posix_calls == [str(mpy_dir)]
-    assert len(run_calls) == 2
-    assert "mpy-cross" in run_calls[0]
-    assert "ports/windows" in run_calls[1]
-
-
-def test_windows_clangarm64_installs_both_compat_and_clang_packages(
-    monkeypatch, tmp_path
-):
-    monkeypatch.setattr(build.msys2, "resolve_msys2", lambda **k: tmp_path / "msys64")
-    monkeypatch.setattr(ResolvedMsys2, "to_posix_path", lambda self, native: "/d/a/mpy")
-    monkeypatch.setattr(ResolvedMsys2, "run", lambda self, cmd, **k: None)
-
-    install_calls = []
-    monkeypatch.setattr(
-        ResolvedMsys2, "install_packages", lambda self, pkgs: install_calls.append(pkgs)
-    )
-
-    build_dir = tmp_path / "mpy" / "ports" / "windows" / "build-standard"
-    build_dir.mkdir(parents=True)
-    (build_dir / "micropython.exe").write_bytes(b"MZ")
-
-    build_windows(windows_opts(msystem="CLANGARM64"), tmp_path / "mpy")
-
-    assert install_calls == [
-        [
-            "make",
-            "git",
-            "python3",
-            "mingw-w64-clang-aarch64-gcc-compat",
-            "mingw-w64-clang-aarch64-clang",
-        ]
+    assert command == [
+        "make",
+        "-C",
+        "/gh/ws/mpy/ports/windows",
+        "VARIANT=standard",
+        "BUILD=/gh/ws/usermod/build/windows-x64",
+        "CROSS_COMPILE=x86_64-w64-mingw32-",
+        "USER_C_MODULES=/gh/ws/micropython/usermod",
+        "FROZEN_MANIFEST=/gh/ws/a7p_manifest.py",
     ]
 
 
+def test_windows_x86_command_uses_i686_prefix():
+    command = windows_make_command(windows_opts(arch="x86"), Path("/gh/ws/mpy"))
+
+    assert "CROSS_COMPILE=i686-w64-mingw32-" in command
+
+
+def test_windows_unknown_arch_rejected(tmp_path):
+    with pytest.raises(UsermodBuildError, match="unknown windows arch"):
+        build_windows(windows_opts(arch="riscv64"), tmp_path / "mpy")
+
+
+def test_windows_missing_toolchain_names_apt_package(monkeypatch, tmp_path):
+    monkeypatch.setattr(build.shutil, "which", lambda name: None)
+
+    with pytest.raises(UsermodBuildError, match="apt install gcc-mingw-w64-x86-64"):
+        build_windows(windows_opts(), tmp_path / "mpy")
+
+
+def test_windows_probes_toolchain_before_building(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(
+        build.shutil, "which", lambda name: calls.append(name) or f"/usr/bin/{name}"
+    )
+    build_dir = tmp_path / "build-x64"
+    build_dir.mkdir()
+    (build_dir / "micropython.exe").write_bytes(b"MZ")
+    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
+
+    build_windows(windows_opts(build_dir=build_dir), tmp_path / "mpy")
+
+    assert calls == ["x86_64-w64-mingw32-gcc"]
+
+
+def test_windows_builds_and_returns_exe_path(monkeypatch, tmp_path):
+    build_dir = tmp_path / "build-x64"
+    build_dir.mkdir()
+    (build_dir / "micropython.exe").write_bytes(b"MZ")
+
+    monkeypatch.setattr(build.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
+
+    result = build_windows(windows_opts(build_dir=build_dir), tmp_path / "mpy")
+
+    assert result == build_dir / "micropython.exe"
+
+
 def test_windows_missing_exe_after_success_is_an_error(monkeypatch, tmp_path):
-    monkeypatch.setattr(build.msys2, "resolve_msys2", lambda **k: tmp_path / "msys64")
-    monkeypatch.setattr(ResolvedMsys2, "install_packages", lambda self, pkgs: None)
-    monkeypatch.setattr(ResolvedMsys2, "to_posix_path", lambda self, native: "/d/a/mpy")
-    monkeypatch.setattr(ResolvedMsys2, "run", lambda self, cmd, **k: None)
+    build_dir = tmp_path / "build-x64"
+    build_dir.mkdir()
+
+    monkeypatch.setattr(build.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
 
     with pytest.raises(UsermodBuildError, match="build reported success but"):
-        build_windows(windows_opts(), tmp_path / "mpy")
+        build_windows(windows_opts(build_dir=build_dir), tmp_path / "mpy")
 
 
-def test_windows_build_failure_names_the_port(monkeypatch, tmp_path):
-    monkeypatch.setattr(build.msys2, "resolve_msys2", lambda **k: tmp_path / "msys64")
-    monkeypatch.setattr(ResolvedMsys2, "install_packages", lambda self, pkgs: None)
-    monkeypatch.setattr(ResolvedMsys2, "to_posix_path", lambda self, native: "/d/a/mpy")
+def test_windows_build_failure_names_the_command(monkeypatch, tmp_path):
+    import subprocess as sp
 
-    def boom(self, cmd, **k):
-        raise build.msys2.Msys2Error(f"msys2 command failed: `{cmd}`")
+    def fake_run(cmd, **kwargs):
+        raise sp.CalledProcessError(1, cmd)
 
-    monkeypatch.setattr(ResolvedMsys2, "run", boom)
+    monkeypatch.setattr(build.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(build.subprocess, "run", fake_run)
 
-    with pytest.raises(UsermodBuildError, match="windows/MINGW64"):
-        build_windows(windows_opts(), tmp_path / "mpy")
+    with pytest.raises(UsermodBuildError, match="failed with exit code"):
+        build_windows(windows_opts(build_dir=tmp_path / "build-x64"), tmp_path / "mpy")
+
+
+# ── windows/arm64 (llvm-mingw) ───────────────────────────────────────────
+
+
+def test_windows_arm64_command_matches_verified_shape():
+    # Verified live: COMPILER_TARGET=/STRIP=/SIZE= and the three
+    # CFLAGS_EXTRA suppressions are load-bearing (see
+    # resources/usermod.toml's own [llvm-mingw] table for exactly why),
+    # not cosmetic. No apt_package -- this arch has none.
+    command = windows_make_command(
+        windows_opts(
+            arch="arm64", build_dir=Path("/gh/ws/usermod/build/windows-arm64")
+        ),
+        Path("/gh/ws/mpy"),
+    )
+
+    assert command == [
+        "make",
+        "-C",
+        "/gh/ws/mpy/ports/windows",
+        "VARIANT=standard",
+        "BUILD=/gh/ws/usermod/build/windows-arm64",
+        "CROSS_COMPILE=aarch64-w64-mingw32-",
+        "COMPILER_TARGET=mingw-forced",
+        "STRIP=",
+        "SIZE=true",
+        (
+            "CFLAGS_EXTRA=-Wno-double-promotion -Wno-uninitialized "
+            "-Wno-default-const-init-var-unsafe"
+        ),
+        "USER_C_MODULES=/gh/ws/micropython/usermod",
+        "FROZEN_MANIFEST=/gh/ws/a7p_manifest.py",
+    ]
+
+
+def test_windows_arm64_resolves_llvm_mingw_not_apt(monkeypatch, tmp_path):
+    resolve_calls = []
+
+    def fake_resolve(**kwargs):
+        resolve_calls.append(kwargs)
+        return ResolvedLlvmMingw(install_dir=tmp_path / "llvm-mingw")
+
+    monkeypatch.setattr(build.llvmmingw, "resolve_llvm_mingw", fake_resolve)
+    monkeypatch.setattr(
+        build.shutil,
+        "which",
+        lambda name: (_ for _ in ()).throw(
+            AssertionError("arm64 must not probe PATH for a gcc")
+        ),
+    )
+
+    run_calls = []
+    monkeypatch.setattr(build.subprocess, "run", lambda cmd, **k: run_calls.append(k))
+
+    build_dir = tmp_path / "build-arm64"
+    build_dir.mkdir()
+    (build_dir / "micropython.exe").write_bytes(b"MZ")
+
+    build_windows(windows_opts(arch="arm64", build_dir=build_dir), tmp_path / "mpy")
+
+    assert len(resolve_calls) == 1
+    # The resolved toolchain's own PATH is what subprocess.run() gets --
+    # not a bare host lookup.
+    assert "PATH" in run_calls[0]["env"]
+
+
+def test_windows_arm64_builds_and_returns_exe_path(monkeypatch, tmp_path):
+    build_dir = tmp_path / "build-arm64"
+    build_dir.mkdir()
+    (build_dir / "micropython.exe").write_bytes(b"MZ")
+
+    monkeypatch.setattr(
+        build.llvmmingw,
+        "resolve_llvm_mingw",
+        lambda **k: ResolvedLlvmMingw(install_dir=tmp_path / "llvm-mingw"),
+    )
+    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
+
+    result = build_windows(
+        windows_opts(arch="arm64", build_dir=build_dir), tmp_path / "mpy"
+    )
+
+    assert result == build_dir / "micropython.exe"
+
+
+def test_windows_arm64_missing_exe_after_success_is_an_error(monkeypatch, tmp_path):
+    build_dir = tmp_path / "build-arm64"
+    build_dir.mkdir()
+
+    monkeypatch.setattr(
+        build.llvmmingw,
+        "resolve_llvm_mingw",
+        lambda **k: ResolvedLlvmMingw(install_dir=tmp_path / "llvm-mingw"),
+    )
+    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
+
+    with pytest.raises(UsermodBuildError, match="build reported success but"):
+        build_windows(windows_opts(arch="arm64", build_dir=build_dir), tmp_path / "mpy")
+
+
+def test_windows_arm64_build_failure_names_the_command(monkeypatch, tmp_path):
+    import subprocess as sp
+
+    def fake_run(cmd, **kwargs):
+        raise sp.CalledProcessError(1, cmd)
+
+    monkeypatch.setattr(
+        build.llvmmingw,
+        "resolve_llvm_mingw",
+        lambda **k: ResolvedLlvmMingw(install_dir=tmp_path / "llvm-mingw"),
+    )
+    monkeypatch.setattr(build.subprocess, "run", fake_run)
+
+    with pytest.raises(UsermodBuildError, match="failed with exit code"):
+        build_windows(
+            windows_opts(arch="arm64", build_dir=tmp_path / "build-arm64"),
+            tmp_path / "mpy",
+        )

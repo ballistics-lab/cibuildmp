@@ -38,34 +38,47 @@ part of **M8**'s original port list (`unix`/`webassembly`/`qemu`/
 since a resolver with nothing driving a build through it proves less than
 one that does.
 
-`windows` (**D18**) is the fifth and last port here: `usermod/msys2.py`'s
-`ResolvedMsys2` runs commands through MSYS2's own `bash.exe`, not a plain
-`subprocess.run()` with `PATH` prepended -- see that module's own
-docstring for why, and for the one honest caveat every other resolver in
-this package doesn't carry: it cannot be verified in a Linux sandbox at
-all, so this port's own code should be expected to need real
-`windows-latest` CI correction rounds the other four already had before
-this one, not after.
+`windows` (**D18**) is the fifth and last port here: a plain Linux-hosted
+cross-compile for all three arches this project covers (`x64`/`x86` via
+an apt-installed mingw-w64 GCC, `arm64` via a downloaded `llvm-mingw`
+toolchain -- `usermod/llvmmingw.py`, since no Linux distro packages a GCC
+targeting `aarch64-w64-mingw32` at all), no Windows host or MSYS2 needed
+for any of them. This is **not** what `a7p`'s own `mp-usermod.yml` does
+(it runs MSYS2 on `windows-latest` for all three arches, and two earlier
+versions of this port matched that -- first for all three, then just for
+`arm64` once `x64`/`x86` were confirmed to cross-compile more simply)
+-- both superseded after live-verifying real alternatives: upstream
+MicroPython's own CI cross-compiles `x64`/`x86` from Linux too
+(`.github/workflows/ports_windows.yml`'s own `cross-build-on-linux` job),
+and mingw-w64's own documentation names `llvm-mingw` as the one toolchain
+that both targets ARM64 Windows and runs as a Linux-hosted cross
+compiler. It is the exact same `ports/windows/Makefile` MSYS2 runs either
+way -- `USER_C_MODULES`/`FROZEN_MANIFEST` work identically, confirmed
+live with a real custom C module linked into a genuine `micropython.exe`
+for all three arches (x64, x86, arm64/PE32+ Aarch64). See
+docs/BACKLOG.md's D18 for the full MSVC-then-MSYS2-then-cross-compile
+history, including the three Clang-specific `CFLAGS_EXTRA` suppressions
+`arm64` alone needs and why each earlier conclusion was corrected rather
+than silently replaced.
 
 Every `Path` embedded into a `make` command line here goes through
 `.as_posix()`, never a bare `str()`: a real `usermod-dev.yml` run on
-`windows-latest` caught this -- `str(WindowsPath(...))` produces
-backslashes, and GNU Make (native or MSYS2) wants forward slashes
-regardless of host OS. The exact class of bug **D18** already documented
-for `a7p`'s own hand-written workflow (`$GITHUB_WORKSPACE`'s own native
-Windows form, mangled by MSYS2 bash's own backslash-escaping), just
-caught here before it shipped instead of after.
+`windows-latest`, back when this port still ran under MSYS2, caught this
+-- `str(WindowsPath(...))` produces backslashes, and GNU Make wants
+forward slashes regardless of host OS. Kept as the rule for every port
+here, not just the one that surfaced it.
 """
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 from .. import toolchains
 from ..toolchains import ResolvedToolchain
-from . import emsdk, espidf, msys2
+from . import emsdk, espidf, llvmmingw
 
 
 class UsermodBuildError(Exception):
@@ -440,95 +453,156 @@ def build_esp32(
     return firmware
 
 
-# ── windows (MSYS2) ─────────────────────────────────────────────────────
+# ── windows ──────────────────────────────────────────────────────────────
 
-# MSYSTEM -> the compiler package a7p's own mp-usermod.yml installs
-# alongside it (its own matrix.msys_install), transcribed directly, not
-# guessed. CLANGARM64 needs both the gcc-compat wrapper and clang itself.
-WINDOWS_MSYS_INSTALL: dict[str, str] = {
-    "MINGW32": "mingw-w64-i686-gcc",
-    "MINGW64": "mingw-w64-x86_64-gcc",
-    "CLANGARM64": "mingw-w64-clang-aarch64-gcc-compat mingw-w64-clang-aarch64-clang",
+
+@dataclass(frozen=True)
+class WindowsArchSettings:
+    cross_compile: str
+    # Empty means "no apt package -- resolved via llvm-mingw instead",
+    # arm64's own case (see resolve_windows_toolchain()).
+    apt_package: str = ""
+    # Clang-specific diagnostics MicroPython's own C wasn't written to
+    # satisfy under -Werror -- empty for the GCC-based x64/x86 arches,
+    # which need none. See resources/usermod.toml's own [llvm-mingw]
+    # table for exactly which and why, verified live rather than guessed.
+    extra_cflags: str = ""
+    # COMPILER_TARGET=/STRIP=/SIZE= -- the same overrides MSYS2's own
+    # CLANGARM64 environment already needed (D18's own history): this
+    # clang's -dumpmachine doesn't contain "mingw" either, which
+    # ports/windows/Makefile's own .exe-suffix and post-link strip logic
+    # both grep for. Empty for x64/x86 -- a plain GNU cross-gcc needs none.
+    extra_make_args: tuple[str, ...] = ()
+
+
+# CROSS_COMPILE prefixes for each Windows arch this project builds, and how
+# each toolchain is resolved. x64/x86: the same apt packages upstream's own
+# tools/ci.sh (ci_windows_setup/ci_windows_build) and
+# .github/workflows/ports_windows.yml's own cross-build-on-linux job use --
+# like unix's own x86 (toolchains.py's own "cannot provision itself" case),
+# ordinary Debian/Ubuntu packages, not something with a standalone tarball
+# worth pinning separately. arm64: Debian/Ubuntu ship no
+# aarch64-w64-mingw32 GCC target at all -- llvm-mingw (usermod/llvmmingw.py)
+# is the one Linux-hosted alternative mingw-w64's own docs point at by
+# name, verified live with a real custom C module producing a genuine
+# PE32+ Aarch64 micropython.exe.
+WINDOWS_ARCH_SETTINGS: dict[str, WindowsArchSettings] = {
+    "x64": WindowsArchSettings(
+        "x86_64-w64-mingw32-", apt_package="gcc-mingw-w64-x86-64"
+    ),
+    "x86": WindowsArchSettings("i686-w64-mingw32-", apt_package="gcc-mingw-w64-i686"),
+    "arm64": WindowsArchSettings(
+        "aarch64-w64-mingw32-",
+        extra_cflags=(
+            "-Wno-double-promotion -Wno-uninitialized "
+            "-Wno-default-const-init-var-unsafe"
+        ),
+        extra_make_args=("COMPILER_TARGET=mingw-forced", "STRIP=", "SIZE=true"),
+    ),
 }
 
 
 @dataclass(frozen=True)
 class WindowsBuildOptions:
+    arch: str
     user_c_modules: str
     frozen_manifest: str
-    msystem: str = "MINGW64"
-    build_dir: str = "build-standard"
-    variant: str = ""
-    cflags_extra: str = ""
+    build_dir: Path
+    variant: str = "standard"
     extra_make_args: tuple[str, ...] = ()
 
 
-def _windows_mpy_cross_command(mpy_dir_posix: str) -> str:
-    # The four overrides are CLANGARM64-specific, applied unconditionally
-    # because they are harmless no-ops on MINGW32/64 -- see
-    # build-usermod-windows/action.yml's own "Build mpy-cross" step for
-    # the full reasoning behind each (LDFLAGS_ARCH: lld rejects GNU ld's
-    # --cref; COMPILER_TARGET: the gcc-compat wrapper's own -dumpmachine
-    # doesn't contain "mingw", which fmode.c's inclusion is grepped for;
-    # STRIP/SIZE: CLANGARM64 ships neither binary under the expected name).
-    return (
-        f'make -C "{mpy_dir_posix}/mpy-cross" '
-        'LDFLAGS_ARCH="-Wl,--gc-sections" COMPILER_TARGET="mingw-forced" '
-        'STRIP="" SIZE="true" -j"$(nproc)"'
-    )
+def _windows_dir(mpy_dir: Path) -> Path:
+    return mpy_dir / "ports" / "windows"
 
 
-def windows_make_command(opts: WindowsBuildOptions, mpy_dir_posix: str) -> str:
-    # No CROSS_COMPILE=: inside an MSYS2 environment the toolchain is
-    # already the target's own, under unprefixed names.
-    variant_arg = f"VARIANT={opts.variant}" if opts.variant else ""
-    extra = " ".join(opts.extra_make_args)
-    return (
-        f'make -C "{mpy_dir_posix}/ports/windows" {variant_arg} '
-        f'BUILD="{opts.build_dir}" COMPILER_TARGET="mingw-forced" '
-        f'STRIP="" SIZE="true" CFLAGS_EXTRA="{opts.cflags_extra}" '
-        f'USER_C_MODULES="{opts.user_c_modules}" '
-        f'FROZEN_MANIFEST="{opts.frozen_manifest}" {extra} -j"$(nproc)"'
-    )
+def windows_make_command(opts: WindowsBuildOptions, mpy_dir: Path) -> list[str]:
+    settings = WINDOWS_ARCH_SETTINGS[opts.arch]
+    command = [
+        "make",
+        "-C",
+        _windows_dir(mpy_dir).as_posix(),
+        f"VARIANT={opts.variant}",
+        f"BUILD={opts.build_dir.as_posix()}",
+        f"CROSS_COMPILE={settings.cross_compile}",
+        *settings.extra_make_args,
+    ]
+    if settings.extra_cflags:
+        command.append(f"CFLAGS_EXTRA={settings.extra_cflags}")
+    command += [
+        f"USER_C_MODULES={opts.user_c_modules}",
+        f"FROZEN_MANIFEST={opts.frozen_manifest}",
+        *opts.extra_make_args,
+    ]
+    return command
 
 
 def build_windows(
     opts: WindowsBuildOptions,
     mpy_dir: Path,
     *,
-    msys2_root: Path | None = None,
+    toolchain_root: Path | None = None,
     quiet: bool = False,
 ) -> Path:
-    """Build ports/windows under MSYS2, returning the produced `.exe`.
+    """Build ports/windows for `opts.arch`, returning the produced `.exe`.
 
-    `mpy_dir` is a native Windows path; converted to MSYS2's own POSIX
-    form via `ResolvedMsys2.to_posix_path()` (real `cygpath -u`, not
-    `.as_posix()` -- see that method's own docstring for why `.as_posix()`
-    is not enough here specifically). `opts.user_c_modules`/
-    `frozen_manifest`/`build_dir` are left as the caller already formatted
-    them -- same contract every other port's `*BuildOptions` already has.
+    A plain Linux-hosted cross-compile for all three arches this project
+    covers, not MSYS2: verified live against a real v1.28.0 checkout --
+    x64/x86 with an apt-installed GCC (matching upstream's own
+    cross-build-on-linux CI job exactly, tools/ci.sh's ci_windows_build),
+    arm64 with a downloaded llvm-mingw toolchain (usermod/llvmmingw.py --
+    no Linux distro packages a GCC targeting aarch64-w64-mingw32 at all).
+    Each produced a genuine micropython.exe with a real USER_C_MODULES's
+    own symbols confirmed present via `strings`. It is the exact same
+    ports/windows/Makefile MSYS2 runs either way, just invoked with
+    CROSS_COMPILE=<prefix>- like every other cross-compiled port here
+    (unix's x86/armhf, qemu) instead of running inside an MSYS2 shell --
+    superseded MSYS2 for all three arches this project builds (D18's own
+    backlog entry has the full three-stage history: MSVC ruled out first,
+    then MSYS2 for all arches, then this). MSYS2 stays a real option for
+    an arch this project doesn't cover yet outside these three.
 
-    The output path is `mpy_dir / "ports" / "windows" / opts.build_dir /
-    "micropython.exe"` -- `ports/windows/Makefile`'s own `PROG ?=
-    micropython` plus its `.exe` suffix on this port specifically.
+    mpy-cross is not built here either, same as every other port:
+    it is a host tool (freezes the manifest at build time, is not part of
+    the target binary), so it needs no cross-compiling at all --
+    sources.build_mpy_cross() already builds a native one, shared with
+    every other port.
+
+    The output path is `opts.build_dir / "micropython.exe"` --
+    ports/windows/Makefile's own `PROG ?= micropython` plus the `.exe`
+    suffix `py/mkrules.mk` appends for this port specifically.
     """
-    root = msys2.resolve_msys2(root=msys2_root, quiet=quiet)
-    session = msys2.ResolvedMsys2(root=root, msystem=opts.msystem)
+    if opts.arch not in WINDOWS_ARCH_SETTINGS:
+        raise UsermodBuildError(
+            f"unknown windows arch {opts.arch!r}. Known: "
+            f"{', '.join(sorted(WINDOWS_ARCH_SETTINGS))}"
+        )
+    settings = WINDOWS_ARCH_SETTINGS[opts.arch]
 
-    packages = ["make", "git", "python3", *WINDOWS_MSYS_INSTALL[opts.msystem].split()]
-    session.install_packages(packages)
+    env = None
+    if opts.arch == "arm64":
+        toolchain = llvmmingw.resolve_llvm_mingw(root=toolchain_root, quiet=quiet)
+        env = toolchain.env()
+    else:
+        gcc = shutil.which(f"{settings.cross_compile}gcc")
+        if gcc is None:
+            raise UsermodBuildError(
+                f"windows/{opts.arch}: {settings.cross_compile}gcc is not on "
+                f"PATH. Install it with: apt install {settings.apt_package}"
+            )
 
-    mpy_dir_posix = session.to_posix_path(str(mpy_dir))
-
+    command = windows_make_command(opts, mpy_dir)
     try:
-        session.run(_windows_mpy_cross_command(mpy_dir_posix))
-        session.run(windows_make_command(opts, mpy_dir_posix))
-    except msys2.Msys2Error as exc:
-        raise UsermodBuildError(f"windows/{opts.msystem}: {exc}") from exc
+        subprocess.run(command, env=env, check=True)
+    except subprocess.CalledProcessError as exc:
+        raise UsermodBuildError(
+            f"windows/{opts.arch}: `{' '.join(command)}` failed with exit "
+            f"code {exc.returncode}"
+        ) from exc
 
-    binary = mpy_dir / "ports" / "windows" / opts.build_dir / "micropython.exe"
+    binary = opts.build_dir / "micropython.exe"
     if not binary.exists():
         raise UsermodBuildError(
-            f"windows/{opts.msystem}: build reported success but {binary} is missing"
+            f"windows/{opts.arch}: build reported success but {binary} is missing"
         )
     return binary

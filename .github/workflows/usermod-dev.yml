@@ -1,15 +1,18 @@
 name: usermod dev
 
-# Scratch CI for M9's own usermod work (D18 MSYS2, D19 ESP-IDF): a plain
-# on-push trigger on this one development branch, not a pull_request --
-# opening a PR is a separate, explicit decision (docs/BACKLOG.md's own
-# development history), not something this workflow should force. Delete
-# or fold into publish.yml/build-examples.yml once M9 lands on main.
+# Scratch CI for M9's own usermod work: a plain on-push trigger on this one
+# development branch, not a pull_request -- opening a PR is a separate,
+# explicit decision (docs/BACKLOG.md's own development history), not
+# something this workflow should force. Delete or fold into
+# publish.yml/build-examples.yml once M9 lands on main.
 #
-# windows-latest here is the actual reason this exists: D18's MSYS2
-# orchestration cannot be verified in a Linux sandbox at all -- this is
-# the only real feedback loop for it, so it needs to run on every push,
-# not wait for a PR.
+# No windows-latest job: D18's windows port used to need one (MSYS2
+# orchestration could not be verified in a Linux sandbox at all), first for
+# all three arches, then just for arm64 -- both stages superseded by plain
+# Linux-hosted cross-compiles (docs/BACKLOG.md's D18: apt-installed
+# mingw-w64 GCC for x64/x86, a downloaded llvm-mingw toolchain for arm64).
+# All three are fully verifiable on ubuntu-latest, the same as
+# unix/qemu/webassembly/esp32, none of which get a dedicated CI job either.
 
 on:
   push:
@@ -27,25 +30,3 @@ jobs:
       - run: uv run ruff format --check src tests
       - run: uv run pyright src
       - run: uv run pytest -q
-
-  windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-      - run: uv sync
-      - run: uv run pytest -q
-
-  # Real MSYS2 + a full MicroPython compile, not the hermetic suite above
-  # -- on push, same as the other two jobs: workflow_dispatch needs a
-  # manual click in the GitHub UI on every check (no API access to fire
-  # it from here), which defeats the point of a fast on-push feedback
-  # loop. See scripts/windows_usermod_smoke.py's own docstring for why
-  # this exists as a throwaway script rather than a package entry point.
-  windows-live-build:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-      - run: uv sync
-      - run: uv run python .github/workflows/scripts/windows_usermod_smoke.py

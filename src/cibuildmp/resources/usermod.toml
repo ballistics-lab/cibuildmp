@@ -133,3 +133,45 @@ version = "6.0.8"
 hash = "9d70dbe8860ccdd3595f6e6065d94bfb543ae955"
 url = "https://storage.googleapis.com/webassembly/emscripten-releases-builds/linux/9d70dbe8860ccdd3595f6e6065d94bfb543ae955/wasm-binaries.tar.xz"
 sha256 = "9bea769c189d9f52196e74283fb86937318cc24bf14879f2c6bdd19862131901"
+
+# ── llvm-mingw (D18, windows/arm64) ─────────────────────────────────────────
+# The one Windows arch build_windows() (a plain apt-installed mingw-w64
+# GCC cross-compile, x64/x86) cannot cover: Debian/Ubuntu package no
+# aarch64-w64-mingw32 GCC target at all, and GCC's own upstream ARM64
+# Windows support is not what any Linux distro ships pre-built. mingw-w64's
+# own docs (https://www.mingw-w64.org, "Pre-built Toolchains") name
+# llvm-mingw as the one toolchain that targets ARM64 Windows *and* runs as
+# a Linux-hosted cross compiler (mstorsjo/llvm-mingw's own README: releases
+# named `llvm-mingw-<version>-<crt>-ubuntu-<distro>-<arch>.tar.xz` are
+# "cross compilers, that can be run on Linux, compiling binaries for any of
+# the 4 target Windows architectures"). Verified live, not assumed: a real
+# v1.28.0 ports/windows build, CROSS_COMPILE=aarch64-w64-mingw32- from this
+# tarball, with a real custom C module, produced a genuine PE32+ Aarch64
+# micropython.exe with that module's own symbols linked in.
+#
+# Three CFLAGS_EXTRA suppressions are load-bearing, not cosmetic -- found
+# live, not guessed: this clang toolchain is strict about things GCC (every
+# other cross-compiler this project resolves) is not.
+#   -Wno-double-promotion         py/binary.c's _Float16<->float union trick
+#                                  reads as an implicit precision-increasing
+#                                  promotion under Clang specifically.
+#   -Wno-uninitialized
+#   -Wno-default-const-init-var-unsafe
+#                                  shared/runtime/gchelper_generic.c's own
+#                                  `const register long x19 asm("x19")`
+#                                  idiom (reading a callee-saved register an
+#                                  asm stub already wrote) reads as "used
+#                                  uninitialized" to Clang; GCC does not
+#                                  apply this diagnosis to a bare asm-tied
+#                                  register declaration the way Clang does.
+# COMPILER_TARGET=mingw-forced/STRIP=""/SIZE="true" are the same overrides
+# MSYS2's own CLANGARM64 environment already needed (D18's own history) --
+# this clang's `-dumpmachine` doesn't contain "mingw" either, which
+# ports/windows/Makefile's own `.exe`-suffix and post-link strip logic
+# checks for.
+[llvm-mingw]
+version = "20260616"
+
+[llvm-mingw.platform.linux-x64]
+url = "https://github.com/mstorsjo/llvm-mingw/releases/download/20260616/llvm-mingw-20260616-ucrt-ubuntu-22.04-x86_64.tar.xz"
+sha256 = "534b92e067b22a6b4441f48ae9240a3341b17825d04d577eab0cf85c44b4deda"
