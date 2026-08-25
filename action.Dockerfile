@@ -108,6 +108,18 @@ RUN dpkg --add-architecture arm64 && \
 # own linux-libc-dev-<arch>-cross as a hard Depends, so naming these
 # three is enough.
 #
+# libtool: a sixth real build failure, past the fifth above --
+# unix/armhf's own deplibs step got past ltdl.m4 (libltdl-dev) only to
+# fail differently: `libtoolize: No such file or directory`, then
+# `Makefile.am:39: error: Libtool library used but 'LIBTOOL' is
+# undefined`. Same shape as the libc6-dev-<arch>-cross gap:
+# libltdl-dev only Recommends: libtool (confirmed via apt-cache
+# depends), which --no-install-recommends skips. This project's own
+# dev sandbox already had libtool installed from unrelated earlier
+# work, which is exactly why the ltdl.m4 fix looked complete when
+# first verified there -- only a real image without it ever exposed
+# the gap.
+#
 # wabt: examples/wasm2mpy's own toolchain (wasm2c), pinned by nothing more
 # than "whatever Ubuntu 24.04 carries" -- deliberately, since that is the
 # same version build-examples.yml's own runner-level apt-get used to
@@ -135,6 +147,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc-mipsel-linux-gnu \
     libc6-dev-mipsel-cross \
     libltdl-dev \
+    libtool \
     pkg-config \
     libusb-1.0-0 \
     wabt \

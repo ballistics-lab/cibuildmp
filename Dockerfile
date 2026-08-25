@@ -110,6 +110,23 @@ RUN dpkg --add-architecture arm64 && \
 #                             ("possibly undefined macro:
 #                             LT_SYS_SYMBOL_USCORE" -- ltdl.m4's, which
 #                             autoconf/automake/libtool alone don't ship).
+#   libtool                -- a sixth real build failure, past
+#                             libc6-dev-<arch>-cross below: deplibs'
+#                             ./autogen.sh gets past ltdl.m4 (the fix
+#                             above) only to fail differently --
+#                             `libtoolize: No such file or directory`,
+#                             then (with libtoolize itself present but
+#                             not run) `Makefile.am:39: error: Libtool
+#                             library used but 'LIBTOOL' is undefined`.
+#                             Same shape as the libc6-dev-<arch>-cross
+#                             gap: libltdl-dev only Recommends: libtool
+#                             (confirmed via apt-cache depends), which
+#                             --no-install-recommends skips -- this dev
+#                             sandbox already had libtool installed from
+#                             unrelated earlier work, which is exactly
+#                             why the LT_SYS_SYMBOL_USCORE fix above
+#                             looked complete when it was first verified
+#                             live here.
 #   libc6-dev-arm64-cross/ -- each cross gcc package only Recommends:
 #   libc6-dev-armhf-cross/    its own libc6-dev-<arch>-cross (confirmed via
 #   libc6-dev-mipsel-cross    apt-cache depends), which --no-install-recommends
@@ -166,6 +183,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc-mipsel-linux-gnu \
     libc6-dev-mipsel-cross \
     libltdl-dev \
+    libtool \
     pkg-config \
     libusb-1.0-0 \
     && rm -rf /var/lib/apt/lists/*

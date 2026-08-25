@@ -1711,10 +1711,14 @@ that Docker-action gap next.
 (`aarch64`/`armhf`/`mipsel`) closing D23/D24's own open item, and the
 first real `docker build` of either image (neither had ever actually
 been built before this -- both predate real usermod CLI usage
-entirely) surfaced five genuine, non-obvious apt/gcc problems no amount
+entirely) surfaced six genuine, non-obvious apt/gcc problems no amount
 of reading package lists would have caught -- one of them (the
 `i386-linux-gnu` symlink) initially "fixed" wrong and only caught by a
-later, unrelated real build failure.** `examples/usermod-unix`
+later, unrelated real build failure, and two of them (`libc6-dev-<arch>-cross`,
+`libtool`) sharing the exact same root shape: a package only
+`Recommends:`, not `Depends:`, what `--no-install-recommends` then
+silently drops -- and both masked, at first, by this project's own dev
+sandbox happening to have them installed from unrelated earlier work.** `examples/usermod-unix`
 (a real `USER_C_MODULES` module, `cibuildmp.toml` defaulting to all
 five `unix` arches) wired into `build-examples.yml`'s own `uses: ./`
 step is what proved it -- this project's dev sandbox has no Docker
@@ -1820,19 +1824,47 @@ lesson **D18**'s own `action.Dockerfile`-location bug already taught.
   `unix/armhf`, `unix/mipsel` build each, with a custom C module, three
   genuine linked binaries (`ARM aarch64`, `ARM armhf`, `MIPS32`) with
   no header errors at all.
-- All five fixes are Dockerfile-only, not `cibuildmp` itself: none
+- **A sixth real failure, on `unix/armhf`'s own `deplibs` step,
+  immediately past the fifth fix landing on real CI:** `libtoolize: No
+  such file or directory`, then (once `libtoolize` itself is on PATH
+  but never actually invoked to regenerate the vendored `lib/libffi`
+  tree's own macros) `Makefile.am:39: error: Libtool library used but
+  'LIBTOOL' is undefined`. Exactly the same shape as the fifth bug,
+  one package over: `libltdl-dev` only `Recommends:` `libtool`
+  (confirmed via `apt-cache depends`), not a hard `Depends:` --
+  `--no-install-recommends` skips it. This project's own dev sandbox
+  already had `libtool` installed from unrelated earlier work in this
+  session, which is exactly why **D24**'s own `armhf`/`mipsel` live
+  verification (and this very D25 entry's fifth-bug verification,
+  above) looked complete at the time -- neither ever actually
+  exercised a sandbox without it. Caught for real only once a
+  genuinely libtool-free image (the real `docker build`/`docker run`
+  from the previous commit) tried the same step. Verified live the
+  same rigorous way this time, specifically to avoid repeating the
+  false-positive: purged `libtool`, *and* deleted the already-generated
+  `lib/libffi/configure` this session's own earlier runs had left
+  behind (its own Makefile rule only regenerates `configure` when it is
+  missing or older than `autogen.sh` -- reusing a stale, already-good
+  `configure` is exactly how the first "live verification" of this
+  fix silently proved nothing), reproduced the exact CI failure,
+  installed `libtool`, deleted the stale `configure` again, and only
+  then confirmed a genuine fresh `unix/armhf` and `unix/mipsel` build
+  each -- two real statically-linked binaries (`ARM EABI5`, `MIPS32`)
+  with the custom C module built in.
+- All six fixes are Dockerfile-only, not `cibuildmp` itself: none
   affect a bare `ubuntu-latest` runner running the CLI directly
   (**M9b**'s own live verification, and every `build-examples.yml` run
   before this one, already exercised `gcc -m32` successfully outside
   Docker) -- only these two custom images, which now need
   `gcc-13-multilib`, `libffi-dev`, `pkg-config`, the real `:i386`
-  packages (not a symlink), and the three `libc6-dev-<arch>-cross`
-  packages `--no-install-recommends` was silently dropping, to combine
-  x86 multilib support with three cross-compilers in one filesystem.
-  README's own bare-metal install instructions get the same fixes, at
-  the point a reader would actually hit them -- though a reader
-  running a plain `apt install` (recommends on by default) would never
-  have hit the fifth bug at all; it is purely a consequence of
+  packages (not a symlink), the three `libc6-dev-<arch>-cross`
+  packages, and `libtool` -- everything `--no-install-recommends` was
+  silently dropping -- to combine x86 multilib support with three
+  cross-compilers in one filesystem. README's own bare-metal install
+  instructions get the same fixes, at the point a reader would
+  actually hit them -- though a reader running a plain `apt install`
+  (recommends on by default) would never have hit the fifth or sixth
+  bug at all; both are purely a consequence of
   `--no-install-recommends`, which only these two Dockerfiles use.
 - **cibuildwheel's own answer to "many architectures, one toolchain
   set" is structurally different, not comparably fixed** -- asked and
@@ -1859,7 +1891,7 @@ image; `action.yml` stops being a Docker action itself and becomes a
 thin composite action that ensures Docker is present, then runs
 `cibuildmp` directly on the bare runner; `cibuildmp` itself launches
 sibling per-port containers rather than running inside one.** Direct
-follow-up to D25's own cibuildwheel comparison and the five real bugs
+follow-up to D25's own cibuildwheel comparison and the six real bugs
 found there -- the user's own proposal, refined once from "per
 architecture" to "per port" citing `mpbuild`'s own precedent of
 separate containers per port.
@@ -1883,7 +1915,7 @@ separate containers per port.
   already runs directly on the host (D2/M2), no container at all,
   today or after this change.
 - **Honest limit: per-port splitting does not, by itself, avoid the
-  five bugs D25 just fixed.** Every one of them was `unix` colliding
+  six bugs D25 just fixed.** Every one of them was `unix` colliding
   with itself -- its own five architectures (`x64`/`x86`/`aarch64`/
   `armhf`/`mipsel`) sharing one filesystem, not `unix` colliding with
   `windows` or `esp32`. A `unix`-only image still combines all five
@@ -1921,7 +1953,7 @@ separate containers per port.
   sandbox has no Docker daemon (**D19**), so unlike every apt-level fix
   above, an actual `docker build`/`docker run` of this slice cannot be
   verified here at all -- only on real CI, the same round-trip
-  constraint D25's own five-bug chain already worked under, now one
+  constraint D25's own six-bug chain already worked under, now one
   level higher (a whole new image, not one more apt package).
 
 - **M10** — runner/matrix integration, fan-out-by-default for usermod

@@ -53,8 +53,10 @@ RUN dpkg --add-architecture arm64 && \
 # libc6-dev-armhf-cross/libc6-dev-mipsel-cross named explicitly (each
 # cross gcc only Recommends: its own, which --no-install-recommends
 # skips); libffi-dev:i386/linux-libc-dev:i386 for unix/x86's own
-# modffi.c, not a symlink -- all five real bugs D25 found and fixed,
-# transcribed here unchanged rather than re-discovered for this image too.
+# modffi.c, not a symlink; libtool (deplibs' own ./autogen.sh needs
+# libtoolize, which libltdl-dev only Recommends:, not Depends:) -- all
+# six real bugs D25/D26 found and fixed, transcribed here unchanged
+# rather than re-discovered for this image too.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     python3 \
@@ -70,5 +72,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc-mipsel-linux-gnu \
     libc6-dev-mipsel-cross \
     libltdl-dev \
+    libtool \
     pkg-config \
     && rm -rf /var/lib/apt/lists/*
