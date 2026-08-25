@@ -2986,7 +2986,17 @@ conclusion.
      "grandfathered," kept purely because ripping out working code
      costs something for no benefit): the user's own direct, later
      call is Docker-only, full stop, no exception for `unix` either.
-     The real toolchain diversity across ports (ESP-IDF, emsdk,
+     **The reason inverts D3's own original framing, above, not just
+     overrides it:** D3 called bare-host the non-mutating option and
+     Docker the heavier one. For usermod that framing is backwards --
+     a bare-host build means `apt-get install`ing arch-specific
+     cross-toolchains onto whatever's running the build, a real,
+     persistent mutation of that host. A container is the actually
+     non-mutating, deterministic, isolated option: it is built once
+     from a pinned Dockerfile and discarded per run, touching nothing
+     outside itself. Docker-only is the isolation-preserving choice,
+     not a tradeoff against it. The real toolchain diversity across
+     ports (ESP-IDF, emsdk,
      llvm-mingw, five different `unix` cross-compilers) makes a
      parallel, dual-maintained non-Docker path prohibitively expensive
      for every port, `unix` included, not just the ones added from
