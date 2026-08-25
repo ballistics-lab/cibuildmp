@@ -32,6 +32,15 @@ module's own docstring for why.
 
 `windows` is M8's own remaining scope, not started (waits on **M9**'s
 MSYS2 orchestration, **D18**).
+
+Every `Path` embedded into a `make` command line here goes through
+`.as_posix()`, never a bare `str()`: a real `usermod-dev.yml` run on
+`windows-latest` caught this -- `str(WindowsPath(...))` produces
+backslashes, and GNU Make (native or MSYS2) wants forward slashes
+regardless of host OS. The exact class of bug **D18** already documented
+for `a7p`'s own hand-written workflow (`$GITHUB_WORKSPACE`'s own native
+Windows form, mangled by MSYS2 bash's own backslash-escaping), just
+caught here before it shipped instead of after.
 """
 
 from __future__ import annotations
@@ -98,9 +107,9 @@ def unix_make_command(opts: UnixBuildOptions, mpy_dir: Path) -> list[str]:
     return [
         "make",
         "-C",
-        str(_unix_dir(mpy_dir)),
+        _unix_dir(mpy_dir).as_posix(),
         f"VARIANT={opts.variant}",
-        f"BUILD={opts.build_dir}",
+        f"BUILD={opts.build_dir.as_posix()}",
         f"CROSS_COMPILE={settings.cross_compile}",
         *settings.link_opts,
         f"USER_C_MODULES={opts.user_c_modules}",
@@ -121,9 +130,9 @@ def run_unix_deplibs(opts: UnixBuildOptions, mpy_dir: Path) -> None:
     command = [
         "make",
         "-C",
-        str(_unix_dir(mpy_dir)),
+        _unix_dir(mpy_dir).as_posix(),
         f"VARIANT={opts.variant}",
-        f"BUILD={opts.build_dir}",
+        f"BUILD={opts.build_dir.as_posix()}",
         f"CROSS_COMPILE={settings.cross_compile}",
         "MICROPY_STANDALONE=1",
         "deplibs",
@@ -220,9 +229,9 @@ def qemu_make_command(
     return [
         "make",
         "-C",
-        str(mpy_dir / "ports" / "qemu"),
+        (mpy_dir / "ports" / "qemu").as_posix(),
         f"BOARD={opts.board}",
-        f"BUILD={opts.build_dir}",
+        f"BUILD={opts.build_dir.as_posix()}",
         f"CROSS_COMPILE={chain.prefix}",
         f"USER_C_MODULES={opts.user_c_modules}",
         f"FROZEN_MANIFEST={opts.frozen_manifest}",
@@ -291,9 +300,9 @@ def webassembly_make_command(opts: WebassemblyBuildOptions, mpy_dir: Path) -> li
     return [
         "make",
         "-C",
-        str(mpy_dir / "ports" / "webassembly"),
+        (mpy_dir / "ports" / "webassembly").as_posix(),
         f"VARIANT={opts.variant}",
-        f"BUILD={opts.build_dir}",
+        f"BUILD={opts.build_dir.as_posix()}",
         f"USER_C_MODULES={opts.user_c_modules}",
         f"FROZEN_MANIFEST={opts.frozen_manifest}",
         *opts.extra_make_args,

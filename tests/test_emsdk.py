@@ -1,12 +1,14 @@
 import hashlib
 import io
+import os
+import platform
 import tarfile
 from pathlib import Path
 
 import pytest
 
 from cibuildmp.usermod import emsdk
-from cibuildmp.usermod.emsdk import EmsdkError, resolve_emsdk
+from cibuildmp.usermod.emsdk import EmsdkError, ResolvedEmsdk, resolve_emsdk
 
 
 def _fake_emsdk_tarball(dest: Path) -> None:
@@ -26,10 +28,20 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+@pytest.mark.skipif(
+    platform.system() != "Linux"
+    or platform.machine().lower() not in ("x86_64", "amd64"),
+    reason="sanity check for this project's own linux-x64 dev/CI host, not a portability claim",
+)
 def test_host_platform_key_matches_pinned_table():
-    # The live host this test runs on is linux-x64 -- same assertion as
-    # the module's own manual sanity check during development.
     assert emsdk._host_platform_key() == "linux-x64"
+
+
+def test_host_platform_key_rejects_unmapped_os(monkeypatch):
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+    monkeypatch.setattr(platform, "machine", lambda: "AMD64")
+    with pytest.raises(EmsdkError, match="unsupported host for emsdk: Windows/AMD64"):
+        emsdk._host_platform_key()
 
 
 def test_resolve_emsdk_downloads_extracts_and_verifies(tmp_path, monkeypatch):
@@ -46,7 +58,7 @@ def test_resolve_emsdk_downloads_extracts_and_verifies(tmp_path, monkeypatch):
     data = {
         "version": "6.0.8",
         "platform": {
-            "linux-x64": {
+            "fake-host": {
                 "hash": "deadbeef",
                 "url": "https://example.invalid/wasm-binaries.tar.xz",
                 "sha256": _sha256(probe),
@@ -54,6 +66,11 @@ def test_resolve_emsdk_downloads_extracts_and_verifies(tmp_path, monkeypatch):
         },
     }
 
+    # _host_platform_key() mocked too -- this test must be hermetic to
+    # whatever OS/arch actually runs it, not coupled to being linux-x64
+    # the way an earlier version of this test was (it failed for real on
+    # a windows-latest CI run for exactly this reason).
+    monkeypatch.setattr(emsdk, "_host_platform_key", lambda: "fake-host")
     monkeypatch.setattr(emsdk, "usermod_data", lambda: {"emsdk": data})
     monkeypatch.setattr(emsdk, "download_file", fake_download)
 
@@ -64,7 +81,7 @@ def test_resolve_emsdk_downloads_extracts_and_verifies(tmp_path, monkeypatch):
     assert (result.install_dir / "bin" / "clang").exists()
     # cached_dir() moves populate()'s returned subdir (staging/"install")
     # to become dest itself -- dest is not dest/"install".
-    assert result.install_dir == tmp_path / "emsdk" / "6.0.8" / "linux-x64"
+    assert result.install_dir == tmp_path / "emsdk" / "6.0.8" / "fake-host"
 
     # Second call is a cache hit -- no further download.
     resolve_emsdk(root=tmp_path, quiet=True)
@@ -78,13 +95,14 @@ def test_resolve_emsdk_rejects_checksum_mismatch(tmp_path, monkeypatch):
     data = {
         "version": "6.0.8",
         "platform": {
-            "linux-x64": {
+            "fake-host": {
                 "hash": "deadbeef",
                 "url": "https://example.invalid/wasm-binaries.tar.xz",
                 "sha256": "0" * 64,
             }
         },
     }
+    monkeypatch.setattr(emsdk, "_host_platform_key", lambda: "fake-host")
     monkeypatch.setattr(emsdk, "usermod_data", lambda: {"emsdk": data})
     monkeypatch.setattr(emsdk, "download_file", fake_download)
 
@@ -106,10 +124,13 @@ def test_resolve_emsdk_unknown_host_platform(tmp_path, monkeypatch):
 
 
 def test_env_prepends_both_bin_dirs(tmp_path):
-    from cibuildmp.usermod.emsdk import ResolvedEmsdk
-
     install_dir = tmp_path / "install"
     sdk = ResolvedEmsdk(install_dir=install_dir)
     env = sdk.env({"PATH": "/usr/bin"})
 
-    assert env["PATH"] == f"{install_dir / 'emscripten'}:{install_dir / 'bin'}:/usr/bin"
+    # os.pathsep, not a hardcoded ":" -- this must hold on Windows (";")
+    # too, not just Linux/macOS.
+    sep = os.pathsep
+    assert env["PATH"] == (
+        f"{install_dir / 'emscripten'}{sep}{install_dir / 'bin'}{sep}/usr/bin"
+    )

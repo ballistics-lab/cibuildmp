@@ -1295,7 +1295,16 @@ rather than design from scratch.
 - **Windows/macOS hosts.** The download strategy makes a macOS host plausible
   for the arm/riscv/xtensa arches; `x86`'s multilib and the whole
   `docker` strategy are Linux-only. Decide whether phase 1 claims anything
-  beyond Linux, or explicitly does not.
+  beyond Linux, or explicitly does not. A real `windows-latest` CI run
+  (`usermod-dev.yml`, added for M9's own D18 work) already surfaced one
+  concrete data point either way this gets decided: `tests/test_build.py`'s
+  `test_pre_build_command_runs_in_module_root` fails there today --
+  `run_pre_build_command()`'s `touch marker` runs via `subprocess.run(...,
+  shell=True)`, which is `cmd.exe` on Windows, and `cmd.exe` has no
+  `touch`. Not fixed here: it is natmod's own test, out of scope for M9's
+  usermod work, and this project has not decided natmod claims Windows at
+  all yet -- flagged so that decision, whenever it happens, does not have
+  to rediscover this.
 - **Old tags vs. a modern host `gcc`.** Found while verifying **D13** live:
   `v1.21.0` fails to build `mpy-cross` under a recent `gcc`
   (`-Werror=unterminated-string-initialization` on upstream's own
