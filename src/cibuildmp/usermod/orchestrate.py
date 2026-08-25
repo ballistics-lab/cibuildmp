@@ -126,15 +126,18 @@ def _port_build_options(
             extra_make_args=extra_make_args,
         )
     if port == "qemu":
-        # No board= here: qemu has no configurable axis yet
-        # (usermod/targets.py's own _PORT_AXES), so target.arch is
-        # always "" -- passing that through would override
-        # QemuBuildOptions' own "MPS2_AN385" default with an empty
-        # string instead of leaving it alone.
+        # target.arch is "" unless a caller opts into [usermod.qemu]
+        # boards = [...] (targets.py's own _PORT_AXES default keeps the
+        # bare "" sentinel precisely so an unconfigured build's own
+        # identifier/board stay unchanged -- see that module's own
+        # comment) -- `or "MPS2_AN385"` is what turns the empty default
+        # back into QemuBuildOptions' own default board instead of
+        # overriding it with an empty string.
         return QemuBuildOptions(
             user_c_modules=user_c_modules,
             frozen_manifest=frozen_manifest,
             build_dir=_resolved_build_dir(mpy_dir, port, identifier),
+            board=target.arch or "MPS2_AN385",
             extra_make_args=extra_make_args,
         )
     if port == "webassembly":

@@ -376,6 +376,52 @@ def test_qemu_unsupported_board_rejected(tmp_path):
         build_qemu(qemu_opts(board="MIMXRT1050_EVK"), tmp_path / "mpy")
 
 
+@pytest.mark.parametrize(
+    ("board", "expected_arch"),
+    [("MPS2_AN385", "armv7m"), ("VIRT_RV32", "rv32imc"), ("VIRT_RV64", "rv64imc")],
+)
+def test_qemu_resolves_board_specific_toolchain(
+    board, expected_arch, monkeypatch, tmp_path
+):
+    """Each board must probe its own arch's toolchain, not always
+    armv7m's -- VIRT_RV32/VIRT_RV64 need rv32imc/rv64imc's
+    riscv-none-elf, not arm-none-eabi-."""
+    calls = []
+    monkeypatch.setattr(
+        build.toolchains,
+        "resolve",
+        lambda arch, **k: calls.append(arch) or HOST_CHAIN,
+    )
+    build_dir = tmp_path / f"build-{board}"
+    build_dir.mkdir()
+    (build_dir / "firmware.elf").write_bytes(b"\x7fELF")
+    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
+
+    build_qemu(qemu_opts(board=board, build_dir=build_dir), tmp_path / "mpy")
+
+    assert calls == [expected_arch]
+
+
+def test_qemu_riscv_command_uses_the_resolved_prefix(tmp_path):
+    riscv_chain = ResolvedToolchain(
+        "host", "riscv64-unknown-elf-", "riscv64-unknown-elf-", None
+    )
+    command = qemu_make_command(
+        qemu_opts(board="VIRT_RV64"), Path("/gh/ws/mpy"), riscv_chain
+    )
+
+    assert command == [
+        "make",
+        "-C",
+        "/gh/ws/mpy/ports/qemu",
+        "BOARD=VIRT_RV64",
+        "BUILD=/gh/ws/usermod/build/armv7m",
+        "CROSS_COMPILE=riscv64-unknown-elf-",
+        "USER_C_MODULES=/gh/ws/micropython/usermod",
+        "FROZEN_MANIFEST=/gh/ws/a7p_manifest.py",
+    ]
+
+
 # ── webassembly ──────────────────────────────────────────────────────────
 
 

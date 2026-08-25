@@ -3,7 +3,9 @@
 # examples/natmod/*/Makefile, which default ARCH to one value for a
 # standalone `make`.
 MOD = template
-SRC = template.c
+# ../src/template_core.c is the shared core usermod/template/template.c
+# also compiles unchanged -- see that file's own header comment.
+SRC = template.c ../src/template_core.c
 
 # Must be set before the include below -- dynruntime.mk only defaults it
 # with `?=`. Scopes intermediate objects (*.o/.native.mpy) per arch *and*

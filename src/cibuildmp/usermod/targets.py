@@ -24,19 +24,31 @@ from .build import UNIX_RUNNABLE_ARCHS, WINDOWS_ARCH_SETTINGS
 
 # port -> (config axis key, every axis value this project can currently
 # build, in identifier order). A `None` key means the port has no
-# configurable axis at all yet -- qemu only wires MPS2_AN385
-# (usermod/build.py's own QemuBuildOptions), webassembly only the
-# "pyscript" variant -- represented as the single "" axis value so
-# UsermodTarget.identifier stays just the bare port name rather than a
-# fake `qemu-` suffix. `esp32`'s default is ESP32_GENERIC only, even
-# though other ESP32-family boards are selectable (README's own
-# usermod table footnote: selectable, not itself live-verified) --
-# not defaulted to, the same "default = everything actually proven"
-# rule `unix`'s own default (excluding armhf/mipsel) already follows.
+# configurable axis at all yet -- webassembly only the "pyscript" variant
+# -- represented as the single "" axis value so UsermodTarget.identifier
+# stays just the bare port name rather than a fake `-` suffix.
+#
+# `qemu`'s own default stays the single `""` sentinel, not `MPS2_AN385`,
+# even though it now has a real `"boards"` axis (build_qemu() also
+# resolves VIRT_RV32/VIRT_RV64, each its own natmod RISC-V toolchain) --
+# a real, live-verified `board` value here would rename every existing
+# caller's own default identifier from bare `qemu` to `qemu-MPS2_AN385`,
+# breaking a7p's own already-wired `build-usermod-armv7m` action for no
+# behavioural gain (still the same board, same toolchain). Opting into
+# `[usermod.qemu] boards = [...]` (with a real board name) is what
+# switches to the `qemu-<board>` identifier shape -- the same "default
+# preserved, opt-in gets the new shape" rule **D15**'s own `+0x..` suffix
+# already follows for rv32imc's arch-flags.
+#
+# `esp32`'s default is ESP32_GENERIC only, even though other ESP32-family
+# boards are selectable (README's own usermod table footnote: selectable,
+# not itself live-verified) -- not defaulted to, the same "default =
+# everything actually proven" rule `unix`'s own default (excluding
+# armhf/mipsel) already follows.
 _PORT_AXES: dict[str, tuple[str | None, tuple[str, ...]]] = {
     "unix": ("archs", UNIX_RUNNABLE_ARCHS),
     "windows": ("archs", tuple(WINDOWS_ARCH_SETTINGS)),
-    "qemu": (None, ("",)),
+    "qemu": ("boards", ("",)),
     "webassembly": (None, ("",)),
     "esp32": ("boards", ("ESP32_GENERIC",)),
 }

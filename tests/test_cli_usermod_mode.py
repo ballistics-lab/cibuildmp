@@ -136,6 +136,36 @@ def test_both_tables_explicit_platform_usermod(tmp_path, capsys):
     assert capsys.readouterr().out.split() == ["qemu"]
 
 
+def test_both_tables_platform_env_var(tmp_path, capsys, monkeypatch):
+    # CIBMP_PLATFORM, not a dedicated action.yml input -- the same generic
+    # env-override every cibuildmp.toml key already has, matching
+    # cibuildwheel's own CIBW_BUILD shape.
+    monkeypatch.setenv("CIBMP_PLATFORM", "natmod")
+    write(tmp_path, '[natmod]\narchs = ["x64"]\n[usermod]\n')
+
+    assert main([str(tmp_path), "--print-build-identifiers"]) == 0
+    assert capsys.readouterr().out.split() == ["mpy6.3-natmod-x64"]
+
+
+def test_platform_flag_wins_over_env_var(tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("CIBMP_PLATFORM", "natmod")
+    make_module_dir(tmp_path)
+    write(tmp_path, '[natmod]\n[usermod]\nports = ["qemu"]\n')
+
+    assert (
+        main([str(tmp_path), "--platform", "usermod", "--print-build-identifiers"]) == 0
+    )
+    assert capsys.readouterr().out.split() == ["qemu"]
+
+
+def test_platform_env_var_bad_value_is_an_error(tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("CIBMP_PLATFORM", "windows")
+    write(tmp_path, "[natmod]\n")
+
+    assert main([str(tmp_path), "--print-build-identifiers"]) == 2
+    assert "CIBMP_PLATFORM" in capsys.readouterr().err
+
+
 def test_usermod_bad_port_is_an_error(tmp_path, capsys):
     write(tmp_path, '[usermod]\nports = ["stm32"]\n')
 

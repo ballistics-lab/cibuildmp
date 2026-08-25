@@ -77,14 +77,31 @@ def test_axis_table_on_axisless_port_rejected(tmp_path):
         tmp_path,
         """
         [usermod]
-        ports = ["qemu"]
+        ports = ["webassembly"]
 
-        [usermod.qemu]
-        archs = ["armv7m"]
+        [usermod.webassembly]
+        variant = ["pyscript"]
         """,
     )
     with pytest.raises(UsermodConfigError, match="no configurable axis"):
         UsermodOptions.load(tmp_path)
+
+
+def test_axis_table_qemu_boards_selects_riscv(tmp_path):
+    write_config(
+        tmp_path,
+        """
+        [usermod]
+        ports = ["qemu"]
+
+        [usermod.qemu]
+        boards = ["VIRT_RV32", "VIRT_RV64"]
+        """,
+    )
+    options = UsermodOptions.load(tmp_path)
+
+    identifiers = [t.identifier for t in options.targets()]
+    assert identifiers == ["qemu-VIRT_RV32", "qemu-VIRT_RV64"]
 
 
 def test_module_dir_and_manifest_overridable(tmp_path):

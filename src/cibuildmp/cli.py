@@ -132,7 +132,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Build mode. Auto-detected by default from which top-level table "
         "the config has -- [natmod] or [usermod] -- the same way cibuildwheel "
         "infers its own platform from the host. Only needed when a config "
-        "defines both tables, to say which one this invocation is for.",
+        "defines both tables, to say which one this invocation is for. Also "
+        "settable via CIBMP_PLATFORM -- the same generic env-override every "
+        "cibuildmp.toml key already has (options.py's own opt()), not a "
+        "dedicated action.yml input: a caller sets it directly on the "
+        "`uses: cibuildmp` step's own env:, the same shape CIBMP_VERSION "
+        "already uses, matching cibuildwheel's own CIBW_BUILD (an env var,"
+        " never an action.yml input either).",
     )
     return parser
 
@@ -327,7 +333,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"cibuildmp: error: {exc}", file=sys.stderr)
         return 2
 
-    mode = detect_mode(preread[1], args.platform)
+    platform_env = os.environ.get("CIBMP_PLATFORM")
+    if platform_env and platform_env not in {"natmod", "usermod"}:
+        print(
+            f"cibuildmp: error: CIBMP_PLATFORM={platform_env!r} is not "
+            f"'natmod' or 'usermod'",
+            file=sys.stderr,
+        )
+        return 2
+
+    mode = detect_mode(preread[1], args.platform or platform_env or None)
     if mode is None:
         print(
             "cibuildmp: error: config has both [natmod] and [usermod] -- pass "

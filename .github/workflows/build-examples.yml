@@ -13,23 +13,32 @@ name: Build examples
 # step below runs directly on this job's own bare runner now, not inside a
 # separate container image.
 #
-#   template     -- natmod's own C, the minimal case.
-#   wasm2mpy     -- native source is WebAssembly, compiled to C via wasm2c
-#                   before the normal dynruntime.mk flow takes over (see
-#                   examples/wasm2mpy/cibuildmp.toml). Proves the natmod
-#                   contract (D2) is genuinely source-language-agnostic.
-#   usermod-unix -- usermod's own build path (M9b), all five real unix
-#                   arches (x64/x86/aarch64/armhf/mipsel, D20/D24) --
-#                   this is what actually proves action.yml's own apt
-#                   prerequisites (the ports.ubuntu.com mirror fix,
-#                   gcc-aarch64-linux-gnu, gcc-arm-linux-gnueabihf,
-#                   gcc-mipsel-linux-gnu, libltdl-dev, libtool) work
-#                   through the real composite action, not just in a bare
-#                   dev sandbox.
-#   usermod-webassembly -- the second usermod port wired to
-#                   ensure_image()'s Docker path (D26/D30). No arch axis
-#                   at all (one combined image, emsdk baked in), and
-#                   Docker-only with no bare-host fallback, unlike unix.
+#   template -- natmod/, usermod/ and src/ as siblings under one project,
+#               the real downstream layout (micropython-bclibc's and
+#               a7p/micropython's own cibuildmp.toml), not a separate
+#               example directory per mode. natmod/template.c and
+#               usermod/template/template.c both wrap the exact same
+#               src/template_core.c (see that file's own header comment)
+#               instead of two independent implementations that happen to
+#               agree, and src/facade.py is the shared Python-level API
+#               above it -- copied alongside template.mpy on the natmod
+#               side ([publish] extra-files), frozen into the firmware
+#               image on the usermod side (usermod/manifest.py). Built
+#               twice, `CIBMP_PLATFORM=natmod` then `=usermod` (the
+#               config now has both tables, so detect_mode() cannot infer
+#               which one alone) -- natmod's own five bare-host arches
+#               below, usermod's own five real unix arches
+#               (x64/x86/aarch64/armhf/mipsel, D20/D24) plus webassembly
+#               (D26/D30's Docker-only path) in build-usermod, which is
+#               what actually proves action.yml's own apt prerequisites
+#               (the ports.ubuntu.com mirror fix, gcc-aarch64-linux-gnu,
+#               gcc-arm-linux-gnueabihf, gcc-mipsel-linux-gnu, libltdl-dev,
+#               libtool) work through the real composite action, not just
+#               in a bare dev sandbox.
+#   wasm2mpy -- native source is WebAssembly, compiled to C via wasm2c
+#               before the normal dynruntime.mk flow takes over (see
+#               examples/wasm2mpy/cibuildmp.toml). Proves the natmod
+#               contract (D2) is genuinely source-language-agnostic.
 #
 # push: (no branches: filter) rather than push: branches: [main] -- this
 # needs to run on every push to a dev branch too, not just main, the same
@@ -119,9 +128,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Build examples/template
+      - name: Build examples/template (natmod)
         uses: ./
         env:
+          # examples/template/cibuildmp.toml now has both [natmod] and
+          # [usermod] (natmod/, usermod/ and src/ as siblings, the real
+          # downstream layout -- see that file's own header comment), so
+          # detect_mode() can no longer infer which table this invocation
+          # means. CIBMP_PLATFORM, not a dedicated action.yml input --
+          # the same generic env-override every cibuildmp.toml key
+          # already has, matching cibuildwheel's own CIBW_BUILD shape.
+          CIBMP_PLATFORM: "natmod"
           # Exercises D14's packaging step (extra-files + package.json) on
           # every push -- no real release tag needed for that, this repo
           # ships no module of its own to version.
@@ -132,6 +149,7 @@ jobs:
       - name: Build examples/wasm2mpy
         uses: ./
         env:
+          CIBMP_PLATFORM: "natmod"
           CIBMP_VERSION: 0.0.0-ci
         with:
           package-dir: examples/wasm2mpy
@@ -143,15 +161,25 @@ jobs:
           cat examples/template/mpyhouse/*/package.json
 
   # Split from `build` above rather than added as one more step there:
-  # dockerrun.ensure_image() (D28's own next step) now backs
-  # usermod-unix's Docker path by default, so this needs verify-docker-images
-  # to actually be worth anything -- without that dependency, this job's
-  # own five docker builds would just redo, uncached, on a second GitHub
-  # runner with no shared Docker daemon, the exact work verify-docker-images
-  # already did *with* a real cache (type=gha) and already pushed to GHCR.
-  # template/wasm2mpy above have nothing to do with any of that, so they
-  # stay in their own job rather than getting pulled into this wait too.
-  build-usermod-unix:
+  # dockerrun.ensure_image() (D28's own next step) now backs the usermod
+  # side of examples/template by default, so this needs
+  # verify-docker-images to actually be worth anything -- without that
+  # dependency, this job's own five docker builds would just redo,
+  # uncached, on a second GitHub runner with no shared Docker daemon, the
+  # exact work verify-docker-images already did *with* a real cache
+  # (type=gha) and already pushed to GHCR. `build` above only exercises
+  # examples/template's own natmod side plus wasm2mpy, neither of which
+  # touches Docker at all, so they stay in their own job rather than
+  # getting pulled into this wait too.
+  #
+  # webassembly is the second usermod port wired to ensure_image()'s
+  # Docker path (D26's own "one port, proven live, before the next" --
+  # unix was the first slice, above). Docker-only (docs/BACKLOG.md's
+  # D30): unlike unix there is no bare-host fallback to fall back to at
+  # all here, so this job is what proves build_webassembly() actually
+  # works end to end against a real pushed image, not just that the
+  # Dockerfile builds.
+  build-usermod:
     runs-on: ubuntu-latest
     needs: verify-docker-images
     permissions:
@@ -167,6 +195,7 @@ jobs:
       # first run through this job's own override wiring). Only needed on
       # a push event, matching the env vars below that are the only thing
       # that could ever trigger a real pull here.
+
       - uses: docker/login-action@v3
         if: ${{ github.event_name == 'push' }}
         with:
@@ -174,7 +203,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - name: Build examples/usermod-unix
+      - name: Build examples/template (usermod)
         # No CIBMP_VERSION here -- usermod output has no package.json to
         # version at all (D23: it's a full port binary, not a
         # mip.install()-able .mpy), so the env var would just be unused.
@@ -193,54 +222,15 @@ jobs:
         # published image of their own would take.
         uses: ./
         env:
+          CIBMP_PLATFORM: "usermod"
           CIBMP_UNIX_X64_MANYLINUX_DOCKER_IMAGE: ${{ github.event_name == 'push' && format('ghcr.io/{0}/cibuildmp-unix-manylinux-x64:sha-{1}', github.repository_owner, github.sha) || '' }}
           CIBMP_UNIX_X86_MANYLINUX_DOCKER_IMAGE: ${{ github.event_name == 'push' && format('ghcr.io/{0}/cibuildmp-unix-manylinux-x86:sha-{1}', github.repository_owner, github.sha) || '' }}
           CIBMP_UNIX_AARCH64_MANYLINUX_DOCKER_IMAGE: ${{ github.event_name == 'push' && format('ghcr.io/{0}/cibuildmp-unix-manylinux-aarch64:sha-{1}', github.repository_owner, github.sha) || '' }}
           CIBMP_UNIX_ARMHF_MANYLINUX_DOCKER_IMAGE: ${{ github.event_name == 'push' && format('ghcr.io/{0}/cibuildmp-unix-manylinux-armhf:sha-{1}', github.repository_owner, github.sha) || '' }}
           CIBMP_UNIX_MIPSEL_MANYLINUX_DOCKER_IMAGE: ${{ github.event_name == 'push' && format('ghcr.io/{0}/cibuildmp-unix-manylinux-mipsel:sha-{1}', github.repository_owner, github.sha) || '' }}
-        with:
-          package-dir: examples/usermod-unix
-
-      - name: List built artifacts
-        run: ls -laR examples/usermod-unix/mpyhouse
-
-  # webassembly is the second usermod port wired to ensure_image()'s
-  # Docker path (D26's own "one port, proven live, before the next" --
-  # unix was the first slice, above). Docker-only (docs/BACKLOG.md's
-  # D30): unlike unix there is no bare-host fallback to fall back to at
-  # all here, so this job is what proves build_webassembly() actually
-  # works end to end against a real pushed image, not just that the
-  # Dockerfile builds.
-  build-usermod-webassembly:
-    runs-on: ubuntu-latest
-    needs: verify-docker-images
-    permissions:
-      contents: read
-      packages: read
-    steps:
-      - uses: actions/checkout@v7
-
-      # Same reasoning as build-usermod-unix's own login step: GHCR
-      # packages are private by default, even to this same repo's own
-      # pull.
-      - uses: docker/login-action@v3
-        if: ${{ github.event_name == 'push' }}
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
-
-      - name: Build examples/usermod-webassembly
-        # Same reasoning as build-usermod-unix's own step: only has a
-        # real value to point at on a push event (verify-docker-images
-        # only pushes to GHCR there); on a pull_request run this stays
-        # unset and ensure_image() falls through to its own local-build
-        # fallback instead.
-        uses: ./
-        env:
           CIBMP_WEBASSEMBLY_DOCKER_IMAGE: ${{ github.event_name == 'push' && format('ghcr.io/{0}/cibuildmp-webassembly:sha-{1}', github.repository_owner, github.sha) || '' }}
         with:
-          package-dir: examples/usermod-webassembly
+          package-dir: examples/template
 
       - name: List built artifacts
-        run: ls -laR examples/usermod-webassembly/mpyhouse
+        run: ls -laR examples/template/mpyhouse

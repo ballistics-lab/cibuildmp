@@ -36,7 +36,7 @@ def test_axis_key_names():
     assert axis_key("unix") == "archs"
     assert axis_key("windows") == "archs"
     assert axis_key("esp32") == "boards"
-    assert axis_key("qemu") is None
+    assert axis_key("qemu") == "boards"
     assert axis_key("webassembly") is None
 
 
@@ -89,4 +89,17 @@ def test_usermod_targets_unknown_port_rejected():
 
 def test_usermod_targets_axis_override_on_axisless_port_rejected():
     with pytest.raises(UnknownAxisError, match="no configurable axis"):
-        usermod_targets(["qemu"], {"qemu": ["armv7m"]})
+        usermod_targets(["webassembly"], {"webassembly": ["pyscript"]})
+
+
+def test_usermod_targets_qemu_default_stays_bare_identifier():
+    # qemu's own default axis value is the "" sentinel, not "MPS2_AN385"
+    # -- an unconfigured build must keep its original bare "qemu"
+    # identifier (see targets.py's own _PORT_AXES comment for why).
+    targets = usermod_targets(["qemu"], {})
+    assert [t.identifier for t in targets] == ["qemu"]
+
+
+def test_usermod_targets_qemu_board_override_selects_riscv():
+    targets = usermod_targets(["qemu"], {"qemu": ["VIRT_RV32", "VIRT_RV64"]})
+    assert [t.identifier for t in targets] == ["qemu-VIRT_RV32", "qemu-VIRT_RV64"]
