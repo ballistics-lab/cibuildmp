@@ -20,6 +20,16 @@ name: Build examples
 # needs to run on every push to a dev branch too, not just main, the same
 # "no PR without explicit permission" reasoning usermod-dev.yml's own
 # header already documents.
+#
+# No runner-level apt-get step here anymore (there used to be one, for
+# gcc-multilib + wabt): `uses: ./` runs the actual `make dist` build
+# *inside* action.Dockerfile's own container now, not on this bare
+# runner -- confirmed live, the hard way, when converting action.yml to a
+# Docker action left wabt only on the runner and examples/wasm2mpy's build
+# failed inside the container with "wasm2c: not found" (gcc-multilib was
+# already redundant the same way, just silently so). Both packages now
+# live in action.Dockerfile itself instead -- see that file's own comments
+# for the per-package reasoning.
 
 on:
   push:
@@ -34,20 +44,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-
-      # x86 cannot self-provision (docs/BACKLOG.md M2): the host gcc is
-      # always there but ubuntu-latest ships no 32-bit glibc headers/libs
-      # by default. Same package .github/actions/build-natmod's own "Install
-      # cross-compiler" step already apt-installs for ARCH=x86 -- this repo
-      # just doesn't go through that action here, so it needs its own copy.
-      #
-      # wabt: examples/wasm2mpy's own toolchain (wasm2c), pinned to the
-      # exact version its vendored runtime.c was written against -- newer
-      # wasm2c changes its generated-code API shape (verified for real:
-      # 1.0.41 fails to compile that file, 1.0.36 -- what Ubuntu's own repo
-      # carries -- works). Not a cross-toolchain cibuildmp itself resolves
-      # (docs/BACKLOG.md D3 only covers the ten natmod ARCH= toolchains).
-      - run: sudo apt-get update -q && sudo apt-get install -y gcc-multilib wabt
 
       - name: Build examples/template
         uses: ./

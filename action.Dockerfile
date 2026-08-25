@@ -25,6 +25,14 @@ FROM ubuntu:24.04
 # own comment for the full per-package reasoning (D3/M2/D18). Kept in
 # sync by hand today; a real drift risk if one changes without the other,
 # not automated away here.
+#
+# wabt: examples/wasm2mpy's own toolchain (wasm2c), pinned by nothing more
+# than "whatever Ubuntu 24.04 carries" -- deliberately, since that is the
+# same version build-examples.yml's own runner-level apt-get used to
+# install before the build itself moved into this container (confirmed
+# live: 1.0.41 fails to compile that example's vendored runtime.c, the
+# 1.0.36 Ubuntu ships works). Keep this image's own Ubuntu base in sync
+# with whatever build-examples.yml expects if that ever changes.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     git \
@@ -35,6 +43,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc-mingw-w64-x86-64 \
     gcc-mingw-w64-i686 \
     libusb-1.0-0 \
+    wabt \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
