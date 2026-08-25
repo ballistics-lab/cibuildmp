@@ -176,7 +176,7 @@ runs:
       # the very first CI run of this conversion: `cibuildmp` itself already
       # has its own generic `CIBMP_<KEY>` config-override convention
       # (options.py's own `opt()`, checked before the config file and
-      # before any default -- `CIBMP_VERSION`, `CIBMP_CACHE`, etc. are the
+      # before any default -- `CIBMP_VERSION`, `CIBMP_CACHE_PATH`, etc. are the
       # same mechanism). Naming this step's own plumbing variable
       # `CIBMP_OUTPUT_DIR` collided with it outright: GitHub Actions always
       # *sets* an env: block's own vars, even for an empty-string input, so

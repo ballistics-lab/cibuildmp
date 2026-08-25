@@ -452,17 +452,16 @@ def test_webassembly_command_matches_build_usermod_webassembly_shape():
     ]
 
 
-def test_webassembly_builds_through_docker_and_returns_mjs_path(monkeypatch, tmp_path):
-    # Docker-only (D30): no CIBMP_WEBASSEMBLY_DOCKER_IMAGE / PORT_IMAGES
-    # entry set here either -- cibuildmp ships
-    # resources/docker/webassembly.Dockerfile, so ensure_image() builds
-    # (or reuses) that image itself, the same default-to-container
-    # behaviour build_unix() already has.
+def test_webassembly_no_image_registered_is_a_clear_error(monkeypatch, tmp_path):
+    # Docker-only (D30), and cibuildmp never builds an image itself any
+    # more (checked against cibuildwheel's real source before deciding --
+    # its own container runtime only ever pulls an already-published,
+    # digest-pinned image) -- with no override and nothing in
+    # PORT_IMAGES, build_webassembly() must fail loudly, not fall back to
+    # building docker/webassembly.Dockerfile on its own.
     monkeypatch.delenv("CIBMP_WEBASSEMBLY_DOCKER_IMAGE", raising=False)
     monkeypatch.setattr("cibuildmp.usermod.dockerrun.PORT_IMAGES", {})
     build_dir = tmp_path / "build-wasm"
-    build_dir.mkdir()
-    (build_dir / "micropython.mjs").write_bytes(b"")
 
     calls = []
     monkeypatch.setattr(
@@ -470,13 +469,10 @@ def test_webassembly_builds_through_docker_and_returns_mjs_path(monkeypatch, tmp
         lambda cmd, **k: calls.append(cmd) or None,
     )
 
-    result = build_webassembly(wasm_opts(build_dir=build_dir), tmp_path / "mpy")
+    with pytest.raises(UsermodBuildError, match="no Docker image registered"):
+        build_webassembly(wasm_opts(build_dir=build_dir), tmp_path / "mpy")
 
-    assert result == build_dir / "micropython.mjs"
-    assert calls[0][:2] == ["docker", "build"]
-    assert calls[0][-1].endswith("resources/docker")
-    assert calls[1][:3] == ["docker", "run", "--rm"]
-    assert "make" in calls[1]
+    assert calls == []
 
 
 def test_webassembly_docker_image_override_skips_own_dockerfile_build(
@@ -954,47 +950,17 @@ def test_unix_docker_image_mounts_mpy_dir_and_user_c_modules(monkeypatch, tmp_pa
     assert "/gh/ws/micropython/usermod:/gh/ws/micropython/usermod" in docker_command
 
 
-def test_unix_no_registered_image_builds_cibuildmps_own_dockerfile(
-    monkeypatch, tmp_path
-):
-    # No CIBMP_UNIX_X64_MANYLINUX_DOCKER_IMAGE / PORT_IMAGES entry set:
-    # this is no longer a bare host.subprocess.run() build. cibuildmp
-    # ships resources/docker/unix-manylinux-x64.Dockerfile, so
-    # ensure_image() builds (or reuses) that image and every command
-    # after routes through it -- the new default, matching
-    # cibuildwheel's own default-to-container behaviour.
+def test_unix_no_registered_image_falls_back_to_bare_host(monkeypatch, tmp_path):
+    # No CIBMP_UNIX_X64_MANYLINUX_DOCKER_IMAGE / PORT_IMAGES entry set,
+    # and cibuildmp never builds an image itself any more (checked
+    # against cibuildwheel's real source before deciding -- its own
+    # container runtime only ever pulls an already-published,
+    # digest-pinned image) -- unix keeps its own bare-host fallback
+    # (unlike webassembly, which has none, D30), so this is still a
+    # plain host subprocess.run(), not a docker build.
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     monkeypatch.delenv("CIBMP_UNIX_X64_MANYLINUX_DOCKER_IMAGE", raising=False)
-    monkeypatch.setattr(
-        "cibuildmp.usermod.dockerrun.PORT_IMAGES",
-        {},
-    )
-    build_dir = tmp_path / "build-x64"
-    build_dir.mkdir()
-    (build_dir / "micropython").write_bytes(b"\x7fELF")
-
-    calls = []
-    monkeypatch.setattr(
-        "cibuildmp.usermod.dockerrun.subprocess.run",
-        lambda cmd, **k: calls.append(cmd) or None,
-    )
-
-    build_unix(opts("x64", build_dir=build_dir), tmp_path / "mpy")
-
-    assert calls[0][:2] == ["docker", "build"]
-    assert calls[0][-1].endswith("resources/docker")
-    assert calls[1][:3] == ["docker", "run", "--rm"]
-    assert "make" in calls[1]
-
-
-def test_unix_no_dockerfile_available_falls_back_to_bare_host(monkeypatch, tmp_path):
-    # The one case that still means a plain subprocess.run(): a port/arch
-    # cibuildmp ships no packaged Dockerfile for at all (today, that's
-    # windows/arm64 and esp32 -- simulated here by emptying _DOCKERFILES
-    # rather than adding a sixth real "no Dockerfile" unix arch).
-    monkeypatch.delenv("CIBMP_UNIX_X64_MANYLINUX_DOCKER_IMAGE", raising=False)
     monkeypatch.setattr("cibuildmp.usermod.dockerrun.PORT_IMAGES", {})
-    monkeypatch.setattr("cibuildmp.usermod.dockerrun._DOCKERFILES", {})
     build_dir = tmp_path / "build-x64"
     build_dir.mkdir()
     (build_dir / "micropython").write_bytes(b"\x7fELF")

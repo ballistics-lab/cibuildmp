@@ -263,10 +263,11 @@ def build_unix(
     make/deplibs commands run inside a per-(arch, libc) container instead
     of directly on this host, by default -- an explicit
     CIBMP_UNIX_<ARCH>_MANYLINUX_DOCKER_IMAGE override or a
-    dockerrun.PORT_IMAGES-registered default wins first if either is set,
-    otherwise cibuildmp builds (or reuses, via Docker's own layer cache)
-    its own packaged Dockerfile for this arch and uses that -- see
-    usermod/dockerrun.py's own docstring for why this is keyed by
+    dockerrun.PORT_IMAGES-registered default, digest-pinned, published by
+    publish-docker-images.yml (cibuildmp itself never builds one, the
+    same division of labour cibuildwheel's own pinned manylinux/
+    musllinux images have) -- see usermod/dockerrun.py's own docstring
+    for why this is keyed by
     (port, arch, libc), not port alone (D31: unix's own five
     architectures do not share one image, and glibc/musl are a real
     runtime-compatibility axis a shared image would hide). "manylinux"
@@ -481,20 +482,19 @@ def build_webassembly(
     `micropython.mjs`.
 
     Docker-only (D30's own later call: no bare-host path for any usermod
-    port, `unix` included). `dockerrun.ensure_image("webassembly")` builds
-    (or reuses, via Docker's own layer cache) cibuildmp's own packaged
-    `resources/docker/webassembly.Dockerfile` unless an explicit
-    `CIBMP_WEBASSEMBLY_DOCKER_IMAGE` override or a `dockerrun.PORT_IMAGES`
-    default is set -- either way this always resolves to a real image:
-    unlike `windows`/`esp32`, `webassembly` has a packaged Dockerfile
-    today, so `ensure_image()` never returns `None` here. emsdk itself is
-    baked into that image (`usermod/emsdk.py`'s own resolver stays what
-    pins/verifies the same download for the Dockerfile's own `RUN` step
-    to match, not something a build invokes directly any more -- no
-    `sdk.env()` to inject, the image's own `ENV PATH` already covers it).
-    `toolchain_root`/`quiet` are accepted only for the same call shape
-    every `build_<port>()` shares (`orchestrate.py`'s `build_one()`
-    passes them uniformly); neither is used on this Docker-only path.
+    port, `unix` included). `dockerrun.ensure_image("webassembly")`
+    resolves an explicit `CIBMP_WEBASSEMBLY_DOCKER_IMAGE` override or a
+    `dockerrun.PORT_IMAGES`-registered, digest-pinned default published
+    by `publish-docker-images.yml` -- cibuildmp itself never builds
+    `docker/webassembly.Dockerfile` (see usermod/dockerrun.py's own
+    docstring for why). emsdk itself is baked into that image
+    (`usermod/emsdk.py`'s own resolver stays what pins/verifies the same
+    download for the Dockerfile's own `RUN` step to match, not something
+    a build invokes directly any more -- no `sdk.env()` to inject, the
+    image's own `ENV PATH` already covers it). `toolchain_root`/`quiet`
+    are accepted only for the same call shape every `build_<port>()`
+    shares (`orchestrate.py`'s `build_one()` passes them uniformly);
+    neither is used on this Docker-only path.
 
     The output path is `opts.build_dir / "micropython.mjs"` --
     `ports/webassembly/Makefile`'s own `all:` target.
@@ -504,9 +504,11 @@ def build_webassembly(
     docker_image = dockerrun.ensure_image("webassembly")
     if docker_image is None:
         raise UsermodBuildError(
-            "webassembly: cibuildmp ships no Docker image for this port "
-            "and usermod builds are Docker-only -- this should not happen "
-            "unless resources/docker/webassembly.Dockerfile was removed"
+            "webassembly: no Docker image registered for this port "
+            "and usermod builds are Docker-only -- set "
+            "CIBMP_WEBASSEMBLY_DOCKER_IMAGE, or wait for "
+            "publish-docker-images.yml to publish one and register it in "
+            "dockerrun.PORT_IMAGES"
         )
 
     command = webassembly_make_command(opts, mpy_dir)

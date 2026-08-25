@@ -624,7 +624,7 @@ All in `src/cibuildmp/sources.py`, standard library only.
       unusable on a Windows runner outside MSYS2 for exactly that reason, so
       this removes a real portability limit rather than a hypothetical one.
 - [x] Cache under `~/.cache/cibuildmp/micropython/<tag>/`, honouring
-      `CIBMP_CACHE` and `XDG_CACHE_HOME`. Extraction is staged in a temp
+      `CIBMP_CACHE_PATH` and `XDG_CACHE_HOME`. Extraction is staged in a temp
       directory and moved into place with `os.replace`, and a completion
       stamp file gates reuse, so an interrupted run cannot leave a partial
       tree that the next one trusts.
@@ -1940,6 +1940,18 @@ because the output never landed where it should have.
   confirmed to fail without their respective fix before being confirmed
   to pass with it, not just written and trusted.
 
+**Superseded by D33, below: `ensure_image()`'s own "build cibuildmp's
+packaged Dockerfile locally when nothing is registered" fallback,
+described throughout this entry (and D26/D30/D31/D32), no longer
+exists. cibuildmp never builds a Docker image itself any more -- see
+D33 for the current design (checked against cibuildwheel's real source
+before deciding, not assumed) and `usermod/dockerrun.py`'s own module
+docstring for the code as it stands today. The rest of D28 stays as the
+real record of how the container-per-port migration actually happened
+-- the isolation argument, the per-arch image split, the buildx/type=gha
+caching mechanics later removed by D33 are all still true engineering
+history, just not the current build-vs-pull design.**
+
 **D28 — full migration plan: container-per-port for usermod (D26),
 written as a standalone handoff for a fresh session to execute.
 Isolation between ports is the primary driver, not a side benefit** --
@@ -2119,7 +2131,7 @@ unconditionally).
     (`CIBMP_PACKAGE_DIR`, `CIBMP_OUTPUT_DIR`, ...) -- and collided
     outright with `cibuildmp`'s own real, pre-existing, documented
     `CIBMP_<KEY>` config-override convention (`options.py`'s own
-    `opt()`, the same mechanism `CIBMP_VERSION`/`CIBMP_CACHE` already
+    `opt()`, the same mechanism `CIBMP_VERSION`/`CIBMP_CACHE_PATH` already
     use, checked *before* the config file and before any default).
     GitHub Actions always sets a step's own `env:` vars, even for an
     empty-string input, so every push silently exported
@@ -2538,9 +2550,9 @@ build dependencies, and pulled container images); cibuildmp already
 has a real answer for the first and needs a deliberate one for the
 second -- conflating them would be a mistake.
 
-1. **Toolchain/source cache -- already exists, `CIBMP_CACHE`.**
+1. **Toolchain/source cache -- already exists, `CIBMP_CACHE_PATH`.**
    `sources.cache_root()` (`src/cibuildmp/sources.py`) already reads
-   `CIBMP_CACHE`, falling back to `$XDG_CACHE_HOME/cibuildmp` or
+   `CIBMP_CACHE_PATH`, falling back to `$XDG_CACHE_HOME/cibuildmp` or
    `~/.cache/cibuildmp` -- this *is* the direct analogue of
    `CIBW_CACHE_PATH` for MicroPython checkouts, `mpy-cross`, and every
    downloaded toolchain (`toolchains.py`, `llvmmingw.py`, `emsdk.py`,
@@ -2558,7 +2570,7 @@ second -- conflating them would be a mistake.
      and it would need its own image otherwise.
    - In CI, once `action.yml` is a composite action (migration step
      3), a caller gets to add a completely ordinary `actions/cache`
-     step over `~/.cache/cibuildmp` (or wherever `CIBMP_CACHE` points)
+     step over `~/.cache/cibuildmp` (or wherever `CIBMP_CACHE_PATH` points)
      around the `cibuildmp` invocation -- something a Docker action
      structurally cannot offer at all today (GitHub's Docker-action
      mechanism has no way for a caller to mount a volume into the
@@ -2634,6 +2646,11 @@ not after:**
   the right shape to keep following -- `windows` is the natural next
   slice (apt-only toolchain, no large download like `esp32`'s
   ESP-IDF or `webassembly`'s emsdk, closest in shape to `unix`).
+
+**Superseded by D33: the "cibuildmp calls `docker build` itself" default
+this entry introduces is exactly what D33 later removed. Kept as the
+real record of how that design was reached and load-bearing-tested, not
+as the current mechanism.**
 
 **D32 — closing D28's own "one real gap": `unix` usermod now defaults to
 Docker whenever cibuildmp ships that arch's own Dockerfile, instead of
@@ -3301,6 +3318,88 @@ mid-flight" costs.
   seven already proven working, just not owned by `cibuildmp` yet
   (**D21**).
 - **M12** — adopt in the three consuming repos, mirroring **M5**.
+
+**D33 — cibuildmp never builds a Docker image itself; it only ever
+resolves a reference and pulls it, exactly like cibuildwheel's own
+container runtime, checked directly rather than assumed.** The user's
+own framing, directly: "я хочу окремий workflow який публікує
+докерімеджі, самі докерфайли в репо-рут/docker, а cibuildmp просто
+скачує готові образи" -- prompted by looking at `oci_container.py`
+(cibuildwheel's own container runtime) and finding zero `docker build`/
+`buildx` calls anywhere in that repo. cibuildwheel's own manylinux/
+musllinux images are published to quay.io (not GHCR, not Docker Hub --
+`pypa/manylinux`'s own, separate project's choice), pinned by exact
+digest in `resources/pinned_docker_images.cfg`, regenerated by a rare,
+out-of-band maintainer script (`bin/update_docker.py`) -- never part of
+a consumer's own build. This decision brings cibuildmp's own container
+story to the same shape:
+
+- **`docker/*.Dockerfile`, repo root** -- moved out of
+  `src/cibuildmp/resources/docker/` (D28's own migration step 3
+  location). No longer needs to ship inside the installed wheel:
+  cibuildmp itself never reads these files at runtime any more.
+  `pyproject.toml`'s own `package-data` list dropped the entry.
+  Mirrors `pypa/manylinux`'s own top-level `docker/` -- that repo has no
+  `pyproject.toml` either, since it is pure image-building
+  infrastructure, never something `pip install`s, the same reason this
+  now applies to `docker/` here too.
+- **`.github/workflows/publish-docker-images.yml`, a genuinely separate
+  workflow** -- not a job folded into `build-examples.yml` or
+  `publish.yml`. Triggers on a push to `main` that touches `docker/**`,
+  or `workflow_dispatch` -- not every push to every branch, the same
+  "rare, deliberate, maintainer-triggered" cadence
+  `bin/update_docker.py` has. Builds and pushes every one of the eight
+  images to GHCR, `:latest`-tagged for human findability only, and
+  prints the real `@sha256:...` digest `docker/build-push-action`
+  returns to the job summary -- what a maintainer actually copies into
+  `PORT_IMAGES`, by hand, in a real PR, the same manual step
+  `bin/update_docker.py`'s own output requires of a cibuildwheel
+  maintainer.
+- **`usermod/dockerrun.py`'s `ensure_image()` lost its entire local-build
+  branch** (`_DOCKERFILES`, `_build_command()`,
+  `_ensure_buildx_container_builder()`, all deleted) -- it is now a
+  thin alias for `image_for()`, nothing more. `run()`'s own `--pull
+  missing` is what actually fetches an image, lazily, the first time it
+  is used -- the exact division of labour `oci_container.py` already
+  has. `PORT_IMAGES` having nothing registered for a (port, arch[,
+  libc]) is now an immediate, clear `UsermodBuildError`
+  ("no Docker image registered..."), not a slow last resort that used
+  to build one from scratch.
+- **No `CIBMP_CACHE_PATH`-backed `docker save`/`docker load` layer was
+  added either** -- floated as a way to make Docker images share
+  cibuildmp's own existing `CIBMP_CACHE_PATH` cache-dir model (the same
+  shape `sources.cache_root()` already gives toolchain tarballs and the
+  MicroPython checkout, itself renamed this session from `CIBMP_CACHE`
+  to match `CIBW_CACHE_PATH`'s own name exactly), then dropped on the
+  same "check cibuildwheel's real source first" discipline: `docker
+  save`/`docker load` do not appear anywhere in that repo either.
+  Docker's own local image store is the only cache involved, same as
+  cibuildwheel.
+- **`build-examples.yml`'s own `verify-docker-images` job is build-only
+  now, on every push and pull_request (fork PRs included, no registry
+  credentials needed for a build that never pushes)** -- it used to
+  also push every image to GHCR under a `:sha-<gitsha>` tag on a direct
+  push, specifically so `build-usermod`'s own six
+  `CIBMP_*_DOCKER_IMAGE` env vars could point at something real without
+  waiting for a release. That whole mechanism is gone: the user's own
+  call, directly -- "реальний юзер не має думати за
+  CIBMP_*_DOCKER_IMAGE" -- a real end user was never going to see that
+  env var, and it existed only to work around not having D28 step 5
+  (a real, `PORT_IMAGES`-registered publish) done yet. `build-usermod`
+  now runs with no image overrides at all, the same as any real
+  consumer.
+- **A real, honest gap this decision accepts, not hides:** until a
+  maintainer actually merges `docker/**`, lets
+  `publish-docker-images.yml` run for real (this sandbox has no GHCR
+  push credentials, so it could not be triggered or verified live this
+  session), and copies the resulting digests into `PORT_IMAGES` by
+  hand, `PORT_IMAGES` stays empty -- meaning `build-usermod`'s own
+  webassembly leg (no bare-host fallback, D30) fails outright with the
+  new clear error, and its unix leg falls through to a bare-host build
+  instead of a container one. This is the correct, honest state for an
+  unfinished bootstrap, the same shape D28's own "PORT_IMAGES is still
+  empty" note already was before step 5 -- not something to paper over
+  with a temporary mechanism this decision just finished removing.
 
 ### Later — tests
 

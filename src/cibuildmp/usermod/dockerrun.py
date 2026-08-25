@@ -15,16 +15,43 @@ host) need no path translation at all -- every path they reference already
 lives under `mpy_dir` or the caller's own module directory, both passed
 here as `mounts`.
 
-D28 step 2: adding a new port's Docker support is "write the Dockerfile,
-declare it in PORT_IMAGES below" -- a maintainer edits *this file*, not
-something an end user configures via cibuildmp.toml. There is no
-config-file knob here and there deliberately never will be: a Docker
-image per port is cibuildmp's own build infrastructure, the same way
-`action.Dockerfile`'s package list isn't a user-facing setting either.
-`CIBMP_<PORT>_<ARCH>_<LIBC>_DOCKER_IMAGE` stays purely as a
-local-testing/override knob (point it at a `:local` tag you just built,
-or swap in a fork's image without editing source) -- it always wins
-over PORT_IMAGES's own default when set. See docs/BACKLOG.md's own
+**cibuildmp itself never builds a Docker image.** The user's own call,
+checked against cibuildwheel's real source before deciding, not assumed:
+cibuildwheel's own container runtime (`oci_container.py`) holds nothing
+but the resolved image reference itself -- no separate preload/cache
+step of its own -- and only ever does a plain `docker pull` of an
+already-published, digest-pinned image
+(`resources/pinned_docker_images.cfg`) the first time it is actually
+used; building one is a rare, out-of-band maintainer task
+(`bin/update_docker.py`), never part of a consumer's own build. This
+module now follows that exactly: the per-port Dockerfiles live at the
+repo root (`docker/*.Dockerfile`, not shipped in the installed wheel any
+more -- see pyproject.toml's own comment), published by
+`.github/workflows/publish-docker-images.yml` to GHCR, digest-pinned in
+`PORT_IMAGES` below the same way `pinned_docker_images.cfg` pins
+quay.io's own manylinux/musllinux images. `ensure_image()` just resolves
+which reference to use; `run()`'s own `--pull missing` is what actually
+fetches it, lazily, the same division of labour cibuildwheel's own code
+already has. Docker's own local image store is the only cache involved
+-- no `CIBMP_CACHE_PATH`-backed save/load of image content was added on top
+of that: checked directly, cibuildwheel does not do this either
+(`docker save`/`docker load` do not appear anywhere in its repo), so
+there was no real precedent for it, only extra machinery. No build
+fallback at all any more: `PORT_IMAGES` having nothing registered for a
+(port, arch[, libc]) is now a clear, immediate error, not a slow last
+resort.
+
+D28 step 2: adding a new port's Docker support is "write the Dockerfile
+at docker/<name>.Dockerfile, let publish-docker-images.yml publish it,
+register the resulting digest in PORT_IMAGES below" -- a maintainer edits
+*this file*, not something an end user configures via cibuildmp.toml.
+There is no config-file knob here and there deliberately never will be: a
+Docker image per port is cibuildmp's own build infrastructure, the same
+way `action.Dockerfile`'s package list isn't a user-facing setting
+either. `CIBMP_<PORT>_<ARCH>_<LIBC>_DOCKER_IMAGE` stays purely as a
+local-testing/override knob (point it at a `:local` tag you just built
+yourself, or swap in a fork's image without editing source) -- it always
+wins over `PORT_IMAGES`'s own default when set. See docs/BACKLOG.md's own
 D26/D28.
 
 Keyed by (port, arch), with an optional trailing libc segment -- not
@@ -50,7 +77,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-from importlib.resources import as_file, files
 from pathlib import Path
 
 from .build import UsermodBuildError
@@ -59,17 +85,27 @@ from .build import UsermodBuildError
 # "{port}-{arch}" or "{port}-{arch}-{libc}" -- the same port/arch
 # vocabulary `cibuildmp` already uses everywhere else (targets.py's
 # Target.port/Target.arch), plus D31's own manylinux/musllinux libc
-# axis where a port actually has one. Empty today:
-# resources/docker/unix-manylinux-*.Dockerfile all exist and build
-# correctly (D20, D24, D25, D26) but none are published anywhere yet
-# (that's D28 step 5) -- an entry here takes effect for every caller
-# that doesn't set the env var override, so registering
-# "unix-x64-manylinux" before a real, pullable image exists would make
-# ordinary unopted-in unix/x64 usermod builds start trying (and
-# failing) to pull it. Add
-# `"unix-x64-manylinux": "ghcr.io/ballistics-lab/cibuildmp-unix-manylinux-x64:latest"`
-# here once publish.yml actually pushes that tag, and the same one line
-# per (port, arch, libc) thereafter.
+# axis where a port actually has one.
+#
+# Digest-pinned (`@sha256:...`), never a mutable tag like `:latest` --
+# the same shape cibuildwheel's own `pinned_docker_images.cfg` uses for
+# exactly the same reason: an immutable reference is what makes "already
+# cached" and "still correct" the same fact, so `run()`'s own `--pull
+# missing` never has to guess whether a locally-cached image is stale.
+# `publish-docker-images.yml` is what keeps this table current -- update
+# the digest here (a maintainer, real PR) whenever that workflow
+# publishes a new one, the same manual-but-deliberate cadence
+# `bin/update_docker.py` gives cibuildwheel's own pins.
+#
+# Empty today: docker/unix-manylinux-*.Dockerfile (etc.) all exist and
+# build correctly (D20, D24, D25, D26) but publish-docker-images.yml has
+# not run for real yet (needs a real push to this repo's own main, which
+# this sandbox cannot do) -- registering a digest that does not exist
+# yet would make ordinary unopted-in usermod builds start failing to
+# pull it. Add
+# `"unix-x64-manylinux": "ghcr.io/o-murphy/cibuildmp-unix-manylinux-x64@sha256:<real digest>"`
+# here once that workflow has actually published one, and the same one
+# line per (port, arch, libc) thereafter.
 PORT_IMAGES: dict[str, str] = {}
 
 
@@ -83,12 +119,11 @@ def image_for(
     than passing `""`, so the key/env name don't carry a trailing
     separator that means nothing.
 
-    This is one half of image resolution, not the whole story any more --
-    see `ensure_image()` for the other half (building `cibuildmp`'s own
-    packaged Dockerfile when neither of these is set). Kept separate
-    because it is pure and side-effect-free (no `docker` invocation, no
-    filesystem access), which is what lets `tests/test_usermod_dockerrun.py`
-    cover its precedence rules without a Docker daemon at all.
+    Pure and side-effect-free (no `docker` invocation, no filesystem
+    access) -- what lets `tests/test_usermod_dockerrun.py` cover its
+    precedence rules without a Docker daemon at all. `run()` below is
+    what actually fetches the resolved reference, lazily, the first time
+    it is used.
 
     `CIBMP_<PORT>_<ARCH>_DOCKER_IMAGE` (e.g.
     `CIBMP_WINDOWS_X64_DOCKER_IMAGE=cibuildmp-windows:local`), or
@@ -106,171 +141,23 @@ def image_for(
     return PORT_IMAGES.get("-".join(parts))
 
 
-# Every port/arch[/libc] cibuildmp ships its own Dockerfile for, keyed the
-# same way PORT_IMAGES is. windows/arm64 (llvm-mingw), esp32 (no Dockerfile
-# at all yet, D28's own still-open item) are deliberately absent -- those
-# stay host builds until either a Dockerfile is written for them or a
-# caller points CIBMP_<...>_DOCKER_IMAGE at an image of their own.
-_DOCKERFILES: dict[str, str] = {
-    "unix-x64-manylinux": "unix-manylinux-x64.Dockerfile",
-    "unix-x86-manylinux": "unix-manylinux-x86.Dockerfile",
-    "unix-aarch64-manylinux": "unix-manylinux-aarch64.Dockerfile",
-    "unix-armhf-manylinux": "unix-manylinux-armhf.Dockerfile",
-    "unix-mipsel-manylinux": "unix-manylinux-mipsel.Dockerfile",
-    "windows-x64": "windows.Dockerfile",
-    "windows-x86": "windows.Dockerfile",
-    "qemu": "qemu.Dockerfile",
-    "webassembly": "webassembly.Dockerfile",
-}
-
-
 def ensure_image(
     port: str, arch: str | None = None, libc: str | None = None
 ) -> str | None:
-    """The image `port`/`arch`'s own build command should run in, building
-    it first if nobody has already: `image_for()`'s explicit override or
-    registered default wins first, same as before; failing that, if
-    cibuildmp ships this (port, arch[, libc])'s own Dockerfile
-    (`_DOCKERFILES` above), build it -- or reuse Docker's own layer cache
-    if an unchanged image already exists locally under this tag -- and
-    return that. Returns None only when none of the three apply (no
-    override, nothing registered, no packaged Dockerfile), which today
-    means windows/arm64 and esp32 only.
+    """The image `port`/`arch`'s own build command should run in.
 
-    This is the actual behaviour change from `image_for()`'s original,
-    opt-in-only design: cibuildmp now defaults to a container for every
-    port/arch it ships a Dockerfile for, the same way cibuildwheel
-    defaults every manylinux/musllinux identifier through its own pinned
-    container rather than treating it as a fallback for a host missing
-    packages. D2's own framing -- cibuildmp owns provisioning, a caller
-    should not have to `apt-get install` a cross-toolchain by hand -- was
-    already true for the toolchain-tarball ports; this is that same
-    argument applied to the ports whose provisioning is a container
-    instead of a tarball.
+    A thin alias for `image_for()` -- kept as its own name only because
+    every real call site already reads `dockerrun.ensure_image(...)`,
+    not because there is anything left to "ensure" here. Checked against
+    cibuildwheel's own source directly: its container runtime
+    (`oci_container.py`) holds nothing but the resolved reference string
+    itself, no separate preload/cache-warming step -- `docker run
+    --pull=...` is what actually fetches an image, lazily, the first
+    time it is used. `run()` below does the equivalent (`--pull
+    missing`), so there is nothing for this function to do beyond
+    resolving which reference that command should use.
     """
-    explicit = image_for(port, arch, libc)
-    if explicit is not None:
-        return explicit
-
-    parts = [port, *([arch] if arch else []), *([libc] if libc else [])]
-    key = "-".join(parts)
-    dockerfile_name = _DOCKERFILES.get(key)
-    if dockerfile_name is None:
-        return None
-
-    # The dockerfile's own stem doubles as the cache scope -- deliberately
-    # the same string build-examples.yml's own verify-docker-images job
-    # uses for its matrix leg (resources/docker/<this>.Dockerfile), not
-    # `key` (which additionally folds in the libc segment `unix` alone
-    # carries). A consumer's own CI run through action.yml never sees
-    # that job at all, but *this* repo's own build-usermod-unix job does,
-    # moments earlier in the same workflow run -- sharing the scope
-    # string is what lets this fallback build hit that already-warm cache
-    # instead of starting cold, on the rare event ordering does not
-    # already make it redundant (usermod-unix-x64's own needs:
-    # verify-docker-images plus its env-var override normally skips this
-    # function's build path entirely -- see D32).
-    scope = dockerfile_name.removesuffix(".Dockerfile")
-    tag = f"cibuildmp-{key}:local"
-    resource = files("cibuildmp").joinpath("resources", "docker", dockerfile_name)
-    with as_file(resource) as dockerfile_path:
-        command = _build_command(dockerfile_path, tag, scope)
-        try:
-            subprocess.run(command, check=True)
-        except subprocess.CalledProcessError as exc:
-            raise UsermodBuildError(
-                f"{' '.join(command)} failed with exit code {exc.returncode}"
-            ) from exc
-        except FileNotFoundError as exc:
-            raise UsermodBuildError(
-                f"cibuildmp needs to build its own Docker image for "
-                f"{key} but the docker CLI itself is not on PATH"
-            ) from exc
-    return tag
-
-
-def _build_command(dockerfile_path: Path, tag: str, scope: str) -> list[str]:
-    """The `docker build` invocation for `dockerfile_path`, `type=gha`-cached
-    when running inside a GitHub Actions job (`GITHUB_ACTIONS=true`, set by
-    the runner itself, not something a caller opts into) and a plain local
-    build everywhere else.
-
-    A laptop already gets "build once, reuse until the Dockerfile changes"
-    for free from Docker's own local image/layer cache -- nothing to add
-    there. A GitHub-hosted runner is a fresh VM on every single run, with
-    no local layer cache to persist between them at all, which is exactly
-    what leaves a consumer's own CI paying a full `apt-get install` on
-    every push unless something explicitly persists a cache across runs --
-    the same problem build-examples.yml's own verify-docker-images job
-    already solved for this repo with `cache-from`/`cache-to: type=gha`.
-    Folding the equivalent here means a consumer gets it too, from nothing
-    more than the config + action.yml they already write (D2's own
-    framing: cibuildmp owns provisioning, a caller should not have to
-    reinvent a caching strategy any more than a toolchain download).
-    """
-    if os.environ.get("GITHUB_ACTIONS") != "true":
-        return [
-            "docker",
-            "build",
-            "-f",
-            str(dockerfile_path),
-            "-t",
-            tag,
-            str(dockerfile_path.parent),
-        ]
-
-    _ensure_buildx_container_builder()
-    return [
-        "docker",
-        "buildx",
-        "build",
-        "-f",
-        str(dockerfile_path),
-        "-t",
-        tag,
-        "--cache-from",
-        f"type=gha,scope={scope}",
-        "--cache-to",
-        f"type=gha,mode=max,scope={scope}",
-        "--load",
-        str(dockerfile_path.parent),
-    ]
-
-
-_BUILDX_BUILDER = "cibuildmp"
-
-
-def _ensure_buildx_container_builder() -> None:
-    """`type=gha` cache export/import needs the `docker-container` buildx
-    driver -- the classic default `docker` driver does not support it at
-    all. Idempotent: `docker buildx inspect` first rather than always
-    `create`, since `create` errors outright if a builder under this name
-    already exists (a real case on a self-hosted runner reused across
-    jobs, not just a hypothetical).
-    """
-    exists = (
-        subprocess.run(
-            ["docker", "buildx", "inspect", _BUILDX_BUILDER],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        ).returncode
-        == 0
-    )
-    if not exists:
-        subprocess.run(
-            [
-                "docker",
-                "buildx",
-                "create",
-                "--name",
-                _BUILDX_BUILDER,
-                "--driver",
-                "docker-container",
-            ],
-            check=True,
-        )
-    subprocess.run(["docker", "buildx", "use", _BUILDX_BUILDER], check=True)
+    return image_for(port, arch, libc)
 
 
 def run(command: list[str], *, mounts: list[Path], workdir: Path, image: str) -> None:
@@ -282,20 +169,16 @@ def run(command: list[str], *, mounts: list[Path], workdir: Path, image: str) ->
     `command` (already built for a bare-host invocation) needs no
     rewriting: every path it references already lives under one of them.
 
-    `--pull missing` (Docker's own default, confirmed live via `docker
-    run --help` -- pinned explicitly here rather than relied on, in
-    case that default ever changes) is the whole answer to "how does
-    cibuildmp decide build-vs-cache": it never decides anything itself.
-    An already-cached `image` (matched by full reference, tag and all)
-    runs immediately with no network access at all; a `image` not seen
-    before pulls exactly once. This only stays correct because every
-    image `cibuildmp` itself resolves to is tagged `:sha-<gitsha>`
-    (D28 step 5's own `verify-docker-images` job) -- an immutable
-    reference by construction, so "already cached" and "still correct"
-    are the same fact. `--pull always` would be needed instead the
-    moment anything here ever resolved to a mutable tag like `:latest`,
-    which is exactly why PORT_IMAGES/CIBMP_<PORT>_<ARCH>_DOCKER_IMAGE
-    are documented as sha-tagged references, not `:latest` ones.
+    `--pull missing` -- correct here specifically because `image` is
+    always a digest-pinned reference (`PORT_IMAGES`'s own comment, or a
+    caller's own override): an already-cached `image` runs immediately
+    with no network access at all, and one not seen before pulls exactly
+    once, with no risk of ever running a stale build against a name that
+    used to mean something else. `ensure_image()` above already
+    populated the cache (from `CIBMP_CACHE_PATH` or a real pull) before this
+    ever runs, so in practice this `--pull` rarely does anything at all --
+    kept anyway as the correct fallback for a caller that built `image`
+    by hand and calls `run()` directly, skipping `ensure_image()`.
     """
     docker_command = ["docker", "run", "--rm", "--pull", "missing"]
     # Without this, every image here (all Ubuntu-based, no USER directive)

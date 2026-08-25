@@ -67,29 +67,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # D28's own per-(port, arch) Docker images
-  # (resources/docker/*.Dockerfile). Builds every one of them on every
-  # push (PR too, but never pushes there -- a fork's own PR gets no
-  # registry credentials, and shouldn't); on a direct push, a
-  # successful build is also pushed to GHCR, tagged by this exact
-  # commit's own sha -- immutable, and reachable the moment a build
-  # goes green, not gated behind a real `v*` release tag the way
-  # publish.yml's own publish-docker job is. The user's own call,
-  # revising an earlier "leave this as a TODO" answer: without a real,
-  # currently-pullable image, PORT_IMAGES can never actually be
-  # exercised end to end on a dev branch -- waiting for a release just
-  # to test the mechanism this decision exists to prove isn't
-  # reasonable. Deliberately `:sha-<sha>` only, no `:latest` -- a
-  # shared mutable tag across arbitrary branches would let one branch's
-  # push silently clobber what another branch (or a real release)
-  # expects `:latest` to mean; a real stable alias belongs to
-  # publish.yml's own release-tag-gated job instead (D28 step 5), not
-  # here.
+  # D28's own per-(port, arch) Docker images (docker/*.Dockerfile, repo
+  # root -- see pyproject.toml's own comment for why they moved out of
+  # src/cibuildmp/resources/). Build-only, on every push AND pull_request
+  # (a fork's own PR included -- no registry credentials needed for a
+  # build that never pushes), catching a broken Dockerfile fast, on the
+  # PR itself, the same "surfaces before release time, not after" split
+  # publish.yml's own build job already documents for the same reason.
+  #
+  # Publishing is a genuinely separate concern now, not this job's own
+  # `push: true` branch any more: .github/workflows/publish-docker-images.yml
+  # is the "real, out-of-band maintainer task" cibuildwheel's own
+  # bin/update_docker.py is for quay.io's manylinux/musllinux pins --
+  # triggered by a push to main, not every push to every branch, and
+  # pins by digest, not `:sha-<gitsha>`/`:latest`. `usermod/dockerrun.py`'s
+  # own PORT_IMAGES is what a maintainer updates from that workflow's own
+  # output; nothing here feeds it any more (the CIBMP_*_DOCKER_IMAGE
+  # override dance that used to point build-usermod at this job's own
+  # per-push GHCR pushes is gone -- a real end user was never going to
+  # think about that env var, and cibuildwheel's own container runtime
+  # never builds an image to begin with, only ever pulls a pin).
   verify-docker-images:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
     strategy:
       matrix:
         dockerfile:
@@ -106,20 +107,12 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      - uses: docker/login-action@v3
-        if: ${{ github.event_name == 'push' }}
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
-
-      - name: docker build resources/docker/${{ matrix.dockerfile }}.Dockerfile
+      - name: docker build docker/${{ matrix.dockerfile }}.Dockerfile
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: src/cibuildmp/resources/docker/${{ matrix.dockerfile }}.Dockerfile
-          push: ${{ github.event_name == 'push' }}
-          tags: ghcr.io/${{ github.repository_owner }}/cibuildmp-${{ matrix.dockerfile }}:sha-${{ github.sha }}
+          file: docker/${{ matrix.dockerfile }}.Dockerfile
+          push: false
           cache-from: type=gha,scope=${{ matrix.dockerfile }}
           cache-to: type=gha,mode=max,scope=${{ matrix.dockerfile }}
 
@@ -179,56 +172,45 @@ jobs:
   # all here, so this job is what proves build_webassembly() actually
   # works end to end against a real pushed image, not just that the
   # Dockerfile builds.
+  #
+  # No docker/login-action, no CIBMP_*_DOCKER_IMAGE overrides pointed at
+  # verify-docker-images' own pushed :sha-<sha> tags -- the user's own
+  # call, checked against cibuildwheel's real source first: cibuildwheel
+  # never builds its own manylinux/musllinux images at runtime at all
+  # (zero `docker build`/`buildx` anywhere in its repo) -- its container
+  # runtime (`oci_container.py`) only ever does a plain `docker pull` of
+  # an already-published, digest-pinned image
+  # (`resources/pinned_docker_images.cfg`); building one is a rare,
+  # out-of-band maintainer task (`bin/update_docker.py`), never part of a
+  # consumer's own CI. `PORT_IMAGES` (dockerrun.py) is cibuildmp's own
+  # future equivalent of that pinned config -- empty today, since no
+  # `v*`-tagged release has populated it yet (D28 step 5) -- so
+  # per-commit GHCR sha-tags were never going to be the same thing that
+  # config is, just a shape that could be made to resemble it. Real
+  # coverage of `image_for()`'s own pull-a-real-image branch belongs to
+  # `publish.yml`'s own release-tag-gated job once D28 step 5 lands, not
+  # a standing fixture in this dev-branch workflow. ensure_image()'s own
+  # local-build fallback (dockerrun.py's own `_build_command()`) already
+  # does `docker buildx build --cache-from/--cache-to type=gha,scope=
+  # <dockerfile stem>`, the same scope verify-docker-images populates a
+  # few minutes earlier in this same workflow run -- `needs:
+  # verify-docker-images` stays so that cache is warm before this job
+  # starts, not because anything here still pulls what that job pushes.
   build-usermod:
     runs-on: ubuntu-latest
     needs: verify-docker-images
     permissions:
       contents: read
-      packages: read
     steps:
       - uses: actions/checkout@v7
-
-      # verify-docker-images pushes these as private GHCR packages by
-      # default (an unauthenticated `docker pull` -- what `docker run
-      # --pull missing` does inside dockerrun.run() -- fails "unauthorized"
-      # even for a package this same repo owns, caught live: the very
-      # first run through this job's own override wiring). Only needed on
-      # a push event, matching the env vars below that are the only thing
-      # that could ever trigger a real pull here.
-
-      - uses: docker/login-action@v3
-        if: ${{ github.event_name == 'push' }}
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
 
       - name: Build examples/template (usermod)
         # No CIBMP_VERSION here -- usermod output has no package.json to
         # version at all (D23: it's a full port binary, not a
         # mip.install()-able .mpy), so the env var would just be unused.
-        #
-        # The five overrides below only have a real value to point at on
-        # a push event -- verify-docker-images only pushes to GHCR there
-        # (a fork's own pull_request gets no registry credentials, by
-        # design). On a pull_request run these stay unset (empty-string
-        # env vars, correctly ignored: image_for()'s own `if override:`
-        # check is truthiness-based, not the `is not None` check that bit
-        # ACTION_OUTPUT_DIR under this exact "GHA always sets a step's
-        # own env:, even empty" shape -- D28's own ninth bug), so
-        # ensure_image() falls through to its own local-build fallback
-        # instead -- slower (no gha cache reachable outside that job),
-        # but correct, and exactly the same path a consumer with no
-        # published image of their own would take.
         uses: ./
         env:
           CIBMP_PLATFORM: "usermod"
-          CIBMP_UNIX_X64_MANYLINUX_DOCKER_IMAGE: ${{ github.event_name == 'push' && format('ghcr.io/{0}/cibuildmp-unix-manylinux-x64:sha-{1}', github.repository_owner, github.sha) || '' }}
-          CIBMP_UNIX_X86_MANYLINUX_DOCKER_IMAGE: ${{ github.event_name == 'push' && format('ghcr.io/{0}/cibuildmp-unix-manylinux-x86:sha-{1}', github.repository_owner, github.sha) || '' }}
-          CIBMP_UNIX_AARCH64_MANYLINUX_DOCKER_IMAGE: ${{ github.event_name == 'push' && format('ghcr.io/{0}/cibuildmp-unix-manylinux-aarch64:sha-{1}', github.repository_owner, github.sha) || '' }}
-          CIBMP_UNIX_ARMHF_MANYLINUX_DOCKER_IMAGE: ${{ github.event_name == 'push' && format('ghcr.io/{0}/cibuildmp-unix-manylinux-armhf:sha-{1}', github.repository_owner, github.sha) || '' }}
-          CIBMP_UNIX_MIPSEL_MANYLINUX_DOCKER_IMAGE: ${{ github.event_name == 'push' && format('ghcr.io/{0}/cibuildmp-unix-manylinux-mipsel:sha-{1}', github.repository_owner, github.sha) || '' }}
-          CIBMP_WEBASSEMBLY_DOCKER_IMAGE: ${{ github.event_name == 'push' && format('ghcr.io/{0}/cibuildmp-webassembly:sha-{1}', github.repository_owner, github.sha) || '' }}
         with:
           package-dir: examples/template
 

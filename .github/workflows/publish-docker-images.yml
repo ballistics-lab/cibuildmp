@@ -1,0 +1,95 @@
+name: Publish Docker images
+
+# The "separate workflow" the user's own direction called for, checked
+# against cibuildwheel's real model before shaping it: cibuildwheel never
+# builds its own manylinux/musllinux images as part of a consumer's
+# build at all -- publishing one is a rare, out-of-band maintainer task
+# (its own bin/update_docker.py), and the pinned digest that results
+# (resources/pinned_docker_images.cfg) is the only thing a real build
+# ever touches (a plain `docker pull`, see cibuildwheel's own
+# oci_container.py). This workflow is cibuildmp's own equivalent of that
+# maintainer task -- it does not run on every push (build-examples.yml's
+# own verify-docker-images job already build-checks every Dockerfile on
+# every push/PR, catching breakage fast); it runs when docker/ actually
+# changes on main, or on demand, and its own job is publishing, not
+# verifying.
+#
+# docker/*.Dockerfile lives at the repo root, not inside
+# src/cibuildmp/resources/ -- pyproject.toml's own comment has the full
+# reasoning (mirrors pypa/manylinux's own top-level docker/, since
+# neither repo needs these files to ship inside an installed package any
+# more now that cibuildmp never builds one itself).
+#
+# Digest-pinned, not `:latest` -- the user's own explicit call: GHCR
+# supports pinning by digest exactly the way quay.io does for
+# cibuildwheel's own pins, so there is no need to trade the immutability
+# a `:sha-<gitsha>` tag already gave build-examples.yml's own dev-branch
+# testing for a floating tag here. After this workflow runs, a
+# maintainer copies the digest GitHub prints for each pushed image
+# (`docker/build-push-action`'s own `digest` output, printed to the job
+# summary below) into `usermod/dockerrun.py`'s own `PORT_IMAGES`, in a
+# real PR -- the same manual-but-deliberate cadence
+# cibuildwheel's own `bin/update_docker.py` has for its own pins, not
+# something this workflow does to source on its own.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docker/**"
+      - ".github/workflows/publish-docker-images.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: publish-docker-images-${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        dockerfile:
+          - unix-manylinux-x64
+          - unix-manylinux-x86
+          - unix-manylinux-aarch64
+          - unix-manylinux-armhf
+          - unix-manylinux-mipsel
+          - windows
+          - qemu
+          - webassembly
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push docker/${{ matrix.dockerfile }}.Dockerfile
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/${{ matrix.dockerfile }}.Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/cibuildmp-${{ matrix.dockerfile }}:latest
+          cache-from: type=gha,scope=${{ matrix.dockerfile }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.dockerfile }}
+
+      - name: Record the pinned digest
+        # The `:latest` tag above is only what makes this image easy to
+        # find by hand -- nothing in cibuildmp itself is ever pointed at
+        # a mutable tag (dockerrun.py's own PORT_IMAGES comment has why).
+        # This is the value a maintainer actually copies into PORT_IMAGES.
+        run: |
+          echo "### ${{ matrix.dockerfile }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "ghcr.io/${{ github.repository_owner }}/cibuildmp-${{ matrix.dockerfile }}@${{ steps.push.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
