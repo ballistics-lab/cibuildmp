@@ -4,17 +4,25 @@ name: Build examples
 # built here with this repo's own root action.yml -- the same `uses:` a
 # consumer like bclibc or a7p would write. Green here means the actual
 # build path (M3: make, collect, verify, package) works end to end, not
-# just that --dry-run prints a plausible plan.
+# just that --dry-run prints a plausible plan. This is also the only real
+# feedback loop for action.yml itself (a Docker action since D18's own
+# CI-conversion work): `uses: ./` below builds .github/docker/action.Dockerfile
+# for real, something no amount of YAML-syntax checking or local shell
+# testing can substitute for.
 #
 #   template  -- natmod's own C, the minimal case.
 #   wasm2mpy  -- native source is WebAssembly, compiled to C via wasm2c
 #                before the normal dynruntime.mk flow takes over (see
 #                examples/wasm2mpy/cibuildmp.toml). Proves the natmod
 #                contract (D2) is genuinely source-language-agnostic.
+#
+# push: (no branches: filter) rather than push: branches: [main] -- this
+# needs to run on every push to a dev branch too, not just main, the same
+# "no PR without explicit permission" reasoning usermod-dev.yml's own
+# header already documents.
 
 on:
   push:
-    branches: [main]
   pull_request:
     paths-ignore:
       - "**.md"
