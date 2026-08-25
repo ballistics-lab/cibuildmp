@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from ..sources import SourceError
+from ..stepsummary import write_step_summary
 from ..toolchains import ToolchainError
 from . import orchestrate
 from .build import UsermodBuildError
@@ -118,4 +119,5 @@ def run(
     )
     for result in results:
         print(f"  {result.identifier}: {result.output.name} ({result.size} bytes)")
+    write_step_summary(results, total_duration)
     return 0

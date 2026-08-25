@@ -19,6 +19,7 @@ from .sources import (
     fetch_micropython,
     read_mpy_abi,
 )
+from .stepsummary import write_step_summary
 from .targets import (
     LATEST_KNOWN_ABI,
     NATMOD_ARCHS,
@@ -285,6 +286,7 @@ def build(options: Options, targets: list[Target], *, toolchain: str = "auto") -
     print(f"\ncibuildmp: {total} target(s) built in {total_duration:.1f}s")
     for result in results:
         print(f"  {result.identifier}: {result.output.name} ({result.size} bytes)")
+    write_step_summary(results, total_duration)
     return 0
 
 

@@ -2357,11 +2357,54 @@ not after:**
 
 **D29 — a real GitHub Actions job summary, the way cibuildwheel's own
 action already does it: a table of what got built, visible directly on
-the Action run's own page, not just buried in raw log lines.** The
+the Action run's own page, not just buried in raw log lines. Done,
+implemented while D28's own composite-action CI was running.** The
 user's own explicit ask, independent of **D28**'s container-per-port
-migration -- this can and should land on its own, in either order.
-Not implemented at all today; `$GITHUB_STEP_SUMMARY` is not referenced
-anywhere in this codebase yet (checked directly, not assumed).
+migration -- landed on its own, in parallel.
+
+- **Implemented as designed below**, in a new standalone module,
+  `src/cibuildmp/stepsummary.py` -- `write_step_summary(results,
+  total_duration)`, duck-typed over a `_Result` `Protocol`
+  (`identifier`/`output`/`size`, read-only properties so
+  `Sequence[_Result]` stays covariant and accepts both `list[BuildResult]`
+  and `list[UsermodBuildResult]` without `pyright` complaining -- the
+  same list-invariance snag **D26**'s own `usermod/targets.py` comment
+  already hit once). A standalone module rather than living in either
+  `cli.py`, specifically to dodge a circular import: `cli.py` already
+  imports `usermod.cli` for dispatch, so a shared helper defined in
+  either one would need the other to import it back.
+- No-ops when `$GITHUB_STEP_SUMMARY` is unset (every local run, and
+  any non-GitHub CI system), otherwise appends a Markdown table to
+  that path -- *appends*, not overwrites, since GitHub Actions expects
+  every step in a job to add to the same running file across the
+  whole job, confirmed by a dedicated test.
+- Wired into both call sites exactly where designed:
+  `src/cibuildmp/cli.py`'s `build()` and
+  `src/cibuildmp/usermod/cli.py`'s `run()`, immediately after each
+  one's own existing plain-text summary loop -- runs in addition to
+  it, not instead of it.
+- Tested at two levels, not just written and trusted: `stepsummary.py`
+  itself (`tests/test_stepsummary.py`, 5 cases -- no-op when unset,
+  correct table contents, appends rather than truncates, large sizes
+  get a thousands separator, an empty result list still writes a
+  header) and the real wiring through the actual CLI
+  (`tests/test_cli.py::test_real_build_writes_github_step_summary_when_set`,
+  a genuine `main()` call with only the toolchain/fetch/build edges
+  mocked, confirmed to fail without the `write_step_summary(...)` call
+  in `cli.py` before being confirmed to pass with it -- not just
+  written and assumed correct). 237 tests pass project-wide.
+- **Not yet verified on real GitHub Actions itself** -- unlike every
+  Dockerfile fix in this session's own chain, this one genuinely
+  cannot be meaningfully faked locally beyond what the tests above
+  already do (there is no live `$GITHUB_STEP_SUMMARY` file to inspect
+  outside a real Actions run), so the real proof is whatever the next
+  `build-examples.yml` run's own Summary tab shows once this lands on
+  the branch.
+
+The original design notes below are kept for the historical record of
+what was planned before implementation, not because anything in this
+entry supersedes them -- the implementation matches the design as
+written.
 
 - **What cibuildwheel's own action does, precisely:** after a build,
   it writes a Markdown table into `$GITHUB_STEP_SUMMARY` -- one row
