@@ -88,6 +88,17 @@ never install any of the cross packages below, but there is no reason
 to risk it: `gcc-13-multilib` provides the identical `-m32` multilib
 support with no such conflict, verified live.
 
+One more step this substitution needs: `gcc -m32` looks for
+`<asm/errno.h>` etc. under `/usr/include/i386-linux-gnu`, a directory
+no apt package actually creates on Ubuntu (multilib support shares
+headers with the native `x86_64-linux-gnu` tree instead) — confirmed
+live the same way, a real `fatal error: asm/errno.h: No such file or
+directory` from natmod's own `x86` arch build:
+
+```console
+$ sudo ln -sf /usr/include/x86_64-linux-gnu /usr/include/i386-linux-gnu
+```
+
 Plus, only if you build `unix/aarch64`, `unix/armhf`, or `unix/mipsel`
 (see [Target support](#target-support) below for exactly which apt
 package each needs) — `unix/aarch64` alone needs one extra step first,

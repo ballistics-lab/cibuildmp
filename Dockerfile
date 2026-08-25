@@ -105,6 +105,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libusb-1.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
+# gcc -m32 (natmod's own x86 arch, and usermod unix/x86) looks for
+# <asm/errno.h> etc. under /usr/include/i386-linux-gnu -- confirmed live
+# with `gcc -m32 -E -v`, whose own search list omits it entirely without
+# this, even though the exact same headers already exist one directory
+# over (Ubuntu's multilib packaging shares them with the native
+# x86_64-linux-gnu tree via 32-bit stub headers, not a separate i386
+# tree -- no apt package installs a plain i386-linux-gnu directory at
+# all). A real build failure caught this (`fatal error: asm/errno.h: No
+# such file or directory`), not assumed from reading package lists.
+RUN ln -sf /usr/include/x86_64-linux-gnu /usr/include/i386-linux-gnu
+
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
 # Installed from a pinned git ref, not a local COPY or PyPI -- keeps this

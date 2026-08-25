@@ -1707,6 +1707,79 @@ toolchain (same open gap **D23**'s own note already has for
 `aarch64`) — a real, separate, still-open item for whoever tackles
 that Docker-action gap next.
 
+**D25 — both Dockerfiles now bake in every `unix` cross toolchain
+(`aarch64`/`armhf`/`mipsel`) closing D23/D24's own open item, and the
+first real `docker build` of either image (neither had ever actually
+been built before this -- both predate real usermod CLI usage
+entirely) surfaced two genuine, non-obvious apt/gcc problems no amount
+of reading package lists would have caught.** `examples/usermod-unix`
+(a real `USER_C_MODULES` module, `cibuildmp.toml` defaulting to all
+five `unix` arches) wired into `build-examples.yml`'s own `uses: ./`
+step is what proved it -- this project's dev sandbox has no Docker
+daemon at all (**D19**'s own finding), so every ingredient was
+verified individually there and the actual `docker build` had to run
+for real on CI, exactly the same "only a real build catches this"
+lesson **D18**'s own `action.Dockerfile`-location bug already taught.
+
+- **`gcc-multilib` unconditionally `Conflicts:` every single
+  `gcc-N-<target>-linux-gnu` cross-compiler package, every GCC major
+  version 4.9 through 15** -- confirmed directly from `apt-cache show
+  gcc-multilib`'s own `Conflicts:` field, not a resolver quirk a
+  differently-ordered `apt-get install` would sidestep: installing
+  `gcc-multilib` after the cross packages are already present offers
+  to *remove all three of them*. This dev sandbox never surfaced it
+  while every individual cross-compiler was being verified earlier
+  (**D20**/**D24**) because `gcc-multilib` itself was never actually
+  installed there at all (`dpkg -s gcc-multilib` said so directly) --
+  only the versioned sub-packages from separate, earlier installs.
+  Fix: `gcc-13-multilib` (the real, versioned package `gcc-multilib`
+  itself only wraps) carries no such `Conflicts:` and provides the
+  identical `-m32` support -- verified live, installed alongside all
+  three cross packages in one transaction with no conflict, then a
+  real `gcc -m32` compile-and-run.
+- **`gcc -m32` cannot find `<asm/errno.h>` after that substitution**
+  -- a second, separate real failure, this time inside natmod's own
+  `x86` arch build (`examples/template`), not usermod at all: `gcc -m32
+  -E -v`'s own header search list omits `/usr/include/i386-linux-gnu`
+  entirely (confirmed live), even though `gcc -m32 -print-multiarch`
+  correctly names that exact directory as the target. No apt package
+  actually creates it -- Ubuntu's own multilib packaging shares 32-bit
+  headers with the native `x86_64-linux-gnu` tree instead (32-bit-only
+  stub headers like `gnu/stubs-32.h` live *inside* that same tree, not
+  a separate one). `gcc-multilib`'s own install path apparently avoids
+  this some other way this session did not fully trace; the verified,
+  minimal fix instead is `ln -sf /usr/include/x86_64-linux-gnu
+  /usr/include/i386-linux-gnu` -- confirmed live, a real `-m32` compile
+  and run succeeding immediately after.
+- Both fixes are Dockerfile-only, not `cibuildmp` itself: neither
+  affects a bare `ubuntu-latest` runner running the CLI directly
+  (**M9b**'s own live verification, and every `build-examples.yml` run
+  before this one, already exercised `gcc -m32` successfully outside
+  Docker) -- only these two custom images, which now need both
+  `gcc-13-multilib` and the symlink to combine x86 multilib support
+  with the cross-compilers in one filesystem. README's own bare-metal
+  install instructions get the same two fixes, at the point a reader
+  would actually hit them.
+- **cibuildwheel's own answer to "many architectures, one toolchain
+  set" is structurally different, not comparably fixed** -- asked and
+  answered directly, not assumed: cibuildwheel never combines
+  cross-compilers in one image at all. Linux wheels build inside one
+  container *per target architecture* (`manylinux_x86_64`,
+  `manylinux_aarch64`, ...), each with only its own architecture's
+  native toolchain; non-x86 targets on an x86 runner go through QEMU
+  user-mode emulation (registered via `docker/setup-qemu-action` on
+  GitHub Actions) rather than cross-compiling, so the *emulated*
+  container's own gcc is always native to what it's building for.
+  macOS wheels build natively via one Xcode toolchain's own
+  `-arch x86_64 -arch arm64` (`universal2`), no container or conflict
+  surface at all. `cibuildmp`'s own choice -- real cross-compilation
+  from one x86_64 host, not a container/QEMU per target -- is
+  deliberate (**D2**/**M2**'s own "why not docker for x86" reasoning:
+  MicroPython's build is light enough that cross-compiling beats
+  emulation) and it is exactly what both bugs above are the real,
+  concrete cost of; not a flaw unique to this project's own approach,
+  a structural tradeoff already made with eyes open.
+
 - **M10** — runner/matrix integration, fan-out-by-default for usermod
   identifiers (**D20**).
 - **M11** — execution axis: qemu-system, rp2040py, node, native — four of
