@@ -41,6 +41,39 @@ on:
       - "LICENSE"
 
 jobs:
+  # D28's own per-(port, arch) Docker images
+  # (resources/docker/*.Dockerfile) -- build-only, no push, no GHCR
+  # credentials needed at all: this proves each Dockerfile actually
+  # builds (the still-open gap every one of these files' own header
+  # comments flags -- "not yet built for real via docker build") on
+  # every push, independent of publish.yml's own publish-docker job,
+  # which is deliberately gated behind a real `v*` release tag and
+  # stays that way (image *publishing* is a maintainer decision; image
+  # *building* is not, and shouldn't wait on one). `unix` is one image
+  # per arch (D26/D31 -- no combined image any more, manylinux only so
+  # far); `windows` stays one combined x64+x86 image (no
+  # manylinux/musllinux-shaped axis for this port at all).
+  verify-docker-images:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        dockerfile:
+          - unix-manylinux-x64
+          - unix-manylinux-x86
+          - unix-manylinux-aarch64
+          - unix-manylinux-armhf
+          - unix-manylinux-mipsel
+          - windows
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: docker build resources/docker/${{ matrix.dockerfile }}.Dockerfile
+        run: |
+          docker build \
+            -t cibuildmp-${{ matrix.dockerfile }}:ci \
+            -f src/cibuildmp/resources/docker/${{ matrix.dockerfile }}.Dockerfile \
+            .
+
   build:
     runs-on: ubuntu-latest
     steps:

@@ -1955,6 +1955,29 @@ separate containers per port.
   verified here at all -- only on real CI, the same round-trip
   constraint D25's own six-bug chain already worked under, now one
   level higher (a whole new image, not one more apt package).
+- **Amended (D31): "one image per port" was still too coarse for
+  `unix` specifically.** The user's own correction, directly: `unix`
+  needed cutting further, into one image per *(arch, libc)* --
+  cibuildwheel's own `manylinux_x86_64`/`musllinux_aarch64` shape, not
+  one combined "unix" image the way this decision first described it
+  above. `resources/docker/unix.Dockerfile` (one image, all five
+  arches) was replaced by five separate
+  `resources/docker/unix-manylinux-<arch>.Dockerfile` files, each only
+  that arch's own packages -- real isolation this decision's own bullet
+  above already argued for at the *port* level now also holds at the
+  *arch* level (an armhf toolchain bump can no longer touch an x64
+  image's own build). `natmod` is explicitly NOT part of this
+  refinement -- the user's own point: a `.mpy` is loaded by an
+  already-running target interpreter, not exec'd as its own process, so
+  the build host's own libc linkage never enters the picture the way it
+  does for a full `unix` port executable; one combined `natmod`
+  Dockerfile (**D30**'s own point 2) stays correct. `windows` also
+  stays one combined image (this file's own `resources/docker/windows.Dockerfile`
+  header has the reasoning: no manylinux/musllinux-shaped axis exists
+  for Windows at all). See **D31** for the full musllinux gap this
+  correction sits inside, and `usermod/dockerrun.py`'s own resolver,
+  now keyed by `(port, arch)` with an optional trailing `libc` segment
+  rather than `port` alone.
 
 **D27 — the sixth Dockerfile fix (libtool) finally got real CI past every
 `unix` arch's own build, and immediately surfaced two genuine `cibuildmp`
@@ -2037,31 +2060,44 @@ unconditionally).
 
 **Current state, precisely.**
 
-- `resources/docker/unix.Dockerfile` exists: `unix`'s own toolchain only (the
-  exact package set **D20/D24/D25** verified live, six real apt/gcc
-  bugs and all), no `cibuildmp` installed inside it -- deliberately,
-  since the whole point of the split is that `cibuildmp` stays on the
-  bare host and only ever `docker run`s a port's own build command as
-  a sibling container (never Docker-in-Docker; **D26**'s own
-  reasoning for why: today's `action.yml` already runs *inside* one
-  container, so nesting a second `docker run` from in there would need
-  the host's Docker socket passed through -- fragile, avoidable by
-  flipping which side runs bare).
+- `resources/docker/unix-manylinux-<arch>.Dockerfile` exists for all
+  five arches (`x64`/`x86`/`aarch64`/`armhf`/`mipsel`) -- one image per
+  arch, not one combined `unix.Dockerfile` any more (this decision's
+  own amendment above, **D31**): each holds only that arch's own
+  packages (the exact per-arch set **D20/D24/D25** verified live,
+  cross-checked directly against a real `v1.28.0` `ports/unix/Makefile`
+  for which arches even need `pkg-config`/`libffi-dev` at all --
+  `MICROPY_STANDALONE=1` arches, armhf/mipsel, build libffi from the
+  vendored submodule instead and need neither). No `cibuildmp`
+  installed inside any of them -- deliberately, since the whole point
+  of the split is that `cibuildmp` stays on the bare host and only ever
+  `docker run`s a port's own build command as a sibling container
+  (never Docker-in-Docker; **D26**'s own reasoning for why: today's
+  `action.yml` already runs *inside* one container, so nesting a second
+  `docker run` from in there would need the host's Docker socket passed
+  through -- fragile, avoidable by flipping which side runs bare).
 - `usermod/dockerrun.py` exists: a sibling-container runner with a real
-  resolver, migration step 2 (below), now implemented. `image_for_port()`
-  checks `CIBMP_<PORT>_DOCKER_IMAGE` first (an override for local
-  testing/forks), then falls back to `PORT_IMAGES`, a plain
+  resolver, migration step 2 (below), now implemented -- and corrected
+  twice mid-session, on review. `image_for(port, arch, libc=None)`
+  checks `CIBMP_<PORT>_<ARCH>[_<LIBC>]_DOCKER_IMAGE` first (an override
+  for local testing/forks), then falls back to `PORT_IMAGES`, a plain
   `dict[str, str]` **in this file's own source** that a maintainer edits
   to register a port's canonical image -- not a `cibuildmp.toml` key.
-  `PORT_IMAGES` is still empty today: `resources/docker/unix.Dockerfile` exists and
-  builds correctly but isn't published to GHCR yet (step 5), and
-  registering "unix" before a real pullable image exists would make
-  every unopted-in `unix` usermod build start trying, and failing, to
-  pull it -- so `image_for_port()` still returns `None` for every real
-  caller today, unchanged. `build_unix()` in `usermod/build.py` checks
-  this and, when it returns an image, routes both `run_unix_deplibs()`
-  and the main `make` invocation through `dockerrun.run()` instead of a
-  bare `subprocess.run()`.
+  Keyed by `(port, arch)`, with an optional trailing `libc` segment only
+  for ports that actually have one (`unix`, passing `"manylinux"`
+  explicitly from `build_unix()`) -- `windows`/`qemu`/`webassembly`/
+  `esp32` call it with no `libc` at all rather than defaulting to a
+  "manylinux" label that means nothing for them. `PORT_IMAGES` is still
+  empty today: the five `unix-manylinux-*` images above all exist and
+  build correctly (inferred, not yet docker-built) but aren't published
+  to GHCR yet (step 5), and registering any of them before a real
+  pullable image exists would make every unopted-in `unix` usermod
+  build for that arch start trying, and failing, to pull it -- so
+  `image_for()` still returns `None` for every real caller today,
+  unchanged. `build_unix()` in `usermod/build.py` checks this and, when
+  it returns an image, routes both `run_unix_deplibs()` and the main
+  `make` invocation through `dockerrun.run()` instead of a bare
+  `subprocess.run()`.
 - **`action.yml` is now a composite action -- migration step 1, done
   and live-verified on real CI, not just implemented.** `runs: using:
   "docker"` → `"composite"`, `entrypoint.sh` deleted (dead code,
@@ -2104,31 +2140,55 @@ unconditionally).
   - **Still not yet done:** `--platform usermod` still always builds
     on the bare host inside this new composite action too -- there is
     no flag or config key yet that makes a caller's own build actually
-    go through `resources/docker/unix.Dockerfile` as a sibling container
-    (migration step 2). This remains the single largest gap before the
-    `unix` slice is a real, usable feature rather than a
-    proof-of-concept -- step 1 only removed the *structural* blocker
-    (Docker-in-Docker), it did not yet wire the mechanism through.
+    go through one of the `unix-manylinux-*` images as a sibling
+    container (migration step 2's own resolver exists now, but nothing
+    calls it with an image registered -- `PORT_IMAGES` is still empty).
+    This remains the single largest gap before the `unix` slice is a
+    real, usable feature rather than a proof-of-concept -- step 1 only
+    removed the *structural* blocker (Docker-in-Docker), it did not yet
+    wire the mechanism through.
 - `resources/docker/windows.Dockerfile` also now exists (migration step
-  3's first item -- x64/x86 only, the two apt-installed mingw-w64 GCC
-  packages `build_windows()` already proves work for this port;
-  `arm64` stays bare-host-only until step 4 gives `dockerrun.py` real
-  mount coverage for `sources.cache_root()`, where `llvm-mingw`
-  downloads). Same open verification gap as `unix.Dockerfile`: not yet
-  built for real via `docker build` (no reachable Docker daemon in the
-  sandbox this was written in) -- correctness inferred from matching
-  `action.Dockerfile`'s own already-proven package list for this exact
-  port/arch pair, not yet confirmed independently.
-- Both Dockerfiles live under `src/cibuildmp/resources/docker/`, not a
-  top-level `docker/` directory -- moved there mid-session, on the
+  3's first item -- one combined x64+x86 image, the two apt-installed
+  mingw-w64 GCC packages `build_windows()` already proves work for this
+  port; `arm64` stays bare-host-only until step 4 gives `dockerrun.py`
+  real mount coverage for `sources.cache_root()`, where `llvm-mingw`
+  downloads). Not split per arch the way `unix` is -- this port has no
+  manylinux/musllinux-shaped axis, so the isolation argument for
+  splitting `unix` doesn't carry over. Same open verification gap as
+  every `unix-manylinux-*` image: not yet built for real via `docker
+  build` (no reachable Docker daemon in the sandbox this was written
+  in) -- correctness inferred from matching `action.Dockerfile`'s own
+  already-proven package list for this exact port/arch pair, not yet
+  confirmed independently. `build-examples.yml` now has a
+  `verify-docker-images` job (matrix over all six Dockerfiles) that
+  build-only `docker build`s each of them on every push -- no publish,
+  no GHCR credentials, independent of `publish.yml`'s own `v*`-tag-gated
+  `publish-docker` job -- closing this specific gap for real the moment
+  it runs, not just documenting it as open.
+- All six Dockerfiles live under `src/cibuildmp/resources/docker/`, not
+  a top-level `docker/` directory -- moved there mid-session, on the
   user's own correction, once it was pointed out that a top-level
   `docker/` never shipped in the installed package at all
   (`pyproject.toml`'s own `package-data` only listed
   `resources/*.toml`). Real package resources now, the same as
   `natmod.toml`/`usermod.toml` already are -- `package-data` extended
-  to `resources/docker/*` to match.
+  to `resources/docker/*` to match, verified live by building a real
+  wheel and confirming all six files land inside it.
 - `qemu`/`webassembly`/`esp32` still have no Dockerfile of their own at
   all yet.
+- `action.yml`'s own apt-prerequisites step also now caches
+  `/var/cache/apt/archives` via `actions/cache@v4.3.0` (pinned by
+  commit SHA, verified live against a real `git ls-remote --tags` on
+  `actions/cache` before pinning, not guessed), keyed on this file's
+  own hash so a future package-list change busts the cache
+  automatically. Orthogonal to the Docker migration above and not
+  waiting on it -- the user's own observation, directly: this step is
+  the slow part of every run today (~12 minutes, no caching at all
+  today), independent of *which* toolchains it installs. First attempt,
+  not yet confirmed live whether GitHub's hosted runner actually lets a
+  non-root cache-action step read back root-owned apt-archive contents
+  cleanly -- watch the real CI run's own cache step before trusting it
+  worked.
 
 **The full migration plan, in dependency order -- reordered from the
 first pass above, per the user's own explicit follow-up.** The
@@ -2193,13 +2253,14 @@ followed by one big wiring pass at the end.
      below), but exactly the shape this migration would need to
      extend into if the Windows/macOS open question ever resolves
      towards "yes."
-2. **The Docker-image resolver becomes real -- done.** `usermod/dockerrun.py`
-   now has `PORT_IMAGES: dict[str, str]`, a maintainer-owned mapping in
-   the module's own source, plus `image_for_port()` checking
-   `CIBMP_<PORT>_DOCKER_IMAGE` first (override) and falling back to
-   `PORT_IMAGES.get(port)` (the registered default). This is the literal
-   shape of the user's own framing: adding a new port's support becomes
-   "write one Dockerfile, then declare it in the resolver" -- a
+2. **The Docker-image resolver becomes real -- done, refined twice.**
+   `usermod/dockerrun.py` now has `PORT_IMAGES: dict[str, str]`, a
+   maintainer-owned mapping in the module's own source, plus
+   `image_for(port, arch, libc=None)` checking
+   `CIBMP_<PORT>_<ARCH>[_<LIBC>]_DOCKER_IMAGE` first (override) and
+   falling back to `PORT_IMAGES` (the registered default). This is the
+   literal shape of the user's own framing: adding a new port's support
+   becomes "write one Dockerfile, then declare it in the resolver" -- a
    one-line addition to `PORT_IMAGES`, a maintainer editing source, not
    an end user's `cibuildmp.toml`.
    - **A real misunderstanding, caught and corrected before any wrong
@@ -2217,22 +2278,39 @@ followed by one big wiring pass at the end.
      its Dockerfile lands, the same way `UNIX_ARCH_SETTINGS` in
      `usermod/build.py` is itself a maintainer-owned dict, not a config
      surface. No `Edit`/`Write` had happened yet under the wrong
-     reading -- caught at the investigation stage, corrected, and
-     re-implemented as `PORT_IMAGES` above. `tests/test_usermod_dockerrun.py`
-     covers all four cases (no override + no registration → host build;
-     registered default used; env override wins over a registered
-     default; an unregistered port with no override stays a host
-     build), and `PORT_IMAGES` stays empty until step 5 actually
-     publishes a pullable `unix` image -- registering it before that
-     would break every unopted-in `unix` build the moment this step
-     lands, not just when the port's own Dockerfile does.
+     reading -- caught at the investigation stage, corrected.
+   - **Refined again, same session: keyed by `(port, arch)`, not `port`
+     alone.** First implemented as `image_for_port(port)`/
+     `PORT_IMAGES.get(port)`; the user then pointed out `unix.Dockerfile`
+     itself was the wrong shape ("це херня, я думав ми наріжемо
+     manylinux-x64 muslinux-aarch64 тощо") -- cibuildwheel's own
+     per-(arch, libc) image shape, not one combined `unix` image (this
+     decision's own amendment above, **D31**). Re-implemented as
+     `image_for(port, arch, libc=None)`, `PORT_IMAGES` keyed
+     `"{port}-{arch}"` or `"{port}-{arch}-{libc}"` -- `libc` stays
+     optional (not defaulted to `"manylinux"`) so `windows`/`qemu`/
+     `webassembly`/`esp32`, none of which have any libc axis at all,
+     never carry a meaningless label; only `build_unix()` passes
+     `"manylinux"` explicitly, `unix`'s own only real value today.
+     `tests/test_usermod_dockerrun.py` covers six cases (no override +
+     no registration → host build; registered default used; env
+     override wins; an unregistered arch stays a host build even when a
+     sibling arch is registered; an unregistered port stays a host
+     build; `libc` omitted uses a two-part key/env name, not a
+     `"manylinux"` stand-in). `PORT_IMAGES` stays empty until step 5
+     actually publishes a pullable image for at least one `(port, arch)`
+     pair -- registering one before that would break every unopted-in
+     build for that exact pair the moment this step lands, not just
+     when the port's own Dockerfile does.
 3. **The remaining three per-port Dockerfiles, one at a time, each
    immediately usable the moment it lands** (step 1 and 2 already
    wired the mechanism, so this stops being "write five images, then
-   wire them all at the end"). `resources/docker/unix.Dockerfile` is the
-   template to copy: only that port's own toolchain, no `cibuildmp`
-   baked in. `windows` was next -- apt-only toolchain, no large download
-   like `esp32`'s ESP-IDF or `webassembly`'s emsdk, closest in shape to
+   wire them all at the end"). Any `resources/docker/unix-manylinux-*.Dockerfile`
+   is the template to copy for a port with no libc axis (just drop the
+   trailing `-<arch>` split unless the port genuinely needs it the way
+   `unix` does): only that port's own toolchain, no `cibuildmp` baked
+   in. `windows` was next -- apt-only toolchain, no large download like
+   `esp32`'s ESP-IDF or `webassembly`'s emsdk, closest in shape to
    `unix` (**D26**'s own "first slice" precedent: one port, proven
    live, before the next).
    - **`resources/docker/windows.Dockerfile` -- written.**
@@ -2677,27 +2755,35 @@ Verified live in this session, not assumed:
 
 **The real fix is a musl toolchain, not a linker flag** -- `-static`
 alone was the tempting, cheap-looking answer and it does not work, per
-the live finding above. The natural place for this to live is exactly
-the container-per-port machinery **D26**/**D28** are already building:
-a second, Alpine-based image per arch (musl's own `gcc`, not Ubuntu's),
-registered in `usermod/dockerrun.py`'s own `PORT_IMAGES` (**D28** step 2,
-just implemented) the same one-line way a new port is declared today --
-except keyed by *(port, libc)*, not just *(port)*, since `unix` alone
-now needs two images (`resources/docker/unix.Dockerfile` for glibc,
-`docker/unix-musl.Dockerfile` for musl) where every other port still
-needs one. `targets.py`'s own `identifier` property needs a matching new
-axis alongside `arch` (`mpy6.3-usermod-unix-x64-manylinux` /
-`-x64-musllinux`, cibuildwheel-shaped, defaulting to `manylinux` so every
-existing identifier stays valid unless a caller opts into `musllinux`
-explicitly) -- threading this through `UsermodOptions`/`orchestrate.py`'s
-own axis-override machinery (**D20**) the same way `arch`/`board` already
-work is real, multi-file work, not a one-line addition, and is explicitly
-**not attempted in this session**: it needs a real musl cross-toolchain
-resolved per arch, a real Dockerfile, and real verification against an
-actual musl host, none of which fit alongside the resolver fix above.
-Flagged here, precisely, so a future session designs the axis once
-rather than bolting it on ad hoc the way **D25**'s six bugs show what
-"discovered mid-flight" costs.
+the live finding above. **The manylinux half of this is now done, the
+musllinux half is not, and both halves live in the same mechanism.**
+Following directly from this decision's own finding, the earlier
+`resources/docker/unix.Dockerfile` (one image, all five arches) was
+replaced with five per-arch `unix-manylinux-<arch>.Dockerfile` images
+(**D26**'s own amendment above) -- the same correction the user pushed
+for directly ("це херня, я думав ми наріжемо manylinux-x64
+muslinux-aarch64 тощо"), and `usermod/dockerrun.py`'s own resolver now
+takes an explicit `libc` parameter for exactly this reason
+(`image_for(port, arch, libc=None)`, **D28** step 2). What's still
+genuinely missing is only the musl side: an Alpine-based
+`unix-musllinux-<arch>.Dockerfile` per arch (musl's own `gcc`, not
+Ubuntu's), registered in `PORT_IMAGES` the same one-line way
+(`"unix-x64-musllinux"`), no resolver changes needed at that point --
+the mechanism already accepts this shape today, it just has nothing to
+register yet. `targets.py`'s own `identifier` property still needs a
+matching new axis alongside `arch` (`mpy6.3-usermod-unix-x64-manylinux`
+/ `-x64-musllinux`, cibuildwheel-shaped, defaulting to `manylinux` so
+every existing identifier stays valid unless a caller opts into
+`musllinux` explicitly) -- threading this through
+`UsermodOptions`/`orchestrate.py`'s own axis-override machinery
+(**D20**) the same way `arch`/`board` already work is real, multi-file
+work, not a one-line addition, and is explicitly **not attempted in
+this session**: it needs a real musl cross-toolchain resolved per arch,
+real Dockerfiles, and real verification against an actual musl host,
+none of which fit alongside the resolver/image work above. Flagged
+here, precisely, so a future session designs the axis once rather than
+bolting it on ad hoc the way **D25**'s six bugs show what "discovered
+mid-flight" costs.
 
 - **M10** — runner/matrix integration, fan-out-by-default for usermod
   identifiers (**D20**).

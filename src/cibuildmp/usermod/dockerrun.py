@@ -17,10 +17,29 @@ something an end user configures via cibuildmp.toml. There is no
 config-file knob here and there deliberately never will be: a Docker
 image per port is cibuildmp's own build infrastructure, the same way
 `action.Dockerfile`'s package list isn't a user-facing setting either.
-`CIBMP_<PORT>_DOCKER_IMAGE` stays purely as a local-testing/override knob
-(point it at a `:local` tag you just built, or swap in a fork's image
-without editing source) -- it always wins over PORT_IMAGES's own default
-when set. See docs/BACKLOG.md's own D26/D28.
+`CIBMP_<PORT>_<ARCH>_<LIBC>_DOCKER_IMAGE` stays purely as a
+local-testing/override knob (point it at a `:local` tag you just built,
+or swap in a fork's image without editing source) -- it always wins
+over PORT_IMAGES's own default when set. See docs/BACKLOG.md's own
+D26/D28.
+
+Keyed by (port, arch), with an optional trailing libc segment -- not
+port alone. Corrected mid-session, on review: `unix`'s own five
+architectures do not share one image (D31), cibuildwheel's own
+manylinux_x86_64/musllinux_aarch64 shape, not one combined "linux"
+image. `libc6-dev-arm64-cross` etc. only apply to their own arch
+anyway, so a per-arch split loses nothing a combined image had and
+gains real isolation: an armhf toolchain bump can no longer touch an
+x64 build's own image the way one shared apt-get install line did
+before D26 at all. `libc` is `None` by default, not `"manylinux"`:
+most ports (`windows`, `qemu`, `webassembly`, `esp32`) have no such
+axis at all -- Windows has no second libc a binary could be built
+against -- so forcing every port through a fake "manylinux" label
+would leak `unix`-specific vocabulary onto ports it means nothing for.
+Only `build_unix()` passes one, explicitly, since that port is the one
+place this distinction is real (D31's own musllinux images don't exist
+yet -- no real musl toolchain built or verified -- so `"manylinux"` is
+`unix`'s own only real value today, not a stand-in default here).
 """
 
 from __future__ import annotations
@@ -31,34 +50,45 @@ from pathlib import Path
 
 from .build import UsermodBuildError
 
-# Maintainer-declared default image per port, keyed by the same port name
-# `cibuildmp` already uses everywhere else (targets.py's Target.port).
-# Empty today: resources/docker/unix.Dockerfile exists and builds
-# correctly (D20, D24, D25) but is not yet published anywhere (that's
-# D28 step 5) -- an entry here takes effect for every caller that
-# doesn't set the env var override, so registering "unix" before a
-# real, pullable image exists would make ordinary unopted-in unix
-# usermod builds start trying (and failing) to pull it. Add
-# `"unix": "ghcr.io/ballistics-lab/cibuildmp-unix:latest"` here once
-# publish.yml actually pushes that tag, and the same one line per port
-# thereafter.
+# Maintainer-declared default image per (port, arch[, libc]), keyed
+# "{port}-{arch}" or "{port}-{arch}-{libc}" -- the same port/arch
+# vocabulary `cibuildmp` already uses everywhere else (targets.py's
+# Target.port/Target.arch), plus D31's own manylinux/musllinux libc
+# axis where a port actually has one. Empty today:
+# resources/docker/unix-manylinux-*.Dockerfile all exist and build
+# correctly (D20, D24, D25, D26) but none are published anywhere yet
+# (that's D28 step 5) -- an entry here takes effect for every caller
+# that doesn't set the env var override, so registering
+# "unix-x64-manylinux" before a real, pullable image exists would make
+# ordinary unopted-in unix/x64 usermod builds start trying (and
+# failing) to pull it. Add
+# `"unix-x64-manylinux": "ghcr.io/ballistics-lab/cibuildmp-unix-manylinux-x64:latest"`
+# here once publish.yml actually pushes that tag, and the same one line
+# per (port, arch, libc) thereafter.
 PORT_IMAGES: dict[str, str] = {}
 
 
-def image_for_port(port: str) -> str | None:
-    """The image to run `port`'s own build command in, or None to build
-    directly on the host (today's default for every port, since
-    PORT_IMAGES is still empty and no caller sets the env var).
+def image_for(port: str, arch: str, libc: str | None = None) -> str | None:
+    """The image to run `port`/`arch`'s own build command in (optionally
+    qualified by `libc`, for ports where that's a real axis -- `unix`
+    only, today), or None to build directly on the host (today's
+    default for every port/arch, since PORT_IMAGES is still empty and
+    no caller sets the env var).
 
-    `CIBMP_<PORT>_DOCKER_IMAGE` (e.g. `CIBMP_UNIX_DOCKER_IMAGE=cibuildmp-unix:local`)
-    overrides PORT_IMAGES's own registered default when set -- local
-    testing against a freshly-built image, or swapping in a different
-    image entirely, without touching source.
+    `CIBMP_<PORT>_<ARCH>_DOCKER_IMAGE` (e.g.
+    `CIBMP_WINDOWS_X64_DOCKER_IMAGE=cibuildmp-windows:local`), or
+    `CIBMP_<PORT>_<ARCH>_<LIBC>_DOCKER_IMAGE` when `libc` is given
+    (e.g. `CIBMP_UNIX_X64_MANYLINUX_DOCKER_IMAGE=...`), overrides
+    PORT_IMAGES's own registered default when set -- local testing
+    against a freshly-built image, or swapping in a different image
+    entirely, without touching source.
     """
-    override = os.environ.get(f"CIBMP_{port.upper()}_DOCKER_IMAGE")
+    parts = [port, arch, *([libc] if libc else [])]
+    env_key = "CIBMP_" + "_".join(p.upper() for p in parts) + "_DOCKER_IMAGE"
+    override = os.environ.get(env_key)
     if override:
         return override
-    return PORT_IMAGES.get(port)
+    return PORT_IMAGES.get("-".join(parts))
 
 
 def run(command: list[str], *, mounts: list[Path], workdir: Path, image: str) -> None:

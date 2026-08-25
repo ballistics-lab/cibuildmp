@@ -243,14 +243,23 @@ def build_unix(
     ports/unix/Makefile's own `PROG ?= micropython` default, unambiguous
     with no globbing needed, unlike natmod's build.collect_output().
 
-    D26's own proof-of-concept: if CIBMP_UNIX_DOCKER_IMAGE is set, the
-    actual make/deplibs commands run inside that image as a sibling
+    D26's own design: if CIBMP_UNIX_<ARCH>_MANYLINUX_DOCKER_IMAGE is set
+    (or dockerrun.PORT_IMAGES has "unix-<arch>-manylinux" registered),
+    the actual make/deplibs commands run inside that image as a sibling
     container instead of directly on this host -- see
-    usermod/dockerrun.py's own docstring. The host-side toolchain probe
-    below is skipped in that case: the toolchain lives inside the image,
-    not on this host's PATH, so shutil.which() would reject a perfectly
-    good docker-based build. Opt-in only, not reachable from the CLI or
-    action.yml yet.
+    usermod/dockerrun.py's own docstring for why this is keyed by
+    (port, arch, libc), not port alone (D31: unix's own five
+    architectures do not share one image, and glibc/musl are a real
+    runtime-compatibility axis a shared image would hide). "manylinux"
+    is passed explicitly here, not a resolver-side default: it is
+    `unix`'s only real libc option today (musllinux needs a real musl
+    toolchain, D31, not built yet) -- once UnixBuildOptions grows a
+    `libc` field for musllinux, that field replaces this literal, the
+    resolver itself needs no change. The host-side toolchain probe
+    below is skipped whenever an image is selected: the toolchain lives
+    inside the image, not on this host's PATH, so shutil.which() would
+    reject a perfectly good docker-based build. Opt-in only, not
+    reachable from the CLI or action.yml yet.
     """
     if opts.arch not in UNIX_ARCH_SETTINGS:
         raise UsermodBuildError(
@@ -260,7 +269,7 @@ def build_unix(
 
     from . import dockerrun
 
-    docker_image = dockerrun.image_for_port("unix")
+    docker_image = dockerrun.image_for("unix", opts.arch, "manylinux")
 
     if docker_image is None:
         if opts.arch == "x86":

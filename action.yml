@@ -53,6 +53,29 @@ inputs:
 runs:
   using: "composite"
   steps:
+    # This apt step is the slow part of every run today (~12 minutes),
+    # independent of the D28/D30 Docker migration above and not waiting on
+    # it: that migration moves *which* toolchains this step installs
+    # (D30's own point 2), but caching the packages this step already
+    # installs is a real win on its own, right now, on every push --
+    # /var/cache/apt/archives holds the downloaded .deb files apt-get
+    # install below unpacks; restoring them here skips re-downloading
+    # every package (including the large mingw-w64/cross-gcc ones) from
+    # apt's own mirrors on every single run, the same
+    # azure.archive.ubuntu.com flakiness/slowness already flagged
+    # elsewhere. Keyed on this file's own hash so any future change to the
+    # package list below busts the cache automatically rather than
+    # silently serving a stale set. First attempt, not yet confirmed live
+    # whether GitHub's hosted runner actually lets a non-root cache-action
+    # step read back root-owned /var/cache/apt/archives contents cleanly
+    # -- watch the real CI run's own "Post Cache apt archives" step and
+    # its reported cache size, don't assume it worked.
+    - name: Cache apt archives
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: /var/cache/apt/archives/*.deb
+        key: apt-archives-${{ runner.os }}-${{ hashFiles('action.yml') }}
+
     - name: Install cibuildmp's own apt prerequisites
       shell: bash
       run: |
