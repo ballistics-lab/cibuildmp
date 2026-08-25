@@ -2924,6 +2924,17 @@ checked against a real run, not local reasoning):
     precisely so a future session evaluates it as a real option rather
     than re-discovering cibuildwheel's own approach from scratch.
 
+**D32's own end-to-end proof is now fully green, confirmed live, not
+assumed**: `build-usermod-unix` succeeded for real (all 5 `unix`
+arches, through `dockerrun.run()` against the exact
+`ghcr.io/.../cibuildmp-unix-manylinux-<arch>:sha-<gitsha>` images
+`verify-docker-images` just pushed moments earlier in the same run) --
+alongside `build`, all 8 `verify-docker-images` legs, and
+`usermod-dev.yml`, on the same commit. This is the actual close of
+D28's own "one real gap": a real usermod build has now run *through*
+the Docker path end to end, not just `docker build`/`docker push`
+succeeding.
+
 `windows`/`qemu`/`webassembly` wiring, and `PORT_IMAGES` actually being
 registered (still empty -- `ensure_image()`'s local build is the thing
 proving the path works at all now, registering a maintained default on
@@ -3296,7 +3307,24 @@ mid-flight" costs.
   to repair) that verifies a `micropython` binary's own actual glibc
   symbol versions against the floor its image claims, rather than
   trusting the claim silently the way today's plain "manylinux" label
-  does.
+  does. **This needs zero new dependencies, checked directly against
+  `pyproject.toml`**: `pyelftools`/`ar` are already real, existing
+  `cibuildmp` dependencies -- today only because `tools/mpy_ld.py`
+  (MicroPython's own native-`.mpy` linker, D2) is itself a Python
+  script that imports them, and `make_command()`'s own
+  `PYTHON=<sys.executable>` (`build.py`, D12's own mechanism) is what
+  makes cibuildmp's own environment satisfy that need rather than
+  requiring a separate `pip install` at build time -- not because
+  `cibuildmp`'s own code does any ELF inspection of its own yet. A real
+  glibc-floor checker for `unix` is therefore new *code* using an
+  already-present dependency, not a new dependency to add.
+  `auditwheel`'s own `elfutils.py` module (`elf_read_dt_needed`,
+  `elf_find_versioned_symbols`) is worth reading directly before
+  writing that code from scratch, confirmed live against a real
+  `pypa/auditwheel` checkout to operate on a bare ELF `Path`, fully
+  decoupled from the wheel-archive-specific code (`wheel_abi.py`,
+  `repair.py`) that can't be reused as-is (`auditwheel`'s own CLI is
+  hard-wired to a `.whl` file argument, not a bare executable).
 
 - **M10** — runner/matrix integration, fan-out-by-default for usermod
   identifiers (**D20**).
