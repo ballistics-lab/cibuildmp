@@ -189,7 +189,9 @@ def unix_make_command(opts: UnixBuildOptions, mpy_dir: Path) -> list[str]:
     ]
 
 
-def run_unix_deplibs(opts: UnixBuildOptions, mpy_dir: Path) -> None:
+def run_unix_deplibs(
+    opts: UnixBuildOptions, mpy_dir: Path, *, docker_image: str | None = None
+) -> None:
     """MICROPY_STANDALONE=1 only makes libffi a DEPLIBS entry, not a
     prerequisite of the default build target -- must run as its own step
     first, same as build-usermod-unix's own "Build libffi (deplibs)" step.
@@ -208,6 +210,16 @@ def run_unix_deplibs(opts: UnixBuildOptions, mpy_dir: Path) -> None:
         "MICROPY_STANDALONE=1",
         "deplibs",
     ]
+    if docker_image is not None:
+        from . import dockerrun
+
+        dockerrun.run(
+            command,
+            mounts=[mpy_dir, Path(opts.user_c_modules)],
+            workdir=_unix_dir(mpy_dir),
+            image=docker_image,
+        )
+        return
     try:
         subprocess.run(command, check=True)
     except subprocess.CalledProcessError as exc:
@@ -230,50 +242,76 @@ def build_unix(
     The output path is `opts.build_dir / "micropython"` --
     ports/unix/Makefile's own `PROG ?= micropython` default, unambiguous
     with no globbing needed, unlike natmod's build.collect_output().
+
+    D26's own proof-of-concept: if CIBMP_UNIX_DOCKER_IMAGE is set, the
+    actual make/deplibs commands run inside that image as a sibling
+    container instead of directly on this host -- see
+    usermod/dockerrun.py's own docstring. The host-side toolchain probe
+    below is skipped in that case: the toolchain lives inside the image,
+    not on this host's PATH, so shutil.which() would reject a perfectly
+    good docker-based build. Opt-in only, not reachable from the CLI or
+    action.yml yet.
     """
     if opts.arch not in UNIX_ARCH_SETTINGS:
         raise UsermodBuildError(
             f"unknown unix arch {opts.arch!r}. Known: "
             f"{', '.join(sorted(UNIX_ARCH_SETTINGS))}"
         )
-    if opts.arch == "x86":
-        # "x86" means exactly the same thing here as it does for natmod --
-        # the host gcc's own -m32 multilib runtime, not a separate cross
-        # toolchain -- so this reuses natmod's own probe rather than
-        # re-implementing it. Raises ToolchainError, left unwrapped: the
-        # caller already handles that alongside BuildError/SourceError the
-        # same way natmod's own cli.main() does.
-        toolchains.resolve("x86", root=toolchain_root, quiet=quiet)
-    elif opts.arch != "x64":
-        # Every other arch (aarch64/armhf/mipsel) is apt-provisioned, not
-        # a downloaded tarball -- toolchains.resolve() doesn't fit
-        # (nothing to download or cache), so this is the same
-        # shutil.which()-plus-named-package probe build_windows() already
-        # uses for its own apt-provisioned x64/x86 arches. Only checks the
-        # cross-compiler itself: armhf/mipsel's own extra host dependency
-        # (libltdl-dev, for deplibs' autoreconf step -- this module's own
-        # docstring has the story) has no equivalent shutil.which() check,
-        # the same way windows/arm64's llvm-mingw download isn't
-        # pre-validated piece by piece either.
-        settings = UNIX_ARCH_SETTINGS[opts.arch]
-        gcc = shutil.which(f"{settings.cross_compile}gcc")
-        if gcc is None:
-            raise UsermodBuildError(
-                f"unix/{opts.arch}: {settings.cross_compile}gcc is not on "
-                f"PATH. Install it with: apt install {settings.apt_package}"
-            )
+
+    from . import dockerrun
+
+    docker_image = dockerrun.image_for_port("unix")
+
+    if docker_image is None:
+        if opts.arch == "x86":
+            # "x86" means exactly the same thing here as it does for
+            # natmod -- the host gcc's own -m32 multilib runtime, not a
+            # separate cross toolchain -- so this reuses natmod's own
+            # probe rather than re-implementing it. Raises ToolchainError,
+            # left unwrapped: the caller already handles that alongside
+            # BuildError/SourceError the same way natmod's own cli.main()
+            # does.
+            toolchains.resolve("x86", root=toolchain_root, quiet=quiet)
+        elif opts.arch != "x64":
+            # Every other arch (aarch64/armhf/mipsel) is apt-provisioned,
+            # not a downloaded tarball -- toolchains.resolve() doesn't fit
+            # (nothing to download or cache), so this is the same
+            # shutil.which()-plus-named-package probe build_windows()
+            # already uses for its own apt-provisioned x64/x86 arches.
+            # Only checks the cross-compiler itself: armhf/mipsel's own
+            # extra host dependency (libltdl-dev, for deplibs' autoreconf
+            # step -- this module's own docstring has the story) has no
+            # equivalent shutil.which() check, the same way
+            # windows/arm64's llvm-mingw download isn't pre-validated
+            # piece by piece either.
+            settings = UNIX_ARCH_SETTINGS[opts.arch]
+            gcc = shutil.which(f"{settings.cross_compile}gcc")
+            if gcc is None:
+                raise UsermodBuildError(
+                    f"unix/{opts.arch}: {settings.cross_compile}gcc is not "
+                    f"on PATH. Install it with: apt install "
+                    f"{settings.apt_package}"
+                )
 
     if UNIX_ARCH_SETTINGS[opts.arch].standalone:
-        run_unix_deplibs(opts, mpy_dir)
+        run_unix_deplibs(opts, mpy_dir, docker_image=docker_image)
 
     command = unix_make_command(opts, mpy_dir)
-    try:
-        subprocess.run(command, check=True)
-    except subprocess.CalledProcessError as exc:
-        raise UsermodBuildError(
-            f"unix/{opts.arch}: `{' '.join(command)}` failed with exit code "
-            f"{exc.returncode}"
-        ) from exc
+    if docker_image is not None:
+        dockerrun.run(
+            command,
+            mounts=[mpy_dir, Path(opts.user_c_modules)],
+            workdir=_unix_dir(mpy_dir),
+            image=docker_image,
+        )
+    else:
+        try:
+            subprocess.run(command, check=True)
+        except subprocess.CalledProcessError as exc:
+            raise UsermodBuildError(
+                f"unix/{opts.arch}: `{' '.join(command)}` failed with exit "
+                f"code {exc.returncode}"
+            ) from exc
 
     binary = opts.build_dir / "micropython"
     if not binary.exists():

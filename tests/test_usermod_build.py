@@ -777,3 +777,74 @@ def test_windows_arm64_build_failure_names_the_command(monkeypatch, tmp_path):
             windows_opts(arch="arm64", build_dir=tmp_path / "build-arm64"),
             tmp_path / "mpy",
         )
+
+
+# ── unix / docker strategy (D26 proof-of-concept) ───────────────────────────
+
+
+def test_unix_docker_image_skips_host_toolchain_probe(monkeypatch, tmp_path):
+    # CIBMP_UNIX_DOCKER_IMAGE set: the toolchain lives inside the image, not
+    # on this host's PATH, so build_unix() must not call shutil.which() at
+    # all -- a bare-host probe would reject a perfectly good docker build.
+    monkeypatch.setenv("CIBMP_UNIX_DOCKER_IMAGE", "cibuildmp-unix:local")
+    monkeypatch.setattr(
+        build.shutil,
+        "which",
+        lambda name: pytest.fail(f"unexpected host toolchain probe: {name}"),
+    )
+    build_dir = tmp_path / "build-aarch64"
+    build_dir.mkdir()
+    (build_dir / "micropython").write_bytes(b"\x7fELF")
+
+    calls = []
+    monkeypatch.setattr(
+        "cibuildmp.usermod.dockerrun.subprocess.run",
+        lambda cmd, **k: calls.append(cmd) or None,
+    )
+
+    result = build_unix(opts("aarch64", build_dir=build_dir), tmp_path / "mpy")
+
+    assert result == build_dir / "micropython"
+    assert len(calls) == 1
+    docker_command = calls[0]
+    assert docker_command[:3] == ["docker", "run", "--rm"]
+    assert "cibuildmp-unix:local" in docker_command
+    assert "make" in docker_command
+
+
+def test_unix_docker_image_mounts_mpy_dir_and_user_c_modules(monkeypatch, tmp_path):
+    monkeypatch.setenv("CIBMP_UNIX_DOCKER_IMAGE", "cibuildmp-unix:local")
+    build_dir = tmp_path / "build-x64"
+    build_dir.mkdir()
+    (build_dir / "micropython").write_bytes(b"\x7fELF")
+
+    calls = []
+    monkeypatch.setattr(
+        "cibuildmp.usermod.dockerrun.subprocess.run",
+        lambda cmd, **k: calls.append(cmd) or None,
+    )
+
+    mpy_dir = tmp_path / "mpy"
+    build_unix(opts("x64", build_dir=build_dir), mpy_dir)
+
+    docker_command = calls[0]
+    assert f"{mpy_dir}:{mpy_dir}" in docker_command
+    assert "/gh/ws/micropython/usermod:/gh/ws/micropython/usermod" in docker_command
+
+
+def test_unix_no_docker_image_env_uses_bare_host_as_before(monkeypatch, tmp_path):
+    # No CIBMP_UNIX_DOCKER_IMAGE set: every existing caller's behaviour is
+    # unchanged -- the default stays a bare subprocess.run(), not docker.
+    monkeypatch.delenv("CIBMP_UNIX_DOCKER_IMAGE", raising=False)
+    build_dir = tmp_path / "build-x64"
+    build_dir.mkdir()
+    (build_dir / "micropython").write_bytes(b"\x7fELF")
+
+    calls = []
+    monkeypatch.setattr(
+        build.subprocess, "run", lambda cmd, **k: calls.append(cmd) or None
+    )
+
+    build_unix(opts("x64", build_dir=build_dir), tmp_path / "mpy")
+
+    assert calls[0][0] == "make"
