@@ -74,6 +74,7 @@ jobs:
           - unix-manylinux-mipsel
           - windows
           - qemu
+          - webassembly
     steps:
       - uses: actions/checkout@v7
 

@@ -2351,11 +2351,21 @@ followed by one big wiring pass at the end.
      `verify-docker-images`'s own matrix, so it now builds (and
      publishes, on a real push) for real like every other Dockerfile
      here, not left open as a documented gap.
-   - `resources/docker/webassembly.Dockerfile` -- emsdk is downloaded at build
-     time (`usermod/emsdk.py`), so this image may need close to
-     nothing baked in beyond `python3`/`git`/`curl`/`ca-certificates`;
-     confirm live whether emsdk's own toolchain needs anything else
-     from the base OS first.
+   - **`resources/docker/webassembly.Dockerfile` -- written, base OS
+     packages only (`build-essential`, `python3`), intentionally
+     incomplete on its own.** `emsdk` itself is not baked in at all --
+     `usermod/emsdk.py`'s own `resolve_emsdk()` downloads a pinned
+     prebuilt tarball into `sources.cache_root()` on the bare host; per
+     step 4 (below, not yet implemented), that directory needs
+     bind-mounting into the container at *run* time, not baked into
+     the image at *build* time, or every `docker run --rm` would
+     redownload it (an ordinary container's own filesystem is thrown
+     away after each run). Real, live-checked finding while writing
+     this: `ports/webassembly/Makefile` also declares `TERSER`/`NODE`
+     (`npx terser`, for `.min.mjs`) -- but only the `min`/`repl`/`test`
+     targets touch them, never the default `all` target
+     `webassembly_make_command()` always builds, so Node.js/npm are
+     deliberately not installed here at all, not an oversight.
    - `resources/docker/esp32.Dockerfile` -- the heaviest one: ESP-IDF itself is
      a multi-gigabyte checkout with its own Python env bootstrap
      (`usermod/espidf.py`). Worth deciding explicitly whether ESP-IDF
