@@ -120,6 +120,8 @@ jobs:
   deploy:
     needs: [build]
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
 
     # Dynamic: real PyPI on a tag push, TestPyPI on an explicit opt-in
     # dispatch, otherwise a plain build that needs no publish permissions.

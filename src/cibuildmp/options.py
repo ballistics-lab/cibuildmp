@@ -102,9 +102,19 @@ class Options:
         package_dir: Path,
         config_file: Path | None = None,
         env: Mapping[str, str] | None = None,
+        preread: tuple[Path | None, dict[str, Any]] | None = None,
     ) -> Options:
+        """`preread`, when given, is `(config_path, raw)` the caller
+        already got from `read_config()` -- `cli.py`'s own mode-detection
+        peek has to read the file once to decide natmod vs usermod
+        (usermod/options.py's `UsermodOptions.load()` takes the same
+        parameter, for the same reason), so this avoids reading and
+        parsing the same TOML file a second time on the natmod path.
+        """
         environ: Mapping[str, str] = os.environ if env is None else env
-        config_path, raw = _read_config(package_dir, config_file)
+        config_path, raw = (
+            preread if preread is not None else read_config(package_dir, config_file)
+        )
 
         natmod = dict(raw.get("natmod") or {})
         overrides = list(raw.get("overrides") or [])
@@ -234,9 +244,15 @@ class Options:
         )
 
 
-def _read_config(
+def read_config(
     package_dir: Path, config_file: Path | None
 ) -> tuple[Path | None, dict[str, Any]]:
+    """The raw parsed `cibuildmp.toml`/`[tool.cibuildmp]` tree, before any
+    mode-specific interpretation. Public (not `Options.load()`-internal)
+    so `cli.py` can peek at which top-level tables (`natmod`/`usermod`)
+    are present to auto-detect build mode, and so `usermod/options.py`
+    can read the same file without a second, differently-shaped parser.
+    """
     if config_file is not None:
         if not config_file.is_file():
             raise ConfigError(f"config file not found: {config_file}")

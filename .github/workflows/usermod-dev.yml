@@ -1,0 +1,57 @@
+name: usermod dev
+
+# Scratch CI for M9's own usermod work: a plain on-push trigger on this one
+# development branch, not a pull_request -- opening a PR is a separate,
+# explicit decision (docs/BACKLOG.md's own development history), not
+# something this workflow should force. Delete or fold into
+# publish.yml/build-examples.yml once M9 lands on main.
+#
+# No windows-latest job: D18's windows port used to need one (MSYS2
+# orchestration could not be verified in a Linux sandbox at all), first for
+# all three arches, then just for arm64 -- both stages superseded by plain
+# Linux-hosted cross-compiles (docs/BACKLOG.md's D18: apt-installed
+# mingw-w64 GCC for x64/x86, a downloaded llvm-mingw toolchain for arm64).
+# All three are fully verifiable on ubuntu-latest, the same as
+# unix/qemu/webassembly/esp32, none of which get a dedicated CI job either.
+
+on:
+  push:
+    branches: [claude/cibuildmp-usermod-support-fvojm8]
+  workflow_dispatch:
+
+# Same reasoning build-examples.yml's own concurrency block now has: this
+# workflow only ever runs against one branch anyway, so a superseded run
+# from an earlier commit is pure waste once a newer push lands -- cancel
+# it rather than let it finish.
+concurrency:
+  group: usermod-dev-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - run: uv sync
+      - run: uv run ruff check src tests
+      - run: uv run ruff format --check src tests
+      - run: uv run pyright src
+      - run: uv run pytest -q
+
+  # unix-aarch64-cross-check (the one-off diagnostic that used to live
+  # here) got its answer and is gone: a real ubuntu-latest runner's own
+  # apt does resolve gcc-aarch64-linux-gnu + libffi-dev:arm64 once its
+  # arm64 sources point at ports.ubuntu.com instead of the default
+  # amd64-only mirror -- confirmed live, a genuine linked ARM aarch64 ELF
+  # with a real custom C module built in. Folded into a real
+  # cross_compile="aarch64-linux-gnu-" entry in UNIX_ARCH_SETTINGS
+  # (usermod/build.py); the "test" job above now covers it the same way
+  # it covers every other arch, via tests/test_usermod_build.py.
+  #
+  # composite-action-docker-reach-check (the other one-off diagnostic
+  # that used to live here) got its answer too: a plain, non-Docker-action
+  # `run:` step on ubuntu-latest genuinely reaches the runner's own live
+  # Docker daemon -- confirmed live, a real `docker info` (Docker Engine
+  # 28.0.4) and a real `docker run --rm hello-world` pull-and-run, no
+  # setup step needed at all. Folded into docs/BACKLOG.md's own D28.

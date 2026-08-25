@@ -11,7 +11,7 @@ from pathlib import Path
 
 from . import __version__
 from .build import BuildError, BuildResult, build_target
-from .options import BuildOptions, ConfigError, Options
+from .options import BuildOptions, ConfigError, Options, read_config
 from .sources import (
     SourceError,
     build_mpy_cross,
@@ -19,6 +19,7 @@ from .sources import (
     fetch_micropython,
     read_mpy_abi,
 )
+from .stepsummary import write_step_summary
 from .targets import (
     LATEST_KNOWN_ABI,
     NATMOD_ARCHS,
@@ -27,6 +28,7 @@ from .targets import (
     is_abi_known,
 )
 from .toolchains import ResolvedToolchain, ToolchainError, resolve
+from .usermod import cli as usermod_cli
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -125,12 +127,40 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--platform",
-        default="natmod",
-        choices=["natmod"],
-        help="Build mode. Only natmod is implemented; usermod is planned "
-        "(see docs/BACKLOG.md).",
+        default=None,
+        choices=["natmod", "usermod"],
+        help="Build mode. Auto-detected by default from which top-level table "
+        "the config has -- [natmod] or [usermod] -- the same way cibuildwheel "
+        "infers its own platform from the host. Only needed when a config "
+        "defines both tables, to say which one this invocation is for. Also "
+        "settable via CIBMP_PLATFORM -- the same generic env-override every "
+        "cibuildmp.toml key already has (options.py's own opt()), not a "
+        "dedicated action.yml input: a caller sets it directly on the "
+        "`uses: cibuildmp` step's own env:, the same shape CIBMP_VERSION "
+        "already uses, matching cibuildwheel's own CIBW_BUILD (an env var,"
+        " never an action.yml input either).",
     )
     return parser
+
+
+def detect_mode(raw: dict, explicit: str | None) -> str | None:
+    """The build mode for this invocation: `explicit` (--platform) if
+    given, otherwise inferred from which top-level table `raw` has.
+
+    Returns None when inference is genuinely ambiguous (both [natmod]
+    and [usermod] present, no --platform) -- main() turns that into an
+    error rather than silently guessing. Neither table present defaults
+    to natmod, preserving every existing config's behaviour untouched: a
+    repo following the conventional natmod/ layout with no config at all
+    already builds natmod today, and must keep doing so.
+    """
+    if explicit is not None:
+        return explicit
+    has_natmod = "natmod" in raw
+    has_usermod = "usermod" in raw
+    if has_natmod and has_usermod:
+        return None
+    return "usermod" if has_usermod else "natmod"
 
 
 def _plan_line(
@@ -174,6 +204,22 @@ def build(options: Options, targets: list[Target], *, toolchain: str = "auto") -
     """
     resolved = [options.build_options(t) for t in targets]
     total = len(resolved)
+
+    # `build/<arch>*/` is cibuildmp's own scratch space (collect_output()
+    # globs it, then immediately copies the .mpy into output_dir -- nothing
+    # downstream ever reads it again), not something a Makefile owner is
+    # expected to manage across runs. Left alone, a directory from a
+    # *previous* invocation can outlive this one: two arches that share a
+    # name prefix (`xtensa` / `xtensawin`) make collect_output()'s own
+    # `build/{arch}*/` glob genuinely ambiguous once the shorter arch's
+    # fresh directory exists alongside the longer arch's stale one, found
+    # for real running this exact matrix twice in a row without cleaning in
+    # between. One rmtree per distinct module_root, before anything builds,
+    # keeps every run's `build/` the product of only that run.
+    for module_root in dict.fromkeys(
+        options.package_dir / bo.module_dir for bo in resolved
+    ):
+        shutil.rmtree(module_root / "build", ignore_errors=True)
 
     # Toolchains are resolved before the plan is printed, not after: where a
     # toolchain's prefix is not the one dynruntime.mk hardcodes, resolution
@@ -262,6 +308,7 @@ def build(options: Options, targets: list[Target], *, toolchain: str = "auto") -
     print(f"\ncibuildmp: {total} target(s) built in {total_duration:.1f}s")
     for result in results:
         print(f"  {result.identifier}: {result.output.name} ({result.size} bytes)")
+    write_step_summary(results, total_duration)
     return 0
 
 
@@ -279,7 +326,37 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     try:
-        options = Options.load(args.package_dir, args.config_file)
+        preread = read_config(args.package_dir, args.config_file)
+    except ConfigError as exc:
+        if args.debug_traceback:
+            raise
+        print(f"cibuildmp: error: {exc}", file=sys.stderr)
+        return 2
+
+    platform_env = os.environ.get("CIBMP_PLATFORM")
+    if platform_env and platform_env not in {"natmod", "usermod"}:
+        print(
+            f"cibuildmp: error: CIBMP_PLATFORM={platform_env!r} is not "
+            f"'natmod' or 'usermod'",
+            file=sys.stderr,
+        )
+        return 2
+
+    mode = detect_mode(preread[1], args.platform or platform_env or None)
+    if mode is None:
+        print(
+            "cibuildmp: error: config has both [natmod] and [usermod] -- pass "
+            "--platform natmod or --platform usermod to say which one this "
+            "invocation is for",
+            file=sys.stderr,
+        )
+        return 2
+
+    if mode == "usermod":
+        return usermod_cli.run(args, args.package_dir, args.config_file, preread)
+
+    try:
+        options = Options.load(args.package_dir, args.config_file, preread=preread)
         if args.output_dir is not None:
             options.output_dir = args.output_dir
         if args.archs is not None:

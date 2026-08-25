@@ -65,6 +65,18 @@ include = ["cibuildmp*"]
 # Explicit rather than relying on include-package-data: resources/natmod.toml
 # holds every pinned toolchain URL, checksum and arch table, so a wheel that
 # silently omits it is a wheel that fails at import.
+#
+# The per-port Dockerfiles used to ship here too (resources/docker/*, D28),
+# back when an installed cibuildmp with no image registered would build one
+# itself from a vendored copy. No longer: the user's own call -- cibuildmp
+# should behave like cibuildwheel's own container runtime (oci_container.py),
+# which never builds an image at all, only ever pulls an already-published,
+# pinned one. Building is now a repo-only, CI-only concern
+# (docker/*.Dockerfile at the repo root, published by
+# publish-docker-images.yml, mirroring pypa/manylinux's own top-level
+# docker/ -- that repo has no pyproject.toml either, since it is pure
+# image-building infrastructure, never something `pip install`s), so
+# nothing under docker/ needs to ship inside the wheel any more.
 [tool.setuptools.package-data]
 cibuildmp = ["resources/*.toml"]
 

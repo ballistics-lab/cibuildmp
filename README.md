@@ -21,9 +21,19 @@ into a port's own firmware build) C extensions.
 describes its whole target matrix. The tool resolves it into build
 identifiers, fetches MicroPython, builds `mpy-cross`, provisions each
 target's cross toolchain, and runs the build -- the same way locally as on a
-runner. This is the direction the project is going; see
-[`docs/BACKLOG.md`](docs/BACKLOG.md) for the design decisions and what is
-implemented so far.
+runner. This is the direction the project is going, and the intended
+primary way to use it going forward -- run directly (`uv tool install
+cibuildmp` or `pip install cibuildmp`; usermod builds additionally need a
+real, reachable Docker daemon on whatever host runs `cibuildmp` itself --
+D30, D33), or in CI via this repo's own root `action.yml` (`uses:
+ballistics-lab/cibuildmp@<tag>`) -- a composite action that installs
+`cibuildmp` fresh on the runner and invokes it directly, not a Docker
+action any more (moved off that on purpose: `cibuildmp` itself launches
+sibling Docker containers for usermod's own per-port builds, which needs
+to run on the bare runner rather than inside one already, see
+`docs/BACKLOG.md`'s own D26/D28). See
+[`docs/BACKLOG.md`](docs/BACKLOG.md) for the design decisions and what
+is implemented so far.
 
 ```console
 $ cibuildmp --dry-run
@@ -36,14 +46,99 @@ cibuildmp: 10 target(s) against MicroPython v1.28.0
 Drop `--dry-run` and it builds for real: each target lands in its own
 `output-dir/<identifier>/` directory (`mpyhouse/mpy6.3-natmod-x64/`, …)
 alongside a `package.json` once `version` is set — see
-[`examples/template`](examples/template) and
+[`examples/template`](examples/template),
 [`examples/wasm2mpy`](examples/wasm2mpy) (native source is WebAssembly,
 compiled through `wasm2c` — the natmod contract doesn't care what
-produced the C).
+produced the C), and [`examples/usermod-unix`](examples/usermod-unix)
+(a `USER_C_MODULES` module, all five real `unix` arches).
 
-**The composite actions.** The original building blocks, still the way every
-usermod target is built today. `cibuildmp` is absorbing them one at a time
-(natmod first); until it does, they remain fully supported.
+### Running via Docker
+
+```console
+$ docker build -t cibuildmp .                                   # latest tagged release
+$ docker build -t cibuildmp --build-arg CIBUILDMP_REF=v0.3.0 .   # a specific tag
+$ docker run --rm -it \
+    -v cibuildmp-cache:/root/.cache/cibuildmp \
+    -v "$PWD":/work -w /work \
+    cibuildmp --dry-run
+```
+
+The cache volume matters: without it, every run re-downloads every
+toolchain and re-fetches MicroPython from scratch. Drop `--dry-run` for
+a real build the same way as above; anything after `cibuildmp` in the
+`docker run` line is passed straight through as CLI arguments (`--only
+<identifier>`, `--archs x64,x86`, …).
+
+The image (`Dockerfile`, Ubuntu 24.04) installs only what `cibuildmp`
+cannot self-provision — every other toolchain (`arm-none-eabi-`,
+`xtensa-esp-elf-`, `riscv-none-elf-`, `emsdk`, ESP-IDF, `llvm-mingw`,
+…) downloads its own pinned copy into the cache volume above on first
+use (**D3**). Running `cibuildmp` directly on your own Ubuntu/Debian
+machine instead of through Docker needs the same set:
+
+```console
+$ sudo apt install build-essential git ca-certificates curl python3 \
+    gcc-13-multilib gcc-mingw-w64-x86-64 gcc-mingw-w64-i686 libusb-1.0-0
+```
+
+`gcc-13-multilib`, not the plain `gcc-multilib` package — a real,
+documented apt `Conflicts:` against every `gcc-N-<target>-linux-gnu`
+cross-compiler package (found the hard way, a real `docker build`
+failure). Harmless if you only ever build `x64`/`x86`/`windows` and
+never install any of the cross packages below, but there is no reason
+to risk it: `gcc-13-multilib` provides the identical `-m32` multilib
+support with no such conflict, verified live.
+
+One more step this substitution needs: `gcc -m32` looks for
+`<asm/errno.h>` and `<ffi.h>` (`unix/x86`'s own `modffi.c`) under
+`/usr/include/i386-linux-gnu`, a directory no apt package creates by
+default on an amd64 Ubuntu host — confirmed live, a real
+`fatal error: asm/errno.h: No such file or directory` from natmod's own
+`x86` arch build. Unlike `arm64` below, `i386` is not a "ports"
+architecture — it stays on the regular `archive.ubuntu.com`/
+`security.ubuntu.com` mirrors, so no mirror surgery is needed, only
+enabling it and installing the real i386 packages:
+
+```console
+$ sudo dpkg --add-architecture i386
+$ sudo apt update && sudo apt install linux-libc-dev:i386 libffi-dev:i386
+```
+
+(An earlier version of this doc symlinked
+`i386-linux-gnu -> x86_64-linux-gnu` instead — that covers `asm/errno.h`
+but silently feeds `modffi.c` the wrong-arch, 64-bit `ffitarget.h`, which
+`libffi` itself refuses with `#warning ... X86 IS DEFINED` under
+`-Werror`, a real build failure this replaced it after. `ffitarget.h`
+genuinely differs by word size — there is no shortcut around installing
+the real `:i386` packages.)
+
+Plus, only if you build `unix/aarch64`, `unix/armhf`, or `unix/mipsel`
+(see [Target support](#target-support) below for exactly which apt
+package each needs) — `unix/aarch64` alone needs one extra step first,
+since `libffi-dev:arm64` is a target-arch package Ubuntu's default
+mirrors don't carry. (A plain `apt install` like the one below pulls
+each cross-compiler's own `libc6-dev-<arch>-cross` automatically —
+Ubuntu ships it as a `Recommends:`, on by default. Only the Dockerfiles
+building the image above skip it deliberately, with
+`--no-install-recommends`, and name it explicitly instead — see that
+Dockerfile's own comment if you ever pass that flag here too.)
+
+```console
+$ sudo dpkg --add-architecture arm64
+# then point apt's own arm64 sources at ports.ubuntu.com -- see
+# action.yml's own apt-prerequisites step for the exact deb822 stanzas
+# this needs on Ubuntu 24.04+, or apt-add-repository on older releases
+$ sudo apt update && sudo apt install \
+    gcc-aarch64-linux-gnu libffi-dev:arm64 \
+    gcc-arm-linux-gnueabihf gcc-mipsel-linux-gnu libltdl-dev
+```
+
+**The composite actions.** The original building blocks, and still the
+supported path for CI wanting each usermod target built as its own job
+today. `cibuildmp` is absorbing them one at a time (natmod first); until
+it does, they remain fully supported, but are no longer where new work
+starts -- see [Composite actions](#composite-actions-githubactions)
+further down.
 
 ## Why this exists
 
@@ -94,9 +189,196 @@ identical:
 
 Pin a tag, as before -- not `@main`, not a commit SHA.
 
-## What's here
+## Conventions this repo assumes
 
-### Composite actions (`.github/actions/`)
+A module following the natmod/usermod layout looks like:
+
+```
+natmod/
+  Makefile              # includes py/dynruntime.mk, dispatches on ARCH=
+usermod/
+  micropython.cmake
+  micropython.mk
+  manifest.py
+```
+
+`build-natmod` only assumes `natmod/Makefile` (or whatever
+`natmod_dir` points at) accepts `ARCH=` and `MPY_DIR=` and has a `dist`
+target that drops the built `.mpy` under `build/<arch>*/`. Nothing here
+assumes a specific module name, precision scheme, or test framework --
+those stay in the consuming repo.
+
+**One more requirement for the `cibuildmp` CLI specifically** (not
+`build-natmod`, which gives every arch its own job and checkout): scope
+`dynruntime.mk`'s `BUILD` variable by `$(ARCH)` --
+`BUILD = .obj/$(ARCH)` before the `include`, kept outside `build/` so it
+does not collide with the `dist` output the CLI globs for (see
+`examples/template/natmod/Makefile`). `cibuildmp` with no `--only` runs
+every target sequentially in one `natmod/` tree (**D9**), and
+`dynruntime.mk` defaults `BUILD ?= build` unscoped, so without this a
+second `ARCH=` in the same invocation finds the previous arch's own
+object files "up to date" (same path, source unchanged) and skips
+rebuilding -- the merged `$(MOD).mpy` silently stays the *first* arch's
+binary. `cibuildmp` catches this itself (the header-arch verification
+that is its `auditwheel` equivalent fails loudly instead), but scoping
+`BUILD` avoids paying for the failed build at all.
+
+If the module also uses `rv32imc`'s `arch-flags` (**D15**), `BUILD` needs
+`$(ARCH_FLAGS)` folded in too --
+`BUILD = .obj/$(ARCH)$(if $(ARCH_FLAGS),+$(ARCH_FLAGS))`. Same bug, second
+axis: `rv32imc`'s own object file does not depend on `ARCH_FLAGS` at all,
+so building several arch-flags variants back to back in one invocation
+(`arch-flags = ["", "zba", "zba,zcmp"]`) reuses the first variant's cached
+`.o`/`.mpy` for every later one just as silently, even though `$(ARCH)`
+never changed. Found the same way as the `$(ARCH)` case: by actually
+running the whole variant list, not by inspection.
+
+None of this cares what produced the `.c` files `SRC` lists --
+[`examples/wasm2mpy`](examples/wasm2mpy) compiles WebAssembly to C via
+`wasm2c` in a Makefile rule before the same `dynruntime.mk` flow takes
+over, and needs nothing from `cibuildmp` beyond `module-dir = "."` and an
+`extra-make-args` entry for its own `APP=` variable.
+
+## Target support
+
+### Natmod support per arch
+
+All ten `ARCH=` values `py/dynruntime.mk` accepts (`docs/BACKLOG.md`'s
+own **M0**–**M5**), each self-provisioning its own toolchain (**D3**) —
+adopted in all three consuming repos and verified on real CI, arch by
+arch, not just `--dry-run`.
+
+| Arch        | Toolchain              | Provisioning         |
+|-------------|-------------------------|-----------------------|
+| `x64`       | host gcc                | none needed           |
+| `x86`       | host gcc (`-m32`)       | apt only[^apt-x86]    |
+| `armv6m`    | `arm-none-eabi-`        | self-downloaded, cached |
+| `armv7m`    | `arm-none-eabi-`        | self-downloaded, cached |
+| `armv7emsp` | `arm-none-eabi-`        | self-downloaded, cached |
+| `armv7emdp` | `arm-none-eabi-`        | self-downloaded, cached |
+| `xtensa`    | `xtensa-lx106-elf-`     | self-downloaded, cached |
+| `xtensawin` | `xtensa-esp32-elf-`     | self-downloaded, cached |
+| `rv32imc`   | `riscv64-unknown-elf-`  | self-downloaded, cached |
+| `rv64imc`   | `riscv64-unknown-elf-`  | self-downloaded, cached |
+
+[^apt-x86]: `apt install gcc-multilib` — no downloadable tarball exists for this one; **D3**'s own "why not docker for x86" note.
+
+### Usermod support per port/arch
+
+Upstream MicroPython has 20 ports (`ports/*` in a real checkout); every
+one of them is listed below for orientation, not just the ones this
+project covers. This is `usermod/build.py`'s own build-driver layer
+(`docs/BACKLOG.md`'s **M6**–**M9**) — live-verified against a real
+MicroPython checkout, including a real custom `USER_C_MODULES` module
+for every ✅ row.
+
+**Wired into the `cibuildmp` CLI now (M9b)**: a `[usermod]` table in
+`cibuildmp.toml` (plus per-port `[usermod.<port>]` sub-tables for the
+real axis — `archs` for `unix`/`windows`, `boards` for `esp32`) is
+auto-detected the same way `[natmod]` already is — no `--mode`/
+`--platform` flag needed unless a config genuinely defines both tables
+at once. Verified live end to end, not just against the hermetic
+suite: a real `[usermod]` config with a real custom C module, run
+through the actual `cibuildmp` CLI (no mocking), produced a genuine
+linked `unix-x64` binary that runs and actually calls into that module.
+See `docs/BACKLOG.md`'s **D23**/**M9b** for the full design (identifier
+scheme, why there's no `package.json` for usermod output, what's
+deliberately not wired yet — `[[overrides]]`, `extra-files`).
+
+**Exercised through the real `action.yml` end to end** —
+[`examples/usermod-unix`](examples/usermod-unix) builds all five real
+`unix` arches (`x64`/`x86`/`aarch64`/`armhf`/`mipsel`) through the
+actual action on every push (`build-examples.yml`), not just the
+hermetic test suite — real linked binaries, collected with their
+executable bit intact, confirmed live on CI. `unix` and `webassembly`
+now build **Docker-only** (`docs/BACKLOG.md`'s own **D28**/**D30**: one
+Docker image per port, no bare-host fallback for either) —
+[`examples/usermod-webassembly`](examples/usermod-webassembly) proves
+the same path for `webassembly`, which has no arch axis and one
+combined image with emsdk baked in. `windows`/`qemu`/`esp32` are not
+wired into `action.yml` yet — see `docs/BACKLOG.md`'s own **D28** for
+the plan. The composite actions above (`build-usermod-*`) remain the
+supported, verified production path for the ports `action.yml` doesn't
+cover yet.
+
+| Port          | Target                    | Provisioning                    | Status |
+|---------------|----------------------------|-----------------------------------|--------|
+| `unix`        | `x64`                      | host gcc                          | ✅ |
+| `unix`        | `x86`                      | apt only[^apt-x86]                | ✅ |
+| `unix`        | `aarch64`                  | `apt install gcc-aarch64-linux-gnu libffi-dev:arm64`[^ports-mirror] | ✅ |
+| `unix`        | `armhf`                    | `apt install gcc-arm-linux-gnueabihf libltdl-dev`[^deplibs-static] | ✅ |
+| `unix`        | `mipsel`                   | `apt install gcc-mipsel-linux-gnu libltdl-dev`[^deplibs-static]    | ✅ |
+| `qemu`        | `MPS2_AN385` (Cortex-M3)   | `arm-none-eabi-`[^qemu-shared]     | ✅ |
+| `qemu`        | RISC-V boards               | `riscv64-unknown-elf-`             | ❌[^not-attempted] |
+| `webassembly` | `pyscript` variant          | `emsdk`[^linux-x64-only]           | ✅ |
+| `esp32`       | `ESP32_GENERIC`             | ESP-IDF v5.5.1, self-cloned + installed | ✅ |
+| `esp32`       | other ESP32-family boards   | same ESP-IDF resolver              | ⚠️[^esp32-other] |
+| `windows`     | `x64`                       | `apt install gcc-mingw-w64-x86-64` | ✅ |
+| `windows`     | `x86`                       | `apt install gcc-mingw-w64-i686`   | ✅ |
+| `windows`     | `arm64`                     | `llvm-mingw`[^linux-x64-only]      | ✅ |
+| `rp2`         | any board                   | Pico SDK                          | ❌[^rp2-gap] |
+| `stm32`       | STM32 MCUs                 | —                                  | ❌[^out-of-scope] |
+| `esp8266`     | Espressif ESP8266           | —                                  | ❌[^out-of-scope] |
+| `samd`        | Microchip SAMD21/SAMD51     | —                                  | ❌[^out-of-scope] |
+| `nrf`         | Nordic nRF51/52             | —                                  | ❌[^out-of-scope] |
+| `mimxrt`      | NXP i.MX RT 10xx             | —                                  | ❌[^out-of-scope] |
+| `renesas-ra`  | Renesas RA family            | —                                  | ❌[^out-of-scope] |
+| `cc3200`      | TI CC3200 (Wi-Fi SoC)         | —                                  | ❌[^out-of-scope] |
+| `alif`        | Alif Ensemble MCUs           | —                                  | ❌[^out-of-scope] |
+| `pic16bit`    | Microchip PIC24/dsPIC33       | —                                  | ❌[^out-of-scope] |
+| `powerpc`     | PowerPC (Microwatt/qemu)      | —                                  | ❌[^out-of-scope] |
+| `zephyr`      | Zephyr RTOS (any board)       | —                                  | ❌[^zephyr-gap] |
+| `bare-arm`    | minimal bare-metal reference — not a real target | — | ❌[^out-of-scope] |
+| `minimal`     | minimal reference port — not a real target | —          | ❌[^out-of-scope] |
+| `embed`       | embeddable library, not a flashable target | —          | ❌[^out-of-scope] |
+
+[^ports-mirror]: Cross-compiles cleanly from an x86_64 host — verified live, a real linked `ARM aarch64` ELF with a custom C module built in. `libffi-dev:arm64` needs `dpkg --add-architecture arm64`'s apt sources pointed at `ports.ubuntu.com` first: Ubuntu's default `archive.ubuntu.com`/`security.ubuntu.com` mirrors only carry `amd64`/`i386`. Real for any Ubuntu host, not sandbox-specific.
+[^deplibs-static]: Cross-compiles cleanly, statically linking a real `deplibs`-built libffi (`MICROPY_STANDALONE=1`, not apt's dynamic one — verified live, a real linked `ARM`/`MIPS32` ELF with a custom C module built in). `libltdl-dev` is the one non-obvious part: without it, `deplibs`' own `./autogen.sh` (regenerating vendored libffi's `configure` via `autoreconf`) fails on `"possibly undefined macro: LT_SYS_SYMBOL_USCORE"` — `autoconf`/`automake`/`libtool` alone don't ship `ltdl.m4`, only `libltdl-dev` does.
+[^qemu-shared]: Shared with natmod's own `armv7m` toolchain — resolved once, reused, not pinned a second time.
+[^not-attempted]: `ports/qemu` also has RISC-V boards; a real, cheap-to-add extension later, not attempted since nothing here exercises it yet.
+[^linux-x64-only]: Self-downloaded and cached; the pinned release is `linux-x64`-hosted only today.
+[^esp32-other]: Selectable via the same `Esp32BuildOptions`, not itself live-verified — only `ESP32_GENERIC` was actually built and checked.
+[^rp2-gap]: `resources/usermod.toml` already pins its manifest path and `cmake` build-system (target selection is ready), but `usermod/build.py` has no `build_rp2()` driver at all yet — no Pico SDK resolver, no live verification, not started.
+[^out-of-scope]: Out of scope, not started: no reference CI recipe to build this against and no pinned data at all -- `a7p`'s own `mp-usermod.yml` (the real production reference this project's usermod support is built from) doesn't cover it either. Scoped in only when a real consumer needs it, the same way `windows`/arm64 was (see **D18**'s own addenda).
+[^zephyr-gap]: Also out of scope, for a second, structural reason beyond "no reference workflow": `zephyr` doesn't fit this project's own board-selection model at all -- **D22**, confirmed directly against upstream: no `board.json` anywhere in `ports/zephyr/boards/`, board selection is a `<board>.conf`/`<board>.overlay` pair instead, a shape the vendored `boards.py` scanner has nothing to match.
+
+No Windows or macOS host is needed for any of the seven ✅/⚠️ usermod
+targets above, `windows`'s own three arches included — every toolchain
+there is either already on a Linux host or downloads/apt-installs onto
+one.
+
+## Roadmap
+
+`cibuildmp` is the roadmap. [`docs/BACKLOG.md`](docs/BACKLOG.md) is the
+plan of record: the decisions taken (and why), what is implemented, and
+what is deliberately deferred.
+
+Where it stands: target selection, MicroPython and `mpy-cross`
+provisioning, cross-toolchain resolution, and the natmod build itself
+(running `make`, collecting the `.mpy`, verifying its header) are done.
+There is no separate publish step -- `cibuildmp` writes each identifier's
+own `package.json` as part of the normal build once `version` is set, the
+same way cibuildwheel has no publish step either. Adopted in all three
+consuming repos' natmod workflows and verified green on real CI, arch by
+arch (`micropython-bclibc`, `a7p`, `micropython-wasm3`) -- not just
+`--dry-run`. usermod's own build drivers exist too (see
+[Target support](#target-support) above) but aren't wired into the CLI's
+own `--mode` yet -- that's the next real milestone, not the composite
+actions below.
+
+Until usermod is wired into the CLI and verified against real CI in a
+consuming repo the way natmod now is, the composite actions below stay
+the supported path for it -- natmod's own composite actions
+(`fetch-micropython`, `build-natmod`) are still here too, unchanged, for
+anything that hasn't repinned to the `cibuildmp` CLI yet.
+
+## Composite actions (`.github/actions/`)
+
+The pre-CLI building blocks -- one GitHub Action per build step, still
+fully supported for CI, but no longer where new work starts (see
+[Two layers](#two-layers) above). New usermod ports and arches land in
+the `cibuildmp` CLI's own `usermod/build.py` first; these actions absorb
+the CLI's work once it's wired up, not the other way around.
 
 Every table below is the action's complete input surface -- if it isn't
 listed here, the action doesn't accept it. `MPY_DIR` in a "Requires"
@@ -104,7 +386,7 @@ line means `fetch-micropython` or `clone-micropython` (this repo's own)
 must have already run in the same job; a composite action step can't set
 an env var that steps *before* it will see, only ones after.
 
-#### `fetch-micropython`
+### `fetch-micropython`
 
 Downloads and extracts a MicroPython release tarball, exports `MPY_DIR`.
 Use for a plain natmod build or a unix-port build; the tarball already
@@ -119,7 +401,7 @@ for why the Windows actions never call it either).
 
 No outputs; exports `MPY_DIR` to `$GITHUB_ENV` as a side effect.
 
-#### `clone-micropython`
+### `clone-micropython`
 
 Shallow git-clones a MicroPython release branch instead of fetching a
 tarball, with a chosen set of submodules initialised, and exports
@@ -138,7 +420,7 @@ jobs use it, any time the caller needs `MPY_DIR` set without dragging in
 
 No outputs; exports `MPY_DIR` to `$GITHUB_ENV` as a side effect.
 
-#### `build-natmod`
+### `build-natmod`
 
 Installs whatever toolchain a single `dynruntime.mk` `ARCH` needs (plain
 apt package, the `xtensa-lx106` tarball, or esp-idf -- dispatched per
@@ -158,7 +440,7 @@ submodules included if the natmod Makefile needs any.
 
 No outputs.
 
-#### `build-usermod-unix`
+### `build-usermod-unix`
 
 The unix-port cross-compile matrix for a `USER_C_MODULES` usermod: `x64`,
 `x86` (32-bit), `aarch64`, `armhf`, or `mipsel`. Installs the arch's
@@ -186,7 +468,7 @@ composite action can't pick its own runner.
 | --- | --- |
 | `build_dir` | The `BUILD=` directory actually used (resolved default included), so the caller can find the built binary without recomputing it |
 
-#### `build-usermod-windows`
+### `build-usermod-windows`
 
 The `ports/windows` half of the same usermod build, run inside an MSYS2
 shell (every step is `shell: msys2 {0}`): builds `mpy-cross` then the
@@ -230,7 +512,7 @@ one, for the same backslash reason `MPY_DIR` has to be POSIX-style.
 | --- | --- |
 | `build_dir` | The `BUILD=` directory actually used (the input, verbatim) |
 
-#### `build-usermod-webassembly`
+### `build-usermod-webassembly`
 
 The `ports/webassembly` usermod build: installs emsdk, builds `mpy-cross`,
 then runs the port build under it, producing a `micropython.mjs` +
@@ -265,7 +547,7 @@ writes its own combined manifest first and passes that as
 | --- | --- |
 | `build_dir` | The `BUILD=` directory actually used (resolved default included), so the caller can find `micropython.mjs`/`.wasm` without recomputing it |
 
-#### `build-usermod-rp2040`
+### `build-usermod-rp2040`
 
 The `ports/rp2` usermod build: installs the arm-none-eabi + CMake toolchain,
 builds `mpy-cross`, then runs the port build under it, producing a
@@ -293,7 +575,7 @@ internal submodule tree is never actually touched by this build.
 | --- | --- |
 | `build_dir` | The `BUILD=` directory actually used (resolved default included), so the caller can find `firmware.uf2` without recomputing it |
 
-#### `build-usermod-armv7m`
+### `build-usermod-armv7m`
 
 The `ports/qemu` usermod build: installs the arm-none-eabi toolchain, builds
 `mpy-cross`, then runs the port build under it, producing a `firmware.elf`.
@@ -318,7 +600,7 @@ Requires: `MPY_DIR` and checkout, same as `build-usermod-unix`.
 | --- | --- |
 | `build_dir` | The `BUILD=` directory actually used (resolved default included), so the caller can find `firmware.elf` without recomputing it |
 
-#### `build-usermod-esp32`
+### `build-usermod-esp32`
 
 The `ports/esp32` usermod build: installs ESP-IDF, builds `mpy-cross`,
 then runs the port build under it, producing `micropython.bin`/`firmware.bin`.
@@ -395,80 +677,6 @@ Artifact upload is left to the caller on purpose -- artifact names and the
 exact glob under `natmod/build/` differ per repo/module and aren't part of
 the shared contract.
 
-## Conventions this repo assumes
-
-A module following the natmod/usermod layout looks like:
-
-```
-natmod/
-  Makefile              # includes py/dynruntime.mk, dispatches on ARCH=
-usermod/
-  micropython.cmake
-  micropython.mk
-  manifest.py
-```
-
-`build-natmod` only assumes `natmod/Makefile` (or whatever
-`natmod_dir` points at) accepts `ARCH=` and `MPY_DIR=` and has a `dist`
-target that drops the built `.mpy` under `build/<arch>*/`. Nothing here
-assumes a specific module name, precision scheme, or test framework --
-those stay in the consuming repo.
-
-**One more requirement for the `cibuildmp` CLI specifically** (not
-`build-natmod`, which gives every arch its own job and checkout): scope
-`dynruntime.mk`'s `BUILD` variable by `$(ARCH)` --
-`BUILD = .obj/$(ARCH)` before the `include`, kept outside `build/` so it
-does not collide with the `dist` output the CLI globs for (see
-`examples/template/natmod/Makefile`). `cibuildmp` with no `--only` runs
-every target sequentially in one `natmod/` tree (**D9**), and
-`dynruntime.mk` defaults `BUILD ?= build` unscoped, so without this a
-second `ARCH=` in the same invocation finds the previous arch's own
-object files "up to date" (same path, source unchanged) and skips
-rebuilding -- the merged `$(MOD).mpy` silently stays the *first* arch's
-binary. `cibuildmp` catches this itself (the header-arch verification
-that is its `auditwheel` equivalent fails loudly instead), but scoping
-`BUILD` avoids paying for the failed build at all.
-
-If the module also uses `rv32imc`'s `arch-flags` (**D15**), `BUILD` needs
-`$(ARCH_FLAGS)` folded in too --
-`BUILD = .obj/$(ARCH)$(if $(ARCH_FLAGS),+$(ARCH_FLAGS))`. Same bug, second
-axis: `rv32imc`'s own object file does not depend on `ARCH_FLAGS` at all,
-so building several arch-flags variants back to back in one invocation
-(`arch-flags = ["", "zba", "zba,zcmp"]`) reuses the first variant's cached
-`.o`/`.mpy` for every later one just as silently, even though `$(ARCH)`
-never changed. Found the same way as the `$(ARCH)` case: by actually
-running the whole variant list, not by inspection.
-
-None of this cares what produced the `.c` files `SRC` lists --
-[`examples/wasm2mpy`](examples/wasm2mpy) compiles WebAssembly to C via
-`wasm2c` in a Makefile rule before the same `dynruntime.mk` flow takes
-over, and needs nothing from `cibuildmp` beyond `module-dir = "."` and an
-`extra-make-args` entry for its own `APP=` variable.
-
-## Roadmap
-
-`cibuildmp` is the roadmap. [`docs/BACKLOG.md`](docs/BACKLOG.md) is the
-plan of record: the decisions taken (and why), what is implemented, and
-what is deliberately deferred.
-
-Where it stands: target selection, MicroPython and `mpy-cross`
-provisioning, cross-toolchain resolution, and the natmod build itself
-(running `make`, collecting the `.mpy`, verifying its header) are done.
-There is no separate publish step -- `cibuildmp` writes each identifier's
-own `package.json` as part of the normal build once `version` is set, the
-same way cibuildwheel has no publish step either. Adopted in all three
-consuming repos' natmod workflows and verified green on real CI, arch by
-arch (`micropython-bclibc`, `a7p`, `micropython-wasm3`) -- not just
-`--dry-run`. usermod is next: it will vendor board data from
-[`mpbuild`](https://github.com/mattytrentini/mpbuild) rather than depend
-on the package, and test runners stay deferred.
-
-Until usermod lands and is verified against real CI in a consuming repo the
-same way natmod now is, the composite actions below stay the supported
-path for it -- natmod's own composite actions (`fetch-micropython`,
-`build-natmod`) are still here too, unchanged, for anything that hasn't
-repinned to the `cibuildmp` CLI yet.
-
 ## Versioning
 
 Pin consumers to a tag, not `@main` and not a commit SHA. Bumping the tag
@@ -491,6 +699,25 @@ name suffix (`build-natmod-arch` → `build-natmod`). `v0.1.0` had only
 `build-usermod-unix-arch`.
 
 The `cibuildmp` package and the actions share one version. The package is
-not on PyPI yet, so both actions install it from their own checkout
-(`uv tool install ${{ github.action_path }}`) -- which means the tool that
-runs is exactly the ref you pinned, with no index to keep in sync.
+not on PyPI yet, so every action installs it from its own checkout --
+`cibuildmp-matrix` and the root `action.yml` both do this directly
+(`uv tool install "$GITHUB_ACTION_PATH"` -- a composite action's own
+`github.action_path` is already the pinned ref's own source, checked out
+by GitHub Actions itself before any step runs, so this is a real install
+from that exact ref, not a second network fetch). The tool that runs is
+exactly the ref you pinned, with no index to keep in sync. The root
+`Dockerfile` (the standalone/WSL2 one, not the action's) pins the same
+way, just explicitly instead of implicitly: `uv tool install
+git+https://github.com/ballistics-lab/cibuildmp.git@${CIBUILDMP_REF}`,
+`CIBUILDMP_REF` defaulting to the latest tag at the time the Dockerfile
+was last touched -- override it with `--build-arg CIBUILDMP_REF=vX.Y.Z`
+for a different one, the same "pin a tag, not `@main`" rule as everywhere
+else on this page.
+
+There used to be a second, separately-published `action.Dockerfile`
+image (`publish.yml`'s own `publish-docker` job) for the same
+standalone use case -- removed (`docs/BACKLOG.md`'s own **D33**): it
+duplicated this same root `Dockerfile`, and had not fed `action.yml`
+itself (a composite action, not a Docker action, since **D28**/**D30**)
+for a while already. This root `Dockerfile` is the one supported way to
+run `cibuildmp` in a container.

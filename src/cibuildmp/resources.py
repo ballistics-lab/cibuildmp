@@ -13,10 +13,21 @@ from functools import cache
 from importlib.resources import files
 from typing import Any
 
-RESOURCE = "natmod.toml"
-
 
 @cache
-def natmod_data() -> dict[str, Any]:
-    raw = (files(__package__).joinpath("resources", RESOURCE)).read_bytes()
+def _load(resource: str) -> dict[str, Any]:
+    # __package__ is "cibuildmp" for this module -- never None in practice,
+    # since resources.py is only ever imported as part of the package, not
+    # run as a standalone script. The assert is purely for pyright: files()
+    # takes str | ModuleType, not the str | None __package__ is typed as.
+    assert __package__ is not None
+    raw = (files(__package__).joinpath("resources", resource)).read_bytes()
     return tomllib.loads(raw.decode())
+
+
+def natmod_data() -> dict[str, Any]:
+    return _load("natmod.toml")
+
+
+def usermod_data() -> dict[str, Any]:
+    return _load("usermod.toml")

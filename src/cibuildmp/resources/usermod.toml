@@ -1,0 +1,177 @@
+# Pinned per-port data for usermod builds (docs/BACKLOG.md D16, D17).
+#
+# Neither field comes from `mpbuild`'s board_database.py (D7 vendors that
+# separately, in usermod/boards.py) -- USER_C_MODULES shape and manifest
+# layout are cibuildmp's own concern, not something mpbuild ever resolves.
+#
+# Scoped to the six ports usermod's own D16-D21 already has a working
+# reference for (a7p's mp-usermod.yml): unix, webassembly, windows, qemu,
+# esp32, rp2. Every other port (stm32, samd, nrf, mimxrt, ...) is
+# deliberately absent -- adding them now, unverified, would repeat the
+# exact "reasoning presented as fact before code exists" mistake D16-D21
+# corrected in docs/BACKLOG.md. Extend this table, one verified port at a
+# time, when a real consumer needs one.
+#
+# Verified live against a real v1.28.0 checkout, not transcribed from a
+# composite action's doc comment: grep for "USER_C_MODULES" in py/py.mk and
+# py/usermod.cmake, and `find ports/*/{boards,variants}/manifest.py`.
+
+# ── USER_C_MODULES shape (D16) ─────────────────────────────────────────────
+# "make"  -- py/py.mk: USER_C_MODULES must be a directory; every
+#            <dir>/*/micropython.mk one level under it is auto-included, so
+#            one directory can hold several modules side by side.
+# "cmake" -- py/usermod.cmake: USER_C_MODULES is a *list* of paths, each
+#            either a .cmake file directly, or a directory that gets
+#            /micropython.cmake appended -- exactly one module per list
+#            entry, no auto-discovery of subdirectories the way "make" has.
+#            Corrects D16's original framing ("this one is a file, not a
+#            directory to glob"), which came from one composite action's
+#            own doc comment rather than from py/usermod.cmake directly:
+#            the directory form is legal on the cmake side too, it just
+#            resolves to one file (<dir>/micropython.cmake) instead of
+#            globbing every subdirectory the make side does.
+#
+# ── Default manifest path (D17) ────────────────────────────────────────────
+# Relative to $(PORT_DIR). Empty means the port ships no default manifest to
+# combine a consumer's own FROZEN_MANIFEST with -- confirmed for qemu by its
+# absence on disk, not assumed.
+#
+# The real mechanism (checked against a7p's actual mp-usermod.yml, then
+# against py/py.mk-including Makefiles and py/usermod.cmake-including
+# CMakeLists.txt directly -- an earlier version of this table got it wrong
+# from reading source alone, without cross-checking a real consumer):
+# every make-driven port sets one port-level default in its own Makefile
+# (`FROZEN_MANIFEST ?= variants/manifest.py`, same line shape in unix,
+# webassembly and windows), which a variant's own mpconfigvariant.mk can
+# override (`FROZEN_MANIFEST ?= variants/<name>/manifest.py`, or override to
+# empty -- unix's own `minimal` variant does exactly that). Board-based
+# ports have the same shape one level down: CMakeLists.txt defaults
+# MICROPY_FROZEN_MANIFEST to boards/manifest.py, and "Include board config,
+# it may override MICROPY_FROZEN_MANIFEST" (rp2/CMakeLists.txt's own
+# comment) -- most esp32/rp2 boards do ship their own boards/<BOARD>/
+# manifest.py.
+#
+# The paths below are NOT that general per-variant/per-board resolution --
+# they are the one fixed path each port resolves to under exactly how
+# a7p's own mp-usermod.yml builds it today (its own combined-FROZEN_MANIFEST
+# step passes an explicit path, which always wins over any board/variant
+# default or override in the Makefile/CMakeLists.txt above). unix and
+# webassembly both build a specific, non-default variant, so their entries
+# below are that variant's own override, not the port-level default:
+# `variants/standard/manifest.py` (unix), `variants/pyscript/manifest.py`
+# (webassembly). windows/esp32/rp2 build without any variant/board
+# override in a7p's workflow, so their entries below are each port's own
+# unmodified default. Widening this to real per-variant/per-board
+# resolution is real, unstarted work -- nothing in the current six-port
+# scope exercises it, so it is not attempted here.
+
+[port.unix]
+build-system = "make"
+default-manifest = "variants/standard/manifest.py"
+
+[port.webassembly]
+build-system = "make"
+default-manifest = "variants/pyscript/manifest.py"
+
+[port.windows]
+build-system = "make"
+default-manifest = "variants/manifest.py"
+
+[port.qemu]
+build-system = "make"
+default-manifest = ""
+
+[port.esp32]
+build-system = "cmake"
+default-manifest = "boards/manifest.py"
+
+[port.rp2]
+build-system = "cmake"
+default-manifest = "boards/manifest.py"
+
+# ── emsdk (webassembly toolchain) ───────────────────────────────────────────
+# Pinned to one specific resolved version, not "latest" -- unlike
+# build-usermod-webassembly's own `emsdk_ref: latest` default (its own
+# doc comment already calls this "a moving target... some future emsdk
+# release could break a build with no change on either side of this
+# action"). Floating is a defensible choice for ephemeral CI; it trades
+# away exactly the reproducibility the `download` strategy exists for in
+# a locally-reproducible tool (D2/D3) -- see docs/BACKLOG.md's own
+# "Toolchain pinning vs. reproducibility" open question, and its new
+# "nothing checks whether a pinned version is stale" note for how this
+# and every other pin here should eventually get reviewed.
+#
+# Bypasses emsdk's own installer (`git clone emsdk` + `./emsdk
+# install/activate`) entirely -- verified live, not assumed: extracting
+# this tarball and prepending its `emscripten/` and `bin/` directories to
+# PATH is sufficient on its own. emcc's own tools/config.py auto-derives
+# LLVM_ROOT (from `clang`) and BINARYEN_ROOT (from `wasm-opt`) by
+# searching PATH when no `.emscripten` config file exists, so no config
+# file needs writing either. A host python3 (already a
+# dependency-of-a-dependency of pyelftools/ar, D12) runs emcc.py itself;
+# a host node is only needed to *run* the produced .wasm/.mjs, not to
+# build it, so it is not this table's concern.
+#
+# version -- an emscripten-releases-tags.json alias (e.g. "6.0.8"), the
+#   value it resolved to when this was pinned, not the literal string
+#   "latest".
+# [emsdk.platform.<os>-<arch>] -- one table per host this project builds
+#   webassembly on. Only linux-x64 today: a7p's own mp-usermod.yml (the
+#   reference D16-D21 rest on) only ever runs this port on `ubuntu-latest`.
+#   hash is the emscripten-releases build hash "version" resolved to; url
+#   is transcribed from emsdk.py's own
+#   emscripten_releases_download_url_template
+#   (storage.googleapis.com/webassembly/emscripten-releases-builds/
+#   {os}/{hash}/wasm-binaries{arch-suffix}.{ext}); sha256 is a literal pin
+#   computed locally -- Emscripten publishes no checksum sidecar for this
+#   asset, same as the Espressif/micropython.org case D10 already
+#   documents.
+[emsdk]
+version = "6.0.8"
+
+[emsdk.platform.linux-x64]
+hash = "9d70dbe8860ccdd3595f6e6065d94bfb543ae955"
+url = "https://storage.googleapis.com/webassembly/emscripten-releases-builds/linux/9d70dbe8860ccdd3595f6e6065d94bfb543ae955/wasm-binaries.tar.xz"
+sha256 = "9bea769c189d9f52196e74283fb86937318cc24bf14879f2c6bdd19862131901"
+
+# ── llvm-mingw (D18, windows/arm64) ─────────────────────────────────────────
+# The one Windows arch build_windows() (a plain apt-installed mingw-w64
+# GCC cross-compile, x64/x86) cannot cover: Debian/Ubuntu package no
+# aarch64-w64-mingw32 GCC target at all, and GCC's own upstream ARM64
+# Windows support is not what any Linux distro ships pre-built. mingw-w64's
+# own docs (https://www.mingw-w64.org, "Pre-built Toolchains") name
+# llvm-mingw as the one toolchain that targets ARM64 Windows *and* runs as
+# a Linux-hosted cross compiler (mstorsjo/llvm-mingw's own README: releases
+# named `llvm-mingw-<version>-<crt>-ubuntu-<distro>-<arch>.tar.xz` are
+# "cross compilers, that can be run on Linux, compiling binaries for any of
+# the 4 target Windows architectures"). Verified live, not assumed: a real
+# v1.28.0 ports/windows build, CROSS_COMPILE=aarch64-w64-mingw32- from this
+# tarball, with a real custom C module, produced a genuine PE32+ Aarch64
+# micropython.exe with that module's own symbols linked in.
+#
+# Three CFLAGS_EXTRA suppressions are load-bearing, not cosmetic -- found
+# live, not guessed: this clang toolchain is strict about things GCC (every
+# other cross-compiler this project resolves) is not.
+#   -Wno-double-promotion         py/binary.c's _Float16<->float union trick
+#                                  reads as an implicit precision-increasing
+#                                  promotion under Clang specifically.
+#   -Wno-uninitialized
+#   -Wno-default-const-init-var-unsafe
+#                                  shared/runtime/gchelper_generic.c's own
+#                                  `const register long x19 asm("x19")`
+#                                  idiom (reading a callee-saved register an
+#                                  asm stub already wrote) reads as "used
+#                                  uninitialized" to Clang; GCC does not
+#                                  apply this diagnosis to a bare asm-tied
+#                                  register declaration the way Clang does.
+# COMPILER_TARGET=mingw-forced/STRIP=""/SIZE="true" are the same overrides
+# MSYS2's own CLANGARM64 environment already needed (D18's own history) --
+# this clang's `-dumpmachine` doesn't contain "mingw" either, which
+# ports/windows/Makefile's own `.exe`-suffix and post-link strip logic
+# checks for.
+[llvm-mingw]
+version = "20260616"
+
+[llvm-mingw.platform.linux-x64]
+url = "https://github.com/mstorsjo/llvm-mingw/releases/download/20260616/llvm-mingw-20260616-ucrt-ubuntu-22.04-x86_64.tar.xz"
+sha256 = "534b92e067b22a6b4441f48ae9240a3341b17825d04d577eab0cf85c44b4deda"
