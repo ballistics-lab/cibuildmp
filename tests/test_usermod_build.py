@@ -158,6 +158,56 @@ def test_x86_toolchain_error_propagates_unwrapped(tmp_path, monkeypatch):
         build_unix(opts("x86", build_dir=tmp_path / "build-x86"), tmp_path / "mpy")
 
 
+def test_aarch64_command_cross_compiles_not_host_gcc():
+    # Verified live on a real ubuntu-latest runner: aarch64-linux-gnu-gcc
+    # (apt) cross-compiles from x86_64 straight to a linked ARM aarch64
+    # ELF -- no MICROPY_STANDALONE/deplibs step needed the way armhf/mipsel
+    # require.
+    command = unix_make_command(opts("aarch64"), Path("/gh/ws/mpy"))
+
+    assert "CROSS_COMPILE=aarch64-linux-gnu-" in command
+    assert "MICROPY_STANDALONE=1" not in command
+
+
+def test_aarch64_missing_toolchain_names_apt_package(monkeypatch, tmp_path):
+    monkeypatch.setattr(build.shutil, "which", lambda name: None)
+
+    with pytest.raises(
+        UsermodBuildError, match="apt install gcc-aarch64-linux-gnu libffi-dev:arm64"
+    ):
+        build_unix(
+            opts("aarch64", build_dir=tmp_path / "build-aarch64"), tmp_path / "mpy"
+        )
+
+
+def test_aarch64_probes_toolchain_before_building(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(
+        build.shutil, "which", lambda name: calls.append(name) or f"/usr/bin/{name}"
+    )
+    build_dir = tmp_path / "build-aarch64"
+    build_dir.mkdir()
+    (build_dir / "micropython").write_bytes(b"\x7fELF")
+    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
+
+    build_unix(opts("aarch64", build_dir=build_dir), tmp_path / "mpy")
+
+    assert calls == ["aarch64-linux-gnu-gcc"]
+
+
+def test_aarch64_builds_and_returns_binary_path(monkeypatch, tmp_path):
+    build_dir = tmp_path / "build-aarch64"
+    build_dir.mkdir()
+    (build_dir / "micropython").write_bytes(b"\x7fELF")
+
+    monkeypatch.setattr(build.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
+
+    result = build_unix(opts("aarch64", build_dir=build_dir), tmp_path / "mpy")
+
+    assert result == build_dir / "micropython"
+
+
 # ── qemu ───────────────────────────────────────────────────────────────────
 
 HOST_CHAIN = ResolvedToolchain("host", "arm-none-eabi-", "arm-none-eabi-", None)

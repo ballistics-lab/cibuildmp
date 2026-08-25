@@ -197,7 +197,7 @@ for the six ports they cover.
 |---------------|----------------------------|-----------------------------------|--------|
 | `unix`        | `x64`                      | host gcc                          | ✅ |
 | `unix`        | `x86`                      | apt only[^apt-x86]                | ✅ |
-| `unix`        | `aarch64`                  | host gcc                          | ⚠️[^native-arm64] |
+| `unix`        | `aarch64`                  | `apt install gcc-aarch64-linux-gnu libffi-dev:arm64`[^ports-mirror] | ✅ |
 | `unix`        | `armhf`                    | `arm-linux-gnueabihf-`             | ❌[^no-toolchain] |
 | `unix`        | `mipsel`                   | `mipsel-linux-gnu-`                | ❌[^no-toolchain] |
 | `qemu`        | `MPS2_AN385` (Cortex-M3)   | `arm-none-eabi-`[^qemu-shared]     | ✅ |
@@ -224,7 +224,7 @@ for the six ports they cover.
 | `minimal`     | minimal reference port — not a real target | —          | ❌[^out-of-scope] |
 | `embed`       | embeddable library, not a flashable target | —          | ❌[^out-of-scope] |
 
-[^native-arm64]: Needs a native ARM64 host — `UNIX_ARCH_SETTINGS["aarch64"]` sets no `CROSS_COMPILE`, so no cross-compile is configured for this arch.
+[^ports-mirror]: Cross-compiles cleanly from an x86_64 host — verified live, a real linked `ARM aarch64` ELF with a custom C module built in. `libffi-dev:arm64` needs `dpkg --add-architecture arm64`'s apt sources pointed at `ports.ubuntu.com` first: Ubuntu's default `archive.ubuntu.com`/`security.ubuntu.com` mirrors only carry `amd64`/`i386`. Real for any Ubuntu host, not sandbox-specific.
 [^no-toolchain]: Not buildable yet — pinned settings exist, but no toolchain resolver for this cross target is implemented.
 [^qemu-shared]: Shared with natmod's own `armv7m` toolchain — resolved once, reused, not pinned a second time.
 [^not-attempted]: `ports/qemu` also has RISC-V boards; a real, cheap-to-add extension later, not attempted since nothing here exercises it yet.

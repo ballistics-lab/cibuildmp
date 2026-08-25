@@ -1209,15 +1209,27 @@ table should list `ubuntu-latest` for all three, not `windows-latest`/
 `windows-11-arm`. Left as a note for whoever implements **M10**, not
 acted on here.
 
-Does not generalize to "usermod needs only `ubuntu-latest`": `unix`'s
-own `aarch64` arch (`UNIX_ARCH_SETTINGS["aarch64"]`, an *empty*
-`cross_compile`) assumes a native ARM64 host already, exactly the same
-"needs to execute what it builds" constraint **D20**'s own top-level
-entry already names for that arch — a real, separate, still-open
-requirement this addendum does not touch. `armhf`/`mipsel` remain
-unbuildable at all (**M8**'s own acknowledged gap). `windows` specifically
-is what stopped needing a special-case runner; the runner matrix as a
-whole still has real, load-bearing entries beyond `ubuntu-latest`.
+Does not generalize to "usermod needs only `ubuntu-latest`" quite as far
+as it might first look: `unix`'s own `aarch64` arch used to assume a
+native ARM64 host too (`UNIX_ARCH_SETTINGS["aarch64"]` had an *empty*
+`cross_compile`) — corrected the same way `windows` was, once actually
+tested rather than assumed. A real `ubuntu-latest` run (this project's
+own `usermod-dev.yml`, its `unix-aarch64-cross-check` job before it was
+folded in and removed) showed `apt install gcc-aarch64-linux-gnu
+libffi-dev:arm64` cross-compiles cleanly from x86_64, no native ARM64
+host needed after all — the only real wrinkle was that `libffi-dev:arm64`
+needs `dpkg --add-architecture arm64`'s own sources pointed at
+`ports.ubuntu.com` first (Ubuntu's default `archive.ubuntu.com`/
+`security.ubuntu.com` mirrors only carry `amd64`/`i386`; this is real for
+any Ubuntu host, not specific to this project's own dev sandbox or to
+GitHub's runners). `UNIX_ARCH_SETTINGS["aarch64"]` now has a real
+`cross_compile="aarch64-linux-gnu-"` and `apt_package` for it.
+`armhf`/`mipsel` remain unbuildable at all (**M8**'s own acknowledged
+gap, a genuinely different problem: no glibc-hosted cross-toolchain
+resolver for either exists yet, not an execution-host constraint).
+`windows` and now `unix/aarch64` are what stopped needing a
+special-case runner; the runner matrix as a whole still has real,
+load-bearing entries beyond `ubuntu-latest` for what's left.
 
 **D21 — execution, not just linking, is central to usermod's value, and
 is already real infrastructure — this does not fit under D6's blanket

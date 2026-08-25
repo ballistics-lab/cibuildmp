@@ -31,88 +31,12 @@ jobs:
       - run: uv run pyright src
       - run: uv run pytest -q
 
-  # One-off diagnostic, not a real build_unix() change yet: does a real
-  # GitHub-hosted ubuntu-latest runner's own apt mirror actually resolve
-  # libffi-dev:arm64 (needed for unix/aarch64 to cross-compile with FFI
-  # enabled, the same way it's already needed for armhf/mipsel)? The dev
-  # sandbox this session otherwise ran in has a nonstandard/restricted
-  # apt mirror (no ports.ubuntu.com reachable there at all), so a failure
-  # there proved nothing either way about a real runner. Remove this job
-  # once the answer is known and, if it works, folded into a real
-  # cross_compile="aarch64-linux-gnu-" entry in UNIX_ARCH_SETTINGS.
-  unix-aarch64-cross-check:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      # First attempt (plain dpkg --add-architecture arm64 + apt-get update)
-      # 404'd on every arm64 index -- not a sandbox artifact, confirmed live
-      # on this real ubuntu-latest runner too: Ubuntu's default
-      # archive.ubuntu.com/security.ubuntu.com mirrors only carry
-      # amd64/i386; every other architecture, arm64 included, lives on a
-      # separate mirror, ports.ubuntu.com, that the default sources never
-      # point at. Ubuntu 24.04 (noble, what ubuntu-latest is today) also
-      # moved to the deb822 format -- /etc/apt/sources.list.d/ubuntu.sources,
-      # not /etc/apt/sources.list, which is now just a comment pointing at
-      # that file (confirmed directly against this exact runner's own file,
-      # not assumed). Standard fix: restrict the existing deb822 stanzas to
-      # amd64 explicitly and append arm64-only stanzas pointing at
-      # ports.ubuntu.com.
-      - name: Install aarch64 cross-compiler and libffi
-        run: |
-          sudo dpkg --add-architecture arm64
-          sudo sed -i '/^Types: deb$/a Architectures: amd64' /etc/apt/sources.list.d/ubuntu.sources
-          cat <<'EOF' | sudo tee -a /etc/apt/sources.list.d/ubuntu.sources
-
-          Types: deb
-          URIs: http://ports.ubuntu.com/ubuntu-ports
-          Suites: noble noble-updates noble-backports
-          Components: main universe restricted multiverse
-          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
-          Architectures: arm64
-
-          Types: deb
-          URIs: http://ports.ubuntu.com/ubuntu-ports
-          Suites: noble-security
-          Components: main universe restricted multiverse
-          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
-          Architectures: arm64
-          EOF
-          sudo apt-get update -q
-          sudo apt-get install -y gcc-aarch64-linux-gnu libffi-dev:arm64
-      - name: Fetch a real MicroPython checkout
-        run: |
-          curl -sSL -o mpy.tar.xz https://github.com/micropython/micropython/releases/download/v1.28.0/micropython-1.28.0.tar.xz
-          mkdir mpy && tar xf mpy.tar.xz -C mpy --strip-components=1
-      - name: Build mpy-cross (host)
-        run: make -C mpy/mpy-cross -j"$(nproc)"
-      - name: Build a real usermod C module for ports/unix, cross-compiled to aarch64
-        run: |
-          mkdir -p /tmp/cmod/mymod
-          cat > /tmp/cmod/mymod/mymod.c <<'EOF'
-          #include "py/runtime.h"
-          static mp_obj_t mymod_hello(void) { return mp_obj_new_int(42); }
-          static MP_DEFINE_CONST_FUN_OBJ_0(mymod_hello_obj, mymod_hello);
-          static const mp_rom_map_elem_t mymod_globals_table[] = {
-              { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_mymod) },
-              { MP_ROM_QSTR(MP_QSTR_hello), MP_ROM_PTR(&mymod_hello_obj) },
-          };
-          static MP_DEFINE_CONST_DICT(mymod_globals, mymod_globals_table);
-          const mp_obj_module_t mymod_user_cmodule = {
-              .base = { &mp_type_module },
-              .globals = (mp_obj_dict_t *)&mymod_globals,
-          };
-          MP_REGISTER_MODULE(MP_QSTR_mymod, mymod_user_cmodule);
-          EOF
-          cat > /tmp/cmod/mymod/micropython.mk <<'EOF'
-          MYMOD_MOD_DIR := $(USERMOD_DIR)
-          SRC_USERMOD += $(MYMOD_MOD_DIR)/mymod.c
-          EOF
-          make -C mpy/ports/unix -j"$(nproc)" \
-            VARIANT=standard BUILD=build-aarch64-check \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            USER_C_MODULES=/tmp/cmod \
-            FROZEN_MANIFEST=variants/standard/manifest.py
-      - name: Check the produced binary
-        run: |
-          file mpy/ports/unix/build-aarch64-check/micropython
-          strings mpy/ports/unix/build-aarch64-check/micropython | grep -E '^(mymod|hello)$'
+  # unix-aarch64-cross-check (the one-off diagnostic that used to live
+  # here) got its answer and is gone: a real ubuntu-latest runner's own
+  # apt does resolve gcc-aarch64-linux-gnu + libffi-dev:arm64 once its
+  # arm64 sources point at ports.ubuntu.com instead of the default
+  # amd64-only mirror -- confirmed live, a genuine linked ARM aarch64 ELF
+  # with a real custom C module built in. Folded into a real
+  # cross_compile="aarch64-linux-gnu-" entry in UNIX_ARCH_SETTINGS
+  # (usermod/build.py); the "test" job above now covers it the same way
+  # it covers every other arch, via tests/test_usermod_build.py.

@@ -4,12 +4,29 @@ scope ("ports that need no exotic provisioning first" -- docs/BACKLOG.md).
 own the environment"), the same shape build.py already uses for natmod --
 this module resolves per-arch settings and runs it, nothing more.
 
-Only x64, x86 and aarch64 are runnable here: all three build with the
+Only x64, x86 and aarch64 are runnable here. x64/x86 build with the
 host's own gcc (x86 reusing toolchains.resolve()'s own -m32 multilib
 probe, already built for natmod's identical "x86" arch), so nothing new
-needs provisioning. armhf and mipsel need a genuinely new cross-toolchain
-story -- arm-linux-gnueabihf-/mipsel-linux-gnu-, glibc-hosted, not
-natmod's bare-metal arm-none-eabi-/riscv64-unknown-elf- pins -- plus a
+needs provisioning. aarch64 cross-compiles from an x86_64 host via
+apt's own gcc-aarch64-linux-gnu + libffi-dev:arm64 -- *not* "needs a
+native ARM64 host" as first assumed: verified live on a real
+ubuntu-latest runner (usermod-dev.yml's own now-removed
+unix-aarch64-cross-check job) that a plain dynamically-linked libffi
+resolves via multiarch once apt's own arm64 sources are pointed at
+ports.ubuntu.com (see the CROSS_COMPILE assignment below for why that
+mirror step is needed at all -- Ubuntu's default archive/security
+mirrors only carry amd64/i386), producing a genuine linked
+ARM-aarch64 ELF with a real custom C module built in. This only
+matters for a bare CLI/CI run today -- ports/unix usermod builds are
+not wired into the cibuildmp CLI or action.Dockerfile at all yet
+(both still natmod-only), so nothing here needs that same
+ports.ubuntu.com dance baked into the Docker image; whoever wires
+usermod into the CLI next will need to add it there too, at
+image-build time rather than runtime.
+
+armhf and mipsel need a genuinely new cross-toolchain story --
+arm-linux-gnueabihf-/mipsel-linux-gnu-, glibc-hosted, not natmod's
+bare-metal arm-none-eabi-/riscv64-unknown-elf- pins -- plus a
 static-link `deplibs` pre-step; their UnixArchSettings are pinned below
 (transcribed from .github/actions/build-usermod-unix/action.yml's own
 case statement and cross-checked against a real v1.28.0
@@ -90,15 +107,30 @@ class UnixArchSettings:
     cross_compile: str = ""
     link_opts: tuple[str, ...] = ()
     standalone: bool = False
+    apt_package: str = ""
 
 
 # CROSS_COMPILE, MICROPY_FORCE_32BIT and MICROPY_STANDALONE are
 # ports/unix/Makefile's own variables, verified directly against a real
 # v1.28.0 checkout -- not this project's or the composite action's
 # invention.
+#
+# aarch64's cross_compile/apt_package: verified live end-to-end on a real
+# ubuntu-latest runner -- gcc-aarch64-linux-gnu + libffi-dev:arm64 (once
+# apt's own arm64 sources point at ports.ubuntu.com, not the default
+# amd64-only mirror) cross-compile ports/unix from x86_64 straight to a
+# dynamically-linked ARM aarch64 ELF, no deplibs/static-link step needed
+# the way armhf/mipsel below require. No toolchain resolver checks this
+# one in build_unix() (unlike x86's toolchains.resolve() call) because
+# apt, not a downloaded tarball, is what provisions it -- the same
+# shutil.which()-plus-named-package pattern build_windows() already uses
+# for its own apt-provisioned x64/x86 arches covers it instead.
 UNIX_ARCH_SETTINGS: dict[str, UnixArchSettings] = {
     "x64": UnixArchSettings(),
-    "aarch64": UnixArchSettings(),
+    "aarch64": UnixArchSettings(
+        cross_compile="aarch64-linux-gnu-",
+        apt_package="gcc-aarch64-linux-gnu libffi-dev:arm64",
+    ),
     "x86": UnixArchSettings(link_opts=("MICROPY_FORCE_32BIT=1",)),
     "armhf": UnixArchSettings(
         cross_compile="arm-linux-gnueabihf-",
@@ -208,6 +240,18 @@ def build_unix(
         # caller already handles that alongside BuildError/SourceError the
         # same way natmod's own cli.main() does.
         toolchains.resolve("x86", root=toolchain_root, quiet=quiet)
+    elif opts.arch == "aarch64":
+        # apt-provisioned, not a downloaded tarball -- toolchains.resolve()
+        # doesn't fit (nothing to download or cache), so this is the same
+        # shutil.which()-plus-named-package probe build_windows() already
+        # uses for its own apt-provisioned x64/x86 arches.
+        settings = UNIX_ARCH_SETTINGS["aarch64"]
+        gcc = shutil.which(f"{settings.cross_compile}gcc")
+        if gcc is None:
+            raise UsermodBuildError(
+                f"unix/aarch64: {settings.cross_compile}gcc is not on PATH. "
+                f"Install it with: apt install {settings.apt_package}"
+            )
 
     if UNIX_ARCH_SETTINGS[opts.arch].standalone:
         run_unix_deplibs(opts, mpy_dir)
