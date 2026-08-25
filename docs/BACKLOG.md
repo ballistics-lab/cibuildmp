@@ -2191,12 +2191,39 @@ unconditionally).
   own hash so a future package-list change busts the cache
   automatically. Orthogonal to the Docker migration above and not
   waiting on it -- the user's own observation, directly: this step is
-  the slow part of every run today (~12 minutes, no caching at all
-  today), independent of *which* toolchains it installs. First attempt,
-  not yet confirmed live whether GitHub's hosted runner actually lets a
-  non-root cache-action step read back root-owned apt-archive contents
-  cleanly -- watch the real CI run's own cache step before trusting it
-  worked.
+  the slow part of every run today, independent of *which* toolchains
+  it installs.
+  - **A real bug, caught live by directly asking "did this actually
+    help" rather than assuming it did -- the cache never saved even
+    once.** `build`'s own duration got slightly *worse* after this
+    landed (~355-365s before, ~410-415s after, both measured directly
+    from real job timestamps), not better. Root-caused from real job
+    logs, not guessed: every save attempt, on every run checked, failed
+    with `Failed to save: Unable to reserve cache with key
+    apt-archives-Linux-<hash>, another job may be creating this cache`
+    -- and there is never a single "cache restored"/"cache hit" line
+    for that key anywhere. The cause: this session pushed five commits
+    in quick succession, several of which didn't touch `action.yml` at
+    all, so multiple `build-examples.yml` runs across *different*
+    commits ended up racing each other for the exact same
+    hash-derived cache key at overlapping times (confirmed separately:
+    `action.yml`'s own composite action also runs 3 times *within* one
+    `build` job -- template/wasm2mpy/usermod-unix -- each with its own
+    identical-keyed "Cache apt archives" step; harmless in the
+    non-racing case, since only the first of the three needs to
+    actually win the save and the other two see the key already exists
+    and skip cleanly, but indistinguishable in the logs from a real
+    cross-run collision without checking timestamps). **Fixed**:
+    `build-examples.yml` and `usermod-dev.yml` both now have a real
+    `concurrency:` block (`group: <workflow>-${{ github.workflow }}-${{
+    github.ref }}`, `cancel-in-progress: true`), the same pattern
+    `publish.yml` already used -- a superseded run on the same branch
+    gets cancelled outright instead of racing the newer one, so only
+    one run per branch is ever trying to save this key at a time.
+    Not yet confirmed live whether this alone makes the very next push
+    actually save and reuse the cache -- watch the next real run's own
+    logs for a genuine "Cache restored"/hit line before trusting it,
+    the same discipline that caught this bug in the first place.
 
 **The full migration plan, in dependency order -- reordered from the
 first pass above, per the user's own explicit follow-up.** The

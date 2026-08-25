@@ -40,6 +40,19 @@ on:
       - "docs/**"
       - "LICENSE"
 
+# Same pattern publish.yml's own concurrency block already uses. A real,
+# live-caught gap this session: without this, several rapid-fire pushes to
+# the same branch left multiple runs of this workflow racing each other,
+# all sharing the identical apt-archives-<hash> GHA cache key (D28's own
+# apt-cache step) -- every one of them failed to save it ("Failed to save:
+# Unable to reserve cache with key ..., another job may be creating this
+# cache"), confirmed directly from real job logs, not guessed. Cancelling
+# a superseded run outright (rather than merely serializing them) means
+# only the latest commit's own run ever gets to actually save that cache.
+concurrency:
+  group: build-examples-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # D28's own per-(port, arch) Docker images
   # (resources/docker/*.Dockerfile). Builds every one of them on every

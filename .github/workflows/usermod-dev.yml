@@ -19,6 +19,14 @@ on:
     branches: [claude/cibuildmp-usermod-support-fvojm8]
   workflow_dispatch:
 
+# Same reasoning build-examples.yml's own concurrency block now has: this
+# workflow only ever runs against one branch anyway, so a superseded run
+# from an earlier commit is pure waste once a newer push lands -- cancel
+# it rather than let it finish.
+concurrency:
+  group: usermod-dev-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
