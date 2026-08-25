@@ -9,6 +9,16 @@
 # syntax has no way to pass --build-arg, so a shared file's ref pin would
 # have to be a hardcoded default that silently drifts out of sync with
 # whatever tag actually triggered this build.
+#
+# Lives at the repo root, not .github/docker/ alongside entrypoint.sh --
+# a real build failure showed why: GitHub's own Docker-action build uses
+# *this file's own directory* as the build context, not action.yml's
+# directory (`docker build -f <path> <dirname of that path>`, confirmed
+# directly from a real failing run's own command line). Filed in
+# .github/docker/ instead, `COPY .` here would only ever see that one
+# subdirectory's own two files -- silently missing the wheel install and
+# failing to find entrypoint.sh at all, both undetectable without an
+# actual build (YAML syntax and local shell testing both passed first).
 FROM ubuntu:24.04
 
 # Same apt-only prerequisites as the root Dockerfile -- see that file's

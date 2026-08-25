@@ -208,7 +208,7 @@ jobs:
           skip-existing: true
           repository-url: https://test.pypi.org/legacy/
 
-  # The root action.yml's own Docker action (.github/docker/action.Dockerfile)
+  # The root action.yml's own Docker action (action.Dockerfile)
   # builds from source on every consuming job today -- correct, but it
   # re-installs cibuildmp's own apt prerequisites (gcc-multilib,
   # gcc-mingw-w64-x86-64/i686, libusb1) from scratch every single run, since
@@ -246,7 +246,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: .github/docker/action.Dockerfile
+          file: action.Dockerfile
           push: true
           tags: |
             ghcr.io/${{ github.repository }}:${{ needs.deploy.outputs.tag }}

@@ -28,7 +28,7 @@ Windows too -- see [Target support](#target-support) below for why no
 target needs a native Windows or macOS host), or in CI via this repo's
 own root `action.yml` (`uses: ballistics-lab/cibuildmp@<tag>`) -- a
 Docker action, not composite, built from
-[`.github/docker/action.Dockerfile`](.github/docker/action.Dockerfile)
+[`action.Dockerfile`](action.Dockerfile)
 (a separate image from the standalone `Dockerfile` above -- see that
 file's own header for why they can't share one). See
 [`docs/BACKLOG.md`](docs/BACKLOG.md) for the design decisions and what is
@@ -594,7 +594,7 @@ The `cibuildmp` package and the actions share one version. The package is
 not on PyPI yet, so every action installs it from its own checkout --
 `cibuildmp-matrix` still does this directly
 (`uv tool install ${{ github.action_path }}`), and the root `action.yml`
-does the same thing one layer down, inside `.github/docker/action.Dockerfile`'s
+does the same thing one layer down, inside `action.Dockerfile`'s
 own `COPY . /opt/cibuildmp` + `uv tool install` (a Docker action now, not
 composite -- see that action's own comment for why: cibuildmp's toolchain
 provisioning needs real apt packages baked into an image, not re-installed
@@ -608,7 +608,7 @@ for a different one, the same "pin a tag, not `@main`" rule as everywhere
 else on this page.
 
 `publish.yml`'s own `publish-docker` job builds and pushes
-`.github/docker/action.Dockerfile` to
+`action.Dockerfile` to
 `ghcr.io/ballistics-lab/cibuildmp:<tag>` on every real release tag --
 infrastructure for a pre-built, pulled-not-built action image, not yet
 wired into `action.yml` itself. Switching `runs.image` over to

@@ -31,14 +31,21 @@ inputs:
 
 # Docker, not composite: cibuildmp's own toolchain provisioning needs real
 # apt packages on the runner (gcc-multilib for x86, gcc-mingw-w64 for
-# windows/x64/x86, libusb1 for esp32 -- .github/docker/action.Dockerfile's
-# own comment has the full per-package reasoning, shared with the root
-# Dockerfile). A composite action can only apt-install those as a step
-# that runs, and re-runs, on every single job -- a Docker action bakes
-# them into the image once, at build/cache time, instead. Inputs become
-# INPUT_<NAME> env vars in the container; entrypoint.sh (in the image)
-# reads them and builds the exact same cibuildmp command line the old
-# composite step's own bash did.
+# windows/x64/x86, libusb1 for esp32 -- action.Dockerfile's own comment
+# has the full per-package reasoning, shared with the root Dockerfile). A
+# composite action can only apt-install those as a step that runs, and
+# re-runs, on every single job -- a Docker action bakes them into the
+# image once, at build/cache time, instead. Inputs become INPUT_<NAME>
+# env vars in the container; entrypoint.sh (in the image) reads them and
+# builds the exact same cibuildmp command line the old composite step's
+# own bash did.
+#
+# image: 'action.Dockerfile', not '.github/docker/action.Dockerfile' --
+# GitHub's own Docker-action build uses *the Dockerfile's own directory*
+# as the build context, not this file's directory, confirmed the hard
+# way (a real build failure: COPY . only saw .github/docker/'s own two
+# files when the Dockerfile lived there, missing the rest of the repo
+# entirely). Has to live at the repo root for `COPY .` to reach it.
 runs:
   using: "docker"
-  image: ".github/docker/action.Dockerfile"
+  image: "action.Dockerfile"
