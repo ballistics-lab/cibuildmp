@@ -35,14 +35,20 @@
 # a genuinely self-contained, immediately-usable image the moment
 # `docker build` finishes -- consistent with every other image here.
 #
-# TERSER (`npx terser`)/NODE are real dependencies of this port's own
-# Makefile -- but only for the `min`/`repl`/`test`/`test_min` targets,
+# TERSER (`npx terser`) is a real dependency of this port's own
+# Makefile, but only for the `min`/`repl`/`test`/`test_min` targets,
 # never the default `all` target (confirmed directly against a real
 # v1.28.0 `ports/webassembly/Makefile`: `all: $(BUILD)/micropython.mjs`
 # depends on nothing but `emcc` and the shared `$(SRC_JS)` files).
 # `webassembly_make_command()` (usermod/build.py) never names a target
-# at all, so it always runs `all` -- Node.js/npm/terser are
-# deliberately NOT installed here, they would only ever be exercised by
+# at all, so it always runs `all` -- terser/npm are deliberately NOT
+# installed here, they would only ever be exercised by
+# **`nodejs` itself is a different story -- see the `RUN apt-get`
+# step below, corrected live after this exact assumption (originally
+# "NODE deliberately NOT installed, only exercised by targets
+# cibuildmp never asks for") turned out wrong: `emcc`'s own config
+# sanity check wants a real `node` on every invocation, `all` included,
+# regardless of which Make target is running.**
 # a target cibuildmp itself never asks for.
 #
 # The emsdk version/URL/sha256 below MUST stay in sync with
@@ -65,12 +71,32 @@ FROM ubuntu:24.04
 # own footprint by nothing here needing them afterwards (unlike
 # unix/windows/qemu, this image's own toolchain download happens
 # inside the Dockerfile itself, not on the host before `docker run`).
+#
+# nodejs -- real dependency after all, found live inside this exact
+# image, not assumed away the way this file's own header comment above
+# used to argue (TERSER/NODE "only for min/repl/test/test_min, never
+# `all`"): `emcc`'s own sanity check runs, and fails
+# ("NODE_JS not set in config ..., and `node` not found in PATH"), on
+# *every* invocation, including a bare `-E` preprocess for qstr
+# generation -- not gated behind those other targets at all. The
+# `wasm-binaries.tar.xz` release asset this image downloads below does
+# not bundle a Node.js binary itself (only JS sources under
+# `emscripten/src/`, no runtime); a full `emsdk install`/`activate` run
+# would fetch a matching one as part of its own managed toolchain set,
+# which is exactly the installer path this image (and
+# `usermod/emsdk.py`'s own bare-host resolver, which has the identical
+# gap) deliberately bypasses for a smaller, faster, directly-verified
+# download. Ubuntu 24.04's own `nodejs` package (18.x) is enough --
+# `emcc`'s config sanity check only needs *a* working `node` to run
+# against, confirmed live by installing it into a real container and
+# re-running the exact failing command.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     python3 \
     curl \
     ca-certificates \
     xz-utils \
+    nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 # Pinned exactly as resources/usermod.toml's own [emsdk] table
