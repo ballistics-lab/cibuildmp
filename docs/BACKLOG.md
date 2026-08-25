@@ -2361,17 +2361,44 @@ followed by one big wiring pass at the end.
    existing one, each passing the right mount set for what that port's
    own toolchain needs persisted.
 5. **`publish.yml`'s existing `publish-docker` job extends from one
-   image to five** -- the job already exists (`docker/build-push-action`
+   image to six** -- the job already exists (`docker/build-push-action`
    with `cache-from/cache-to: type=gha`, pushing
    `ghcr.io/ballistics-lab/cibuildmp:<tag>`/`:latest`); it needs a
-   matrix over the five Dockerfiles, pushing
-   `ghcr.io/ballistics-lab/cibuildmp-<port>:<tag>`/`:latest` each. Note
-   the existing job's own comment: `action.yml` does not even consume
-   this published image today -- it rebuilds `action.Dockerfile` from
-   source on every single consuming job, across every repo, forever.
-   That gap should very likely close in the same pass as this
-   migration (composite `action.yml` pulls the pinned per-port image
-   by default), not stay open a second time.
+   matrix over the six Dockerfiles (`unix-manylinux-x64`/`x86`/
+   `aarch64`/`armhf`/`mipsel`, `windows`), pushing
+   `ghcr.io/ballistics-lab/cibuildmp-<port>[-<arch>][-<libc>]:<tag>`/`:latest`
+   each. Note the existing job's own comment: `action.yml` does not
+   even consume this published image today -- it rebuilds
+   `action.Dockerfile` from source on every single consuming job,
+   across every repo, forever. That gap should very likely close in the
+   same pass as this migration (composite `action.yml` pulls the
+   pinned per-port image by default), not stay open a second time.
+   - **Real correctness gap in this trigger, caught by the user's own
+     question, not yet fixed:** copying `publish-docker`'s own trigger
+     as-is (`if: github.event_name == 'push'`, and `publish.yml`'s only
+     `push:` trigger is `tags: v*`) would mean per-port images publish
+     *only* on a real release tag. But `cibuildmp` itself installs from
+     `$GITHUB_ACTION_PATH` fresh on every ref (`uv tool install`
+     already gives this reproducibility for the Python side) -- once
+     `PORT_IMAGES` actually references a GHCR tag, a consumer on
+     `@main` or any commit SHA that isn't an exact release tag would
+     hit a real code/image mismatch: `dockerrun.py`'s own registered
+     tag either doesn't exist yet, or points at a stale image built
+     from an older Dockerfile. The correct fix is publishing on every
+     push to the default branch too, tagged `:sha-<gitsha>` (immutable,
+     matches the checked-out commit exactly), with `:vX.Y.Z`/`:latest`
+     staying reserved for real releases as an additional, stable alias.
+     **Deliberately not implemented yet, on the user's own call** (asked
+     directly: publish on every default-branch push, every branch, or
+     leave undecided -- chose to leave this as a documented TODO here
+     rather than wire real GHCR pushes into CI on the spot, since
+     publishing to a shared org registry on every commit is a real,
+     visible infra decision, not one to make unilaterally from a
+     feature branch). Whoever implements step 5 for real must resolve
+     this before registering anything in `PORT_IMAGES` that consumers
+     might reach from a non-tagged ref -- otherwise this decision's own
+     "isolation and correctness" framing gets undercut by a silent
+     image/code version-skew bug on day one.
 
 **Cache strategy -- the direct answer to "we need a `CIBW_CACHE_PATH`
 equivalent," in two genuinely separate parts.** cibuildwheel's own
