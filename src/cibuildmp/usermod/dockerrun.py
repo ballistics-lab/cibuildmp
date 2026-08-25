@@ -99,8 +99,23 @@ def run(command: list[str], *, mounts: list[Path], workdir: Path, image: str) ->
     Each of `mounts` is bind-mounted at its own identical host path, so
     `command` (already built for a bare-host invocation) needs no
     rewriting: every path it references already lives under one of them.
+
+    `--pull missing` (Docker's own default, confirmed live via `docker
+    run --help` -- pinned explicitly here rather than relied on, in
+    case that default ever changes) is the whole answer to "how does
+    cibuildmp decide build-vs-cache": it never decides anything itself.
+    An already-cached `image` (matched by full reference, tag and all)
+    runs immediately with no network access at all; a `image` not seen
+    before pulls exactly once. This only stays correct because every
+    image `cibuildmp` itself resolves to is tagged `:sha-<gitsha>`
+    (D28 step 5's own `verify-docker-images` job) -- an immutable
+    reference by construction, so "already cached" and "still correct"
+    are the same fact. `--pull always` would be needed instead the
+    moment anything here ever resolved to a mutable tag like `:latest`,
+    which is exactly why PORT_IMAGES/CIBMP_<PORT>_<ARCH>_DOCKER_IMAGE
+    are documented as sha-tagged references, not `:latest` ones.
     """
-    docker_command = ["docker", "run", "--rm"]
+    docker_command = ["docker", "run", "--rm", "--pull", "missing"]
     for mount in mounts:
         docker_command += ["-v", f"{mount.as_posix()}:{mount.as_posix()}"]
     docker_command += ["-w", workdir.as_posix(), image, *command]

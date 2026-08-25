@@ -2097,7 +2097,15 @@ unconditionally).
   unchanged. `build_unix()` in `usermod/build.py` checks this and, when
   it returns an image, routes both `run_unix_deplibs()` and the main
   `make` invocation through `dockerrun.run()` instead of a bare
-  `subprocess.run()`.
+  `subprocess.run()`. `dockerrun.run()` itself passes `docker run
+  --pull missing` explicitly -- Docker's own default, confirmed live
+  via `docker run --help`, pinned rather than relied on -- which is the
+  entire answer to "how does cibuildmp decide build-vs-cache": it never
+  decides anything, Docker does, and that only stays correct because
+  every image this project resolves to is `:sha-<gitsha>`-tagged
+  (immutable by construction) rather than `:latest` -- a cached local
+  copy and a still-correct one are the same fact for a sha tag, which
+  is not true for a mutable one.
 - **`action.yml` is now a composite action -- migration step 1, done
   and live-verified on real CI, not just implemented.** `runs: using:
   "docker"` → `"composite"`, `entrypoint.sh` deleted (dead code,
@@ -2319,15 +2327,30 @@ followed by one big wiring pass at the end.
      same as today. Not registered in `PORT_IMAGES` -- same as `unix`,
      not yet published (step 5), and not yet confirmed via a real
      `docker build` (see "current state" above).
-   - `resources/docker/qemu.Dockerfile` -- whatever `mp-usermod.yml`'s own
-     `qemu-system` job installs today (arm-none-eabi-gcc class
-     toolchain plus qemu-system-arm itself for the execution axis,
-     **D21** -- confirm the exact package list against that workflow
-     before writing this one, do not re-derive from memory). Check
-     `mpbuild`'s/`cibuildwheel`'s own Dockerfiles first (**D30**'s own
-     point 4) -- worth checking for a `qemu-system` setup specifically
-     too, not just the build toolchain, once **D21**'s own execution
-     axis gets real implementation and needs a place to run from.
+   - **`resources/docker/qemu.Dockerfile` -- written, one combined
+     image (no `unix`-style per-arch/libc split -- `qemu` only ever
+     targets one board, `MPS2_AN385`, and a bare-metal ELF has no
+     libc/musl axis at all).** Package list confirmed against two real
+     sources, not memory (this bullet's own original instruction): (1)
+     `o-murphy/a7p`'s own real `mp-usermod.yml`, whose
+     `usermod-qemu-armv7m` job installs the toolchain via
+     `cibuildmp/.github/actions/build-usermod-armv7m` --
+     `gcc-arm-none-eabi libnewlib-arm-none-eabi`, `qemu-system-arm`
+     installed separately, in the *caller's* own job, explicitly not a
+     build dependency ("QEMU itself is deliberately NOT installed here:
+     it is a runtime emulator... not a build dependency"); (2) this
+     project's own `resources/natmod.toml`'s `arm-none-eabi` toolchain
+     entry, whose `apt-packages` field is the identical string --
+     `build_qemu()` already resolves this exact toolchain via
+     `toolchains.resolve("armv7m")`, whose own "auto" strategy checks
+     PATH before ever downloading the pinned xpack tarball, so
+     apt-installing it here needs no code change to `build_qemu()` at
+     all for this image to be usable. `qemu-system-arm` (the
+     *execution* axis, **D21**) deliberately stays out of this image,
+     matching `a7p`'s own split exactly -- registered in
+     `verify-docker-images`'s own matrix, so it now builds (and
+     publishes, on a real push) for real like every other Dockerfile
+     here, not left open as a documented gap.
    - `resources/docker/webassembly.Dockerfile` -- emsdk is downloaded at build
      time (`usermod/emsdk.py`), so this image may need close to
      nothing baked in beyond `python3`/`git`/`curl`/`ca-certificates`;

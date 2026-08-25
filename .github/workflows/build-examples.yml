@@ -73,6 +73,7 @@ jobs:
           - unix-manylinux-armhf
           - unix-manylinux-mipsel
           - windows
+          - qemu
     steps:
       - uses: actions/checkout@v7
 
