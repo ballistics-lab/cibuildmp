@@ -44,9 +44,39 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # First attempt (plain dpkg --add-architecture arm64 + apt-get update)
+      # 404'd on every arm64 index -- not a sandbox artifact, confirmed live
+      # on this real ubuntu-latest runner too: Ubuntu's default
+      # archive.ubuntu.com/security.ubuntu.com mirrors only carry
+      # amd64/i386; every other architecture, arm64 included, lives on a
+      # separate mirror, ports.ubuntu.com, that the default sources never
+      # point at. Ubuntu 24.04 (noble, what ubuntu-latest is today) also
+      # moved to the deb822 format -- /etc/apt/sources.list.d/ubuntu.sources,
+      # not /etc/apt/sources.list, which is now just a comment pointing at
+      # that file (confirmed directly against this exact runner's own file,
+      # not assumed). Standard fix: restrict the existing deb822 stanzas to
+      # amd64 explicitly and append arm64-only stanzas pointing at
+      # ports.ubuntu.com.
       - name: Install aarch64 cross-compiler and libffi
         run: |
           sudo dpkg --add-architecture arm64
+          sudo sed -i '/^Types: deb$/a Architectures: amd64' /etc/apt/sources.list.d/ubuntu.sources
+          cat <<'EOF' | sudo tee -a /etc/apt/sources.list.d/ubuntu.sources
+
+          Types: deb
+          URIs: http://ports.ubuntu.com/ubuntu-ports
+          Suites: noble noble-updates noble-backports
+          Components: main universe restricted multiverse
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+          Architectures: arm64
+
+          Types: deb
+          URIs: http://ports.ubuntu.com/ubuntu-ports
+          Suites: noble-security
+          Components: main universe restricted multiverse
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+          Architectures: arm64
+          EOF
           sudo apt-get update -q
           sudo apt-get install -y gcc-aarch64-linux-gnu libffi-dev:arm64
       - name: Fetch a real MicroPython checkout
