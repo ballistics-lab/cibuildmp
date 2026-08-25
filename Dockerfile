@@ -23,12 +23,17 @@ FROM ubuntu:24.04
 # ports.ubuntu.com, that the default sources never reference (confirmed
 # live, twice: once on a real GitHub-hosted runner -- docs/BACKLOG.md's
 # D20 addendum -- and again directly in this image's own base, ubuntu:24.04,
-# before writing this). 24.04 moved to the deb822 sources format, so this
-# restricts the existing stanzas to amd64 and appends arm64-only ones
-# pointing at ports.ubuntu.com, rather than editing the now-unused plain
+# before writing this). i386 is NOT one of those -- it stays on the main
+# archive.ubuntu.com/security.ubuntu.com mirrors alongside amd64 (confirmed
+# live the same way, D25's addendum), so it only needs adding to the
+# existing stanzas' own Architectures: line, no ports.ubuntu.com stanza of
+# its own. 24.04 moved to the deb822 sources format, so this restricts the
+# existing stanzas to amd64,i386 and appends arm64-only ones pointing at
+# ports.ubuntu.com, rather than editing the now-unused plain
 # /etc/apt/sources.list.
 RUN dpkg --add-architecture arm64 && \
-    sed -i '/^Types: deb$/a Architectures: amd64' /etc/apt/sources.list.d/ubuntu.sources && \
+    dpkg --add-architecture i386 && \
+    sed -i '/^Types: deb$/a Architectures: amd64,i386' /etc/apt/sources.list.d/ubuntu.sources && \
     { \
         echo; \
         echo 'Types: deb'; \
@@ -78,6 +83,25 @@ RUN dpkg --add-architecture arm64 && \
 #                             on the first pass -- nothing needed it
 #                             until usermod's own unix arches actually
 #                             built here for the first time.
+#   libffi-dev:i386/       -- usermod unix/x86's own modffi.c build,
+#   linux-libc-dev:i386        under gcc -m32: NOT the same headers as
+#                             plain libffi-dev above. libffi's own
+#                             ffitarget.h is genuinely word-size-specific
+#                             (it encodes the target ABI), so a 32-bit
+#                             compile needs the real i386 package here,
+#                             not the amd64 one under a borrowed path --
+#                             an earlier attempt symlinked
+#                             i386-linux-gnu -> x86_64-linux-gnu instead,
+#                             which happened to fix asm/errno.h below but
+#                             fed modffi.c the wrong-arch ffitarget.h, a
+#                             real build failure
+#                             (`#warning ... X86 IS DEFINED
+#                             [-Werror=cpp]`) this replaced it after.
+#                             linux-libc-dev:i386 is what actually ships
+#                             asm/errno.h under i386-linux-gnu/ (the
+#                             symlink's only genuine job) -- no apt
+#                             package installs a real, arch-correct
+#                             i386-linux-gnu/ directory at all otherwise.
 #   gcc-aarch64-linux-gnu/ -- usermod unix/aarch64, unix/armhf, unix/mipsel
 #   libffi-dev:arm64/         (D20, D24). libltdl-dev is not the
 #   gcc-arm-linux-gnueabihf/  cross-compiler itself -- armhf/mipsel's own
@@ -116,6 +140,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc-mingw-w64-i686 \
     gcc-aarch64-linux-gnu \
     libffi-dev \
+    libffi-dev:i386 \
+    linux-libc-dev:i386 \
     libffi-dev:arm64 \
     gcc-arm-linux-gnueabihf \
     gcc-mipsel-linux-gnu \
@@ -123,17 +149,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     libusb-1.0-0 \
     && rm -rf /var/lib/apt/lists/*
-
-# gcc -m32 (natmod's own x86 arch, and usermod unix/x86) looks for
-# <asm/errno.h> etc. under /usr/include/i386-linux-gnu -- confirmed live
-# with `gcc -m32 -E -v`, whose own search list omits it entirely without
-# this, even though the exact same headers already exist one directory
-# over (Ubuntu's multilib packaging shares them with the native
-# x86_64-linux-gnu tree via 32-bit stub headers, not a separate i386
-# tree -- no apt package installs a plain i386-linux-gnu directory at
-# all). A real build failure caught this (`fatal error: asm/errno.h: No
-# such file or directory`), not assumed from reading package lists.
-RUN ln -sf /usr/include/x86_64-linux-gnu /usr/include/i386-linux-gnu
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 

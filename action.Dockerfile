@@ -27,12 +27,17 @@ FROM ubuntu:24.04
 # ports.ubuntu.com, that the default sources never reference (confirmed
 # live, twice: once on a real GitHub-hosted runner -- docs/BACKLOG.md's
 # D20 addendum -- and again directly in this image's own base, ubuntu:24.04,
-# before writing this). 24.04 moved to the deb822 sources format, so this
-# restricts the existing stanzas to amd64 and appends arm64-only ones
-# pointing at ports.ubuntu.com, rather than editing the now-unused plain
+# before writing this). i386 is NOT one of those -- it stays on the main
+# archive.ubuntu.com/security.ubuntu.com mirrors alongside amd64 (confirmed
+# live the same way, D25's addendum), so it only needs adding to the
+# existing stanzas' own Architectures: line, no ports.ubuntu.com stanza of
+# its own. 24.04 moved to the deb822 sources format, so this restricts the
+# existing stanzas to amd64,i386 and appends arm64-only ones pointing at
+# ports.ubuntu.com, rather than editing the now-unused plain
 # /etc/apt/sources.list.
 RUN dpkg --add-architecture arm64 && \
-    sed -i '/^Types: deb$/a Architectures: amd64' /etc/apt/sources.list.d/ubuntu.sources && \
+    dpkg --add-architecture i386 && \
+    sed -i '/^Types: deb$/a Architectures: amd64,i386' /etc/apt/sources.list.d/ubuntu.sources && \
     { \
         echo; \
         echo 'Types: deb'; \
@@ -75,6 +80,19 @@ RUN dpkg --add-architecture arm64 && \
 # cross-compile at all) still failed the same way for a third,
 # independent reason.
 #
+# libffi-dev:i386/linux-libc-dev:i386: usermod unix/x86's own modffi.c
+# build, under gcc -m32. NOT the same fix as plain libffi-dev above --
+# libffi's own ffitarget.h is word-size-specific (it encodes the target
+# ABI), so a 32-bit compile needs the real i386 package, not the amd64
+# one under a borrowed path. An earlier attempt symlinked
+# i386-linux-gnu -> x86_64-linux-gnu instead, which happened to fix
+# asm/errno.h but fed modffi.c the wrong-arch ffitarget.h -- a fourth
+# real build failure (`#warning ... X86 IS DEFINED [-Werror=cpp]`,
+# `-Werror` turning it fatal) this replaced it after. linux-libc-dev:i386
+# is what actually ships asm/errno.h under a real i386-linux-gnu/
+# directory (the symlink's only genuine job) -- no apt package installs
+# one at all otherwise.
+#
 # wabt: examples/wasm2mpy's own toolchain (wasm2c), pinned by nothing more
 # than "whatever Ubuntu 24.04 carries" -- deliberately, since that is the
 # same version build-examples.yml's own runner-level apt-get used to
@@ -93,6 +111,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc-mingw-w64-i686 \
     gcc-aarch64-linux-gnu \
     libffi-dev \
+    libffi-dev:i386 \
+    linux-libc-dev:i386 \
     libffi-dev:arm64 \
     gcc-arm-linux-gnueabihf \
     gcc-mipsel-linux-gnu \
@@ -101,17 +121,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libusb-1.0-0 \
     wabt \
     && rm -rf /var/lib/apt/lists/*
-
-# gcc -m32 (natmod's own x86 arch, and usermod unix/x86) looks for
-# <asm/errno.h> etc. under /usr/include/i386-linux-gnu -- confirmed live
-# with `gcc -m32 -E -v`, whose own search list omits it entirely without
-# this, even though the exact same headers already exist one directory
-# over (Ubuntu's multilib packaging shares them with the native
-# x86_64-linux-gnu tree via 32-bit stub headers, not a separate i386
-# tree -- no apt package installs a plain i386-linux-gnu directory at
-# all). A real build failure caught this (`fatal error: asm/errno.h: No
-# such file or directory`), not assumed from reading package lists.
-RUN ln -sf /usr/include/x86_64-linux-gnu /usr/include/i386-linux-gnu
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 

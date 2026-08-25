@@ -1711,8 +1711,10 @@ that Docker-action gap next.
 (`aarch64`/`armhf`/`mipsel`) closing D23/D24's own open item, and the
 first real `docker build` of either image (neither had ever actually
 been built before this -- both predate real usermod CLI usage
-entirely) surfaced two genuine, non-obvious apt/gcc problems no amount
-of reading package lists would have caught.** `examples/usermod-unix`
+entirely) surfaced four genuine, non-obvious apt/gcc problems no amount
+of reading package lists would have caught -- one of them (the
+`i386-linux-gnu` symlink) initially "fixed" wrong and only caught by a
+later, unrelated real build failure.** `examples/usermod-unix`
 (a real `USER_C_MODULES` module, `cibuildmp.toml` defaulting to all
 five `unix` arches) wired into `build-examples.yml`'s own `uses: ./`
 step is what proved it -- this project's dev sandbox has no Docker
@@ -1740,26 +1742,65 @@ lesson **D18**'s own `action.Dockerfile`-location bug already taught.
 - **`gcc -m32` cannot find `<asm/errno.h>` after that substitution**
   -- a second, separate real failure, this time inside natmod's own
   `x86` arch build (`examples/template`), not usermod at all: `gcc -m32
-  -E -v`'s own header search list omits `/usr/include/i386-linux-gnu`
-  entirely (confirmed live), even though `gcc -m32 -print-multiarch`
-  correctly names that exact directory as the target. No apt package
-  actually creates it -- Ubuntu's own multilib packaging shares 32-bit
-  headers with the native `x86_64-linux-gnu` tree instead (32-bit-only
-  stub headers like `gnu/stubs-32.h` live *inside* that same tree, not
-  a separate one). `gcc-multilib`'s own install path apparently avoids
-  this some other way this session did not fully trace; the verified,
-  minimal fix instead is `ln -sf /usr/include/x86_64-linux-gnu
+  -E -v`'s own header search list names `/usr/include/i386-linux-gnu`
+  as a search directory (`gcc -m32 -print-multiarch` names the same
+  path) but no apt package actually creates it by default -- gcc simply
+  skips the nonexistent directory and fails to find the header at all.
+  First fix tried: `ln -sf /usr/include/x86_64-linux-gnu
   /usr/include/i386-linux-gnu` -- confirmed live, a real `-m32` compile
-  and run succeeding immediately after.
-- Both fixes are Dockerfile-only, not `cibuildmp` itself: neither
-  affects a bare `ubuntu-latest` runner running the CLI directly
+  and run succeeding immediately after. **Later found wrong** -- see
+  the next bullet -- and replaced.
+- **`unix/x86`'s own `modffi.c` (`MICROPY_PY_FFI`) needs `pkg-config`
+  and the *native* `libffi-dev`, not just the target-arch
+  `libffi-dev:arm64` already installed for `aarch64`/`armhf`/`mipsel`**
+  -- a third real failure, `fatal error: ffi.h: No such file or
+  directory`, caught only once `examples/usermod-unix` started
+  exercising `unix/x64` inside the real Docker image (nothing needed
+  `libffi-dev` at all before usermod's own unix arches built here for
+  the first time). Two combined gaps: plain `libffi-dev` (native amd64)
+  had never been added, only the `:arm64` one; and
+  `ports/unix/Makefile`'s own `LIBFFI_CFLAGS`/`LIBFFI_LDFLAGS` resolve
+  via `pkg-config --cflags/--libs libffi` (confirmed directly from the
+  real cached `Makefile`), so even with `libffi-dev` present, no
+  `pkg-config` on the image left those flags empty. Fix: add both
+  `libffi-dev` and `pkg-config`.
+- **The `i386-linux-gnu` symlink above was itself wrong, not just
+  incomplete -- a fourth real failure, on `unix/x86` specifically,
+  once `pkg-config`/`libffi-dev` made `modffi.c` actually reach
+  `ffi.h`:** `#warning ... X86 IS DEFINED [-Werror=cpp]` out of
+  libffi's own `ffitarget.h`, turned fatal by `-Werror`. Root cause:
+  libffi's `ffitarget.h` is genuinely word-size/ABI-specific (it
+  encodes the target's calling convention), so serving the *64-bit*
+  package's `ffitarget.h` under a 32-bit `-m32` compile is a real
+  correctness bug, not a missing-file one -- it happened to compile
+  (with warnings) rather than silently miscompiling, only because
+  `-Werror` was on. The symlink's only genuinely correct job was
+  `asm/errno.h` (Linux UAPI kernel headers, which *are* arch-generic
+  enough for this to be harmless); it was never the right tool for
+  `ffi.h`. Fix, verified live end-to-end (a real `unix/x86` build with
+  a custom C module, run and returning the right value): drop the
+  symlink entirely, and instead
+  `dpkg --add-architecture i386 && apt install libffi-dev:i386
+  linux-libc-dev:i386`. Unlike `arm64`, `i386` is **not** a "ports"
+  architecture -- it already lives on the regular
+  `archive.ubuntu.com`/`security.ubuntu.com` mirrors (confirmed live:
+  `apt-cache madison libffi-dev:i386` resolved there directly, no
+  `ports.ubuntu.com` stanza needed), so this only widens the existing
+  stanzas' own `Architectures:` line to `amd64,i386`, the same stanzas
+  `arm64`'s own fix above already restricts to `amd64`.
+  `linux-libc-dev:i386` is what actually ships a real, arch-correct
+  `asm/errno.h` under `i386-linux-gnu/` -- the symlink's one genuine
+  job, now done by a real package instead of a borrowed path.
+- All four fixes are Dockerfile-only, not `cibuildmp` itself: none
+  affect a bare `ubuntu-latest` runner running the CLI directly
   (**M9b**'s own live verification, and every `build-examples.yml` run
   before this one, already exercised `gcc -m32` successfully outside
-  Docker) -- only these two custom images, which now need both
-  `gcc-13-multilib` and the symlink to combine x86 multilib support
-  with the cross-compilers in one filesystem. README's own bare-metal
-  install instructions get the same two fixes, at the point a reader
-  would actually hit them.
+  Docker) -- only these two custom images, which now need
+  `gcc-13-multilib`, `libffi-dev`, `pkg-config`, and the real
+  `:i386` packages (not a symlink) to combine x86 multilib support with
+  the cross-compilers in one filesystem. README's own bare-metal
+  install instructions get the same fixes, at the point a reader would
+  actually hit them.
 - **cibuildwheel's own answer to "many architectures, one toolchain
   set" is structurally different, not comparably fixed** -- asked and
   answered directly, not assumed: cibuildwheel never combines
