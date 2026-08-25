@@ -1224,11 +1224,13 @@ needs `dpkg --add-architecture arm64`'s own sources pointed at
 any Ubuntu host, not specific to this project's own dev sandbox or to
 GitHub's runners). `UNIX_ARCH_SETTINGS["aarch64"]` now has a real
 `cross_compile="aarch64-linux-gnu-"` and `apt_package` for it.
-`armhf`/`mipsel` remain unbuildable at all (**M8**'s own acknowledged
-gap, a genuinely different problem: no glibc-hosted cross-toolchain
-resolver for either exists yet, not an execution-host constraint).
-`windows` and now `unix/aarch64` are what stopped needing a
-special-case runner; the runner matrix as a whole still has real,
+`armhf`/`mipsel` were the same story a second time (**D24**): apt
+cross-compilers, no execution-host constraint, no special runner
+needed — just a genuinely new host dependency (`libltdl-dev`) neither
+`aarch64` nor `windows` needed, found only by actually running the
+build rather than assuming the pinned settings alone were enough.
+`windows` and now `unix/aarch64`/`armhf`/`mipsel` are what stopped
+needing a special-case runner; the runner matrix as a whole still has real,
 load-bearing entries beyond `ubuntu-latest` for what's left.
 
 **D21 — execution, not just linking, is central to usermod's value, and
@@ -1378,13 +1380,16 @@ style, now that a slice of it is actually implemented:
         already does) plus a live build: a real `v1.28.0` checkout, `make
         -C ports/unix` run for real (not `--dry-run`), 40s, a genuine
         825768-byte linked binary.
-  - [ ] `armhf`/`mipsel`: settings are pinned (same table above) but
-        `build_unix()` raises rather than attempting either — both need a
-        cross-toolchain no resolver here provisions yet
-        (`arm-linux-gnueabihf-`/`mipsel-linux-gnu-`, glibc-hosted, not
-        natmod's bare-metal pins) plus the `deplibs` static-libffi
-        pre-step wired to a real toolchain. Real work, not attempted in
-        this slice.
+  - [x] `armhf`/`mipsel` (**D24**): both apt-provisioned
+        (`gcc-arm-linux-gnueabihf`/`gcc-mipsel-linux-gnu`, same
+        `shutil.which()`-plus-named-package probe `aarch64`/`windows`
+        already use), both verified live end to end — real `deplibs`
+        run (a genuine static `libffi.a`, `MICROPY_STANDALONE=1`), real
+        main build, a genuine linked `ARM`/`EABI5` and `MIPS32` ELF
+        each with a real custom C module built in. `UNIX_RUNNABLE_ARCHS`
+        now covers every arch `UNIX_ARCH_SETTINGS` pins — the
+        `"not buildable yet"` branch `build_unix()` used to have is
+        gone, unreachable once it did.
   - [x] `usermod/build.py`: `build_qemu()`, `MPS2_AN385` only. Reuses
         natmod's own `armv7m` toolchain (`toolchains.resolve("armv7m")`,
         `arm-none-eabi-`) rather than pinning a second copy —
@@ -1651,6 +1656,56 @@ unmodified, and each difference is deliberate.**
   silently overridden its own `"MPS2_AN385"` default with nothing,
   instead of just not passing `board=` at all and letting the
   dataclass default apply.
+
+**D24 — `unix/armhf` and `unix/mipsel` are real, verified-live cross-compiles
+now, closing M8's own acknowledged gap; the missing piece was never the
+cross-compiler.** `UNIX_ARCH_SETTINGS["armhf"]`/`["mipsel"]` had been
+pinned since **M8**'s first `build_unix()` slice, with `build_unix()`
+deliberately raising `"not buildable yet"` rather than pretending —
+both need a glibc-hosted cross-toolchain natmod's own bare-metal
+`arm-none-eabi-`/`riscv64-unknown-elf-` pins don't cover, plus
+`MICROPY_STANDALONE=1`'s own static-link `deplibs` pre-step (already
+implemented, `run_unix_deplibs()`, but never actually run against a
+real toolchain before now).
+
+Both `gcc-arm-linux-gnueabihf` and `gcc-mipsel-linux-gnu` are plain
+apt packages — confirmed live, no `ports.ubuntu.com` mirror dance at
+all, unlike `aarch64`'s own `libffi-dev:arm64` (**D20**'s own
+addendum): these are cross-compilers that *run* on `amd64`, not
+target-arch libraries multiarch has to resolve. Wired the same
+`shutil.which()`-plus-named-`apt_package` probe `aarch64`/`windows`
+already use.
+
+The one real, non-obvious blocker: `run_unix_deplibs()` failed on a
+real host with `autoreconf: error: ... possibly undefined macro:
+LT_SYS_SYMBOL_USCORE` — `deplibs`' own `./autogen.sh` regenerates
+vendored `lib/libffi`'s `configure` from `configure.ac`, and that
+macro is `ltdl.m4`'s, not `libtool.m4`'s. `autoconf`/`automake`/
+`libtool` alone (all present on this project's own dev host already)
+do **not** ship `ltdl.m4` — only the separate `libltdl-dev` package
+does. Not documented anywhere upstream this was checked against
+(neither `.github/actions/build-usermod-unix`'s own comments nor
+libffi's own `README`/`INSTALL` mention it); found only by actually
+running `deplibs` for real against a genuine cross-toolchain, exactly
+the kind of gap that stays invisible until someone tries the real
+thing rather than trusting the pinned settings table alone. Once
+installed, both `deplibs` and the main build ran clean end to end —
+verified twice: once calling `usermod/build.py`'s own functions
+directly, once through the full `cibuildmp` CLI (`[usermod.unix]
+archs = ["armhf"]`), each producing a genuine linked `ARM`/`EABI5` (or
+`MIPS32`) ELF with a real custom C module built in and callable.
+
+`UNIX_RUNNABLE_ARCHS` now equals every key `UNIX_ARCH_SETTINGS` pins
+(`x64`/`x86`/`aarch64`/`armhf`/`mipsel`) — the `"not buildable yet"`
+branch `build_unix()` used to raise is gone rather than left
+unreachable; `usermod/targets.py`'s own default `unix` axis values
+grew to include both, the same "default = everything currently
+provable" rule `windows`/`arm64` and `unix`/`aarch64` already
+followed once each was proven simple enough, not left as an opt-in
+special case. `action.Dockerfile` does not yet bake in either
+toolchain (same open gap **D23**'s own note already has for
+`aarch64`) — a real, separate, still-open item for whoever tackles
+that Docker-action gap next.
 
 - **M10** — runner/matrix integration, fan-out-by-default for usermod
   identifiers (**D20**).

@@ -30,6 +30,8 @@ def test_ports_list_selects_a_subset(tmp_path):
         "unix-x64",
         "unix-x86",
         "unix-aarch64",
+        "unix-armhf",
+        "unix-mipsel",
         "esp32-ESP32_GENERIC",
     ]
 

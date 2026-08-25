@@ -45,10 +45,12 @@ def test_axis_key_unknown_port_rejected():
         axis_key("stm32")
 
 
-def test_default_axis_values_unix_excludes_unbuildable_archs():
-    # armhf/mipsel are pinned in UNIX_ARCH_SETTINGS but not buildable yet
-    # (build_unix() raises) -- the default must not select them.
-    assert default_axis_values("unix") == ("x64", "x86", "aarch64")
+def test_default_axis_values_unix_includes_all_five_archs():
+    # armhf/mipsel were pinned-but-unbuildable for a while (build_unix()
+    # used to raise "not buildable yet"); now real, live-verified
+    # cross-compiles like every other unix arch, so the default includes
+    # them the same way aarch64 was added once it was proven simple.
+    assert default_axis_values("unix") == ("x64", "x86", "aarch64", "armhf", "mipsel")
 
 
 def test_default_axis_values_windows_includes_all_three():
@@ -61,7 +63,13 @@ def test_default_axis_values_esp32_is_generic_only():
 
 def test_usermod_targets_uses_defaults_when_no_override():
     targets = usermod_targets(["unix"], {})
-    assert [t.identifier for t in targets] == ["unix-x64", "unix-x86", "unix-aarch64"]
+    assert [t.identifier for t in targets] == [
+        "unix-x64",
+        "unix-x86",
+        "unix-aarch64",
+        "unix-armhf",
+        "unix-mipsel",
+    ]
 
 
 def test_usermod_targets_axis_override_replaces_default():

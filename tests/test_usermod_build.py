@@ -93,10 +93,61 @@ def test_unknown_arch_rejected():
         build_unix(opts("riscv64"), Path("/gh/ws/mpy"))
 
 
+@pytest.mark.parametrize(
+    "arch,cross,apt_package",
+    [
+        ("armhf", "arm-linux-gnueabihf-", "gcc-arm-linux-gnueabihf libltdl-dev"),
+        ("mipsel", "mipsel-linux-gnu-", "gcc-mipsel-linux-gnu libltdl-dev"),
+    ],
+)
+def test_armhf_mipsel_missing_toolchain_names_apt_package(
+    monkeypatch, tmp_path, arch, cross, apt_package
+):
+    monkeypatch.setattr(build.shutil, "which", lambda name: None)
+
+    with pytest.raises(UsermodBuildError, match=f"apt install {apt_package}"):
+        build_unix(opts(arch, build_dir=tmp_path / f"build-{arch}"), tmp_path / "mpy")
+
+
 @pytest.mark.parametrize("arch", ["armhf", "mipsel"])
-def test_armhf_mipsel_not_runnable_yet(arch):
-    with pytest.raises(UsermodBuildError, match="not buildable yet"):
-        build_unix(opts(arch), Path("/gh/ws/mpy"))
+def test_armhf_mipsel_probes_toolchain_before_deplibs_and_build(
+    monkeypatch, tmp_path, arch
+):
+    which_calls = []
+    monkeypatch.setattr(
+        build.shutil,
+        "which",
+        lambda name: which_calls.append(name) or f"/usr/bin/{name}",
+    )
+    run_calls = []
+
+    def fake_run(cmd, **kwargs):
+        run_calls.append(cmd)
+
+    build_dir = tmp_path / f"build-{arch}"
+    build_dir.mkdir()
+    (build_dir / "micropython").write_bytes(b"\x7fELF")
+    monkeypatch.setattr(build.subprocess, "run", fake_run)
+
+    build_unix(opts(arch, build_dir=build_dir), tmp_path / "mpy")
+
+    assert which_calls[0].endswith("gcc")
+    assert run_calls[0][-1] == "deplibs"
+    assert any("USER_C_MODULES" in arg for arg in run_calls[1])
+
+
+@pytest.mark.parametrize("arch", ["armhf", "mipsel"])
+def test_armhf_mipsel_builds_and_returns_binary_path(monkeypatch, tmp_path, arch):
+    build_dir = tmp_path / f"build-{arch}"
+    build_dir.mkdir()
+    (build_dir / "micropython").write_bytes(b"\x7fELF")
+
+    monkeypatch.setattr(build.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
+
+    result = build_unix(opts(arch, build_dir=build_dir), tmp_path / "mpy")
+
+    assert result == build_dir / "micropython"
 
 
 def test_x64_builds_and_returns_binary_path(tmp_path, monkeypatch):

@@ -4,35 +4,40 @@ scope ("ports that need no exotic provisioning first" -- docs/BACKLOG.md).
 own the environment"), the same shape build.py already uses for natmod --
 this module resolves per-arch settings and runs it, nothing more.
 
-Only x64, x86 and aarch64 are runnable here. x64/x86 build with the
-host's own gcc (x86 reusing toolchains.resolve()'s own -m32 multilib
-probe, already built for natmod's identical "x86" arch), so nothing new
-needs provisioning. aarch64 cross-compiles from an x86_64 host via
-apt's own gcc-aarch64-linux-gnu + libffi-dev:arm64 -- *not* "needs a
-native ARM64 host" as first assumed: verified live on a real
-ubuntu-latest runner (usermod-dev.yml's own now-removed
-unix-aarch64-cross-check job) that a plain dynamically-linked libffi
-resolves via multiarch once apt's own arm64 sources are pointed at
-ports.ubuntu.com (see the CROSS_COMPILE assignment below for why that
-mirror step is needed at all -- Ubuntu's default archive/security
-mirrors only carry amd64/i386), producing a genuine linked
-ARM-aarch64 ELF with a real custom C module built in. This only
-matters for a bare CLI/CI run today -- ports/unix usermod builds are
-not wired into the cibuildmp CLI or action.Dockerfile at all yet
-(both still natmod-only), so nothing here needs that same
-ports.ubuntu.com dance baked into the Docker image; whoever wires
-usermod into the CLI next will need to add it there too, at
-image-build time rather than runtime.
+All five arches are runnable here now. x64/x86 build with the host's
+own gcc (x86 reusing toolchains.resolve()'s own -m32 multilib probe,
+already built for natmod's identical "x86" arch), so nothing new needs
+provisioning. aarch64 cross-compiles from an x86_64 host via apt's own
+gcc-aarch64-linux-gnu + libffi-dev:arm64 -- *not* "needs a native
+ARM64 host" as first assumed: verified live on a real ubuntu-latest
+runner (usermod-dev.yml's own now-removed unix-aarch64-cross-check
+job) that a plain dynamically-linked libffi resolves via multiarch
+once apt's own arm64 sources are pointed at ports.ubuntu.com (see the
+CROSS_COMPILE assignment below for why that mirror step is needed at
+all -- Ubuntu's default archive/security mirrors only carry
+amd64/i386), producing a genuine linked ARM-aarch64 ELF with a real
+custom C module built in. `action.Dockerfile` does not yet bake that
+same mirror step or aarch64's toolchain into the image, so that one
+target still fails inside the Docker action specifically -- a real,
+separate, still-open gap (README's own usermod table footnote).
 
-armhf and mipsel need a genuinely new cross-toolchain story --
+armhf and mipsel needed a genuinely new cross-toolchain story --
 arm-linux-gnueabihf-/mipsel-linux-gnu-, glibc-hosted, not natmod's
 bare-metal arm-none-eabi-/riscv64-unknown-elf- pins -- plus a
-static-link `deplibs` pre-step; their UnixArchSettings are pinned below
-(transcribed from .github/actions/build-usermod-unix/action.yml's own
-case statement and cross-checked against a real v1.28.0
-ports/unix/Makefile directly, not just that action's comments) so the
-data is ready when a toolchain resolver for them exists, but build_unix()
-raises rather than pretending to build them today.
+static-link `deplibs` pre-step (MICROPY_STANDALONE=1, a real, separate
+libffi build under $(BUILD)/lib/libffi, not the dynamically-linked
+apt package aarch64 uses). Both apt-provisioned, both verified live end
+to end (a real custom C module, both `deplibs` and the main build run
+for real, a genuine linked ARM/EABI5 and MIPS32 ELF each): apt install
+gcc-arm-linux-gnueabihf/gcc-mipsel-linux-gnu is enough for the
+cross-compiler itself, but deplibs' own `./autogen.sh` (regenerating
+libffi's vendored `configure` via autoreconf) failed on a real
+ubuntu-latest-equivalent host with "possibly undefined macro:
+LT_SYS_SYMBOL_USCORE" until `libltdl-dev` was installed too --
+autoconf/automake/libtool alone do not ship `ltdl.m4` at all; only
+`libltdl-dev` does. Not obvious, not documented anywhere upstream this
+was checked against, found only by actually running deplibs for real
+rather than assuming the pinned settings alone were enough.
 
 `qemu` (armv7m) is the second port here: `ports/qemu/Makefile`'s own
 `CROSS_COMPILE ?= arm-none-eabi-` for its default board (`MPS2_AN385`,
@@ -136,15 +141,22 @@ UNIX_ARCH_SETTINGS: dict[str, UnixArchSettings] = {
         cross_compile="arm-linux-gnueabihf-",
         link_opts=("MICROPY_STANDALONE=1", "LDFLAGS_EXTRA=-static"),
         standalone=True,
+        # libltdl-dev: not the cross-compiler itself -- deplibs' own
+        # ./autogen.sh (regenerating vendored libffi's configure via
+        # autoreconf) fails on a real host with "possibly undefined
+        # macro: LT_SYS_SYMBOL_USCORE" without it. autoconf/automake/
+        # libtool alone do not ship ltdl.m4; verified live, the hard way.
+        apt_package="gcc-arm-linux-gnueabihf libltdl-dev",
     ),
     "mipsel": UnixArchSettings(
         cross_compile="mipsel-linux-gnu-",
         link_opts=("MICROPY_STANDALONE=1", "LDFLAGS_EXTRA=-static"),
         standalone=True,
+        apt_package="gcc-mipsel-linux-gnu libltdl-dev",
     ),
 }
 
-UNIX_RUNNABLE_ARCHS = ("x64", "x86", "aarch64")
+UNIX_RUNNABLE_ARCHS = ("x64", "x86", "aarch64", "armhf", "mipsel")
 
 
 @dataclass(frozen=True)
@@ -224,14 +236,6 @@ def build_unix(
             f"unknown unix arch {opts.arch!r}. Known: "
             f"{', '.join(sorted(UNIX_ARCH_SETTINGS))}"
         )
-    if opts.arch not in UNIX_RUNNABLE_ARCHS:
-        settings = UNIX_ARCH_SETTINGS[opts.arch]
-        raise UsermodBuildError(
-            f"unix/{opts.arch}: not buildable yet -- needs a "
-            f"{settings.cross_compile!r} cross-toolchain this project does "
-            f"not resolve yet (M8 covers x64/x86/aarch64 only so far; see "
-            f"docs/BACKLOG.md M8)"
-        )
     if opts.arch == "x86":
         # "x86" means exactly the same thing here as it does for natmod --
         # the host gcc's own -m32 multilib runtime, not a separate cross
@@ -240,17 +244,23 @@ def build_unix(
         # caller already handles that alongside BuildError/SourceError the
         # same way natmod's own cli.main() does.
         toolchains.resolve("x86", root=toolchain_root, quiet=quiet)
-    elif opts.arch == "aarch64":
-        # apt-provisioned, not a downloaded tarball -- toolchains.resolve()
-        # doesn't fit (nothing to download or cache), so this is the same
+    elif opts.arch != "x64":
+        # Every other arch (aarch64/armhf/mipsel) is apt-provisioned, not
+        # a downloaded tarball -- toolchains.resolve() doesn't fit
+        # (nothing to download or cache), so this is the same
         # shutil.which()-plus-named-package probe build_windows() already
-        # uses for its own apt-provisioned x64/x86 arches.
-        settings = UNIX_ARCH_SETTINGS["aarch64"]
+        # uses for its own apt-provisioned x64/x86 arches. Only checks the
+        # cross-compiler itself: armhf/mipsel's own extra host dependency
+        # (libltdl-dev, for deplibs' autoreconf step -- this module's own
+        # docstring has the story) has no equivalent shutil.which() check,
+        # the same way windows/arm64's llvm-mingw download isn't
+        # pre-validated piece by piece either.
+        settings = UNIX_ARCH_SETTINGS[opts.arch]
         gcc = shutil.which(f"{settings.cross_compile}gcc")
         if gcc is None:
             raise UsermodBuildError(
-                f"unix/aarch64: {settings.cross_compile}gcc is not on PATH. "
-                f"Install it with: apt install {settings.apt_package}"
+                f"unix/{opts.arch}: {settings.cross_compile}gcc is not on "
+                f"PATH. Install it with: apt install {settings.apt_package}"
             )
 
     if UNIX_ARCH_SETTINGS[opts.arch].standalone:

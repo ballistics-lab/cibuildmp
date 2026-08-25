@@ -61,6 +61,8 @@ def test_usermod_table_dispatches_to_usermod_cli(tmp_path, capsys):
         "unix-x64",
         "unix-x86",
         "unix-aarch64",
+        "unix-armhf",
+        "unix-mipsel",
     ]
 
 
