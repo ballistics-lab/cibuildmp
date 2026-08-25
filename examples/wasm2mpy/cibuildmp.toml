@@ -31,3 +31,12 @@ archs = ["x64", "x86", "armv6m", "armv7m", "armv7emsp", "armv7emdp",
 # vendored at this module's own root (unlike examples/template's).
 module-dir = "."
 extra-make-args = ["APP=zig"]
+# wasm2c (wabt) is this module's own dependency, not cibuildmp's --
+# action.yml's own apt-prerequisites step used to bundle it for every
+# consumer regardless of whether they build anything WebAssembly-sourced
+# at all, the same "one project's own need leaking into shared
+# infrastructure" shape D30 already flagged for usermod's bare-host
+# cross-toolchains. pre-build-command is exactly what this config knob
+# exists for -- a7p's own real cibuildmp.toml already uses it the same
+# way for its own nanopb fetch.
+pre-build-command = "command -v wasm2c >/dev/null || sudo apt-get install -y wabt"

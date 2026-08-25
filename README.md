@@ -22,21 +22,18 @@ describes its whole target matrix. The tool resolves it into build
 identifiers, fetches MicroPython, builds `mpy-cross`, provisions each
 target's cross toolchain, and runs the build -- the same way locally as on a
 runner. This is the direction the project is going, and the intended
-primary way to use it going forward -- run directly, via the root
-[`Dockerfile`](Dockerfile) (Linux and, through WSL2/Docker Desktop,
-Windows too -- see [Target support](#target-support) below for why no
-target needs a native Windows or macOS host), or in CI via this repo's
-own root `action.yml` (`uses: ballistics-lab/cibuildmp@<tag>`) -- a
-composite action that installs `cibuildmp` fresh on the runner and
-invokes it directly, not a Docker action any more (moved off that on
-purpose: `cibuildmp` itself launches sibling Docker containers for
-usermod's own per-port builds, which needs to run on the bare runner
-rather than inside one already, see `docs/BACKLOG.md`'s own D26/D28).
-[`action.Dockerfile`](action.Dockerfile) still exists and is still
-published to GHCR for standalone use, mirroring the root `Dockerfile`
-above, but is no longer what `action.yml` itself runs. See
-[`docs/BACKLOG.md`](docs/BACKLOG.md) for the design decisions and what is
-implemented so far.
+primary way to use it going forward -- run directly (`uv tool install
+cibuildmp` or `pip install cibuildmp`; usermod builds additionally need a
+real, reachable Docker daemon on whatever host runs `cibuildmp` itself --
+D30, D33), or in CI via this repo's own root `action.yml` (`uses:
+ballistics-lab/cibuildmp@<tag>`) -- a composite action that installs
+`cibuildmp` fresh on the runner and invokes it directly, not a Docker
+action any more (moved off that on purpose: `cibuildmp` itself launches
+sibling Docker containers for usermod's own per-port builds, which needs
+to run on the bare runner rather than inside one already, see
+`docs/BACKLOG.md`'s own D26/D28). See
+[`docs/BACKLOG.md`](docs/BACKLOG.md) for the design decisions and what
+is implemented so far.
 
 ```console
 $ cibuildmp --dry-run
@@ -129,8 +126,8 @@ Dockerfile's own comment if you ever pass that flag here too.)
 ```console
 $ sudo dpkg --add-architecture arm64
 # then point apt's own arm64 sources at ports.ubuntu.com -- see
-# action.Dockerfile's own comment for the exact deb822 stanzas this
-# needs on Ubuntu 24.04+, or apt-add-repository on older releases
+# action.yml's own apt-prerequisites step for the exact deb822 stanzas
+# this needs on Ubuntu 24.04+, or apt-add-repository on older releases
 $ sudo apt update && sudo apt install \
     gcc-aarch64-linux-gnu libffi-dev:arm64 \
     gcc-arm-linux-gnueabihf gcc-mipsel-linux-gnu libltdl-dev
@@ -717,10 +714,10 @@ was last touched -- override it with `--build-arg CIBUILDMP_REF=vX.Y.Z`
 for a different one, the same "pin a tag, not `@main`" rule as everywhere
 else on this page.
 
-`publish.yml`'s own `publish-docker` job builds and pushes
-`action.Dockerfile` to `ghcr.io/ballistics-lab/cibuildmp:<tag>` on every
-real release tag -- a standalone published image (`docker run
-ghcr.io/ballistics-lab/cibuildmp`, mirroring the root `Dockerfile`'s own
-usage), not something `action.yml` itself consumes: `action.yml` moved
-off being a Docker action entirely (`docs/BACKLOG.md`'s own **D28**/
-**D30**), so there is no `runs.image` left for a published tag to feed.
+There used to be a second, separately-published `action.Dockerfile`
+image (`publish.yml`'s own `publish-docker` job) for the same
+standalone use case -- removed (`docs/BACKLOG.md`'s own **D33**): it
+duplicated this same root `Dockerfile`, and had not fed `action.yml`
+itself (a composite action, not a Docker action, since **D28**/**D30**)
+for a while already. This root `Dockerfile` is the one supported way to
+run `cibuildmp` in a container.

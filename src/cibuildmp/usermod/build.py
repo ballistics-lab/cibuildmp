@@ -119,7 +119,6 @@ class UnixArchSettings:
     cross_compile: str = ""
     link_opts: tuple[str, ...] = ()
     standalone: bool = False
-    apt_package: str = ""
 
 
 # CROSS_COMPILE, MICROPY_FORCE_32BIT and MICROPY_STANDALONE are
@@ -127,16 +126,20 @@ class UnixArchSettings:
 # v1.28.0 checkout -- not this project's or the composite action's
 # invention.
 #
-# aarch64's cross_compile/apt_package: verified live end-to-end on a real
+# No apt_package field any more (D30: usermod is Docker-only,
+# build_unix() never probes a host toolchain, so nothing ever reads it
+# programmatically) -- what each arch's own image installs is
+# documented in docker/unix-manylinux-<arch>.Dockerfile and, where the
+# reasoning is non-obvious, in this dict's own per-arch comments
+# (armhf/mipsel's own libltdl-dev note below) instead of a second,
+# code-adjacent copy.
+#
+# aarch64's cross_compile: verified live end-to-end on a real
 # ubuntu-latest runner -- gcc-aarch64-linux-gnu + libffi-dev:arm64 (once
 # apt's own arm64 sources point at ports.ubuntu.com, not the default
 # amd64-only mirror) cross-compile ports/unix from x86_64 straight to a
 # dynamically-linked ARM aarch64 ELF, no deplibs/static-link step needed
-# the way armhf/mipsel below require. No toolchain resolver checks this
-# one in build_unix() (unlike x86's toolchains.resolve() call) because
-# apt, not a downloaded tarball, is what provisions it -- the same
-# shutil.which()-plus-named-package pattern build_windows() already uses
-# for its own apt-provisioned x64/x86 arches covers it instead.
+# the way armhf/mipsel below require.
 # Order is significant, not just alphabetical/historical -- targets.py's
 # own _PORT_AXES derives UNIX_RUNNABLE_ARCHS's build/display order from
 # these keys (dict order is insertion order in Python), so reordering
@@ -145,26 +148,22 @@ class UnixArchSettings:
 UNIX_ARCH_SETTINGS: dict[str, UnixArchSettings] = {
     "x64": UnixArchSettings(),
     "x86": UnixArchSettings(link_opts=("MICROPY_FORCE_32BIT=1",)),
-    "aarch64": UnixArchSettings(
-        cross_compile="aarch64-linux-gnu-",
-        apt_package="gcc-aarch64-linux-gnu libffi-dev:arm64",
-    ),
+    "aarch64": UnixArchSettings(cross_compile="aarch64-linux-gnu-"),
     "armhf": UnixArchSettings(
         cross_compile="arm-linux-gnueabihf-",
         link_opts=("MICROPY_STANDALONE=1", "LDFLAGS_EXTRA=-static"),
         standalone=True,
-        # libltdl-dev: not the cross-compiler itself -- deplibs' own
+        # libltdl-dev (docker/unix-manylinux-armhf.Dockerfile's own apt
+        # list): not the cross-compiler itself -- deplibs' own
         # ./autogen.sh (regenerating vendored libffi's configure via
-        # autoreconf) fails on a real host with "possibly undefined
-        # macro: LT_SYS_SYMBOL_USCORE" without it. autoconf/automake/
-        # libtool alone do not ship ltdl.m4; verified live, the hard way.
-        apt_package="gcc-arm-linux-gnueabihf libltdl-dev",
+        # autoreconf) fails with "possibly undefined macro:
+        # LT_SYS_SYMBOL_USCORE" without it. autoconf/automake/libtool
+        # alone do not ship ltdl.m4; verified live, the hard way.
     ),
     "mipsel": UnixArchSettings(
         cross_compile="mipsel-linux-gnu-",
         link_opts=("MICROPY_STANDALONE=1", "LDFLAGS_EXTRA=-static"),
         standalone=True,
-        apt_package="gcc-mipsel-linux-gnu libltdl-dev",
     ),
 }
 
@@ -205,15 +204,17 @@ def unix_make_command(opts: UnixBuildOptions, mpy_dir: Path) -> list[str]:
     ]
 
 
-def run_unix_deplibs(
-    opts: UnixBuildOptions, mpy_dir: Path, *, docker_image: str | None = None
-) -> None:
+def run_unix_deplibs(opts: UnixBuildOptions, mpy_dir: Path, *, docker_image: str) -> None:
     """MICROPY_STANDALONE=1 only makes libffi a DEPLIBS entry, not a
     prerequisite of the default build target -- must run as its own step
     first, same as build-usermod-unix's own "Build libffi (deplibs)" step.
     BUILD must match the main build's BUILD=: deplibs writes libffi.a
     under $(BUILD)/lib/libffi/out/lib/ and the main build looks for it
     there.
+
+    Docker-only (D30): `docker_image` is always real by the time this is
+    called -- `build_unix()` itself raises before ever reaching here if
+    `ensure_image()` returned `None`.
     """
     settings = UNIX_ARCH_SETTINGS[opts.arch]
     command = [
@@ -226,21 +227,15 @@ def run_unix_deplibs(
         "MICROPY_STANDALONE=1",
         "deplibs",
     ]
-    if docker_image is not None:
-        from . import dockerrun
+    from . import dockerrun
 
-        dockerrun.run(
-            command,
-            mounts=[mpy_dir, Path(opts.user_c_modules)],
-            workdir=_unix_dir(mpy_dir),
-            image=docker_image,
-            timeout=dockerrun.timeout_for("unix", opts.arch, "manylinux"),
-        )
-        return
-    try:
-        subprocess.run(command, check=True)
-    except subprocess.CalledProcessError as exc:
-        raise UsermodBuildError(f"unix/{opts.arch}: deplibs failed: {exc}") from exc
+    dockerrun.run(
+        command,
+        mounts=[mpy_dir, Path(opts.user_c_modules)],
+        workdir=_unix_dir(mpy_dir),
+        image=docker_image,
+        timeout=dockerrun.timeout_for("unix", opts.arch, "manylinux"),
+    )
 
 
 def build_unix(
@@ -260,15 +255,18 @@ def build_unix(
     ports/unix/Makefile's own `PROG ?= micropython` default, unambiguous
     with no globbing needed, unlike natmod's build.collect_output().
 
-    D26/D28's own design, via `dockerrun.ensure_image()`: the actual
-    make/deplibs commands run inside a per-(arch, libc) container instead
-    of directly on this host, by default -- an explicit
-    CIBMP_UNIX_<ARCH>_MANYLINUX_DOCKER_IMAGE override or a
-    dockerrun.PORT_IMAGES-registered default, digest-pinned, published by
-    publish-docker-images.yml (cibuildmp itself never builds one, the
-    same division of labour cibuildwheel's own pinned manylinux/
-    musllinux images have) -- see usermod/dockerrun.py's own docstring
-    for why this is keyed by
+    Docker-only (D30's own later, superseding call: no non-Docker path
+    for any usermod port, `unix`'s own long-grandfathered host
+    cross-compile included -- a bare-host build means `apt-get
+    install`ing arch-specific cross-toolchains onto whatever host runs
+    it, a real, persistent mutation; a container is the actually
+    non-mutating, deterministic, isolated choice, built once from a
+    pinned Dockerfile and discarded per run). `dockerrun.ensure_image()`
+    resolves an explicit `CIBMP_UNIX_<ARCH>_MANYLINUX_DOCKER_IMAGE`
+    override or a `dockerrun.PORT_IMAGES`-registered, digest-pinned
+    default published by `publish-docker-images.yml` -- cibuildmp itself
+    never builds `docker/unix-manylinux-<arch>.Dockerfile` (see
+    usermod/dockerrun.py's own docstring for why). Keyed by
     (port, arch, libc), not port alone (D31: unix's own five
     architectures do not share one image, and glibc/musl are a real
     runtime-compatibility axis a shared image would hide). "manylinux"
@@ -276,10 +274,11 @@ def build_unix(
     `unix`'s only real libc option today (musllinux needs a real musl
     toolchain, D31, not built yet) -- once UnixBuildOptions grows a
     `libc` field for musllinux, that field replaces this literal, the
-    resolver itself needs no change. The host-side toolchain probe
-    below is skipped whenever an image is selected: the toolchain lives
-    inside the image, not on this host's PATH, so shutil.which() would
-    reject a perfectly good docker-based build.
+    resolver itself needs no change.
+
+    `toolchain_root`/`quiet` are accepted only for the same call shape
+    every `build_<port>()` shares (`orchestrate.py`'s `build_one()`
+    passes them uniformly); neither is used on this Docker-only path.
     """
     if opts.arch not in UNIX_ARCH_SETTINGS:
         raise UsermodBuildError(
@@ -290,58 +289,26 @@ def build_unix(
     from . import dockerrun
 
     docker_image = dockerrun.ensure_image("unix", opts.arch, "manylinux")
-
     if docker_image is None:
-        if opts.arch == "x86":
-            # "x86" means exactly the same thing here as it does for
-            # natmod -- the host gcc's own -m32 multilib runtime, not a
-            # separate cross toolchain -- so this reuses natmod's own
-            # probe rather than re-implementing it. Raises ToolchainError,
-            # left unwrapped: the caller already handles that alongside
-            # BuildError/SourceError the same way natmod's own cli.main()
-            # does.
-            toolchains.resolve("x86", root=toolchain_root, quiet=quiet)
-        elif opts.arch != "x64":
-            # Every other arch (aarch64/armhf/mipsel) is apt-provisioned,
-            # not a downloaded tarball -- toolchains.resolve() doesn't fit
-            # (nothing to download or cache), so this is the same
-            # shutil.which()-plus-named-package probe build_windows()
-            # already uses for its own apt-provisioned x64/x86 arches.
-            # Only checks the cross-compiler itself: armhf/mipsel's own
-            # extra host dependency (libltdl-dev, for deplibs' autoreconf
-            # step -- this module's own docstring has the story) has no
-            # equivalent shutil.which() check, the same way
-            # windows/arm64's llvm-mingw download isn't pre-validated
-            # piece by piece either.
-            settings = UNIX_ARCH_SETTINGS[opts.arch]
-            gcc = shutil.which(f"{settings.cross_compile}gcc")
-            if gcc is None:
-                raise UsermodBuildError(
-                    f"unix/{opts.arch}: {settings.cross_compile}gcc is not "
-                    f"on PATH. Install it with: apt install "
-                    f"{settings.apt_package}"
-                )
+        raise UsermodBuildError(
+            f"unix/{opts.arch}: no Docker image registered for this "
+            f"arch and usermod builds are Docker-only -- set "
+            f"CIBMP_UNIX_{opts.arch.upper()}_MANYLINUX_DOCKER_IMAGE, or "
+            f"wait for publish-docker-images.yml to publish one and "
+            f"register it in dockerrun.PORT_IMAGES"
+        )
 
     if UNIX_ARCH_SETTINGS[opts.arch].standalone:
         run_unix_deplibs(opts, mpy_dir, docker_image=docker_image)
 
     command = unix_make_command(opts, mpy_dir)
-    if docker_image is not None:
-        dockerrun.run(
-            command,
-            mounts=[mpy_dir, Path(opts.user_c_modules)],
-            workdir=_unix_dir(mpy_dir),
-            image=docker_image,
-            timeout=dockerrun.timeout_for("unix", opts.arch, "manylinux"),
-        )
-    else:
-        try:
-            subprocess.run(command, check=True)
-        except subprocess.CalledProcessError as exc:
-            raise UsermodBuildError(
-                f"unix/{opts.arch}: `{' '.join(command)}` failed with exit "
-                f"code {exc.returncode}"
-            ) from exc
+    dockerrun.run(
+        command,
+        mounts=[mpy_dir, Path(opts.user_c_modules)],
+        workdir=_unix_dir(mpy_dir),
+        image=docker_image,
+        timeout=dockerrun.timeout_for("unix", opts.arch, "manylinux"),
+    )
 
     binary = opts.build_dir / "micropython"
     if not binary.exists():

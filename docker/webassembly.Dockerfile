@@ -112,7 +112,23 @@ RUN curl -fsSL -o /tmp/wasm-binaries.tar.xz \
     echo "9bea769c189d9f52196e74283fb86937318cc24bf14879f2c6bdd19862131901  /tmp/wasm-binaries.tar.xz" | sha256sum -c - && \
     mkdir -p /opt/emsdk && \
     tar -xJf /tmp/wasm-binaries.tar.xz -C /opt/emsdk && \
-    rm /tmp/wasm-binaries.tar.xz
+    rm /tmp/wasm-binaries.tar.xz && \
+    chmod -R a+rwX /opt/emsdk/install/emscripten/cache
+
+# emcc writes into its own cache/ dir (sanity-check state, cached system
+# headers) on every invocation, not just the first -- extracted here
+# owned by whatever UID `docker build` itself ran as (root, or the
+# tarball's own baked-in "ubuntu" UID 1000 depending on layer), which
+# `dockerrun.run()`'s own `--user $(id -u):$(id -g)` (real host UID,
+# almost never 1000) cannot write to by default. Found for real: passed
+# on a real ubuntu-latest GitHub Actions runner (a different UID than
+# this sandbox's own, which happened to already be 1000 -- coincidence,
+# not a fix) with `emcc: error: cache directory ... is not writable
+# while accessing cache for: sanity`. `chmod -R a+rwX` (not a `chown` to
+# some specific UID cibuildmp could not know in advance) is what makes
+# this work for literally any `--user`, cibuildmp's own or anyone
+# else's -- confirmed live against a real `--user 12345:12345` (an
+# arbitrary UID with nothing else granting it access).
 
 # Same two PATH entries ResolvedEmsdk.env() prepends on a bare-host
 # resolve (emscripten/ for the emcc/em++ driver scripts, bin/ for the

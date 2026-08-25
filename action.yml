@@ -39,9 +39,12 @@ inputs:
 # hello-world` from an ordinary `run:` step on ubuntu-latest, D28's own former
 # "open question", now resolved).
 #
-# The apt list below is unchanged from action.Dockerfile's own (byte for
-# byte, every one of D25's six real bugs and D20/D24's own findings still
-# apply) -- this step is deliberately scoped to the shell conversion alone,
+# The apt list below traces back to action.Dockerfile's own (the old
+# Docker-action image, since deleted -- D33 removed it and its
+# publish.yml own publish-docker job entirely, once action.yml stopped
+# being a Docker action at all and nothing else referenced it), every
+# one of D25's six real bugs and D20/D24's own findings still apply --
+# this step is deliberately scoped to the shell conversion alone,
 # not yet the toolchain-isolation payoff that conversion unlocks (D28's own
 # step 2: the usermod docker-image resolver becoming real/config-driven, and
 # D30's own point 2: most of this apt list moving into per-port sibling
@@ -89,28 +92,33 @@ runs:
         key: v2-apt-archives-${{ runner.os }}-${{ hashFiles('action.yml') }}
 
     - name: Install cibuildmp's own apt prerequisites
+      # Slimmed live, D33: every package this used to install beyond
+      # what's left below (mingw-w64 x64/x86, aarch64/armhf/mipsel-
+      # linux-gnu, every libffi-dev/libc6-dev-*-cross variant, libltdl-
+      # dev, libtool, pkg-config, libusb-1.0-0) existed only for
+      # usermod's own bare-host cross-compiles -- gone since D30 made
+      # usermod Docker-only (each sibling container now carries its own
+      # copy of exactly this list, see docker/*.Dockerfile). The whole
+      # dpkg --add-architecture arm64/i386 + ports.ubuntu.com deb822
+      # stanza block existed only to make libffi-dev:arm64/libffi-dev:
+      # i386/linux-libc-dev:i386 installable -- gone with them. Verified
+      # live before cutting, not assumed: a real `apt-get install
+      # gcc-13-multilib` + `gcc -m32` compile-and-run, on a bare
+      # ubuntu:24.04 container with no foreign architecture registered
+      # at all (`dpkg --print-foreign-architectures` empty) -- x86
+      # natmod's own multilib need was never an i386-arch package to
+      # begin with. `wabt` also cut from here, separately: it was
+      # `examples/wasm2mpy`'s own dependency (`wasm2c`), not cibuildmp's
+      # -- every consumer of this action was paying for it whether or
+      # not they build anything WebAssembly-sourced, the same "one
+      # project's own need leaking into shared infrastructure" shape as
+      # the usermod toolchains above. Moved to that example's own
+      # `pre-build-command` instead (`cibuildmp.toml`'s own config knob
+      # exactly for this -- a7p's own real config already uses it the
+      # same way for its nanopb fetch).
       shell: bash
       run: |
         set -eu
-        sudo dpkg --add-architecture arm64
-        sudo dpkg --add-architecture i386
-        sudo sed -i '/^Types: deb$/a Architectures: amd64,i386' /etc/apt/sources.list.d/ubuntu.sources
-        {
-          echo
-          echo 'Types: deb'
-          echo 'URIs: http://ports.ubuntu.com/ubuntu-ports'
-          echo 'Suites: noble noble-updates noble-backports'
-          echo 'Components: main universe restricted multiverse'
-          echo 'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg'
-          echo 'Architectures: arm64'
-          echo
-          echo 'Types: deb'
-          echo 'URIs: http://ports.ubuntu.com/ubuntu-ports'
-          echo 'Suites: noble-security'
-          echo 'Components: main universe restricted multiverse'
-          echo 'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg'
-          echo 'Architectures: arm64'
-        } | sudo tee -a /etc/apt/sources.list.d/ubuntu.sources >/dev/null
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends \
           build-essential \
@@ -118,24 +126,7 @@ runs:
           ca-certificates \
           curl \
           python3 \
-          gcc-13-multilib \
-          gcc-mingw-w64-x86-64 \
-          gcc-mingw-w64-i686 \
-          gcc-aarch64-linux-gnu \
-          libffi-dev \
-          libffi-dev:i386 \
-          linux-libc-dev:i386 \
-          libffi-dev:arm64 \
-          libc6-dev-arm64-cross \
-          gcc-arm-linux-gnueabihf \
-          libc6-dev-armhf-cross \
-          gcc-mipsel-linux-gnu \
-          libc6-dev-mipsel-cross \
-          libltdl-dev \
-          libtool \
-          pkg-config \
-          libusb-1.0-0 \
-          wabt
+          gcc-13-multilib
 
     - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
 
@@ -144,8 +135,9 @@ runs:
       # Installed from this exact checkout, not a git fetch --
       # github.action_path is already the pinned ref's own source (GitHub
       # Actions checks out a composite action's own repo before running it,
-      # the same guarantee action.Dockerfile's own `COPY .` used to rely on
-      # for a Docker action): no separate network round-trip, no
+      # the same guarantee the old, now-deleted action.Dockerfile's own
+      # `COPY .` used to rely on for a Docker action): no separate
+      # network round-trip, no
       # version-drift risk. extras (unknowable at publish time) get folded
       # into this one install directly -- no separate reinstall pass, unlike
       # the old Docker action's own two-step dance, since this installs

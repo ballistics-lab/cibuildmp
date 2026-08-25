@@ -3058,15 +3058,19 @@ conclusion.
      `espidf.py` (already written, from earlier in this session) stay
      as `docker/<port>.Dockerfile`'s own *build-time* provisioning
      mechanism -- called once when the image is built, not something a
-     caller's own bare-host run falls back to. **Concrete follow-up
-     this implies, not yet done:** `usermod/dockerrun.py`'s
-     `ensure_image()` and `build_unix()` still fall through to a bare
-     host build when no Dockerfile/image resolves (**D32**'s own note
-     on this) -- that fallback needs to become a hard, clearly-worded
-     error ("Docker required, image unavailable") instead, once this
-     lands. Also resolves **D32**'s own open "self-hosted runners
-     without Docker" question definitively: fail loudly, not fall
-     back. **Scoped to an actual build only, not the CLI as a whole:**
+     caller's own bare-host run falls back to. **Done (D33's own
+     session): `usermod/dockerrun.py`'s `ensure_image()` no longer has
+     a local-build fallback at all (build vs. pull, a separate change),
+     and `build_unix()`'s own bare-host branch (the `toolchains.resolve
+     ("x86")` / `shutil.which()`-plus-apt-package probe, and
+     `UnixArchSettings.apt_package`, which nothing else read once that
+     branch was gone) is deleted outright, not merely deprioritized.**
+     `docker_image is None` is now the immediate, clearly-worded error
+     this bullet called for ("no Docker image registered ... usermod
+     builds are Docker-only"), matching `build_webassembly()`'s own
+     shape exactly. Also closes **D32**'s own "self-hosted runners
+     without Docker" question the way this bullet already predicted:
+     fail loudly, never fall back. **Scoped to an actual build only, not the CLI as a whole:**
      the error belongs at the point a usermod port is actually about
      to be built (inside `build_<port>()`, once it needs a real image),
      not as a blanket check `cli.py`/`usermod/cli.py` run up front.
@@ -3428,6 +3432,104 @@ story to the same shape:
   container (`--name cibuildmp-<uuid>`) and issues a real `docker kill`
   on that name the moment the timeout fires, which is what actually
   stops it (and, via the already-present `--rm`, removes it).
+- **A real, live-caught bug in `docker/webassembly.Dockerfile`, found
+  the moment `PORT_IMAGES` gave it its first real exercise ever.**
+  `verify-docker-images` only ever ran `docker build` (does the image's
+  own layers assemble), never `docker run` (does a real `make`/`emcc`
+  invocation inside it actually work) -- and `build-usermod`'s own
+  webassembly leg had failed with "no Docker image registered" on
+  every push until this session, meaning no real compile had ever run
+  through this image before. It failed immediately once one could:
+  `emcc: error: NODE_JS not set in config ..., and node not found in
+  PATH`, on a bare `-E` preprocess for qstr generation -- not gated
+  behind `min`/`repl`/`test`/`test_min` the way this file's own header
+  comment had assumed. Root cause, confirmed live inside a real
+  container: the `wasm-binaries.tar.xz` release asset this image
+  downloads bundles no Node.js binary at all (only JS sources), unlike
+  a full `emsdk install`/`activate` run, which this image deliberately
+  bypasses for a smaller, directly-verified download (D18's own
+  precedent for `llvm-mingw`). Fixed by adding Ubuntu 24.04's own
+  `nodejs` package to the image -- confirmed live, the exact failing
+  command re-run inside a container with `nodejs` installed passes
+  `emcc`'s own sanity check. Republished (`publish-docker-images.yml`
+  run `32897892176`) and re-verified end to end: a real pull of the new
+  digest, a real `make` through it, a genuine `micropython.mjs`
+  (217344 bytes -- byte-identical to D18's own original bare-host
+  proof). `usermod/dockerrun.py`'s own `PORT_IMAGES["webassembly"]`
+  entry updated to the new digest.
+- **`unix`'s own bare-host fallback also removed for real this session
+  (see D30's own "Concrete follow-up" bullet, now marked done there),
+  prompted directly by the webassembly finding above:** the same class
+  of bug -- an image that builds but was never actually run for real --
+  could just as easily have been hiding in any of the five
+  `unix-manylinux-<arch>` images, masked the same way, by a fallback
+  nothing ever needed to fall through to once a real image existed.
+  Verified live once the fallback was gone and a real `PORT_IMAGES`
+  entry existed to route through: `unix-x64` built cleanly through its
+  own Docker image on the first real try, no equivalent hidden bug
+  found there.
+- **`PORT_IMAGES` populated with real digests for all eight
+  (port, arch[, libc]) keys**, copied from `publish-docker-images.yml`
+  run `32895072172`'s own "Record the pinned digest" step output (and
+  `32897892176` for webassembly's own re-publish above) -- not
+  placeholders, the actual pins this table's own comment said would
+  land "once that workflow has actually published one."
+- **Every GHCR package `publish-docker-images.yml` creates is private
+  by default, confirmed live** (an anonymous `docker pull` of one
+  returned `401 unauthorized`) -- GitHub's own documented behaviour for
+  a package pushed via the automatic per-job `GITHUB_TOKEN`, private
+  regardless of the parent repo's own visibility, not a bug in the
+  workflow. Fixed for all eight, by hand, via each package's own
+  "Change visibility -> Public" setting (a classic OAuth token's
+  `write:packages` scope, even freshly granted via `gh auth refresh`,
+  turned out not to be enough for the organization-package PATCH
+  endpoint specifically -- `GET` worked, `PATCH` 404'd even on an
+  already-public package -- so this needs the GitHub web UI, or a
+  fine-grained PAT with explicit organization Packages write
+  permission, not a classic scope grant). One-time: visibility is a
+  property of the package name, not each pushed version, so a future
+  push to any of these same eight names stays public with no further
+  action -- only a genuinely new package name (a ninth port/arch/libc
+  combination) would default to private again and need this repeated.
+  Reconfirmed live after the fix: an anonymous `docker pull` of the
+  same digest that 401'd before now succeeds.
+- **`action.Dockerfile` and the root `Dockerfile`, both deleted, along
+  with `publish.yml`'s own `publish-docker` job -- the user's own call,
+  the same "usermod is Docker-only, stop bundling every cross-toolchain
+  in one image" principle applied to cibuildmp's own distribution
+  artifacts, not just the per-port images.** `action.Dockerfile` had
+  not fed `action.yml` (a composite action since D28) for a while
+  already, and only existed to publish a second, standalone image
+  duplicating the root `Dockerfile`'s own "docker run cibuildmp"
+  purpose -- genuinely redundant once noticed, not something either
+  file's own header comment had caught up to. The root `Dockerfile`
+  went with it rather than being slimmed and kept (a real alternative
+  considered and rejected): it bundled every usermod cross-toolchain
+  (mingw-w64, aarch64/armhf/mipsel-linux-gnu, every libffi-dev/
+  libc6-dev-*-cross variant) for a build path D30 already made
+  Docker-only, and its own "docker run cibuildmp" story had no working
+  usermod path left at all inside that container (no `docker` CLI, no
+  `docker.sock` mount, to launch the sibling containers usermod builds
+  now require) -- the bundled toolchains were pure dead weight, not a
+  gap worth patching over removing. `uv tool install cibuildmp`/`pip
+  install cibuildmp` directly is the one supported way to run
+  `cibuildmp` outside CI now; README updated to match, including its
+  own now-stale `examples/usermod-unix` reference (merged into
+  `examples/template` earlier this same session).
+- **`action.yml`'s own apt-prerequisites step slimmed the same way,
+  live-verified before cutting, not assumed:** every package beyond
+  `build-essential`/`git`/`ca-certificates`/`curl`/`python3`/
+  `gcc-13-multilib`/`wabt` existed only for usermod's own bare-host
+  cross-compiles, gone since D30, and the entire `dpkg
+  --add-architecture arm64/i386` + `ports.ubuntu.com` deb822 stanza
+  block existed only to make `libffi-dev:arm64`/`libffi-dev:i386`/
+  `linux-libc-dev:i386` installable, gone with them. Checked live
+  before cutting: a bare `ubuntu:24.04` container, `apt-get install
+  gcc-13-multilib` alone (no foreign architecture registered at all --
+  `dpkg --print-foreign-architectures` empty), a real `gcc -m32`
+  compile-and-run -- natmod's own x86 multilib need was never an
+  i386-arch package to begin with, confirmed rather than inferred from
+  the root `Dockerfile`'s own now-deleted comment asserting it.
 
 ### Later — tests
 
