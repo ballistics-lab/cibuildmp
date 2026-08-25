@@ -64,9 +64,12 @@ include = ["cibuildmp*"]
 
 # Explicit rather than relying on include-package-data: resources/natmod.toml
 # holds every pinned toolchain URL, checksum and arch table, so a wheel that
-# silently omits it is a wheel that fails at import.
+# silently omits it is a wheel that fails at import. resources/docker/*
+# holds each port's own Dockerfile (D28) -- shipped for the same reason:
+# cibuildmp itself owns these build recipes, not just this git checkout,
+# so an installed cibuildmp can be pointed at one directly.
 [tool.setuptools.package-data]
-cibuildmp = ["resources/*.toml"]
+cibuildmp = ["resources/*.toml", "resources/docker/*"]
 
 [tool.setuptools_scm]
 fallback_version = "0.0.0.dev0"

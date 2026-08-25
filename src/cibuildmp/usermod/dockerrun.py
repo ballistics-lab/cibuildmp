@@ -33,14 +33,15 @@ from .build import UsermodBuildError
 
 # Maintainer-declared default image per port, keyed by the same port name
 # `cibuildmp` already uses everywhere else (targets.py's Target.port).
-# Empty today: docker/unix.Dockerfile exists and builds correctly (D20,
-# D24, D25) but is not yet published anywhere (that's D28 step 5) -- an
-# entry here takes effect for every caller that doesn't set the env var
-# override, so registering "unix" before a real, pullable image exists
-# would make ordinary unopted-in unix usermod builds start trying (and
-# failing) to pull it. Add `"unix": "ghcr.io/ballistics-lab/cibuildmp-unix:latest"`
-# here once publish.yml actually pushes that tag, and the same one line
-# per port thereafter.
+# Empty today: resources/docker/unix.Dockerfile exists and builds
+# correctly (D20, D24, D25) but is not yet published anywhere (that's
+# D28 step 5) -- an entry here takes effect for every caller that
+# doesn't set the env var override, so registering "unix" before a
+# real, pullable image exists would make ordinary unopted-in unix
+# usermod builds start trying (and failing) to pull it. Add
+# `"unix": "ghcr.io/ballistics-lab/cibuildmp-unix:latest"` here once
+# publish.yml actually pushes that tag, and the same one line per port
+# thereafter.
 PORT_IMAGES: dict[str, str] = {}
 
 

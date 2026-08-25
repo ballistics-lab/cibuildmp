@@ -12,7 +12,13 @@
 # whole point of the split: no `uv tool install`, no ENTRYPOINT, nothing
 # but the toolchain a real `make -C ports/unix` invocation needs.
 #
-# Build: docker build -t cibuildmp-unix -f docker/unix.Dockerfile .
+# Lives under src/cibuildmp/resources/docker/, not a top-level docker/
+# directory -- shipped as a real package resource (pyproject.toml's own
+# package-data), the same way resources/*.toml already is, so an
+# installed cibuildmp owns this build recipe too, not just this git
+# checkout.
+#
+# Build: docker build -t cibuildmp-unix -f src/cibuildmp/resources/docker/unix.Dockerfile .
 # Use:   CIBMP_UNIX_DOCKER_IMAGE=cibuildmp-unix cibuildmp ...
 FROM ubuntu:24.04
 

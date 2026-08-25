@@ -1945,7 +1945,7 @@ separate containers per port.
   port's own build command, keeping every image far smaller than
   today's combined one.
 - **First slice, agreed with the user:** a proof-of-concept for `unix`
-  only -- a `docker/unix.Dockerfile` (just that port's own toolchain,
+  only -- a `resources/docker/unix.Dockerfile` (just that port's own toolchain,
   the exact package set D20/D24/D25 already verified live, minus
   `windows`/`esp32`-only packages) and a minimal `docker`
   toolchain-strategy path in `usermod/build.py`, opt-in and not yet
@@ -2037,7 +2037,7 @@ unconditionally).
 
 **Current state, precisely.**
 
-- `docker/unix.Dockerfile` exists: `unix`'s own toolchain only (the
+- `resources/docker/unix.Dockerfile` exists: `unix`'s own toolchain only (the
   exact package set **D20/D24/D25** verified live, six real apt/gcc
   bugs and all), no `cibuildmp` installed inside it -- deliberately,
   since the whole point of the split is that `cibuildmp` stays on the
@@ -2053,7 +2053,7 @@ unconditionally).
   testing/forks), then falls back to `PORT_IMAGES`, a plain
   `dict[str, str]` **in this file's own source** that a maintainer edits
   to register a port's canonical image -- not a `cibuildmp.toml` key.
-  `PORT_IMAGES` is still empty today: `docker/unix.Dockerfile` exists and
+  `PORT_IMAGES` is still empty today: `resources/docker/unix.Dockerfile` exists and
   builds correctly but isn't published to GHCR yet (step 5), and
   registering "unix" before a real pullable image exists would make
   every unopted-in `unix` usermod build start trying, and failing, to
@@ -2104,13 +2104,31 @@ unconditionally).
   - **Still not yet done:** `--platform usermod` still always builds
     on the bare host inside this new composite action too -- there is
     no flag or config key yet that makes a caller's own build actually
-    go through `docker/unix.Dockerfile` as a sibling container
+    go through `resources/docker/unix.Dockerfile` as a sibling container
     (migration step 2). This remains the single largest gap before the
     `unix` slice is a real, usable feature rather than a
     proof-of-concept -- step 1 only removed the *structural* blocker
     (Docker-in-Docker), it did not yet wire the mechanism through.
-- `windows`/`qemu`/`webassembly`/`esp32` have no Dockerfile of their
-  own at all yet -- only `unix` has been attempted.
+- `resources/docker/windows.Dockerfile` also now exists (migration step
+  3's first item -- x64/x86 only, the two apt-installed mingw-w64 GCC
+  packages `build_windows()` already proves work for this port;
+  `arm64` stays bare-host-only until step 4 gives `dockerrun.py` real
+  mount coverage for `sources.cache_root()`, where `llvm-mingw`
+  downloads). Same open verification gap as `unix.Dockerfile`: not yet
+  built for real via `docker build` (no reachable Docker daemon in the
+  sandbox this was written in) -- correctness inferred from matching
+  `action.Dockerfile`'s own already-proven package list for this exact
+  port/arch pair, not yet confirmed independently.
+- Both Dockerfiles live under `src/cibuildmp/resources/docker/`, not a
+  top-level `docker/` directory -- moved there mid-session, on the
+  user's own correction, once it was pointed out that a top-level
+  `docker/` never shipped in the installed package at all
+  (`pyproject.toml`'s own `package-data` only listed
+  `resources/*.toml`). Real package resources now, the same as
+  `natmod.toml`/`usermod.toml` already are -- `package-data` extended
+  to `resources/docker/*` to match.
+- `qemu`/`webassembly`/`esp32` still have no Dockerfile of their own at
+  all yet.
 
 **The full migration plan, in dependency order -- reordered from the
 first pass above, per the user's own explicit follow-up.** The
@@ -2208,19 +2226,22 @@ followed by one big wiring pass at the end.
      publishes a pullable `unix` image -- registering it before that
      would break every unopted-in `unix` build the moment this step
      lands, not just when the port's own Dockerfile does.
-3. **The remaining four per-port Dockerfiles, one at a time, each
+3. **The remaining three per-port Dockerfiles, one at a time, each
    immediately usable the moment it lands** (step 1 and 2 already
    wired the mechanism, so this stops being "write five images, then
-   wire them all at the end"). `docker/unix.Dockerfile` is the
+   wire them all at the end"). `resources/docker/unix.Dockerfile` is the
    template to copy: only that port's own toolchain, no `cibuildmp`
-   baked in. `windows` first -- apt-only toolchain, no large download
+   baked in. `windows` was next -- apt-only toolchain, no large download
    like `esp32`'s ESP-IDF or `webassembly`'s emsdk, closest in shape to
    `unix` (**D26**'s own "first slice" precedent: one port, proven
    live, before the next).
-   - `docker/windows.Dockerfile` -- `gcc-mingw-w64-x86-64`/
-     `gcc-mingw-w64-i686` only; `arm64` downloads `llvm-mingw` at
-     build time regardless (`usermod/llvmmingw.py`), same as today.
-   - `docker/qemu.Dockerfile` -- whatever `mp-usermod.yml`'s own
+   - **`resources/docker/windows.Dockerfile` -- written.**
+     `gcc-mingw-w64-x86-64`/`gcc-mingw-w64-i686` only; `arm64` downloads
+     `llvm-mingw` at build time regardless (`usermod/llvmmingw.py`),
+     same as today. Not registered in `PORT_IMAGES` -- same as `unix`,
+     not yet published (step 5), and not yet confirmed via a real
+     `docker build` (see "current state" above).
+   - `resources/docker/qemu.Dockerfile` -- whatever `mp-usermod.yml`'s own
      `qemu-system` job installs today (arm-none-eabi-gcc class
      toolchain plus qemu-system-arm itself for the execution axis,
      **D21** -- confirm the exact package list against that workflow
@@ -2229,12 +2250,12 @@ followed by one big wiring pass at the end.
      point 4) -- worth checking for a `qemu-system` setup specifically
      too, not just the build toolchain, once **D21**'s own execution
      axis gets real implementation and needs a place to run from.
-   - `docker/webassembly.Dockerfile` -- emsdk is downloaded at build
+   - `resources/docker/webassembly.Dockerfile` -- emsdk is downloaded at build
      time (`usermod/emsdk.py`), so this image may need close to
      nothing baked in beyond `python3`/`git`/`curl`/`ca-certificates`;
      confirm live whether emsdk's own toolchain needs anything else
      from the base OS first.
-   - `docker/esp32.Dockerfile` -- the heaviest one: ESP-IDF itself is
+   - `resources/docker/esp32.Dockerfile` -- the heaviest one: ESP-IDF itself is
      a multi-gigabyte checkout with its own Python env bootstrap
      (`usermod/espidf.py`). Worth deciding explicitly whether ESP-IDF
      bakes into the image (large image, fast job) or stays a
@@ -2662,7 +2683,7 @@ a second, Alpine-based image per arch (musl's own `gcc`, not Ubuntu's),
 registered in `usermod/dockerrun.py`'s own `PORT_IMAGES` (**D28** step 2,
 just implemented) the same one-line way a new port is declared today --
 except keyed by *(port, libc)*, not just *(port)*, since `unix` alone
-now needs two images (`docker/unix.Dockerfile` for glibc,
+now needs two images (`resources/docker/unix.Dockerfile` for glibc,
 `docker/unix-musl.Dockerfile` for musl) where every other port still
 needs one. `targets.py`'s own `identifier` property needs a matching new
 axis alongside `arch` (`mpy6.3-usermod-unix-x64-manylinux` /
