@@ -3516,20 +3516,39 @@ story to the same shape:
   `cibuildmp` outside CI now; README updated to match, including its
   own now-stale `examples/usermod-unix` reference (merged into
   `examples/template` earlier this same session).
-- **`action.yml`'s own apt-prerequisites step slimmed the same way,
-  live-verified before cutting, not assumed:** every package beyond
+- **`action.yml`'s own apt-prerequisites step slimmed the same way --
+  and a real, live-caught correction to how far that slimming could
+  actually go, not a clean first pass.** Every package beyond
   `build-essential`/`git`/`ca-certificates`/`curl`/`python3`/
-  `gcc-13-multilib`/`wabt` existed only for usermod's own bare-host
-  cross-compiles, gone since D30, and the entire `dpkg
-  --add-architecture arm64/i386` + `ports.ubuntu.com` deb822 stanza
-  block existed only to make `libffi-dev:arm64`/`libffi-dev:i386`/
-  `linux-libc-dev:i386` installable, gone with them. Checked live
-  before cutting: a bare `ubuntu:24.04` container, `apt-get install
-  gcc-13-multilib` alone (no foreign architecture registered at all --
-  `dpkg --print-foreign-architectures` empty), a real `gcc -m32`
-  compile-and-run -- natmod's own x86 multilib need was never an
-  i386-arch package to begin with, confirmed rather than inferred from
-  the root `Dockerfile`'s own now-deleted comment asserting it.
+  `gcc-13-multilib`/`linux-libc-dev:i386` existed only for usermod's
+  own bare-host cross-compiles, gone since D30, and `dpkg
+  --add-architecture arm64` + its own `ports.ubuntu.com` deb822 stanza
+  existed only to make `libffi-dev:arm64` installable, gone with it.
+  `wabt` cut too, separately -- `examples/wasm2mpy`'s own dependency
+  (`wasm2c`), not cibuildmp's, moved to that example's own
+  `pre-build-command` instead (the same config knob a7p's own real
+  `cibuildmp.toml` already uses for its nanopb fetch).
+  **`dpkg --add-architecture i386` + `linux-libc-dev:i386` do NOT go
+  with arm64's own removal, though a first pass cut them too** -- the
+  live check that first justified cutting them (`apt-get install
+  gcc-13-multilib` alone, `gcc -m32` compiling a bare empty `main()`)
+  never actually exercised what natmod's own real source needs: real
+  CI (`ballistics-lab/cibuildmp` run `32900760845`) failed
+  `mpy6.3-natmod-x86` with `fatal error: asm/errno.h: No such file or
+  directory` the moment this landed for real -- `template.c`'s own
+  `py/dynruntime.h` include chain pulls that header in, and only
+  `linux-libc-dev:i386`'s own `i386-linux-gnu/asm/errno.h` satisfies it
+  under `-m32` (amd64's own `/usr/include/asm/errno.h` does not).
+  `linux-libc-dev:i386` is an i386-arch package, so the architecture
+  registration has to come back with it -- confirmed live a second
+  time, correctly this time, with a real `#include <asm/errno.h>`
+  compiled under `-m32`: fails without `linux-libc-dev:i386` +
+  `dpkg --add-architecture i386`, succeeds with them. i386 needs no
+  `ports.ubuntu.com` stanza of its own the way arm64 did (stays on the
+  default archive.ubuntu.com/security.ubuntu.com mirrors, confirmed by
+  the root `Dockerfile`'s own comment before that file was deleted) --
+  just the existing stanza's own `Architectures:` line gaining `i386`,
+  which is what re-landed.
 
 ### Later — tests
 
