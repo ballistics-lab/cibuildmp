@@ -112,7 +112,9 @@ def test_unix_no_image_registered_is_a_clear_error(monkeypatch, tmp_path, arch):
     # Docker-only (D30): no bare-host fallback for any unix arch any
     # more -- with no override and nothing in PORT_IMAGES, build_unix()
     # must fail loudly, the same shape build_webassembly() already has.
-    monkeypatch.setattr("cibuildmp.usermod.dockerrun.ensure_image", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "cibuildmp.usermod.dockerrun.ensure_image", lambda *a, **k: None
+    )
     calls = []
     monkeypatch.setattr(
         "cibuildmp.usermod.dockerrun.subprocess.run",

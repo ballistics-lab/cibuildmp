@@ -204,7 +204,9 @@ def unix_make_command(opts: UnixBuildOptions, mpy_dir: Path) -> list[str]:
     ]
 
 
-def run_unix_deplibs(opts: UnixBuildOptions, mpy_dir: Path, *, docker_image: str) -> None:
+def run_unix_deplibs(
+    opts: UnixBuildOptions, mpy_dir: Path, *, docker_image: str
+) -> None:
     """MICROPY_STANDALONE=1 only makes libffi a DEPLIBS entry, not a
     prerequisite of the default build target -- must run as its own step
     first, same as build-usermod-unix's own "Build libffi (deplibs)" step.
