@@ -144,7 +144,7 @@ UNIX_ARCH_SETTINGS: dict[str, UnixArchSettings] = {
     ),
 }
 
-_RUNNABLE_ARCHS = ("x64", "x86", "aarch64")
+UNIX_RUNNABLE_ARCHS = ("x64", "x86", "aarch64")
 
 
 @dataclass(frozen=True)
@@ -224,7 +224,7 @@ def build_unix(
             f"unknown unix arch {opts.arch!r}. Known: "
             f"{', '.join(sorted(UNIX_ARCH_SETTINGS))}"
         )
-    if opts.arch not in _RUNNABLE_ARCHS:
+    if opts.arch not in UNIX_RUNNABLE_ARCHS:
         settings = UNIX_ARCH_SETTINGS[opts.arch]
         raise UsermodBuildError(
             f"unix/{opts.arch}: not buildable yet -- needs a "

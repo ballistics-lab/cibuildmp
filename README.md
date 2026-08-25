@@ -187,11 +187,34 @@ one of them is listed below for orientation, not just the ones this
 project covers. This is `usermod/build.py`'s own build-driver layer
 (`docs/BACKLOG.md`'s **M6**–**M9**) — live-verified against a real
 MicroPython checkout, including a real custom `USER_C_MODULES` module
-for every ✅ row. **Not yet wired into the `cibuildmp` CLI or
-`action.yml`** — that's a real, separate, still-open gap (no
-`--mode usermod` entrypoint exists yet). Until it lands, the composite
-actions above (`build-usermod-*`) remain the supported, production path
-for the six ports they cover.
+for every ✅ row.
+
+**Wired into the `cibuildmp` CLI now (M9b)**: a `[usermod]` table in
+`cibuildmp.toml` (plus per-port `[usermod.<port>]` sub-tables for the
+real axis — `archs` for `unix`/`windows`, `boards` for `esp32`) is
+auto-detected the same way `[natmod]` already is — no `--mode`/
+`--platform` flag needed unless a config genuinely defines both tables
+at once. Verified live end to end, not just against the hermetic
+suite: a real `[usermod]` config with a real custom C module, run
+through the actual `cibuildmp` CLI (no mocking), produced a genuine
+linked `unix-x64` binary that runs and actually calls into that module.
+See `docs/BACKLOG.md`'s **D23**/**M9b** for the full design (identifier
+scheme, why there's no `package.json` for usermod output, what's
+deliberately not wired yet — `[[overrides]]`, `extra-files`).
+
+**Not yet exercised through `action.yml`'s own Docker action** — a
+separate, still-open gap from the CLI wiring above: `entrypoint.sh`
+already just calls `cibuildmp "$@"` with no hardcoded `--platform`, so
+a usermod config plausibly already dispatches correctly through it, but
+this has not been tried, and `action.Dockerfile`'s own apt-get list
+only bakes in `unix`'s `x64`/`x86` toolchains (the host gcc) and
+`windows`'s three arches — not `unix`/`aarch64`'s
+`gcc-aarch64-linux-gnu`/`libffi-dev:arm64` (the same `ports.ubuntu.com`
+mirror step `build-examples.yml`'s own wabt fix needed), so that one
+target would fail inside the container specifically until that is
+added. Until this is tried and fixed, the composite actions above
+(`build-usermod-*`) remain the supported, verified production path for
+the six ports they cover.
 
 | Port          | Target                    | Provisioning                    | Status |
 |---------------|----------------------------|-----------------------------------|--------|

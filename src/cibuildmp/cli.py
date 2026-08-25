@@ -11,7 +11,7 @@ from pathlib import Path
 
 from . import __version__
 from .build import BuildError, BuildResult, build_target
-from .options import BuildOptions, ConfigError, Options
+from .options import BuildOptions, ConfigError, Options, read_config
 from .sources import (
     SourceError,
     build_mpy_cross,
@@ -27,6 +27,7 @@ from .targets import (
     is_abi_known,
 )
 from .toolchains import ResolvedToolchain, ToolchainError, resolve
+from .usermod import cli as usermod_cli
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -125,12 +126,34 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--platform",
-        default="natmod",
-        choices=["natmod"],
-        help="Build mode. Only natmod is implemented; usermod is planned "
-        "(see docs/BACKLOG.md).",
+        default=None,
+        choices=["natmod", "usermod"],
+        help="Build mode. Auto-detected by default from which top-level table "
+        "the config has -- [natmod] or [usermod] -- the same way cibuildwheel "
+        "infers its own platform from the host. Only needed when a config "
+        "defines both tables, to say which one this invocation is for.",
     )
     return parser
+
+
+def detect_mode(raw: dict, explicit: str | None) -> str | None:
+    """The build mode for this invocation: `explicit` (--platform) if
+    given, otherwise inferred from which top-level table `raw` has.
+
+    Returns None when inference is genuinely ambiguous (both [natmod]
+    and [usermod] present, no --platform) -- main() turns that into an
+    error rather than silently guessing. Neither table present defaults
+    to natmod, preserving every existing config's behaviour untouched: a
+    repo following the conventional natmod/ layout with no config at all
+    already builds natmod today, and must keep doing so.
+    """
+    if explicit is not None:
+        return explicit
+    has_natmod = "natmod" in raw
+    has_usermod = "usermod" in raw
+    if has_natmod and has_usermod:
+        return None
+    return "usermod" if has_usermod else "natmod"
 
 
 def _plan_line(
@@ -279,7 +302,28 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     try:
-        options = Options.load(args.package_dir, args.config_file)
+        preread = read_config(args.package_dir, args.config_file)
+    except ConfigError as exc:
+        if args.debug_traceback:
+            raise
+        print(f"cibuildmp: error: {exc}", file=sys.stderr)
+        return 2
+
+    mode = detect_mode(preread[1], args.platform)
+    if mode is None:
+        print(
+            "cibuildmp: error: config has both [natmod] and [usermod] -- pass "
+            "--platform natmod or --platform usermod to say which one this "
+            "invocation is for",
+            file=sys.stderr,
+        )
+        return 2
+
+    if mode == "usermod":
+        return usermod_cli.run(args, args.package_dir, args.config_file, preread)
+
+    try:
+        options = Options.load(args.package_dir, args.config_file, preread=preread)
         if args.output_dir is not None:
             options.output_dir = args.output_dir
         if args.archs is not None:
