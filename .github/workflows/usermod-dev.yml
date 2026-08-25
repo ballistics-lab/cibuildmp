@@ -37,11 +37,12 @@ jobs:
       - run: uv run pytest -q
 
   # Real MSYS2 + a full MicroPython compile, not the hermetic suite above
-  # -- only on demand (workflow_dispatch), too slow to run on every push.
-  # See scripts/windows_usermod_smoke.py's own docstring for why this
-  # exists as a throwaway script rather than a package entry point.
+  # -- on push, same as the other two jobs: workflow_dispatch needs a
+  # manual click in the GitHub UI on every check (no API access to fire
+  # it from here), which defeats the point of a fast on-push feedback
+  # loop. See scripts/windows_usermod_smoke.py's own docstring for why
+  # this exists as a throwaway script rather than a package entry point.
   windows-live-build:
-    if: github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
