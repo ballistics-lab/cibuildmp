@@ -65,6 +65,11 @@ def test_libc_omitted_uses_a_two_part_key_and_env_name(monkeypatch):
 
     monkeypatch.delenv("CIBMP_WINDOWS_X64_DOCKER_IMAGE", raising=False)
     monkeypatch.setattr(
-        dockerrun, "PORT_IMAGES", {"windows-x64": "ghcr.io/example/cibuildmp-windows:latest"}
+        dockerrun,
+        "PORT_IMAGES",
+        {"windows-x64": "ghcr.io/example/cibuildmp-windows:latest"},
     )
-    assert dockerrun.image_for("windows", "x64") == "ghcr.io/example/cibuildmp-windows:latest"
+    assert (
+        dockerrun.image_for("windows", "x64")
+        == "ghcr.io/example/cibuildmp-windows:latest"
+    )
