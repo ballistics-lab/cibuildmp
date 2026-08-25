@@ -3013,7 +3013,16 @@ conclusion.
      error ("Docker required, image unavailable") instead, once this
      lands. Also resolves **D32**'s own open "self-hosted runners
      without Docker" question definitively: fail loudly, not fall
-     back.
+     back. **Scoped to an actual build only, not the CLI as a whole:**
+     the error belongs at the point a usermod port is actually about
+     to be built (inside `build_<port>()`, once it needs a real image),
+     not as a blanket check `cli.py`/`usermod/cli.py` run up front.
+     natmod never touches this path at all (**D30**'s own natmod
+     bullet, above -- Docker is preferred there, not required), and a
+     usermod invocation that does not build anything --
+     `--dry-run`, `--print-build-identifiers`, `--print-build-matrix`
+     -- must keep working with no Docker installed at all, the same as
+     today.
    - **A genuine, concrete payoff of this, the user's own observation:**
      adding a new port's own support becomes strictly simpler than it
      is today -- write one Dockerfile, then declare it in the resolver
