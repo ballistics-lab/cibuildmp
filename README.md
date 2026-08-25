@@ -177,23 +177,16 @@ arch, not just `--dry-run`.
 
 ### Usermod support per port/arch
 
-Upstream MicroPython has 20 ports (`ports/*` in a real checkout). This
-table covers 6, not 20 — a deliberate scope, not an oversight: the six
-`a7p`'s own `mp-usermod.yml` already has a real, working CI recipe for
-(`resources/usermod.toml`'s own header). The other 14
-(`alif`, `bare-arm`, `cc3200`, `embed`, `esp8266`, `mimxrt`, `minimal`,
-`nrf`, `pic16bit`, `powerpc`, `renesas-ra`, `samd`, `stm32`, `zephyr`)
-have no reference workflow to build this against and no pinned data —
-`zephyr` specifically doesn't even fit this project's own board-selection
-model (**D22**: no `board.json`, a `<board>.conf`/`<board>.overlay` pair
-instead). This is `usermod/build.py`'s own build-driver layer
+Upstream MicroPython has 20 ports (`ports/*` in a real checkout); every
+one of them is listed below for orientation, not just the ones this
+project covers. This is `usermod/build.py`'s own build-driver layer
 (`docs/BACKLOG.md`'s **M6**–**M9**) — live-verified against a real
 MicroPython checkout, including a real custom `USER_C_MODULES` module
-for every ✅ row below. **Not yet wired into the `cibuildmp` CLI or
+for every ✅ row. **Not yet wired into the `cibuildmp` CLI or
 `action.yml`** — that's a real, separate, still-open gap (no
 `--mode usermod` entrypoint exists yet). Until it lands, the composite
 actions above (`build-usermod-*`) remain the supported, production path
-for usermod.
+for the six ports they cover.
 
 | Port          | Target                    | Provisioning                    | Status |
 |---------------|----------------------------|-----------------------------------|--------|
@@ -211,6 +204,20 @@ for usermod.
 | `windows`     | `x86`                       | `apt install gcc-mingw-w64-i686`   | ✅ |
 | `windows`     | `arm64`                     | `llvm-mingw`[^linux-x64-only]      | ✅ |
 | `rp2`         | any board                   | Pico SDK                          | ❌[^rp2-gap] |
+| `stm32`       | STM32 MCUs                 | —                                  | ❌[^out-of-scope] |
+| `esp8266`     | Espressif ESP8266           | —                                  | ❌[^out-of-scope] |
+| `samd`        | Microchip SAMD21/SAMD51     | —                                  | ❌[^out-of-scope] |
+| `nrf`         | Nordic nRF51/52             | —                                  | ❌[^out-of-scope] |
+| `mimxrt`      | NXP i.MX RT 10xx             | —                                  | ❌[^out-of-scope] |
+| `renesas-ra`  | Renesas RA family            | —                                  | ❌[^out-of-scope] |
+| `cc3200`      | TI CC3200 (Wi-Fi SoC)         | —                                  | ❌[^out-of-scope] |
+| `alif`        | Alif Ensemble MCUs           | —                                  | ❌[^out-of-scope] |
+| `pic16bit`    | Microchip PIC24/dsPIC33       | —                                  | ❌[^out-of-scope] |
+| `powerpc`     | PowerPC (Microwatt/qemu)      | —                                  | ❌[^out-of-scope] |
+| `zephyr`      | Zephyr RTOS (any board)       | —                                  | ❌[^zephyr-gap] |
+| `bare-arm`    | minimal bare-metal reference — not a real target | — | ❌[^out-of-scope] |
+| `minimal`     | minimal reference port — not a real target | —          | ❌[^out-of-scope] |
+| `embed`       | embeddable library, not a flashable target | —          | ❌[^out-of-scope] |
 
 [^native-arm64]: Needs a native ARM64 host — `UNIX_ARCH_SETTINGS["aarch64"]` sets no `CROSS_COMPILE`, so no cross-compile is configured for this arch.
 [^no-toolchain]: Not buildable yet — pinned settings exist, but no toolchain resolver for this cross target is implemented.
@@ -219,10 +226,13 @@ for usermod.
 [^linux-x64-only]: Self-downloaded and cached; the pinned release is `linux-x64`-hosted only today.
 [^esp32-other]: Selectable via the same `Esp32BuildOptions`, not itself live-verified — only `ESP32_GENERIC` was actually built and checked.
 [^rp2-gap]: `resources/usermod.toml` already pins its manifest path and `cmake` build-system (target selection is ready), but `usermod/build.py` has no `build_rp2()` driver at all yet — no Pico SDK resolver, no live verification, not started.
+[^out-of-scope]: Out of scope, not started: no reference CI recipe to build this against and no pinned data at all -- `a7p`'s own `mp-usermod.yml` (the real production reference this project's usermod support is built from) doesn't cover it either. Scoped in only when a real consumer needs it, the same way `windows`/arm64 was (see **D18**'s own addenda).
+[^zephyr-gap]: Also out of scope, for a second, structural reason beyond "no reference workflow": `zephyr` doesn't fit this project's own board-selection model at all -- **D22**, confirmed directly against upstream: no `board.json` anywhere in `ports/zephyr/boards/`, board selection is a `<board>.conf`/`<board>.overlay` pair instead, a shape the vendored `boards.py` scanner has nothing to match.
 
-No Windows or macOS host is needed for any usermod target above,
-`windows`'s own three arches included — every toolchain here is either
-already on a Linux host or downloads/apt-installs onto one.
+No Windows or macOS host is needed for any of the seven ✅/⚠️ usermod
+targets above, `windows`'s own three arches included — every toolchain
+there is either already on a Linux host or downloads/apt-installs onto
+one.
 
 ## Roadmap
 
