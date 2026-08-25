@@ -3388,18 +3388,46 @@ story to the same shape:
   (a real, `PORT_IMAGES`-registered publish) done yet. `build-usermod`
   now runs with no image overrides at all, the same as any real
   consumer.
-- **A real, honest gap this decision accepts, not hides:** until a
-  maintainer actually merges `docker/**`, lets
-  `publish-docker-images.yml` run for real (this sandbox has no GHCR
-  push credentials, so it could not be triggered or verified live this
-  session), and copies the resulting digests into `PORT_IMAGES` by
-  hand, `PORT_IMAGES` stays empty -- meaning `build-usermod`'s own
-  webassembly leg (no bare-host fallback, D30) fails outright with the
-  new clear error, and its unix leg falls through to a bare-host build
-  instead of a container one. This is the correct, honest state for an
-  unfinished bootstrap, the same shape D28's own "PORT_IMAGES is still
-  empty" note already was before step 5 -- not something to paper over
-  with a temporary mechanism this decision just finished removing.
+- **The bootstrap gap above closed the same session, for real, not left
+  open as written.** The user triggered `publish-docker-images.yml`
+  directly (`gh workflow run`, after a real merge to `main` -- GitHub
+  only accepts `workflow_dispatch` for a workflow already present on the
+  default branch); all eight jobs pushed successfully
+  (run `32895072172`). The real `@sha256:...` digests that run printed
+  are now registered in `PORT_IMAGES` for all eight (port, arch[, libc])
+  keys -- copied from each job's own "Record the pinned digest" step,
+  not guessed.
+- **A different, real gap surfaced immediately after, checked live, not
+  assumed: every one of those eight GHCR packages is private by
+  default.** A plain `docker pull` of one, fully unauthenticated, came
+  back `401 unauthorized` -- this is GitHub's own documented behaviour
+  for a package pushed via the automatic per-job `GITHUB_TOKEN` (private
+  regardless of the parent repo's own visibility), not a bug in
+  `publish-docker-images.yml`. `build-usermod` no longer logs in to GHCR
+  at all (this same decision removed that step), so until a repo admin
+  flips each `cibuildmp-*` package to Public under `ballistics-lab`'s
+  own package settings, both `build-usermod` and any real outside
+  consumer fail to pull. Flagged, not fixed here: changing package
+  visibility needs org-admin access this session does not have.
+- **`CIBMP_TIMEOUT` / `CIBMP_<PORT>_<ARCH>_<LIBC>_TIMEOUT`, added the
+  same session, prompted by a real incident, not a hypothetical.** A
+  container from an unrelated earlier manual test outlived the
+  killed/timed-out shell that started it -- a shell-level kill only
+  reaches its immediate child, and `docker run` sits several process
+  hops below that (`bash -> uv -> python -> docker CLI -> dockerd's own
+  container process`), so the container itself kept running, undetected,
+  burning a CPU core at 100% for over an hour. `dockerrun.run()` now
+  accepts an optional `timeout` (seconds); `None` (no limit) stays the
+  default, the user's own explicit call. `timeout_for()` resolves it the
+  same two-tier shape `image_for()` already uses (a per-container env
+  var first, `CIBMP_TIMEOUT` as the blanket fallback, `None` otherwise).
+  Critically, a bare `subprocess.run(..., timeout=...)` is not enough on
+  its own -- its `TimeoutExpired` only kills the `docker run` CLI
+  process, not the container running under `dockerd`, which is exactly
+  the gap the real incident exposed -- so `run()` now names its own
+  container (`--name cibuildmp-<uuid>`) and issues a real `docker kill`
+  on that name the moment the timeout fires, which is what actually
+  stops it (and, via the already-present `--rm`, removes it).
 
 ### Later — tests
 

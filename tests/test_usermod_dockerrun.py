@@ -1,4 +1,7 @@
+import pytest
+
 from cibuildmp.usermod import dockerrun
+from cibuildmp.usermod.build import UsermodBuildError
 
 
 def test_no_override_and_no_registration_means_no_image(monkeypatch):
@@ -155,3 +158,96 @@ def test_ensure_image_never_shells_out(monkeypatch):
     dockerrun.ensure_image("windows", "arm64")
 
     assert calls == []
+
+
+# ── timeout_for() ────────────────────────────────────────────────────────
+
+
+def test_timeout_for_unset_is_none(monkeypatch):
+    monkeypatch.delenv("CIBMP_UNIX_X64_MANYLINUX_TIMEOUT", raising=False)
+    monkeypatch.delenv("CIBMP_TIMEOUT", raising=False)
+    assert dockerrun.timeout_for("unix", "x64", "manylinux") is None
+
+
+def test_timeout_for_blanket_env_applies_to_every_container(monkeypatch):
+    monkeypatch.delenv("CIBMP_UNIX_X64_MANYLINUX_TIMEOUT", raising=False)
+    monkeypatch.setenv("CIBMP_TIMEOUT", "600")
+    assert dockerrun.timeout_for("unix", "x64", "manylinux") == 600.0
+    assert dockerrun.timeout_for("webassembly") == 600.0
+
+
+def test_timeout_for_specific_override_wins_over_blanket(monkeypatch):
+    monkeypatch.setenv("CIBMP_TIMEOUT", "600")
+    monkeypatch.setenv("CIBMP_UNIX_X64_MANYLINUX_TIMEOUT", "120")
+    assert dockerrun.timeout_for("unix", "x64", "manylinux") == 120.0
+    # A different arch with no specific override of its own still gets
+    # the blanket value, not the x64-specific one.
+    assert dockerrun.timeout_for("unix", "x86", "manylinux") == 600.0
+
+
+# ── run() -- timeout enforcement ─────────────────────────────────────────
+
+
+def test_run_passes_no_timeout_by_default(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(
+        dockerrun.subprocess,
+        "run",
+        lambda cmd, **k: calls.append((cmd, k)),
+    )
+
+    dockerrun.run(
+        ["make"], mounts=[tmp_path], workdir=tmp_path, image="cibuildmp-qemu:local"
+    )
+
+    (cmd, kwargs) = calls[0]
+    assert kwargs.get("timeout") is None
+    assert "--name" in cmd
+
+
+def test_run_forwards_the_resolved_timeout(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(
+        dockerrun.subprocess,
+        "run",
+        lambda cmd, **k: calls.append((cmd, k)),
+    )
+
+    dockerrun.run(
+        ["make"],
+        mounts=[tmp_path],
+        workdir=tmp_path,
+        image="cibuildmp-qemu:local",
+        timeout=45.0,
+    )
+
+    assert calls[0][1].get("timeout") == 45.0
+
+
+def test_run_kills_the_container_on_timeout(monkeypatch, tmp_path):
+    import subprocess as sp
+
+    calls = []
+
+    def fake_run(cmd, **k):
+        calls.append(cmd)
+        if cmd[:2] == ["docker", "run"]:
+            raise sp.TimeoutExpired(cmd, k.get("timeout"))
+
+    monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
+
+    with pytest.raises(UsermodBuildError, match="timed out"):
+        dockerrun.run(
+            ["make"],
+            mounts=[tmp_path],
+            workdir=tmp_path,
+            image="cibuildmp-qemu:local",
+            timeout=1.0,
+        )
+
+    # The `docker run` attempt, then a `docker kill <name>` naming the
+    # exact same --name this run passed -- not a plain `subprocess.run`
+    # timeout left to (not) clean up the container on its own.
+    assert calls[0][:2] == ["docker", "run"]
+    run_name = calls[0][calls[0].index("--name") + 1]
+    assert calls[1] == ["docker", "kill", run_name]

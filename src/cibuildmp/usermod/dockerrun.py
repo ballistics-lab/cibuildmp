@@ -77,6 +77,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import uuid
 from pathlib import Path
 
 from .build import UsermodBuildError
@@ -97,16 +98,61 @@ from .build import UsermodBuildError
 # publishes a new one, the same manual-but-deliberate cadence
 # `bin/update_docker.py` gives cibuildwheel's own pins.
 #
-# Empty today: docker/unix-manylinux-*.Dockerfile (etc.) all exist and
-# build correctly (D20, D24, D25, D26) but publish-docker-images.yml has
-# not run for real yet (needs a real push to this repo's own main, which
-# this sandbox cannot do) -- registering a digest that does not exist
-# yet would make ordinary unopted-in usermod builds start failing to
-# pull it. Add
-# `"unix-x64-manylinux": "ghcr.io/o-murphy/cibuildmp-unix-manylinux-x64@sha256:<real digest>"`
-# here once that workflow has actually published one, and the same one
-# line per (port, arch, libc) thereafter.
-PORT_IMAGES: dict[str, str] = {}
+# publish-docker-images.yml ran for real on 2026-08-25 (run 32895072172,
+# triggered by the user) and pushed all eight -- digests below are copied
+# from that run's own "Record the pinned digest" step, not guessed.
+#
+# **These GHCR packages are private as of that run** -- confirmed live,
+# not assumed: an unauthenticated `docker pull` of the qemu image above
+# returned `401 unauthorized`. A real consumer with no GHCR credentials
+# at all (the entire point of this table) cannot pull any of these until
+# a repo admin flips each `cibuildmp-*` package to Public under
+# ballistics-lab's own package settings. Registered here anyway, since
+# the digests themselves are correct and this is the one place they
+# belong -- but until that visibility change happens, every usermod
+# build that reaches this table (including this repo's own
+# build-usermod, which no longer logs in to GHCR at all -- see D33)
+# fails to pull, the same as before this table had anything in it.
+PORT_IMAGES: dict[str, str] = {
+    "unix-x64-manylinux": (
+        "ghcr.io/ballistics-lab/cibuildmp-unix-manylinux-x64"
+        "@sha256:1eb0c762936634c9a38adad5713fe02956ef1ac15af257157d26b77d6fc19cd4"
+    ),
+    "unix-x86-manylinux": (
+        "ghcr.io/ballistics-lab/cibuildmp-unix-manylinux-x86"
+        "@sha256:ea312535ea59f78e72e5294920a794ec5fc8acfc1b4733a142a24a53ab317fd0"
+    ),
+    "unix-aarch64-manylinux": (
+        "ghcr.io/ballistics-lab/cibuildmp-unix-manylinux-aarch64"
+        "@sha256:72979c6af3311b312101f37c9a5a28d1476d4b1883a3c7b98b8f6325a915726f"
+    ),
+    "unix-armhf-manylinux": (
+        "ghcr.io/ballistics-lab/cibuildmp-unix-manylinux-armhf"
+        "@sha256:773a9b0220b8be8e6d76ba6878a596e85bd360c2e18538398c78908af8c8d27c"
+    ),
+    "unix-mipsel-manylinux": (
+        "ghcr.io/ballistics-lab/cibuildmp-unix-manylinux-mipsel"
+        "@sha256:c4055efd0ccbd9a4d4d341d6969ee7577d009be190ac174f71e11fe6dfcba14b"
+    ),
+    # windows-x64/windows-x86 share one combined image (D28 step 3 --
+    # this port has no manylinux/musllinux-shaped axis to split on).
+    "windows-x64": (
+        "ghcr.io/ballistics-lab/cibuildmp-windows"
+        "@sha256:af86047e93e3f7cdf9460674d30c475ab6916277d8684643d63af80258bf350a"
+    ),
+    "windows-x86": (
+        "ghcr.io/ballistics-lab/cibuildmp-windows"
+        "@sha256:af86047e93e3f7cdf9460674d30c475ab6916277d8684643d63af80258bf350a"
+    ),
+    "qemu": (
+        "ghcr.io/ballistics-lab/cibuildmp-qemu"
+        "@sha256:3f204e274f36f15cdd478c9f2a55af3833359568c196955057cf5a2cc31cc336"
+    ),
+    "webassembly": (
+        "ghcr.io/ballistics-lab/cibuildmp-webassembly"
+        "@sha256:aecf6d0da532fe8eec223e6c435f5f8c3b7352a4a33733e44119c49cd93d33d9"
+    ),
+}
 
 
 def image_for(
@@ -133,12 +179,54 @@ def image_for(
     against a freshly-built image, or swapping in a different image
     entirely, without touching source.
     """
-    parts = [port, *([arch] if arch else []), *([libc] if libc else [])]
-    env_key = "CIBMP_" + "_".join(p.upper() for p in parts) + "_DOCKER_IMAGE"
-    override = os.environ.get(env_key)
+    parts = _key_parts(port, arch, libc)
+    override = os.environ.get(_env_name(parts, "DOCKER_IMAGE"))
     if override:
         return override
     return PORT_IMAGES.get("-".join(parts))
+
+
+def _key_parts(port: str, arch: str | None, libc: str | None) -> list[str]:
+    return [port, *([arch] if arch else []), *([libc] if libc else [])]
+
+
+def _env_name(parts: list[str], suffix: str) -> str:
+    return "CIBMP_" + "_".join(p.upper() for p in parts) + f"_{suffix}"
+
+
+def timeout_for(
+    port: str, arch: str | None = None, libc: str | None = None
+) -> float | None:
+    """Seconds `run()` should let this (port, arch[, libc])'s own
+    container run before killing it, or `None` for no limit at all --
+    the default the user's own call insisted on: a container hanging
+    forever should be opt-in protection, not a surprise ceiling nobody
+    asked for.
+
+    `CIBMP_<PORT>_<ARCH>_<LIBC>_TIMEOUT` (the exact same per-container
+    key shape `image_for()` uses for its own env override) wins first,
+    then the blanket `CIBMP_TIMEOUT` applies to every container that has
+    no more specific value of its own, then `None`. Found for real, the
+    reason this exists at all: a container from an earlier, unrelated
+    manual test outlived the process that started it (a killed/timed-out
+    shell does not reliably kill a `docker run` several process hops
+    down -- bash -> uv -> python -> docker CLI -> dockerd's own container
+    process -- since a shell-level kill only reaches the immediate
+    child), and burned CPU at 100% for over an hour before anyone
+    noticed. `run()`'s own on-timeout handling does a real `docker kill`,
+    not just letting `subprocess.run`'s own timeout kill the `docker run`
+    CLI and leave the container itself running -- confirmed that gap
+    specifically, not assumed away, since it is the exact failure mode
+    this feature exists to close.
+    """
+    parts = _key_parts(port, arch, libc)
+    specific = os.environ.get(_env_name(parts, "TIMEOUT"))
+    if specific:
+        return float(specific)
+    blanket = os.environ.get("CIBMP_TIMEOUT")
+    if blanket:
+        return float(blanket)
+    return None
 
 
 def ensure_image(
@@ -160,7 +248,14 @@ def ensure_image(
     return image_for(port, arch, libc)
 
 
-def run(command: list[str], *, mounts: list[Path], workdir: Path, image: str) -> None:
+def run(
+    command: list[str],
+    *,
+    mounts: list[Path],
+    workdir: Path,
+    image: str,
+    timeout: float | None = None,
+) -> None:
     """Run `command` inside `image`, as a sibling container -- not nested
     inside one `cibuildmp` itself is already running in (D26's own "why
     sibling containers, not Docker-in-Docker" reasoning).
@@ -171,16 +266,38 @@ def run(command: list[str], *, mounts: list[Path], workdir: Path, image: str) ->
 
     `--pull missing` -- correct here specifically because `image` is
     always a digest-pinned reference (`PORT_IMAGES`'s own comment, or a
-    caller's own override): an already-cached `image` runs immediately
-    with no network access at all, and one not seen before pulls exactly
-    once, with no risk of ever running a stale build against a name that
-    used to mean something else. `ensure_image()` above already
-    populated the cache (from `CIBMP_CACHE_PATH` or a real pull) before this
-    ever runs, so in practice this `--pull` rarely does anything at all --
-    kept anyway as the correct fallback for a caller that built `image`
-    by hand and calls `run()` directly, skipping `ensure_image()`.
+    caller's own override): an already-cached `image` (Docker's own
+    local store, the only cache involved -- `ensure_image()` above does
+    not pre-fetch anything itself, see its own docstring) runs
+    immediately with no network access at all, and one not seen before
+    pulls exactly once, with no risk of ever running a stale build
+    against a name that used to mean something else.
+
+    `timeout` (seconds, `None` for no limit -- see `timeout_for()`'s own
+    docstring for why unlimited is the default): a bare
+    `subprocess.run(..., timeout=...)` is not enough on its own. Its
+    `TimeoutExpired` only kills the `docker run` CLI process this
+    function spawned -- the *container* itself keeps running under
+    `dockerd`, several process hops away, with `--rm` never getting the
+    chance to clean it up because the container's own main process never
+    exits. Found for real: a container from an earlier, unrelated manual
+    test outlived a killed/timed-out shell exactly this way and burned
+    CPU at 100% for over an hour before anyone noticed. `--name` gives
+    this run's own container a reference this function can `docker kill`
+    by, explicitly, the moment the timeout fires -- that kill is what
+    actually stops it (and, via `--rm`, removes it); `subprocess.run`'s
+    own `TimeoutExpired` is only the signal to go do that.
     """
-    docker_command = ["docker", "run", "--rm", "--pull", "missing"]
+    container_name = f"cibuildmp-{uuid.uuid4().hex[:12]}"
+    docker_command = [
+        "docker",
+        "run",
+        "--rm",
+        "--pull",
+        "missing",
+        "--name",
+        container_name,
+    ]
     # Without this, every image here (all Ubuntu-based, no USER directive)
     # runs as root, and every file the build writes under a bind-mounted
     # path -- mpy_dir's own ports/<port>/build-<identifier>/ included --
@@ -200,7 +317,16 @@ def run(command: list[str], *, mounts: list[Path], workdir: Path, image: str) ->
         docker_command += ["-v", f"{mount.as_posix()}:{mount.as_posix()}"]
     docker_command += ["-w", workdir.as_posix(), image, *command]
     try:
-        subprocess.run(docker_command, check=True)
+        subprocess.run(docker_command, check=True, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        # See this function's own docstring for why a plain kill of the
+        # `docker run` CLI (subprocess's own default TimeoutExpired
+        # behaviour) is not enough -- this is the real stop.
+        subprocess.run(["docker", "kill", container_name], check=False)
+        raise UsermodBuildError(
+            f"docker run --rm ... {image} `{' '.join(command)}` timed out "
+            f"after {timeout}s and was killed"
+        ) from exc
     except subprocess.CalledProcessError as exc:
         raise UsermodBuildError(
             f"docker run --rm ... {image} `{' '.join(command)}` failed "

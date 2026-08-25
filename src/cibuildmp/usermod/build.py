@@ -234,6 +234,7 @@ def run_unix_deplibs(
             mounts=[mpy_dir, Path(opts.user_c_modules)],
             workdir=_unix_dir(mpy_dir),
             image=docker_image,
+            timeout=dockerrun.timeout_for("unix", opts.arch, "manylinux"),
         )
         return
     try:
@@ -331,6 +332,7 @@ def build_unix(
             mounts=[mpy_dir, Path(opts.user_c_modules)],
             workdir=_unix_dir(mpy_dir),
             image=docker_image,
+            timeout=dockerrun.timeout_for("unix", opts.arch, "manylinux"),
         )
     else:
         try:
@@ -517,6 +519,7 @@ def build_webassembly(
         mounts=[mpy_dir, Path(opts.user_c_modules)],
         workdir=mpy_dir / "ports" / "webassembly",
         image=docker_image,
+        timeout=dockerrun.timeout_for("webassembly"),
     )
 
     produced = opts.build_dir / "micropython.mjs"
