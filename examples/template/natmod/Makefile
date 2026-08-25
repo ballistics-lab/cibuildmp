@@ -27,9 +27,25 @@ BUILD = .obj/$(ARCH)$(if $(ARCH_FLAGS),+$(ARCH_FLAGS))
 
 include $(MPY_DIR)/py/dynruntime.mk
 
-# The convention every cibuildmp-built natmod Makefile follows (see
-# README.md's "Conventions this repo assumes"): `dist` drops the built .mpy
-# under build/<arch>*/, which is what build.collect_output() globs for.
-dist: all
+# $(MOD).mpy itself (dynruntime.mk's own merge target) is NOT scoped by
+# $(ARCH) the way $(BUILD) above is -- it's one fixed filename in
+# module-dir, reused across every arch and every separate `cibuildmp`
+# invocation in this same tree. Its own rule only depends on
+# $(BUILD)/$(MOD).native.mpy, so if a *previous* run already left
+# $(BUILD)/$(MOD).native.mpy for the *current* $(ARCH) sitting there older
+# than the last arch's $(MOD).mpy, make sees it as up to date and `dist`
+# copies stale output from a different arch -- found for real running
+# `cibuildmp` twice in the same tree, not just after manual meddling.
+# (Tried making $(MOD).mpy phony-dependent first: dynruntime.mk's own
+# recipe merges every prerequisite via `$^`, so an extra dependency here
+# lands in that list as if it were a real input file -- mpy-tool.py then
+# fails trying to open a file literally named after the fake prerequisite.
+# Deleting the stale file before a recursive `$(MAKE) all` sidesteps that:
+# it never touches dynruntime.mk's own prerequisite list.) ARCH/MPY_DIR/
+# PYTHON are plain `=` command-line overrides (see build.make_command),
+# which `$(MAKE)` always re-passes to a sub-make without needing `export`.
+dist:
+	rm -f $(MOD).mpy
+	$(MAKE) all
 	mkdir -p build/$(ARCH)
 	cp $(MOD).mpy build/$(ARCH)/

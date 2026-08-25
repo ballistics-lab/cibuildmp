@@ -298,6 +298,21 @@ def run(command: list[str], *, mounts: list[Path], workdir: Path, image: str) ->
     are documented as sha-tagged references, not `:latest` ones.
     """
     docker_command = ["docker", "run", "--rm", "--pull", "missing"]
+    # Without this, every image here (all Ubuntu-based, no USER directive)
+    # runs as root, and every file the build writes under a bind-mounted
+    # path -- mpy_dir's own ports/<port>/build-<identifier>/ included --
+    # comes out root-owned on the host. Found for real: a plain, non-root
+    # `rm -rf` on a leftover build-<identifier>/ from an earlier run failed
+    # with "Permission denied" on every file inside, which is exactly what
+    # blocks cleaning stale build state the same way natmod's own
+    # examples/template/natmod/Makefile now does (see that Makefile's own
+    # `dist` comment) -- host-owned output is the precondition for that
+    # fix, not an unrelated nicety. `os.getuid`/`getgid` do not exist on
+    # native Windows Python; Docker itself is Linux-container-only for
+    # every port here regardless of host OS (D30), so this only needs to
+    # be skipped, not ported, where they are absent.
+    if hasattr(os, "getuid"):
+        docker_command += ["--user", f"{os.getuid()}:{os.getgid()}"]
     for mount in mounts:
         docker_command += ["-v", f"{mount.as_posix()}:{mount.as_posix()}"]
     docker_command += ["-w", workdir.as_posix(), image, *command]

@@ -175,6 +175,26 @@ def build_one(
     build_options = options.build_options(target)
     port_opts = _port_build_options(build_options, mpy_dir, options.package_dir)
 
+    # `build_dir` (unix/windows/qemu/webassembly only -- esp32 has none,
+    # see Esp32BuildOptions, and uses ESP-IDF's own CMake-based staleness
+    # tracking instead of a raw Makefile) is `mpy_dir/ports/<port>/
+    # build-<identifier>/`, already scoped per identifier, but nothing
+    # ever removes it *between* separate `cibuildmp` invocations. Found
+    # for real: a leftover build-unix-x64/ from an earlier run (built
+    # against a different, or no, USER_C_MODULES) carried a stale
+    # genhdr/qstrdefs.generated.h missing this run's own module's QSTRs --
+    # `'MP_QSTR_mymod' undeclared` -- the exact same "nothing cleans
+    # between invocations" bug natmod's own build/ scratch space had (see
+    # cli.build()'s own comment), just one layer deeper (MicroPython's own
+    # qstr pipeline, not cibuildmp's glob). Only safe to delete host-side
+    # now that dockerrun.run() passes --user (see its own comment) --
+    # every port build here runs in a sibling container as root otherwise,
+    # which leaves build-<identifier>/ root-owned and unremovable by a
+    # plain host-side rmtree.
+    build_dir = getattr(port_opts, "build_dir", None)
+    if build_dir is not None:
+        shutil.rmtree(build_dir, ignore_errors=True)
+
     build_fn = _BUILD_FN[target.port]
     produced = build_fn(port_opts, mpy_dir, toolchain_root=toolchain_root, quiet=quiet)
 

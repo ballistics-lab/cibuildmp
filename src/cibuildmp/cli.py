@@ -199,6 +199,22 @@ def build(options: Options, targets: list[Target], *, toolchain: str = "auto") -
     resolved = [options.build_options(t) for t in targets]
     total = len(resolved)
 
+    # `build/<arch>*/` is cibuildmp's own scratch space (collect_output()
+    # globs it, then immediately copies the .mpy into output_dir -- nothing
+    # downstream ever reads it again), not something a Makefile owner is
+    # expected to manage across runs. Left alone, a directory from a
+    # *previous* invocation can outlive this one: two arches that share a
+    # name prefix (`xtensa` / `xtensawin`) make collect_output()'s own
+    # `build/{arch}*/` glob genuinely ambiguous once the shorter arch's
+    # fresh directory exists alongside the longer arch's stale one, found
+    # for real running this exact matrix twice in a row without cleaning in
+    # between. One rmtree per distinct module_root, before anything builds,
+    # keeps every run's `build/` the product of only that run.
+    for module_root in dict.fromkeys(
+        options.package_dir / bo.module_dir for bo in resolved
+    ):
+        shutil.rmtree(module_root / "build", ignore_errors=True)
+
     # Toolchains are resolved before the plan is printed, not after: where a
     # toolchain's prefix is not the one dynruntime.mk hardcodes, resolution
     # adds a CROSS= override, and a plan printed first would show a make

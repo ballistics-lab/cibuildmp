@@ -59,8 +59,17 @@ $(BUILD)/wasm.c: $(WASM)
 # Added for cibuildmp: the convention every cibuildmp-built natmod Makefile
 # follows (see README.md's "Conventions this repo assumes") -- drops the
 # built .mpy under build/<arch>*/, which build.collect_output() globs for.
+# `rm` + recursive `$(MAKE) all` (not `dist: all`) for the same reason
+# examples/template/natmod/Makefile's own `dist` does it this way now:
+# $(MOD).mpy is one fixed filename in module-dir, not scoped by $(ARCH)
+# the way $(BUILD) above is, so a second `cibuildmp` invocation in this
+# same tree can see it as already up to date and copy a stale, different
+# arch's binary into build/$(ARCH)/ -- found for real running the natmod
+# example twice in a row, not just after manual meddling.
 .PHONY: dist
-dist: all
+dist:
+	rm -f $(MOD).mpy
+	$(MAKE) all
 	mkdir -p build/$(ARCH)
 	cp $(MOD).mpy build/$(ARCH)/
 
