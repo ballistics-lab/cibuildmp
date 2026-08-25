@@ -2335,6 +2335,84 @@ anywhere in this codebase yet (checked directly, not assumed).
   first, quickly, before or in parallel with **D28**'s much larger
   container migration, if a new session wants an early, low-risk win.
 
+**D30 — extending the container approach to natmod too, and a direct
+answer to "Docker or QEMU" (they are not competing choices).** The
+user's own follow-up to **D28**, six concrete points, addressed here
+individually so a fresh session has the reasoning, not just the
+conclusion.
+
+1. **Confirmed, already the design**: `cibuildmp` stops running inside
+   a container and starts launching container builds itself (**D26**'s
+   own "sibling containers, not Docker-in-Docker" reasoning). No change
+   from **D28**.
+2. **natmod already builds cleanly through one combined Dockerfile
+   today -- genuinely proven, not aspirational.** Every one of
+   **D25**'s six real bugs happened inside `unix`'s own five
+   architectures colliding; natmod's own arches, sharing that exact
+   same combined image the whole time, never broke once across this
+   entire session's CI chain. The user's own proposal: since the whole
+   toolchain can be baked into the image at build time, does that
+   remove the need to resolve a toolchain (`toolchains.py`'s own
+   host/download probing) at all for a Docker-based build? Yes, for
+   the CI path -- but not unconditionally: **D3**'s own foundational
+   promise is that `cibuildmp` works on a bare laptop with no Docker
+   at all, mutating nothing on the host. Making Docker the *only* path
+   would break that guarantee for anyone without Docker installed. The
+   reconciliation, not a contradiction: Docker becomes the **preferred
+   path in CI** (a daemon is already there, natmod's own image is
+   already proven), while `toolchains.py`'s existing host/download
+   resolution stays as the **local, no-Docker fallback** -- the exact
+   same two-path shape `usermod/dockerrun.py` already established for
+   `unix` (`CIBMP_UNIX_DOCKER_IMAGE` unset → old bare-host path,
+   unchanged). "Resolve a toolchain" only turns into "pick a
+   Dockerfile" on the branch where Docker is actually being used, not
+   universally -- **D3** stays true on every other branch.
+3. **Confirmed, already the design**: `usermod` gets one Dockerfile
+   *per port*, not per architecture/board -- **D28**'s own "one port,
+   one toolchain" framing, unchanged.
+4. **A concrete, actionable addition, not yet done:** check `mpbuild`'s
+   own and `cibuildwheel`'s own real Dockerfiles before writing any of
+   **D28**'s five per-port images from scratch, particularly
+   `esp32`/`webassembly` where the real apt/toolchain list is heavy
+   and plausibly already solved correctly somewhere public. Not
+   independently verified in this session at all (same "cited by the
+   user, not yet checked against source" caveat **D26** already
+   carries for `mpbuild`'s own container-per-port precedent) -- a
+   concrete first step for whoever picks up **D28**'s implementation,
+   not a claim about what those Dockerfiles actually contain.
+5. **Direct consequence of point 2, same caveat:** yes, on the
+   Docker-active branch, "resolve toolchain" becomes "which Dockerfile"
+   for natmod exactly the way it already does for usermod's own ports
+   -- conditional on Docker being the selected path, not a blanket
+   replacement of `toolchains.py`.
+6. **"Docker over QEMU or QEMU over Docker" -- neither; they solve
+   different problems, not a build-time either/or.** **D2/M2** already
+   decided, with reasoning, not to emulate for cross-compilation at
+   all: real cross-compiling beats QEMU user-mode emulation for
+   something as light as MicroPython's own build (the same reasoning
+   **D25**'s own cibuildwheel comparison restates -- manylinux uses one
+   container *per architecture* plus `qemu-user`, specifically because
+   Python wheels are far more expensive to build than MicroPython is).
+   Wrapping toolchains in Docker containers does not change that
+   calculus at all -- the containers exist for **dependency isolation
+   between ports** (**D28**'s own "why isolation is the real driver"),
+   not to enable emulation as an alternative to cross-compiling. QEMU
+   stays exactly where **D21** already puts it: a separate *execution*
+   axis (`qemu-system`, running/testing an already-built binary under
+   an emulated target), never a *build-time* one. Three orthogonal
+   concerns, not a competing pair: **Docker for isolation,
+   cross-compilation for building, QEMU only for execution/testing.**
+
+- **Verifying D28's own open Docker-daemon-reachability question is in
+  progress as of this entry** -- a throwaway diagnostic job
+  (`composite-action-docker-reach-check` in `usermod-dev.yml`, no
+  `uses: docker` anywhere, a plain `docker info`/`docker run --rm
+  hello-world`) was pushed specifically to answer it on real CI rather
+  than trust the "almost certainly yes" reasoning alone. Remove once
+  known and fold the real answer into **D28**, the same "diagnostic
+  job, fold in, delete" discipline **D20**'s own
+  `unix-aarch64-cross-check` already established earlier this session.
+
 - **M10** — runner/matrix integration, fan-out-by-default for usermod
   identifiers (**D20**).
 - **M11** — execution axis: qemu-system, rp2040py, node, native — four of
