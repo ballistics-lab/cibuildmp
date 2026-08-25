@@ -1455,6 +1455,19 @@ style, now that a slice of it is actually implemented:
         `arm64` itself moved off MSYS2 once `llvm-mingw` was confirmed
         live to build it from Linux too, with the exact Clang-vs-GCC
         `CFLAGS_EXTRA` fixes that took.
+  - [ ] `rp2` — **not started**, a real gap flagged directly rather than
+        left implicit: **M6**'s own `resources/usermod.toml`/
+        `usermod/portinfo.py` slice already scoped `rp2` in (its
+        `build-system = "cmake"`/`default-manifest = "boards/manifest.py"`
+        pins exist, target selection is ready), but no `build_rp2()` ever
+        got written — no Pico SDK resolver, no live verification, not
+        attempted this session. Caught only when the README's own
+        "Target support" table was checked against a real count of
+        upstream's ports (20, not the 6 this project scopes to) and it
+        turned out the table itself had silently dropped the one port
+        that was scoped in but never driven — worth recording as a
+        reminder that a summary table can go stale exactly the same way
+        code does, not just be written once and trusted.
 - **M9** — toolchain provisioning: ESP-IDF fetch + caching, `docker`
   strategy revisit for it (**D19**). MSYS2's own D18 role (windows
   provisioning) ended up superseded entirely — see the `windows` bullet
