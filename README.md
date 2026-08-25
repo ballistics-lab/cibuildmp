@@ -22,10 +22,15 @@ describes its whole target matrix. The tool resolves it into build
 identifiers, fetches MicroPython, builds `mpy-cross`, provisions each
 target's cross toolchain, and runs the build -- the same way locally as on a
 runner. This is the direction the project is going, and the intended
-primary way to use it going forward -- run directly, or via the root
+primary way to use it going forward -- run directly, via the root
 [`Dockerfile`](Dockerfile) (Linux and, through WSL2/Docker Desktop,
 Windows too -- see [Target support](#target-support) below for why no
-target needs a native Windows or macOS host). See
+target needs a native Windows or macOS host), or in CI via this repo's
+own root `action.yml` (`uses: ballistics-lab/cibuildmp@<tag>`) -- a
+Docker action, not composite, built from
+[`.github/docker/action.Dockerfile`](.github/docker/action.Dockerfile)
+(a separate image from the standalone `Dockerfile` above -- see that
+file's own header for why they can't share one). See
 [`docs/BACKLOG.md`](docs/BACKLOG.md) for the design decisions and what is
 implemented so far.
 
@@ -586,11 +591,17 @@ name suffix (`build-natmod-arch` → `build-natmod`). `v0.1.0` had only
 `build-usermod-unix-arch`.
 
 The `cibuildmp` package and the actions share one version. The package is
-not on PyPI yet, so the actions install it from their own checkout
-(`uv tool install ${{ github.action_path }}`) -- which means the tool that
-runs is exactly the ref you pinned, with no index to keep in sync. The
-root `Dockerfile` pins the same way, just explicitly instead of
-implicitly: `uv tool install git+https://github.com/ballistics-lab/cibuildmp.git@${CIBUILDMP_REF}`,
+not on PyPI yet, so every action installs it from its own checkout --
+`cibuildmp-matrix` still does this directly
+(`uv tool install ${{ github.action_path }}`), and the root `action.yml`
+does the same thing one layer down, inside `.github/docker/action.Dockerfile`'s
+own `COPY . /opt/cibuildmp` + `uv tool install` (a Docker action now, not
+composite -- see that action's own comment for why: cibuildmp's toolchain
+provisioning needs real apt packages baked into an image, not re-installed
+on every job). Either way, the tool that runs is exactly the ref you
+pinned, with no index to keep in sync. The root `Dockerfile` (the
+standalone/WSL2 one, not the action's) pins the same way, just explicitly
+instead of implicitly: `uv tool install git+https://github.com/ballistics-lab/cibuildmp.git@${CIBUILDMP_REF}`,
 `CIBUILDMP_REF` defaulting to the latest tag at the time the Dockerfile
 was last touched -- override it with `--build-arg CIBUILDMP_REF=vX.Y.Z`
 for a different one, the same "pin a tag, not `@main`" rule as everywhere

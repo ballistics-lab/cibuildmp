@@ -29,41 +29,16 @@ inputs:
     required: false
     default: ""
 
+# Docker, not composite: cibuildmp's own toolchain provisioning needs real
+# apt packages on the runner (gcc-multilib for x86, gcc-mingw-w64 for
+# windows/x64/x86, libusb1 for esp32 -- .github/docker/action.Dockerfile's
+# own comment has the full per-package reasoning, shared with the root
+# Dockerfile). A composite action can only apt-install those as a step
+# that runs, and re-runs, on every single job -- a Docker action bakes
+# them into the image once, at build/cache time, instead. Inputs become
+# INPUT_<NAME> env vars in the container; entrypoint.sh (in the image)
+# reads them and builds the exact same cibuildmp command line the old
+# composite step's own bash did.
 runs:
-  using: composite
-  steps:
-    - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
-      with:
-        python-version: "3.14"
-
-    - id: cibmp
-      shell: bash
-      run: |
-        set -euo pipefail
-
-        # Install cibuildmp from this action's own checkout, so the version
-        # that runs is exactly the ref the caller pinned -- no separate
-        # package index to keep in sync with the action tag, and no way for
-        # the two to disagree. github.action_path is where the runner put
-        # this repo at that ref.
-        SPEC="${{ github.action_path }}"
-        if [ -n "${{ inputs.extras }}" ]; then
-          SPEC="${SPEC}[${{ inputs.extras }}]"
-        fi
-        uv tool install "$SPEC"
-
-        # `if` blocks, not `[ -n x ] && ARGS+=(...)`: under `set -e` a
-        # false test makes the whole && list return non-zero and kills the
-        # step, since it is not in a condition context.
-        ARGS=("${{ inputs.package-dir }}")
-        if [ -n "${{ inputs.output-dir }}" ]; then
-          ARGS+=(--output-dir "${{ inputs.output-dir }}")
-        fi
-        if [ -n "${{ inputs.config-file }}" ]; then
-          ARGS+=(--config-file "${{ inputs.config-file }}")
-        fi
-        if [ -n "${{ inputs.only }}" ]; then
-          ARGS+=(--only "${{ inputs.only }}")
-        fi
-
-        cibuildmp "${ARGS[@]}"
+  using: "docker"
+  image: ".github/docker/action.Dockerfile"

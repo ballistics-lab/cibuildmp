@@ -63,5 +63,11 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 ARG CIBUILDMP_REF=v0.3.0
 RUN uv tool install "git+https://github.com/ballistics-lab/cibuildmp.git@${CIBUILDMP_REF}"
 
+# `uv tool install` puts the binary at ~/.local/bin -- not on this base
+# image's default PATH at all (verified live: `which cibuildmp` finds
+# nothing with a bare /usr/local/bin:/usr/bin:/bin PATH, the same set a
+# plain, non-login container process actually gets).
+ENV PATH="/root/.local/bin:${PATH}"
+
 WORKDIR /work
 ENTRYPOINT ["cibuildmp"]
