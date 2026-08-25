@@ -2351,21 +2351,37 @@ followed by one big wiring pass at the end.
      `verify-docker-images`'s own matrix, so it now builds (and
      publishes, on a real push) for real like every other Dockerfile
      here, not left open as a documented gap.
-   - **`resources/docker/webassembly.Dockerfile` -- written, base OS
-     packages only (`build-essential`, `python3`), intentionally
-     incomplete on its own.** `emsdk` itself is not baked in at all --
-     `usermod/emsdk.py`'s own `resolve_emsdk()` downloads a pinned
-     prebuilt tarball into `sources.cache_root()` on the bare host; per
-     step 4 (below, not yet implemented), that directory needs
-     bind-mounting into the container at *run* time, not baked into
-     the image at *build* time, or every `docker run --rm` would
-     redownload it (an ordinary container's own filesystem is thrown
-     away after each run). Real, live-checked finding while writing
-     this: `ports/webassembly/Makefile` also declares `TERSER`/`NODE`
-     (`npx terser`, for `.min.mjs`) -- but only the `min`/`repl`/`test`
-     targets touch them, never the default `all` target
-     `webassembly_make_command()` always builds, so Node.js/npm are
-     deliberately not installed here at all, not an oversight.
+   - **`resources/docker/webassembly.Dockerfile` -- written, emsdk
+     baked in.** A first pass here mounted emsdk from the host's own
+     `sources.cache_root()` instead, on reasoning that does not
+     actually hold: a Dockerfile `RUN` step's own output is a real
+     image layer, reused unchanged by every later `docker run --rm`
+     (only the ephemeral *container* is discarded per run, never the
+     *image* a `RUN` step wrote into) -- there was never a
+     "redownloads every run" problem baking in would have caused,
+     unlike unix's own apt packages this reasoning was supposed to
+     mirror. Asked the user directly once the real tradeoff (image
+     size, not correctness) was clear: the extracted emsdk here is
+     ~1.5GB, measured live via a real download + `tar tJf`, not
+     guessed -- baking it in duplicates that download against
+     `resolve_emsdk()`'s own bare-host cache rather than sharing one
+     copy the way a mount would, but needs no `dockerrun.py`
+     mount/PATH-injection support at all (a plain `ENV PATH` in the
+     Dockerfile is enough) and ships a genuinely self-contained image
+     the moment `docker build` finishes, consistent with every other
+     image here. Baking in won. The pinned URL/sha256 (transcribed from
+     `resources/usermod.toml`'s own `[emsdk]` table, `version =
+     "6.0.8"`) was verified live before pinning -- downloaded for real,
+     `sha256sum -c`'d, and its own internal `tar tJf` layout confirmed
+     (a top-level `install/` containing `install/emscripten/` and
+     `install/bin/`, exactly what `ResolvedEmsdk.env()` already
+     expects) rather than assumed from the tarball's name. Real,
+     live-checked finding while writing this: `ports/webassembly/Makefile`
+     also declares `TERSER`/`NODE` (`npx terser`, for `.min.mjs`) --
+     but only the `min`/`repl`/`test` targets touch them, never the
+     default `all` target `webassembly_make_command()` always builds,
+     so Node.js/npm are deliberately not installed here at all, not an
+     oversight.
    - `resources/docker/esp32.Dockerfile` -- the heaviest one: ESP-IDF itself is
      a multi-gigabyte checkout with its own Python env bootstrap
      (`usermod/espidf.py`). Worth deciding explicitly whether ESP-IDF
@@ -2375,24 +2391,42 @@ followed by one big wiring pass at the end.
      tradeoff, not an oversight, and should get its own one-paragraph
      decision when this Dockerfile is written, not silently default
      one way.
-4. **`usermod/dockerrun.py` grows real mount coverage, only once a
-   port beyond `unix` actually needs it.** Today it only mounts
-   `mpy_dir` and the caller's own module directory -- correct for
-   `unix` (every `unix` toolchain lives inside the image itself,
-   nothing downloaded into `cache_root()`), wrong for every other
-   port: `windows/arm64` (`llvm-mingw`), `webassembly` (`emsdk`), and
-   `esp32` (`esp-idf`) all download into subdirectories of
-   `sources.cache_root()`, not `mpy_dir`, at *build time* now
-   (**D30**'s own point 2 -- these become the Dockerfile's own
-   provisioning step, not a bare-host fallback), but a sibling
-   container for those ports still needs `cache_root()` itself mounted
-   in at *run* time for the cache to actually persist across
-   invocations, or the image rebuilds/redownloads every single run,
-   defeating the whole point of caching. `build_windows()`/
-   `build_webassembly()`/`build_esp32()` each need their own
-   docker-image-selection branch added alongside `build_unix()`'s
-   existing one, each passing the right mount set for what that port's
-   own toolchain needs persisted.
+4. **`usermod/dockerrun.py` grows real mount coverage -- probably only
+   for `esp32`, revised from the original three-port scope below once
+   its own reasoning turned out flawed.** Originally written as: every
+   port whose toolchain is a downloaded tarball rather than an apt
+   package (`windows/arm64`'s `llvm-mingw`, `webassembly`'s `emsdk`,
+   `esp32`'s `esp-idf`) would need `sources.cache_root()` bind-mounted
+   into its container at *run* time, "or the image rebuilds/redownloads
+   every single run." **That premise is wrong** -- caught while
+   actually writing `webassembly.Dockerfile`: a Dockerfile `RUN` step's
+   own output is a real image layer, reused unchanged by every later
+   `docker run --rm` (only the ephemeral *container* is discarded per
+   run, never the *image* a `RUN` step wrote into), so there was never
+   a correctness reason to avoid baking a downloaded toolchain straight
+   into the image the way `unix`'s own apt packages already are.
+   `webassembly.Dockerfile` now bakes `emsdk` in directly (see "current
+   state" above) -- no mount, no `dockerrun.py` changes needed at all
+   for that port. The only real reason left to ever prefer mounting
+   over baking is image size / avoiding a duplicate download between
+   the host's own cache and the image layer (`emsdk`'s own ~1.5GB,
+   measured live, was judged worth baking in anyway, on the user's own
+   call) -- `windows/arm64`'s `llvm-mingw` is almost certainly small
+   enough that the same call goes the same way when that arch's own
+   Dockerfile coverage is written (not attempted yet -- `windows.Dockerfile`
+   still explicitly excludes `arm64`). `esp32`'s `esp-idf` is the one
+   case genuinely large enough (multi-gigabyte) that this decision
+   still needs making deliberately rather than assumed either way --
+   see its own bullet in step 3. If `esp32` does end up mounted rather
+   than baked, this step is exactly that: `dockerrun.py` grows real
+   mount coverage for `sources.cache_root()`, and `build_esp32()` needs
+   its own docker-image-selection branch added alongside
+   `build_unix()`'s existing one (`build_windows()`/`build_webassembly()`
+   need no such branch for this reason any more -- both bake their own
+   toolchain, `webassembly` already does, `windows/arm64` almost
+   certainly will too). If `esp32` also ends up baked, this step may
+   turn out to have nothing left to do at all -- genuinely open until
+   that Dockerfile is written and its own tradeoff decided.
 5. **`publish.yml`'s existing `publish-docker` job extends from one
    image to six** -- the job already exists (`docker/build-push-action`
    with `cache-from/cache-to: type=gha`, pushing

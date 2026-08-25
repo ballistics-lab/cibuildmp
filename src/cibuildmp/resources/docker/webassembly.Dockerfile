@@ -13,23 +13,27 @@
 # manylinux/musllinux-shaped axis here at all (same reasoning
 # qemu.Dockerfile's own header gives).
 #
-# emsdk itself -- the actual `emcc`/`em++` toolchain -- is deliberately
-# NOT baked into this image at all, unlike unix's apt-installed
-# cross-compilers. `usermod/emsdk.py`'s own `resolve_emsdk()` downloads
-# a pinned prebuilt tarball (resources/usermod.toml's own `[emsdk]`
-# table) into `sources.cache_root()`, on the bare host, the same way it
-# does for every non-Docker caller today -- and per D28 step 4 (not yet
-# implemented: `build_webassembly()` has no docker-image branch yet,
-# the same as `build_windows()`/`build_qemu()`), that resolved
-# directory is meant to be bind-mounted into this image at container
-# *run* time, not baked in at image *build* time -- otherwise every
-# `docker run` against this image would need its own fresh emsdk
-# download (an ordinary `docker run --rm` container's filesystem is
-# thrown away after each run), defeating the whole point of caching it
-# at all. This image is therefore intentionally incomplete on its own
-# until step 4 lands: it has the base OS packages `make -C
-# ports/webassembly`'s own non-toolchain steps need, and nothing that
-# resolves or invokes `emcc` itself.
+# emsdk IS baked into this image -- an earlier version of this file
+# mounted it from the host's own `sources.cache_root()` instead, on a
+# reasoning that does not actually hold: a Dockerfile `RUN` step's own
+# output is a real image layer, not something `docker run --rm` ever
+# discards -- only the ephemeral *container* goes away after each run,
+# the *image* it was built from (and everything a `RUN` step wrote
+# into it) is reused unchanged by every later `docker run`, exactly
+# like every apt package `unix`'s own images already bake in the same
+# way. There was never a "redownloads every run" problem to design
+# around. The real, live-checked tradeoff is image size: the extracted
+# emsdk here is ~1.5GB (`tar tJf`'d and measured directly, not
+# guessed), noticeably larger than any other image here -- baking it
+# in duplicates it against the same download `usermod/emsdk.py`'s own
+# `resolve_emsdk()` already caches for a bare-host build, rather than
+# sharing one copy the way a `sources.cache_root()` mount would. Baking
+# in won anyway (the user's own call, asked directly): it needs no
+# `dockerrun.py` mount/PATH-injection support at all (`ENV PATH` below
+# is enough, matching how a normal `docker run` against any of these
+# images already works, no design changes needed elsewhere), and ships
+# a genuinely self-contained, immediately-usable image the moment
+# `docker build` finishes -- consistent with every other image here.
 #
 # TERSER (`npx terser`)/NODE are real dependencies of this port's own
 # Makefile -- but only for the `min`/`repl`/`test`/`test_min` targets,
@@ -41,23 +45,52 @@
 # deliberately NOT installed here, they would only ever be exercised by
 # a target cibuildmp itself never asks for.
 #
+# The emsdk version/URL/sha256 below MUST stay in sync with
+# resources/usermod.toml's own `[emsdk]` table -- there is no tooling
+# that keeps a Dockerfile RUN step and a TOML file in sync
+# automatically, so a future emsdk version bump needs both edited
+# together, or this image silently starts shipping a stale toolchain
+# while the bare-host path moves on.
+#
 # Build: docker build -t cibuildmp-webassembly -f src/cibuildmp/resources/docker/webassembly.Dockerfile .
 # Use:   CIBMP_WEBASSEMBLY_DOCKER_IMAGE=cibuildmp-webassembly cibuildmp ...
-#        (not actually usable yet -- see the emsdk-mounting note above;
-#        this only builds the base image today, D28 step 4 wires the
-#        mount and the env-var name may still change once that lands)
 FROM ubuntu:24.04
 
 # python3: ports/webassembly/Makefile includes py/mkenv.mk, whose own
 # `PYTHON = python3` default every port's build shells out to directly
 # (makeversionhdr.py, mpy-tool.py, qstr generation) -- confirmed
 # directly against a real v1.28.0 checkout, not assumed just because
-# every other port here needs it too. build-essential: emcc itself
-# shells out to a real host `ar`/`ranlib` for static-archive steps in
-# some configurations; kept for the same reason every other image here
-# keeps it, not verified as strictly required for this port's own
-# default VARIANT.
+# every other port here needs it too. curl/ca-certificates: fetching
+# the pinned emsdk tarball below, nothing else -- removed from PATH's
+# own footprint by nothing here needing them afterwards (unlike
+# unix/windows/qemu, this image's own toolchain download happens
+# inside the Dockerfile itself, not on the host before `docker run`).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     python3 \
+    curl \
+    ca-certificates \
+    xz-utils \
     && rm -rf /var/lib/apt/lists/*
+
+# Pinned exactly as resources/usermod.toml's own [emsdk] table
+# (version = "6.0.8", [emsdk.platform.linux-x64]) -- verified live
+# before pinning here: downloaded the real tarball, confirmed this
+# exact sha256 with `sha256sum -c`, and inspected its own internal
+# layout with `tar tJf` (a top-level `install/` directory containing
+# `install/emscripten/` and `install/bin/`, exactly what
+# `usermod/emsdk.py`'s own `ResolvedEmsdk.env()` already expects on a
+# bare-host resolve) rather than assumed from the tarball's name alone.
+RUN curl -fsSL -o /tmp/wasm-binaries.tar.xz \
+      https://storage.googleapis.com/webassembly/emscripten-releases-builds/linux/9d70dbe8860ccdd3595f6e6065d94bfb543ae955/wasm-binaries.tar.xz && \
+    echo "9bea769c189d9f52196e74283fb86937318cc24bf14879f2c6bdd19862131901  /tmp/wasm-binaries.tar.xz" | sha256sum -c - && \
+    mkdir -p /opt/emsdk && \
+    tar -xJf /tmp/wasm-binaries.tar.xz -C /opt/emsdk && \
+    rm /tmp/wasm-binaries.tar.xz
+
+# Same two PATH entries ResolvedEmsdk.env() prepends on a bare-host
+# resolve (emscripten/ for the emcc/em++ driver scripts, bin/ for the
+# LLVM/wasm binaries they invoke) -- set once here via ENV rather than
+# needing dockerrun.py to inject it per run, since the toolchain is
+# baked into this image rather than mounted in.
+ENV PATH="/opt/emsdk/install/emscripten:/opt/emsdk/install/bin:${PATH}"
