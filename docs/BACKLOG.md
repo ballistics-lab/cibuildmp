@@ -2091,13 +2091,16 @@ whatever session) picks this up next.**
   migration step 1's own detail below); (2) the apt-archives GHA cache
   never actually saved even once (`Failed to save: Unable to reserve
   cache with key ..., another job may be creating this cache`, on
-  every run checked) -- root cause: rapid-fire pushes left multiple
-  `build-examples.yml` runs racing each other for the identical
-  hash-derived cache key. Fixed by adding real `concurrency:` blocks to
+  every run checked) -- root cause: rapid-fire pushes left the cache
+  key genuinely stuck (not just racing -- confirmed by a later run's
+  own *restore*, uncontested by any save-timing collision, never once
+  hitting either). Fixed by adding real `concurrency:` blocks to
   `build-examples.yml`/`usermod-dev.yml` (matching `publish.yml`'s own
-  existing pattern) -- **not yet confirmed live that the very next push
-  actually gets a clean cache hit**, watch for a real "Cache
-  restored"/hit line in the next run's own logs before trusting it.
+  existing pattern, confirmed live to actually cancel superseded runs)
+  plus minting a fresh `v2-`-prefixed cache key once the old one proved
+  unrecoverable. **Confirmed fixed with real log evidence**: the first
+  run on the new key logged `Cache saved with key:
+  v2-apt-archives-Linux-<hash>` cleanly.
 
 **The one real gap left before this stops being "images exist" and
 starts being "the feature works": nobody has ever run a real usermod
@@ -2328,9 +2331,17 @@ unconditionally).
     API documents no way to clear a stuck reservation directly, so the
     real fix was simpler: mint a fresh key. `action.yml`'s own cache
     key now has a `v2-` prefix (bump to `v3-`, etc. if this one also
-    ends up stuck) -- not yet confirmed live that the fresh key actually
-    saves cleanly, watch the next real run's own logs for a genuine
-    "Cache restored"/hit line before trusting it.
+    ends up stuck). **Confirmed fixed, real log evidence**: the very
+    next run (`4837c58`) logged `Cache saved with key:
+    v2-apt-archives-Linux-<hash>` on its own first of three save
+    attempts -- the other two got the same "another job may be creating
+    this cache" message, but this time it's the genuinely benign case
+    (already saved earlier in the same job, moments prior), not a stuck
+    reservation. This closes the apt-cache saga for real: the mechanism
+    itself was always sound, the specific key it landed on this session
+    just got stuck by a self-inflicted pileup of rapid pushes. The next
+    real push after this one is the first that can show an actual
+    restore/hit, still worth a glance but no longer in doubt.
 
 **The full migration plan, in dependency order -- reordered from the
 first pass above, per the user's own explicit follow-up.** The
