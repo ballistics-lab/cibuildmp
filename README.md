@@ -586,6 +586,12 @@ name suffix (`build-natmod-arch` → `build-natmod`). `v0.1.0` had only
 `build-usermod-unix-arch`.
 
 The `cibuildmp` package and the actions share one version. The package is
-not on PyPI yet, so both actions install it from their own checkout
+not on PyPI yet, so the actions install it from their own checkout
 (`uv tool install ${{ github.action_path }}`) -- which means the tool that
-runs is exactly the ref you pinned, with no index to keep in sync.
+runs is exactly the ref you pinned, with no index to keep in sync. The
+root `Dockerfile` pins the same way, just explicitly instead of
+implicitly: `uv tool install git+https://github.com/ballistics-lab/cibuildmp.git@${CIBUILDMP_REF}`,
+`CIBUILDMP_REF` defaulting to the latest tag at the time the Dockerfile
+was last touched -- override it with `--build-arg CIBUILDMP_REF=vX.Y.Z`
+for a different one, the same "pin a tag, not `@main`" rule as everywhere
+else on this page.

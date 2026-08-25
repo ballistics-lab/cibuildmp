@@ -4,7 +4,8 @@
 # same reason this image stays lean rather than baking every toolchain in.
 # Mount that directory as a volume to persist it across container runs:
 #
-#   docker build -t cibuildmp .
+#   docker build -t cibuildmp .                                   # default ref, below
+#   docker build -t cibuildmp --build-arg CIBUILDMP_REF=v0.3.0 .   # a specific tag
 #   docker run --rm -it \
 #     -v cibuildmp-cache:/root/.cache/cibuildmp \
 #     -v "$PWD":/work -w /work \
@@ -51,12 +52,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
-# Installed from this image's own checkout, not PyPI -- mirrors action.yml's
-# own "install from github.action_path" choice, so the cibuildmp that runs
-# is always exactly the source this Dockerfile was built from, fork or
-# branch included, not whatever the latest published release happens to be.
-COPY . /opt/cibuildmp
-RUN uv tool install /opt/cibuildmp
+# Installed from a pinned git ref, not a local COPY or PyPI -- keeps this
+# buildable from the bare Dockerfile alone (no repo checkout needed as
+# build context) and the resulting image self-documenting about exactly
+# what it shipped (`docker history` shows the real --build-arg used, not
+# "whatever was in the directory"). Override at build time for a specific
+# release: `docker build --build-arg CIBUILDMP_REF=v0.3.0 .` -- same "pin
+# a tag, not @main" rule README.md's own Versioning section already holds
+# every other consumer to.
+ARG CIBUILDMP_REF=v0.3.0
+RUN uv tool install "git+https://github.com/ballistics-lab/cibuildmp.git@${CIBUILDMP_REF}"
 
 WORKDIR /work
 ENTRYPOINT ["cibuildmp"]
