@@ -150,7 +150,7 @@ PORT_IMAGES: dict[str, str] = {
     ),
     "webassembly": (
         "ghcr.io/ballistics-lab/cibuildmp-webassembly"
-        "@sha256:aecf6d0da532fe8eec223e6c435f5f8c3b7352a4a33733e44119c49cd93d33d9"
+        "@sha256:d9f9dec65136b4bb015d9b49d6741730303bbe7232958ec409af54d02d4d1004"
     ),
 }
 
