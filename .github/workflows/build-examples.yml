@@ -1,20 +1,26 @@
 name: Build examples
 
-# cibuildmp's own integration tests: examples/* are real natmod modules,
-# built here with this repo's own root action.yml -- the same `uses:` a
-# consumer like bclibc or a7p would write. Green here means the actual
-# build path (M3: make, collect, verify, package) works end to end, not
-# just that --dry-run prints a plausible plan. This is also the only real
-# feedback loop for action.yml itself (a Docker action since D18's own
-# CI-conversion work): `uses: ./` below builds .github/docker/action.Dockerfile
-# for real, something no amount of YAML-syntax checking or local shell
-# testing can substitute for.
+# cibuildmp's own integration tests: examples/* are real natmod/usermod
+# modules, built here with this repo's own root action.yml -- the same
+# `uses:` a consumer like bclibc or a7p would write. Green here means the
+# actual build path works end to end, not just that --dry-run prints a
+# plausible plan. This is also the only real feedback loop for action.yml
+# itself (a Docker action since D18's own CI-conversion work): `uses: ./`
+# below builds action.Dockerfile for real, something no amount of
+# YAML-syntax checking or local shell testing can substitute for.
 #
-#   template  -- natmod's own C, the minimal case.
-#   wasm2mpy  -- native source is WebAssembly, compiled to C via wasm2c
-#                before the normal dynruntime.mk flow takes over (see
-#                examples/wasm2mpy/cibuildmp.toml). Proves the natmod
-#                contract (D2) is genuinely source-language-agnostic.
+#   template     -- natmod's own C, the minimal case.
+#   wasm2mpy     -- native source is WebAssembly, compiled to C via wasm2c
+#                   before the normal dynruntime.mk flow takes over (see
+#                   examples/wasm2mpy/cibuildmp.toml). Proves the natmod
+#                   contract (D2) is genuinely source-language-agnostic.
+#   usermod-unix -- usermod's own build path (M9b), all five real unix
+#                   arches (x64/x86/aarch64/armhf/mipsel, D20/D24) --
+#                   this is what actually proves action.Dockerfile's own
+#                   toolchain set (the ports.ubuntu.com mirror fix,
+#                   gcc-aarch64-linux-gnu, gcc-arm-linux-gnueabihf,
+#                   gcc-mipsel-linux-gnu, libltdl-dev) works inside the
+#                   real Docker action, not just in a bare dev sandbox.
 #
 # push: (no branches: filter) rather than push: branches: [main] -- this
 # needs to run on every push to a dev branch too, not just main, the same
@@ -62,8 +68,17 @@ jobs:
         with:
           package-dir: examples/wasm2mpy
 
+      - name: Build examples/usermod-unix
+        # No CIBMP_VERSION here -- usermod output has no package.json to
+        # version at all (D23: it's a full port binary, not a
+        # mip.install()-able .mpy), so the env var would just be unused.
+        uses: ./
+        with:
+          package-dir: examples/usermod-unix
+
       - name: List built artifacts
         run: |
           ls -laR examples/template/mpyhouse
           ls -laR examples/wasm2mpy/mpyhouse
+          ls -laR examples/usermod-unix/mpyhouse
           cat examples/template/mpyhouse/*/package.json

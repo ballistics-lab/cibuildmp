@@ -21,10 +21,39 @@
 # actual build (YAML syntax and local shell testing both passed first).
 FROM ubuntu:24.04
 
+# unix/aarch64's own libffi-dev:arm64 is a target-arch package -- Ubuntu's
+# default archive.ubuntu.com/security.ubuntu.com mirrors only carry
+# amd64/i386; every other architecture lives on a separate mirror,
+# ports.ubuntu.com, that the default sources never reference (confirmed
+# live, twice: once on a real GitHub-hosted runner -- docs/BACKLOG.md's
+# D20 addendum -- and again directly in this image's own base, ubuntu:24.04,
+# before writing this). 24.04 moved to the deb822 sources format, so this
+# restricts the existing stanzas to amd64 and appends arm64-only ones
+# pointing at ports.ubuntu.com, rather than editing the now-unused plain
+# /etc/apt/sources.list.
+RUN dpkg --add-architecture arm64 && \
+    sed -i '/^Types: deb$/a Architectures: amd64' /etc/apt/sources.list.d/ubuntu.sources && \
+    { \
+        echo; \
+        echo 'Types: deb'; \
+        echo 'URIs: http://ports.ubuntu.com/ubuntu-ports'; \
+        echo 'Suites: noble noble-updates noble-backports'; \
+        echo 'Components: main universe restricted multiverse'; \
+        echo 'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg'; \
+        echo 'Architectures: arm64'; \
+        echo; \
+        echo 'Types: deb'; \
+        echo 'URIs: http://ports.ubuntu.com/ubuntu-ports'; \
+        echo 'Suites: noble-security'; \
+        echo 'Components: main universe restricted multiverse'; \
+        echo 'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg'; \
+        echo 'Architectures: arm64'; \
+    } >> /etc/apt/sources.list.d/ubuntu.sources
+
 # Same apt-only prerequisites as the root Dockerfile -- see that file's
-# own comment for the full per-package reasoning (D3/M2/D18). Kept in
-# sync by hand today; a real drift risk if one changes without the other,
-# not automated away here.
+# own comment for the full per-package reasoning (D3/M2/D18/D20/D24).
+# Kept in sync by hand today; a real drift risk if one changes without
+# the other, not automated away here.
 #
 # wabt: examples/wasm2mpy's own toolchain (wasm2c), pinned by nothing more
 # than "whatever Ubuntu 24.04 carries" -- deliberately, since that is the
@@ -42,6 +71,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc-multilib \
     gcc-mingw-w64-x86-64 \
     gcc-mingw-w64-i686 \
+    gcc-aarch64-linux-gnu \
+    libffi-dev:arm64 \
+    gcc-arm-linux-gnueabihf \
+    gcc-mipsel-linux-gnu \
+    libltdl-dev \
     libusb-1.0-0 \
     wabt \
     && rm -rf /var/lib/apt/lists/*

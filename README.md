@@ -45,10 +45,56 @@ cibuildmp: 10 target(s) against MicroPython v1.28.0
 Drop `--dry-run` and it builds for real: each target lands in its own
 `output-dir/<identifier>/` directory (`mpyhouse/mpy6.3-natmod-x64/`, …)
 alongside a `package.json` once `version` is set — see
-[`examples/template`](examples/template) and
+[`examples/template`](examples/template),
 [`examples/wasm2mpy`](examples/wasm2mpy) (native source is WebAssembly,
 compiled through `wasm2c` — the natmod contract doesn't care what
-produced the C).
+produced the C), and [`examples/usermod-unix`](examples/usermod-unix)
+(a `USER_C_MODULES` module, all five real `unix` arches).
+
+### Running via Docker
+
+```console
+$ docker build -t cibuildmp .                                   # latest tagged release
+$ docker build -t cibuildmp --build-arg CIBUILDMP_REF=v0.3.0 .   # a specific tag
+$ docker run --rm -it \
+    -v cibuildmp-cache:/root/.cache/cibuildmp \
+    -v "$PWD":/work -w /work \
+    cibuildmp --dry-run
+```
+
+The cache volume matters: without it, every run re-downloads every
+toolchain and re-fetches MicroPython from scratch. Drop `--dry-run` for
+a real build the same way as above; anything after `cibuildmp` in the
+`docker run` line is passed straight through as CLI arguments (`--only
+<identifier>`, `--archs x64,x86`, …).
+
+The image (`Dockerfile`, Ubuntu 24.04) installs only what `cibuildmp`
+cannot self-provision — every other toolchain (`arm-none-eabi-`,
+`xtensa-esp-elf-`, `riscv-none-elf-`, `emsdk`, ESP-IDF, `llvm-mingw`,
+…) downloads its own pinned copy into the cache volume above on first
+use (**D3**). Running `cibuildmp` directly on your own Ubuntu/Debian
+machine instead of through Docker needs the same set:
+
+```console
+$ sudo apt install build-essential git ca-certificates curl python3 \
+    gcc-multilib gcc-mingw-w64-x86-64 gcc-mingw-w64-i686 libusb-1.0-0
+```
+
+Plus, only if you build `unix/aarch64`, `unix/armhf`, or `unix/mipsel`
+(see [Target support](#target-support) below for exactly which apt
+package each needs) — `unix/aarch64` alone needs one extra step first,
+since `libffi-dev:arm64` is a target-arch package Ubuntu's default
+mirrors don't carry:
+
+```console
+$ sudo dpkg --add-architecture arm64
+# then point apt's own arm64 sources at ports.ubuntu.com -- see
+# action.Dockerfile's own comment for the exact deb822 stanzas this
+# needs on Ubuntu 24.04+, or apt-add-repository on older releases
+$ sudo apt update && sudo apt install \
+    gcc-aarch64-linux-gnu libffi-dev:arm64 \
+    gcc-arm-linux-gnueabihf gcc-mipsel-linux-gnu libltdl-dev
+```
 
 **The composite actions.** The original building blocks, and still the
 supported path for CI wanting each usermod target built as its own job

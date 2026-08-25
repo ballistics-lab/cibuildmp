@@ -1,0 +1,20 @@
+# cibuildmp's own usermod integration test -- see
+# .github/workflows/build-examples.yml. usermod/mymod is a trivial
+# USER_C_MODULES module whose only job is to build cleanly across every
+# unix arch cibuildmp claims to support, the same "no overrides, every
+# claimed target actually builds here" discipline examples/template
+# already holds itself to for natmod.
+#
+# ports = ["unix"] is implicit (the default -- every KNOWN_PORTS entry),
+# named explicitly here anyway so this config reads as a deliberate
+# choice, not an accident of what happened to default at the time it was
+# written. archs is left at its own default too: x64/x86/aarch64/armhf/
+# mipsel, all five real cross-compiles docs/BACKLOG.md's D20/D24 verified
+# live -- this is exactly what proves action.Dockerfile's own toolchain
+# set (gcc-aarch64-linux-gnu, gcc-arm-linux-gnueabihf, gcc-mipsel-linux-gnu,
+# libltdl-dev, the ports.ubuntu.com mirror fix) actually works inside the
+# real Docker action, not just in a bare dev sandbox.
+micropython = "v1.28.0"
+
+[usermod]
+ports = ["unix"]
