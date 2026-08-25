@@ -2612,12 +2612,10 @@ not after:**
   (`usermod-dev.yml`) now that its answer is folded in here.
 - Self-hosted runners without Docker at all (mentioned nowhere in this
   session, but a real category of `cibuildmp` user going forward) lose
-  the per-port image path entirely under this design -- decide whether
-  `cibuildmp` should fall back to bare-host toolchain resolution
-  automatically when Docker is unavailable (matching `unix`'s own
-  current dual-path behaviour: `CIBMP_UNIX_DOCKER_IMAGE` unset already
-  means "build directly," so this may already be free) or fail loudly
-  instead.
+  the per-port image path entirely under this design. **Decided, below
+  under this same decision's usermod bullet: fail loudly, no bare-host
+  fallback** -- Docker is a hard requirement for usermod, not an
+  optional one with a silent fallback.
 - Windows/macOS runners: **D2/M2**'s own "why not docker for x86"
   reasoning, and the open question already in this document's own
   "Windows/macOS hosts" entry, both predate this plan -- a per-port
@@ -2686,6 +2684,9 @@ whichever of two shapes actually applies:
 Returns `None` only where cibuildmp genuinely
 ships no Dockerfile at all yet (`windows/arm64`, `esp32`), which still
 falls all the way through to a bare host build exactly as before.
+**Stale as of the Docker-only call above (this document's own D30):**
+that bare-host fallback is scheduled for removal in favour of a hard
+error, not left as the permanent answer for a missing Dockerfile.
 `build_unix()` now calls `ensure_image()`, not `image_for()` directly --
 the only call site changed this round; `windows`/`qemu`/`webassembly`
 own Dockerfiles exist and are in `_DOCKERFILES` too, but their
@@ -2978,24 +2979,31 @@ conclusion.
      preferred, default path once available; the old path answers
      "Docker isn't installed" without anyone having to build or
      maintain anything new for it.
-   - **usermod**: no non-Docker path is worth pursuing for any port
-     beyond what already exists. The user's own reasoning, plainly
-     correct: the real toolchain diversity across ports (ESP-IDF,
-     emsdk, llvm-mingw, five different `unix` cross-compilers) makes a
+   - **usermod**: no non-Docker path is worth pursuing for any port at
+     all, including `unix`. **Superseding this decision's own first
+     pass** (which called `unix`'s existing host-based cross-compile
+     path -- **D20/D24/D25**, real, proven, already shipping --
+     "grandfathered," kept purely because ripping out working code
+     costs something for no benefit): the user's own direct, later
+     call is Docker-only, full stop, no exception for `unix` either.
+     The real toolchain diversity across ports (ESP-IDF, emsdk,
+     llvm-mingw, five different `unix` cross-compilers) makes a
      parallel, dual-maintained non-Docker path prohibitively expensive
-     for every port added from here on. `unix`'s own existing
-     host-based cross-compile path (**D20/D24/D25**, real, proven,
-     already shipping) stays as-is, grandfathered -- it already exists
-     and already works, so there is no reason to rip it out. But
-     `windows`/`qemu`/`webassembly`/`esp32` should NOT get a
-     comparable non-Docker resolver built for them going forward:
-     Docker is their only path from the start, which is also strictly
-     less work than building and maintaining two parallel resolution
-     mechanisms per port. `llvmmingw.py`/`emsdk.py`/`espidf.py`
-     (already written, from earlier in this session) stay as
-     `docker/<port>.Dockerfile`'s own *build-time* provisioning
+     for every port, `unix` included, not just the ones added from
+     here on. Every port's Docker path is mandatory, not a preferred
+     default with a bare-host escape hatch. `llvmmingw.py`/`emsdk.py`/
+     `espidf.py` (already written, from earlier in this session) stay
+     as `docker/<port>.Dockerfile`'s own *build-time* provisioning
      mechanism -- called once when the image is built, not something a
-     caller's own bare-host run falls back to.
+     caller's own bare-host run falls back to. **Concrete follow-up
+     this implies, not yet done:** `usermod/dockerrun.py`'s
+     `ensure_image()` and `build_unix()` still fall through to a bare
+     host build when no Dockerfile/image resolves (**D32**'s own note
+     on this) -- that fallback needs to become a hard, clearly-worded
+     error ("Docker required, image unavailable") instead, once this
+     lands. Also resolves **D32**'s own open "self-hosted runners
+     without Docker" question definitively: fail loudly, not fall
+     back.
    - **A genuine, concrete payoff of this, the user's own observation:**
      adding a new port's own support becomes strictly simpler than it
      is today -- write one Dockerfile, then declare it in the resolver
