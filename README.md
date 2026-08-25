@@ -606,3 +606,18 @@ instead of implicitly: `uv tool install git+https://github.com/ballistics-lab/ci
 was last touched -- override it with `--build-arg CIBUILDMP_REF=vX.Y.Z`
 for a different one, the same "pin a tag, not `@main`" rule as everywhere
 else on this page.
+
+`publish.yml`'s own `publish-docker` job builds and pushes
+`.github/docker/action.Dockerfile` to
+`ghcr.io/ballistics-lab/cibuildmp:<tag>` on every real release tag --
+infrastructure for a pre-built, pulled-not-built action image, not yet
+wired into `action.yml` itself. Switching `runs.image` over to
+`docker://ghcr.io/ballistics-lab/cibuildmp:vX.Y.Z` has to be a deliberate
+step in cutting the *next* release, not automatic: build-from-source and
+a published image are both correct today, but a published one can only
+be referenced by the exact tag that already has a matching image behind
+it (`action.yml`'s own Docker-action syntax takes a literal string, not
+an expression, so it cannot compute "whatever tag this is" at resolve
+time) -- bump that reference, commit it, *then* tag the release, so the
+image `publish-docker` builds from that same tag push is the one
+`action.yml` (as committed at that tag) already points at.

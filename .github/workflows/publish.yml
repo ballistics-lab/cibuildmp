@@ -120,6 +120,8 @@ jobs:
   deploy:
     needs: [build]
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
 
     # Dynamic: real PyPI on a tag push, TestPyPI on an explicit opt-in
     # dispatch, otherwise a plain build that needs no publish permissions.
@@ -205,3 +207,49 @@ jobs:
         with:
           skip-existing: true
           repository-url: https://test.pypi.org/legacy/
+
+  # The root action.yml's own Docker action (.github/docker/action.Dockerfile)
+  # builds from source on every consuming job today -- correct, but it
+  # re-installs cibuildmp's own apt prerequisites (gcc-multilib,
+  # gcc-mingw-w64-x86-64/i686, libusb1) from scratch every single run, since
+  # GitHub-hosted runners are fresh VMs with no layer cache persisting
+  # between different consuming repos' jobs. A pre-built image, pulled
+  # instead of built, is the real fix -- this job is that: only the
+  # infrastructure, not yet wired into action.yml itself (see that file's
+  # own comment for why flipping runs.image to reference this needs to be
+  # its own deliberate, versioned step, not automatic).
+  #
+  # cache-from/cache-to: type=gha is GitHub's own Actions cache backend --
+  # unlike the runner's local Docker layer cache (gone the moment the VM is
+  # recycled), this persists across workflow runs in this repo, so a
+  # release that only touches, say, resources/usermod.toml rebuilds in
+  # seconds instead of re-running every apt-get from scratch.
+  publish-docker:
+    needs: [deploy]
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: .github/docker/action.Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ needs.deploy.outputs.tag }}
+            ghcr.io/${{ github.repository }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
