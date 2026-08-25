@@ -133,13 +133,18 @@ class UnixArchSettings:
 # apt, not a downloaded tarball, is what provisions it -- the same
 # shutil.which()-plus-named-package pattern build_windows() already uses
 # for its own apt-provisioned x64/x86 arches covers it instead.
+# Order is significant, not just alphabetical/historical -- targets.py's
+# own _PORT_AXES derives UNIX_RUNNABLE_ARCHS's build/display order from
+# these keys (dict order is insertion order in Python), so reordering
+# this literal reorders every --dry-run plan and default build sequence
+# for unix too.
 UNIX_ARCH_SETTINGS: dict[str, UnixArchSettings] = {
     "x64": UnixArchSettings(),
+    "x86": UnixArchSettings(link_opts=("MICROPY_FORCE_32BIT=1",)),
     "aarch64": UnixArchSettings(
         cross_compile="aarch64-linux-gnu-",
         apt_package="gcc-aarch64-linux-gnu libffi-dev:arm64",
     ),
-    "x86": UnixArchSettings(link_opts=("MICROPY_FORCE_32BIT=1",)),
     "armhf": UnixArchSettings(
         cross_compile="arm-linux-gnueabihf-",
         link_opts=("MICROPY_STANDALONE=1", "LDFLAGS_EXTRA=-static"),
@@ -159,7 +164,11 @@ UNIX_ARCH_SETTINGS: dict[str, UnixArchSettings] = {
     ),
 }
 
-UNIX_RUNNABLE_ARCHS = ("x64", "x86", "aarch64", "armhf", "mipsel")
+# Derived, not hand-maintained separately -- every runnable unix arch is
+# already a key of UNIX_ARCH_SETTINGS above, and the two silently drifting
+# apart (an arch added to one but not the other) is a real failure mode a
+# second, independently-typed tuple invites for no benefit.
+UNIX_RUNNABLE_ARCHS = tuple(UNIX_ARCH_SETTINGS)
 
 
 @dataclass(frozen=True)
