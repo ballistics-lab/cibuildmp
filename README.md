@@ -445,6 +445,67 @@ None of this cares what produced the `.c` files `SRC` lists --
 over, and needs nothing from `cibuildmp` beyond `module-dir = "."` and an
 `extra-make-args` entry for its own `APP=` variable.
 
+## Target support
+
+### Natmod support per arch
+
+All ten `ARCH=` values `py/dynruntime.mk` accepts (`docs/BACKLOG.md`'s
+own **M0**–**M5**), each self-provisioning its own toolchain (**D3**) —
+adopted in all three consuming repos and verified on real CI, arch by
+arch, not just `--dry-run`.
+
+| Arch        | Toolchain              | Provisioning         |
+|-------------|-------------------------|-----------------------|
+| `x64`       | host gcc                | none needed           |
+| `x86`       | host gcc (`-m32`)       | apt only[^apt-x86]    |
+| `armv6m`    | `arm-none-eabi-`        | self-downloaded, cached |
+| `armv7m`    | `arm-none-eabi-`        | self-downloaded, cached |
+| `armv7emsp` | `arm-none-eabi-`        | self-downloaded, cached |
+| `armv7emdp` | `arm-none-eabi-`        | self-downloaded, cached |
+| `xtensa`    | `xtensa-lx106-elf-`     | self-downloaded, cached |
+| `xtensawin` | `xtensa-esp32-elf-`     | self-downloaded, cached |
+| `rv32imc`   | `riscv64-unknown-elf-`  | self-downloaded, cached |
+| `rv64imc`   | `riscv64-unknown-elf-`  | self-downloaded, cached |
+
+[^apt-x86]: `apt install gcc-multilib` — no downloadable tarball exists for this one; **D3**'s own "why not docker for x86" note.
+
+### Usermod support per port/arch
+
+This is `usermod/build.py`'s own build-driver layer (`docs/BACKLOG.md`'s
+**M6**–**M9**) — live-verified against a real MicroPython checkout,
+including a real custom `USER_C_MODULES` module for every ✅ row below.
+**Not yet wired into the `cibuildmp` CLI or `action.yml`** — that's a
+real, separate, still-open gap (no `--mode usermod` entrypoint exists
+yet). Until it lands, the composite actions above (`build-usermod-*`)
+remain the supported, production path for usermod.
+
+| Port          | Target                    | Provisioning                    | Status |
+|---------------|----------------------------|-----------------------------------|--------|
+| `unix`        | `x64`                      | host gcc                          | ✅ |
+| `unix`        | `x86`                      | apt only[^apt-x86]                | ✅ |
+| `unix`        | `aarch64`                  | host gcc                          | ⚠️[^native-arm64] |
+| `unix`        | `armhf`                    | `arm-linux-gnueabihf-`             | ❌[^no-toolchain] |
+| `unix`        | `mipsel`                   | `mipsel-linux-gnu-`                | ❌[^no-toolchain] |
+| `qemu`        | `MPS2_AN385` (Cortex-M3)   | `arm-none-eabi-`[^qemu-shared]     | ✅ |
+| `qemu`        | RISC-V boards               | `riscv64-unknown-elf-`             | ❌[^not-attempted] |
+| `webassembly` | `pyscript` variant          | `emsdk`[^linux-x64-only]           | ✅ |
+| `esp32`       | `ESP32_GENERIC`             | ESP-IDF v5.5.1, self-cloned + installed | ✅ |
+| `esp32`       | other ESP32-family boards   | same ESP-IDF resolver              | ⚠️[^esp32-other] |
+| `windows`     | `x64`                       | `apt install gcc-mingw-w64-x86-64` | ✅ |
+| `windows`     | `x86`                       | `apt install gcc-mingw-w64-i686`   | ✅ |
+| `windows`     | `arm64`                     | `llvm-mingw`[^linux-x64-only]      | ✅ |
+
+[^native-arm64]: Needs a native ARM64 host — `UNIX_ARCH_SETTINGS["aarch64"]` sets no `CROSS_COMPILE`, so no cross-compile is configured for this arch.
+[^no-toolchain]: Not buildable yet — pinned settings exist, but no toolchain resolver for this cross target is implemented.
+[^qemu-shared]: Shared with natmod's own `armv7m` toolchain — resolved once, reused, not pinned a second time.
+[^not-attempted]: `ports/qemu` also has RISC-V boards; a real, cheap-to-add extension later, not attempted since nothing here exercises it yet.
+[^linux-x64-only]: Self-downloaded and cached; the pinned release is `linux-x64`-hosted only today.
+[^esp32-other]: Selectable via the same `Esp32BuildOptions`, not itself live-verified — only `ESP32_GENERIC` was actually built and checked.
+
+No Windows or macOS host is needed for any usermod target above,
+`windows`'s own three arches included — every toolchain here is either
+already on a Linux host or downloads/apt-installs onto one.
+
 ## Roadmap
 
 `cibuildmp` is the roadmap. [`docs/BACKLOG.md`](docs/BACKLOG.md) is the
