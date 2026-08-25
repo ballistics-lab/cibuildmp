@@ -37,8 +37,11 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### In progress / Proposed
 
+- [ ] [0008] distribution of the tool itself deferred | both actions install from their own checkout; PyPI name `cibuildmp` never reserved, still open
 - [ ] [0022] zephyr as a third usermod selector axis (epic) | phase outline M6-M9b mostly landed (boards.py, manifests, five of six build drivers, CLI wiring); zephyr itself and `rp2`'s own build driver not started
+- [ ] [0028] full container-per-port migration plan (epic) | steps 1-3 substantially landed, `PORT_IMAGES` populated for 8 images via [0033]; `esp32.Dockerfile` still explicitly not started, no Docker path for that port at all
 - [ ] [0031] unix usermod builds are glibc-only; no musllinux equivalent yet | manylinux half done (per-arch Docker images); musl toolchain + identifier axis + glibc-floor checker designed, not built
+- [ ] [0032] unix usermod defaults to Docker via `ensure_image()`; webassembly wired next | end-to-end proof green for unix+webassembly on real CI; `windows`/`qemu` never wired to `ensure_image()` despite [0030]'s Docker-only mandate — their `PORT_IMAGES` entries are registered but currently dead code; superseded in part by [0033]
 - [ ] [0038] M5 — adopt cibuildmp in the three consuming repos | repos migrated and repinned; archiving the old `micropython-native-ci` repo and reducing `build-natmod` to a `cibuildmp --only` wrapper still open
 - [ ] [0040] usermod test-runner axis (native/qemu-user/qemu-system/node/rp2040py/mpremote/none) | not scheduled ([0006] holds); four of seven runners already proven by `mp-usermod.yml`, not yet owned by cibuildmp
 
@@ -46,10 +49,8 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 - [x] [0041] documentation restructure — this scheme | supersedes the monolithic `docs/BACKLOG.md`
 - [x] [0033] cibuildmp never builds a Docker image itself, only pulls a published one | separate `docker/` + `publish-docker-images.yml`; `ensure_image()`'s local-build fallback removed
-- [x] [0032] `unix` usermod defaults to Docker via `ensure_image()`; `webassembly` wired next | end-to-end proof green on real CI; superseded in part by [0033]
 - [x] [0030] extending the container approach to natmod; "Docker or QEMU" answered (both, different jobs) | Docker required for usermod, preferred (not required) for natmod
 - [x] [0029] real GitHub Actions job summary (`stepsummary.py`) | implemented and tested; not yet independently confirmed on a live Actions Summary tab
-- [x] [0028] full container-per-port migration plan and handoff (epic) | steps 1-3 landed live; step 4 mostly moot, step 5 partial; superseded in part by [0033]
 - [x] [0027] `orchestrate.py` output-dir join and exec-bit copy fixes | two real bugs, both regression-tested
 - [x] [0026] one Docker image per port, sibling containers not Docker-in-Docker | amended by [0031] to one image per (port, arch, libc) for unix
 - [x] [0025] both Dockerfiles bake in every unix cross toolchain | six real apt/gcc bugs found and fixed via real CI builds
@@ -68,7 +69,6 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 - [x] [0011] one repository — cibuildmp absorbed `micropython-native-ci` | `v0.3.0` continues `v0.2.0`'s version line
 - [x] [0010] pinned data lives in `resources/`, not in Python | `resources/natmod.toml`, cross-checked at import
 - [x] [0009] one job looping over targets is the default; fan-out is opt-in | revisited for usermod by [0020]
-- [x] [0008] distribution of the tool itself deferred | both actions install from their own checkout
 - [x] [0007] usermod vendors mpbuild's board database, not a dependency | `usermod/boards.py`, MIT header + provenance kept
 - [x] [0006] no test runners in phase 1 (natmod) | usermod's own [0021] narrows this, doesn't overturn it
 - [x] [0005] one identifier namespace, one override mechanism | `[[overrides]]` collapses three shapes into one

@@ -1,6 +1,6 @@
 # 0032. Closing D28's own gap: unix usermod now defaults to Docker via ensure_image()
 
-- Status: Implemented; superseded in part by [0033]
+- Status: Implemented for `unix`/`webassembly`; `windows`/`qemu` never wired to `ensure_image()` — superseded in part by [0033]
 - Related: [0026], [0028], [0030], [0033]
 
 <!-- migrated verbatim from docs/BACKLOG.md lines 2655-2903 -->

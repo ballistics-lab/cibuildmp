@@ -1,6 +1,6 @@
 # 0028. Full migration plan: container-per-port for usermod
 
-- Status: Implemented (steps 1-3 substantially landed; superseded in part by [0033])
+- Status: Implemented (steps 1-3 substantially landed; `esp32.Dockerfile` still not started; superseded in part by [0033])
 - Related: [0019], [0025], [0026], [0029], [0030], [0031], [0032], [0033]
 
 <!-- migrated verbatim from docs/BACKLOG.md lines 1943-2654 -->
