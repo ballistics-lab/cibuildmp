@@ -2868,11 +2868,31 @@ checked against a real run, not local reasoning):
   present, `pkg-config --libs libffi`
   (`ports/unix/Makefile`'s own non-standalone `LIBFFI_LDFLAGS`
   resolution) silently resolved to nothing, so `-lffi` was never
-  passed to the linker at all. Fixed by re-adding the unqualified
-  `libffi-dev` package: the aarch64 cross-linker's own default sysroot
-  search path still finds and links the *correct* arm64 `libffi.so`
-  once `-lffi` is present, regardless of which architecture's `.pc`
-  file supplied the flag.
+  passed to the linker at all.
+  - **A real self-inflicted repeat of this exact failure, caught
+    immediately, not shipped twice.** The first attempt at this fix
+    added a long, correct-sounding explanatory comment to the
+    Dockerfile but never actually added the `libffi-dev` line the
+    comment described -- pushed, and the identical CI failure
+    reproduced, on the identical tag, because nothing had actually
+    changed. Caught by reading the real CI logs again rather than
+    assuming the fix landed because the diff looked right.
+  - **Fixed for real this time, and verified live end to end in the
+    sandbox before pushing again**, not just reasoned about: with
+    `PKG_CONFIG_LIBDIR` pointed at nowhere (simulating "only
+    `libffi-dev:arm64` installed, no host `.pc` reachable"), a real
+    `aarch64-linux-gnu-gcc` compile+link reproduced the exact same
+    `undefined reference to ffi_type_sint32`/`ffi_prep_cif` failure;
+    with plain `pkg-config --libs libffi` resolving normally (the
+    fixed state), the identical command linked clean, producing a real
+    `ELF 64-bit ... ARM aarch64 ... dynamically linked` binary, and
+    `readelf -d` confirmed its `NEEDED` entry is `libffi.so.8` -- the
+    real, correct, arch-specific runtime dependency, not a baked-in
+    host path. Fixed by actually re-adding the unqualified `libffi-dev`
+    package this time: the aarch64 cross-linker's own default sysroot
+    search path still finds and links the *correct* arm64 `libffi.so`
+    once `-lffi` is present, regardless of which architecture's `.pc`
+    file supplied the flag.
   - **A real, considered alternative, raised directly and checked
     against real source, not memory**: does `cibuildwheel` avoid this
     entire class of cross-toolchain bug? Confirmed live against a real

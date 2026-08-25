@@ -66,6 +66,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     python3 \
     gcc-aarch64-linux-gnu \
+    libffi-dev \
     libffi-dev:arm64 \
     libc6-dev-arm64-cross \
     pkg-config \
