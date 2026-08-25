@@ -65,16 +65,28 @@ runs:
     # azure.archive.ubuntu.com flakiness/slowness already flagged
     # elsewhere. Keyed on this file's own hash so any future change to the
     # package list below busts the cache automatically rather than
-    # silently serving a stale set. First attempt, not yet confirmed live
-    # whether GitHub's hosted runner actually lets a non-root cache-action
-    # step read back root-owned /var/cache/apt/archives contents cleanly
-    # -- watch the real CI run's own "Post Cache apt archives" step and
-    # its reported cache size, don't assume it worked.
+    # silently serving a stale set.
+    #
+    # `v2-` prefix: the original (unprefixed) key got genuinely stuck, not
+    # just raced. Seven commits landed in ~15 minutes while this was being
+    # built, most sharing an unchanged action.yml (hence an identical
+    # cache key) -- every single save attempt since, on every run checked
+    # (including a real concurrency: group added specifically to stop
+    # runs racing each other, and a run with no other run active at all)
+    # failed with "Unable to reserve cache with key ..., another job may
+    # be creating this cache." Conclusive, not just suspected: a later
+    # run's own *restore* (early in the job, uncontested by any
+    # same-job-save timing collision, unlike the saves) never once found
+    # anything either -- if any save had genuinely completed, some later
+    # run sharing that key would have hit it. GitHub's own cache API
+    # documents no way to clear a stuck reservation directly, so this
+    # prefix exists purely to mint a fresh, never-reserved key -- bump it
+    # again (v3-, v4-, ...) if this one ever ends up in the same state.
     - name: Cache apt archives
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
         path: /var/cache/apt/archives/*.deb
-        key: apt-archives-${{ runner.os }}-${{ hashFiles('action.yml') }}
+        key: v2-apt-archives-${{ runner.os }}-${{ hashFiles('action.yml') }}
 
     - name: Install cibuildmp's own apt prerequisites
       shell: bash

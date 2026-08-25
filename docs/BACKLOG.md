@@ -2315,15 +2315,22 @@ unconditionally).
     used -- a superseded run on the same branch gets cancelled outright
     instead of racing the newer one, live-confirmed to actually cancel
     a run (`3c1b389`'s own run was cancelled the moment `160a361` was
-    pushed). **Still not confirmed whether this alone clears a stuck
-    reservation left over from before the fix landed, only that it
-    stops new ones from piling up** -- `160a361` is the first run with
-    no cancelled/racing predecessor of its own, watch its own "build"
-    job logs for a genuine "Cache restored"/hit line specifically
-    before trusting this is actually fixed; if it still fails, the
-    stuck reservation itself may need to simply age out (GitHub's own
-    cache API does not document a way to manually clear one) before any
-    run can win it, independent of whether the race itself is fixed.
+    pushed, and again when `160a361` itself was cancelled by `cf40ca5`
+    moments later). **Confirmed the concurrency fix alone was not
+    enough**: `cf40ca5` -- a completely clean run, nothing else active,
+    nothing racing it -- still failed all three save attempts,
+    identically. Conclusive, not just suspected: a later run's own
+    *restore* (early in the job, before any same-job-save timing
+    collision can even happen) never once found anything for this key
+    either, across every run checked including `cf40ca5` -- if any save
+    had genuinely completed at any point this session, some later run
+    sharing that key would have hit it on restore. GitHub's own cache
+    API documents no way to clear a stuck reservation directly, so the
+    real fix was simpler: mint a fresh key. `action.yml`'s own cache
+    key now has a `v2-` prefix (bump to `v3-`, etc. if this one also
+    ends up stuck) -- not yet confirmed live that the fresh key actually
+    saves cleanly, watch the next real run's own logs for a genuine
+    "Cache restored"/hit line before trusting it.
 
 **The full migration plan, in dependency order -- reordered from the
 first pass above, per the user's own explicit follow-up.** The
