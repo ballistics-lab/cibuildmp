@@ -40,26 +40,10 @@ jobs:
   # cross_compile="aarch64-linux-gnu-" entry in UNIX_ARCH_SETTINGS
   # (usermod/build.py); the "test" job above now covers it the same way
   # it covers every other arch, via tests/test_usermod_build.py.
-
-  # composite-action-docker-reach-check: docs/BACKLOG.md's own D28 flags
-  # a genuinely open question -- once action.yml stops being a Docker
-  # action and becomes composite (D28's own migration plan), can a plain
-  # `run:` step on the runner still reach the runner's own Docker daemon
-  # the way today's Docker-action container implicitly can? Almost
-  # certainly yes (GitHub-hosted runners ship Docker natively, composite
-  # steps run directly on the runner, no container boundary at all) --
-  # but D28 explicitly said "verify first, on real CI, before assuming"
-  # rather than trust that reasoning alone. This job is that check: no
-  # `uses: docker` anywhere, just an ordinary step, proving or disproving
-  # the exact mechanism the whole D28 migration plan depends on. Remove
-  # once known, folding the real answer into D28.
-  composite-action-docker-reach-check:
-    runs-on: ubuntu-latest
-    steps:
-      - run: |
-          echo "::group::docker info"
-          docker info
-          echo "::endgroup::"
-          echo "::group::docker run --rm hello-world"
-          docker run --rm hello-world
-          echo "::endgroup::"
+  #
+  # composite-action-docker-reach-check (the other one-off diagnostic
+  # that used to live here) got its answer too: a plain, non-Docker-action
+  # `run:` step on ubuntu-latest genuinely reaches the runner's own live
+  # Docker daemon -- confirmed live, a real `docker info` (Docker Engine
+  # 28.0.4) and a real `docker run --rm hello-world` pull-and-run, no
+  # setup step needed at all. Folded into docs/BACKLOG.md's own D28.

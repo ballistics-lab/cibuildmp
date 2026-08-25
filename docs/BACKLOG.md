@@ -2065,64 +2065,34 @@ unconditionally).
 - `windows`/`qemu`/`webassembly`/`esp32` have no Dockerfile of their
   own at all yet -- only `unix` has been attempted.
 
-**The full migration plan, in dependency order.**
+**The full migration plan, in dependency order -- reordered from the
+first pass above, per the user's own explicit follow-up.** The
+original order built all five Dockerfiles before touching `action.yml`
+at all; now that the Docker-daemon-reachability question is answered
+(confirmed live, see the former "open question" below, now resolved)
+and Docker is a required dependency rather than an optional path
+(point 2 above), there is no more reason to keep writing Dockerfiles
+nobody can reach yet -- wiring the mechanism through first, proven on
+the one port (`unix`) that already has a real image, unblocks every
+port after it and gives each new port a working end-to-end path the
+moment its own Dockerfile lands, rather than five unreachable images
+followed by one big wiring pass at the end.
 
-1. **Five per-port Dockerfiles**, replacing today's one
-   `action.Dockerfile` (root `Dockerfile` likely stays combined a
-   while longer -- it targets a human running `cibuildmp` standalone
-   on their own machine, where one image covering every port is
-   arguably still the right tradeoff; only `action.Dockerfile`, CI's
-   own image, clearly benefits from the split). `docker/unix.Dockerfile`
-   is the template to copy: only that port's own toolchain, no
-   `cibuildmp` baked in.
-   - `docker/windows.Dockerfile` -- `gcc-mingw-w64-x86-64`/
-     `gcc-mingw-w64-i686` only; `arm64` downloads `llvm-mingw` at
-     build time regardless (`usermod/llvmmingw.py`), same as today.
-   - `docker/qemu.Dockerfile` -- whatever `mp-usermod.yml`'s own
-     `qemu-system` job installs today (arm-none-eabi-gcc class
-     toolchain plus qemu-system-arm itself for the execution axis,
-     **D21** -- confirm the exact package list against that workflow
-     before writing this one, do not re-derive from memory).
-   - `docker/webassembly.Dockerfile` -- emsdk is downloaded at build
-     time (`usermod/emsdk.py`), so this image may need close to
-     nothing baked in beyond `python3`/`git`/`curl`/`ca-certificates`;
-     confirm live whether emsdk's own toolchain needs anything else
-     from the base OS first.
-   - `docker/esp32.Dockerfile` -- the heaviest one: ESP-IDF itself is
-     a multi-gigabyte checkout with its own Python env bootstrap
-     (`usermod/espidf.py`). Worth deciding explicitly whether ESP-IDF
-     bakes into the image (large image, fast job) or stays a
-     download-at-build-time step (small image, slow first job, cache
-     shared across jobs via the cache strategy below) -- a real
-     tradeoff, not an oversight, and should get its own one-paragraph
-     decision when this Dockerfile is written, not silently default
-     one way.
-2. **`usermod/dockerrun.py` grows real mount coverage.** Today it only
-   mounts `mpy_dir` and the caller's own module directory -- correct
-   for `unix` (every `unix` toolchain lives inside the image itself,
-   nothing downloaded into `cache_root()`), wrong for every other
-   port: `windows/arm64` (`llvm-mingw`), `webassembly` (`emsdk`), and
-   `esp32` (`esp-idf`) all download into subdirectories of
-   `sources.cache_root()`, not `mpy_dir`. A sibling container for
-   those ports needs `cache_root()` itself mounted (or, more
-   precisely, whichever of its subdirectories that port's own
-   `resolve_*()` function actually touches), or the download happens
-   again inside the container every single run, defeating the whole
-   point of caching. `build_windows()`/`build_webassembly()`/
-   `build_esp32()` each need their own docker-image-selection branch
-   added alongside `build_unix()`'s existing one, each passing the
-   right mount set for what that port's own toolchain resolver needs.
-3. **`action.yml` stops being a Docker action, becomes a composite
-   action.** `runs: using: "docker"` → `runs: using: "composite"`,
-   steps: ensure `cibuildmp` is installed on the runner (`uv tool
-   install` from a pinned ref or, once GHCR-published images exist,
-   possibly nothing at all if a future release ships a self-contained
-   binary -- not decided, flag it as an open question rather than
-   assuming), then invoke it directly. `entrypoint.sh`'s own
-   input-parsing logic (the `INPUT_PACKAGE-DIR` etc. env-var reading,
-   including the documented bash-not-dash requirement) moves into a
-   composite action's own `run:` step -- and this is not just a move,
-   it genuinely simplifies, confirmed against `pypa/cibuildwheel`'s
+1. **`action.yml` stops being a Docker action, becomes a composite
+   action.** Moved first: this is the actual blocking gap ("not yet
+   wired into the CLI or `action.yml` at all," the largest one flagged
+   in this plan's own "current state" above), and nothing about it was
+   waiting on more Dockerfiles existing -- `unix`'s own image already
+   proves the mechanism. `runs: using: "docker"` → `runs: using:
+   "composite"`, steps: ensure `cibuildmp` is installed on the runner
+   (`uv tool install` from a pinned ref or, once GHCR-published images
+   exist, possibly nothing at all if a future release ships a
+   self-contained binary -- not decided, flag it as an open question
+   rather than assuming), then invoke it directly. `entrypoint.sh`'s
+   own input-parsing logic (the `INPUT_PACKAGE-DIR` etc. env-var
+   reading, including the documented bash-not-dash requirement) moves
+   into a composite action's own `run:` step -- and this is not just a
+   move, it genuinely simplifies, confirmed against `pypa/cibuildwheel`'s
    own real `action.yml` (the user supplied its actual source directly,
    not a description of it): a composite action's own step-level
    `env:` block maps `${{ inputs.package-dir }}` to *any* env var name
@@ -2158,13 +2128,73 @@ unconditionally).
      below), but exactly the shape this migration would need to
      extend into if the Windows/macOS open question ever resolves
      towards "yes."
-4. **`cibuildmp` itself picks the right per-port image per target,**
-   by default, once `--platform usermod` (or config-driven mode
-   detection) is active and Docker is available on the runner --
-   not opt-in via env var forever; `CIBMP_<PORT>_DOCKER_IMAGE` should
-   become the *override*, with a real default (see cache strategy
-   below) rather than the only way to select an image at all, the way
-   it is today.
+2. **The Docker-image resolver becomes real and config-driven, proven
+   on `unix` before any other port gets a Dockerfile at all.** Today
+   `usermod/dockerrun.py`'s own `image_for_port()` only reads
+   `CIBMP_<PORT>_DOCKER_IMAGE` -- fine for a proof-of-concept, not a
+   real feature. This step: give it a real default per port (once
+   Docker is actually available on the runner -- **D30**'s own point 2
+   settles that Docker is required for usermod going forward, not
+   merely preferred), with the env var staying as the override for a
+   local/custom image, not the only way in. The user's own framing of
+   the payoff this unlocks for every port after this one: adding a new
+   port's support becomes "write one Dockerfile, then declare it in
+   the resolver" -- no new Python toolchain-resolution module, no
+   `host`/`download` probing logic duplicated per port, one artifact
+   instead of two.
+3. **The remaining four per-port Dockerfiles, one at a time, each
+   immediately usable the moment it lands** (step 1 and 2 already
+   wired the mechanism, so this stops being "write five images, then
+   wire them all at the end"). `docker/unix.Dockerfile` is the
+   template to copy: only that port's own toolchain, no `cibuildmp`
+   baked in. `windows` first -- apt-only toolchain, no large download
+   like `esp32`'s ESP-IDF or `webassembly`'s emsdk, closest in shape to
+   `unix` (**D26**'s own "first slice" precedent: one port, proven
+   live, before the next).
+   - `docker/windows.Dockerfile` -- `gcc-mingw-w64-x86-64`/
+     `gcc-mingw-w64-i686` only; `arm64` downloads `llvm-mingw` at
+     build time regardless (`usermod/llvmmingw.py`), same as today.
+   - `docker/qemu.Dockerfile` -- whatever `mp-usermod.yml`'s own
+     `qemu-system` job installs today (arm-none-eabi-gcc class
+     toolchain plus qemu-system-arm itself for the execution axis,
+     **D21** -- confirm the exact package list against that workflow
+     before writing this one, do not re-derive from memory). Check
+     `mpbuild`'s/`cibuildwheel`'s own Dockerfiles first (**D30**'s own
+     point 4) -- worth checking for a `qemu-system` setup specifically
+     too, not just the build toolchain, once **D21**'s own execution
+     axis gets real implementation and needs a place to run from.
+   - `docker/webassembly.Dockerfile` -- emsdk is downloaded at build
+     time (`usermod/emsdk.py`), so this image may need close to
+     nothing baked in beyond `python3`/`git`/`curl`/`ca-certificates`;
+     confirm live whether emsdk's own toolchain needs anything else
+     from the base OS first.
+   - `docker/esp32.Dockerfile` -- the heaviest one: ESP-IDF itself is
+     a multi-gigabyte checkout with its own Python env bootstrap
+     (`usermod/espidf.py`). Worth deciding explicitly whether ESP-IDF
+     bakes into the image (large image, fast job) or stays a
+     download-at-build-time step (small image, slow first job, cache
+     shared across jobs via the cache strategy below) -- a real
+     tradeoff, not an oversight, and should get its own one-paragraph
+     decision when this Dockerfile is written, not silently default
+     one way.
+4. **`usermod/dockerrun.py` grows real mount coverage, only once a
+   port beyond `unix` actually needs it.** Today it only mounts
+   `mpy_dir` and the caller's own module directory -- correct for
+   `unix` (every `unix` toolchain lives inside the image itself,
+   nothing downloaded into `cache_root()`), wrong for every other
+   port: `windows/arm64` (`llvm-mingw`), `webassembly` (`emsdk`), and
+   `esp32` (`esp-idf`) all download into subdirectories of
+   `sources.cache_root()`, not `mpy_dir`, at *build time* now
+   (**D30**'s own point 2 -- these become the Dockerfile's own
+   provisioning step, not a bare-host fallback), but a sibling
+   container for those ports still needs `cache_root()` itself mounted
+   in at *run* time for the cache to actually persist across
+   invocations, or the image rebuilds/redownloads every single run,
+   defeating the whole point of caching. `build_windows()`/
+   `build_webassembly()`/`build_esp32()` each need their own
+   docker-image-selection branch added alongside `build_unix()`'s
+   existing one, each passing the right mount set for what that port's
+   own toolchain needs persisted.
 5. **`publish.yml`'s existing `publish-docker` job extends from one
    image to five** -- the job already exists (`docker/build-push-action`
    with `cache-from/cache-to: type=gha`, pushing
@@ -2243,15 +2273,22 @@ second -- conflating them would be a mistake.
 **Risks and open questions to resolve before or during implementation,
 not after:**
 
-- Can a GitHub-hosted runner's own Docker daemon actually be reached
-  from a composite action's plain shell step the same way a Docker
-  action's container currently reaches it? Almost certainly yes
-  (GitHub-hosted runners ship Docker natively, composite actions run
-  directly on the runner, no container boundary in the way at all) --
-  but this session never verified it live, since the whole point of
-  today's proof-of-concept was proving `dockerrun.py`'s own mechanism
-  in isolation, not the composite-action wiring around it. Verify
-  first, on real CI, before assuming.
+- ~~Can a GitHub-hosted runner's own Docker daemon actually be reached
+  from a composite action's plain shell step~~ -- **resolved, confirmed
+  live on real CI, not just reasoned about:** a throwaway diagnostic
+  job (`composite-action-docker-reach-check`, `usermod-dev.yml`, no
+  `uses: docker` anywhere) ran a plain `docker info` and `docker run
+  --rm hello-world` directly in an ordinary `run:` step on
+  `ubuntu-latest`. Both worked immediately, no setup step of any kind:
+  `docker info` reported a real, already-running daemon (Docker Engine
+  28.0.4, `overlay2`, `runc`), and `docker run --rm hello-world`
+  genuinely pulled the image from Docker Hub and printed its own real
+  "Hello from Docker!" banner. Confirms the entire premise this
+  migration's composite-action step depends on: GitHub-hosted runners
+  really do ship a live, reachable Docker daemon with zero container
+  boundary in the way, for any plain step, not just inside a Docker
+  action's own container. The diagnostic job has been removed
+  (`usermod-dev.yml`) now that its answer is folded in here.
 - Self-hosted runners without Docker at all (mentioned nowhere in this
   session, but a real category of `cibuildmp` user going forward) lose
   the per-port image path entirely under this design -- decide whether
@@ -2350,23 +2387,49 @@ conclusion.
    **D25**'s six real bugs happened inside `unix`'s own five
    architectures colliding; natmod's own arches, sharing that exact
    same combined image the whole time, never broke once across this
-   entire session's CI chain. The user's own proposal: since the whole
-   toolchain can be baked into the image at build time, does that
-   remove the need to resolve a toolchain (`toolchains.py`'s own
-   host/download probing) at all for a Docker-based build? Yes, for
-   the CI path -- but not unconditionally: **D3**'s own foundational
-   promise is that `cibuildmp` works on a bare laptop with no Docker
-   at all, mutating nothing on the host. Making Docker the *only* path
-   would break that guarantee for anyone without Docker installed. The
-   reconciliation, not a contradiction: Docker becomes the **preferred
-   path in CI** (a daemon is already there, natmod's own image is
-   already proven), while `toolchains.py`'s existing host/download
-   resolution stays as the **local, no-Docker fallback** -- the exact
-   same two-path shape `usermod/dockerrun.py` already established for
-   `unix` (`CIBMP_UNIX_DOCKER_IMAGE` unset → old bare-host path,
-   unchanged). "Resolve a toolchain" only turns into "pick a
-   Dockerfile" on the branch where Docker is actually being used, not
-   universally -- **D3** stays true on every other branch.
+   entire session's CI chain. **Revised, more decisive than the first
+   pass above -- the user's own direct correction:** **D3**'s own
+   "works on a bare laptop, no Docker, mutates nothing" promise is
+   itself now superseded, not a constraint this plan needs to route
+   around. Docker becomes a **required dependency for real builds**
+   going forward, not an escape hatch. The two ports genuinely differ
+   though, and the plan should say so plainly rather than treat them
+   identically:
+   - **natmod**: `toolchains.py`'s existing host/download resolution
+     stays, purely because it already works and costs nothing further
+     to leave in place -- not preserved as a load-bearing design
+     promise any more, just not worth deleting. Docker is the
+     preferred, default path once available; the old path answers
+     "Docker isn't installed" without anyone having to build or
+     maintain anything new for it.
+   - **usermod**: no non-Docker path is worth pursuing for any port
+     beyond what already exists. The user's own reasoning, plainly
+     correct: the real toolchain diversity across ports (ESP-IDF,
+     emsdk, llvm-mingw, five different `unix` cross-compilers) makes a
+     parallel, dual-maintained non-Docker path prohibitively expensive
+     for every port added from here on. `unix`'s own existing
+     host-based cross-compile path (**D20/D24/D25**, real, proven,
+     already shipping) stays as-is, grandfathered -- it already exists
+     and already works, so there is no reason to rip it out. But
+     `windows`/`qemu`/`webassembly`/`esp32` should NOT get a
+     comparable non-Docker resolver built for them going forward:
+     Docker is their only path from the start, which is also strictly
+     less work than building and maintaining two parallel resolution
+     mechanisms per port. `llvmmingw.py`/`emsdk.py`/`espidf.py`
+     (already written, from earlier in this session) stay as
+     `docker/<port>.Dockerfile`'s own *build-time* provisioning
+     mechanism -- called once when the image is built, not something a
+     caller's own bare-host run falls back to.
+   - **A genuine, concrete payoff of this, the user's own observation:**
+     adding a new port's own support becomes strictly simpler than it
+     is today -- write one Dockerfile, then declare it in the resolver
+     (`usermod/dockerrun.py`'s own `image_for_port()`, or whatever
+     config-driven mapping replaces the current env-var-only lookup).
+     No new Python resolution module to write and test (the shape
+     `llvmmingw.py`/`emsdk.py`/`espidf.py` each are today), no new
+     `download`/`host` probing logic, no new apt-package-list
+     duplicated between a Dockerfile and a bare-host README section.
+     One artifact per port, not two.
 3. **Confirmed, already the design**: `usermod` gets one Dockerfile
    *per port*, not per architecture/board -- **D28**'s own "one port,
    one toolchain" framing, unchanged.
@@ -2403,15 +2466,37 @@ conclusion.
    concerns, not a competing pair: **Docker for isolation,
    cross-compilation for building, QEMU only for execution/testing.**
 
-- **Verifying D28's own open Docker-daemon-reachability question is in
-  progress as of this entry** -- a throwaway diagnostic job
-  (`composite-action-docker-reach-check` in `usermod-dev.yml`, no
-  `uses: docker` anywhere, a plain `docker info`/`docker run --rm
-  hello-world`) was pushed specifically to answer it on real CI rather
-  than trust the "almost certainly yes" reasoning alone. Remove once
-  known and fold the real answer into **D28**, the same "diagnostic
-  job, fold in, delete" discipline **D20**'s own
-  `unix-aarch64-cross-check` already established earlier this session.
+- **D28's own open Docker-daemon-reachability question is now
+  resolved, confirmed live, not just reasoned about** -- see **D28**'s
+  own "risks and open questions" section for the real result (a
+  genuine `docker info`/`docker run --rm hello-world` from a plain,
+  non-Docker-action `run:` step on `ubuntu-latest`, both worked
+  immediately). The diagnostic job has been removed from
+  `usermod-dev.yml`.
+- **`build-examples.yml` should test every available port, the same
+  discipline `examples/usermod-unix` already holds `unix` to, not just
+  the one port that happens to be furthest along.** The user's own
+  explicit ask. Today only `unix` has an integration example at all
+  (`examples/usermod-unix`) -- once **D28**'s remaining Dockerfiles
+  land (migration step 3: `windows`, `qemu`, `webassembly`, `esp32`),
+  each needs its own real example wired into `build-examples.yml`'s
+  own `uses: ./` steps the same way, not left as a claim nobody's CI
+  run actually proves. This is the same "no target claimed without a
+  real CI proof" rule that caught all six of **D25**'s own bugs in the
+  first place -- skipping it for the later ports would reopen exactly
+  the risk this whole session's own discipline was built to close.
+- **A real side benefit, the user's own observation: this also makes
+  local use on Windows genuinely simpler, via Docker Desktop's own
+  WSL2 backend.** The root `Dockerfile`'s own comment already
+  documents running it through WSL2 (`README.md`'s "Running via
+  Docker" section) -- once usermod's own port builds go through Docker
+  as the required path (**D30**'s own point 2), that same WSL2 path
+  covers usermod too, not just the natmod-only bare CLI it covers
+  today. Does not change the "Windows/macOS *runners*" open question
+  below at all (a per-port *Linux* container still cannot run on a
+  bare Windows/macOS CI runner) -- this is specifically about a
+  Windows *developer's own machine* running Docker locally, a genuinely
+  different case from CI.
 
 - **M10** — runner/matrix integration, fan-out-by-default for usermod
   identifiers (**D20**).
