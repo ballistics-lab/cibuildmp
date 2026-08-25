@@ -130,13 +130,6 @@ Feeds directly into **D19**: the same table this describes is exactly what
 an eventual `docker` strategy for `esp32` (and `rp2`/`stm32` too, if D20's
 runner story puts them on it) would pin.
 
-Correction to a constraint this decision previously rested on: mpbuild does
-**not** require a MicroPython git checkout. `Database.__post_init__` only
-checks `(root / "ports").is_dir()`; nothing else in the module touches git,
-and M1's release tarball satisfies that condition. That removes one of the
-three original reasons mpbuild was called "complementary, not competing," so
-it should not be repeated as a reason to keep the dependency.
-
 Honest tradeoff: `board.json`'s schema and the variant convention drift
 upstream, and vendoring means tracking that drift by hand. Pinning
 `mpbuild==1.2.0` would not avoid tracking it either, just tie it to someone
@@ -865,12 +858,10 @@ instead of reasoning from the cibuildwheel analogy alone the way natmod's
 M0 had to.
 
 `cibuildmp` drives every usermod port itself, not just the ones `mpbuild`
-has a board database for — correcting an earlier version of this section,
-which wrongly had `unix`/`windows`/`webassembly` staying on the composite
-actions permanently. That contradicts Positioning, above: every composite
-action here is the low-level layer until `cibuildmp` covers its ground,
-then becomes a thin wrapper over it (**M5**'s own open item for
-`build-natmod`) — no port gets carved out as a permanent exception.
+has a board database for. Every composite action here is the low-level
+layer until `cibuildmp` covers its ground, then becomes a thin wrapper
+over it (**M5**'s own open item for `build-natmod`) — no port gets
+carved out as a permanent exception.
 
 Two different selector axes, not the same thing under two names:
 
@@ -1015,38 +1006,18 @@ it spans installing an environment *and* how every subsequent path is
 formed.
 
 **D19 — ESP-IDF provisioning is the heaviest, least locally-reproducible
-step of any target here, and has no caching.** `build-usermod-esp32`'s own
-header calls this out directly: "No caching yet... Left as a known
-follow-up, not forgotten." A `--recursive` clone of `esp-idf` plus
-`install.sh <chip>` per run is a materially stronger Docker-strategy case
-than natmod's `x86` ever was (**M2**'s own "why not docker" note is
-specific to x86's narrow `gcc-multilib` gap and says usermod is where that
-tradeoff flips) — Espressif ships its own `espressif/idf` Docker images
-built for exactly this. Revisit **D3**'s `docker` strategy here first, not
-as a general-purpose escape hatch. mpbuild's own fallback tag
-(`espressif/idf:v5.4.2`, **D7**) and its lockfile/CI-workflow version-probe
-are a concrete starting pin, not a new lookup to invent.
+step of any target here, and (until fixed) had no caching.**
+`build-usermod-esp32`'s own header called this out directly: "No caching
+yet... Left as a known follow-up, not forgotten."
 
-**Revisited and dropped, verified live rather than assumed.** Docker does
-not even run in this project's own dev sandbox (`docker run` fails outright
--- no daemon socket, not a permissions issue to work around), and the
-official `git clone --recursive` + `install.sh` + `export.sh` recipe this
-decision was written against works there directly, no container needed:
-a real `v5.5.1` clone, `idf_tools.py install --targets=esp32` +
-`install-python-env`, then `make -C ports/esp32 BOARD=ESP32_GENERIC`
-produced a genuine `micropython.bin`, end to end. The "materially
-stronger Docker-strategy case than x86" framing above conflated two
-different things: ESP-IDF's own install being *heavy* (true, ~1.3 GiB of
-toolchain + Python env, ~2 GiB more for the `--recursive` clone) is not
-the same claim as it needing *isolation* the way x86's `-m32` genuinely
-needs a 32-bit userland `M2`'s own host gcc doesn't ship. Every usermod
-port here is still "a cross-compile (or, for `esp32`, a from-source IDF
-build) that runs fine on the build host" — the same reasoning `M2`'s own
-"why not docker for x86" note already used, this time holding for a
-second port instead of flipping.
+Running the build itself inside a container is decided, not open: `esp32`
+gets a Dockerfile under **D28**'s container-per-port migration that bakes
+ESP-IDF into the image the same way `webassembly`'s Dockerfile bakes in
+emsdk (**D16**'s own M8 precedent), not mounted from `cache_root()` —
+explicitly not started yet (ESP-IDF is multi-gigabyte, the one remaining
+real sizing question), tracked there.
 
-One real environment finding along the way, worth recording since it
-looks like a Docker argument on first read and is not one: `openocd-esp32`
+One real environment finding worth keeping regardless of that: `openocd-esp32`
 (part of ESP-IDF's own default toolset for a target, installed by
 `install.sh esp32` regardless of what a usermod build actually needs it
 for — flashing/JTAG debug, not building) failed its own post-install
@@ -1054,11 +1025,10 @@ check with `error while loading shared libraries: libusb-1.0.so.0`, in
 this dev sandbox specifically. `apt install libusb-1.0-0` fixed it — an
 ordinary Linux runtime dependency of upstream's own binary, already
 present on any real dev machine or CI image (a GitHub-hosted runner
-included), not something a container would have supplied any more
-cheaply than `apt` already does.
+included).
 
-What actually needed fixing was D19's own real complaint, not the
-mechanism: **no caching**. Landed as `usermod/espidf.py` — `fetch_esp_idf()`
+What actually needed fixing was D19's own real complaint: **no caching**.
+Landed as `usermod/espidf.py` — `fetch_esp_idf()`
 caches the clone by version, `resolve_esp_idf()`'s own tool-install step
 caches the toolchain + Python venv by `(version, idf_target)`, both via
 the same `sources.cached_dir()` primitive `fetch_micropython()` already
@@ -1070,113 +1040,50 @@ resolution by hand -- delegated, not reimplemented, matching `D2`. Not
 either (**D16**'s own M8 addendum): there is no single `<prefix>gcc` to
 find on `PATH` here.
 
-**D18 addendum — MSVC investigated and rejected as an alternative to MSYS2,
-verified live against the real `ports/windows` build files, not assumed from
-the port's own README alone.** `ports/windows/README.md` documents a fourth
-build method beside MinGW-via-Makefile and MSYS2: MSVC, via
-`msbuild micropython.vcxproj` (`msvc/paths.props`, `msvc/sources.props`,
-`msvc/*.targets`). Simpler to orchestrate on a real `windows-latest` runner
-on paper — MSVC/Build Tools ship pre-installed, no MSYS2 provisioning, no
-`bash.exe`/`cygpath` indirection — so it was worth checking against the
-Makefile path this project had already mostly written before committing to
-either. It does not work for usermod specifically: `msvc/sources.props` is
-a static `<ClCompile Include=...>` file list, fixed at project-file-authoring
-time, and neither it nor `micropython.vcxproj` references `USER_C_MODULES`
-or `FROZEN_MANIFEST` anywhere (confirmed by grep across the whole `msvc/`
-tree and the `.vcxproj` itself — zero hits, versus real hits in `Makefile`
-and `variants/dev/mpconfigvariant.mk`). The Makefile path carries both
-natively: `ports/windows/Makefile`'s own `FROZEN_MANIFEST ?=
-variants/manifest.py` plus `include $(TOP)/py/mkrules.mk`, which is what
-actually wires `USER_C_MODULES` into the build (`py/mkrules.mk`'s own
-`vpath %.c . $(TOP) $(USER_C_MODULES)` and friends). Passing a usermod's
-own C sources or manifest through the MSVC path would mean hand-editing
-`micropython.vcxproj` per module, defeating the point of a driver that
-takes them as parameters — so MSYS2 is not a preference here, it is the
-only one of MicroPython's own three Windows build methods that actually
-takes a `USER_C_MODULES`/`FROZEN_MANIFEST` input at all, and it is also
-what `a7p`'s own `mp-usermod.yml` already uses in production.
+**D18 addendum — MSVC investigated and rejected as an alternative to
+MSYS2.** `ports/windows` also supports building via `msbuild
+micropython.vcxproj`, but neither it nor `msvc/sources.props` references
+`USER_C_MODULES`/`FROZEN_MANIFEST` anywhere (confirmed by grep across
+the whole `msvc/` tree) — `sources.props`'s file list is fixed at
+project-authoring time, so a usermod's C sources could only be added by
+hand-editing the `.vcxproj` per module, defeating the point of a driver
+that takes them as parameters. Ruled out; MSYS2 (and later, its own
+supersession below) is the only one of MicroPython's three Windows build
+methods that takes those as parameters at all, and what `a7p`'s own
+`mp-usermod.yml` already used in production.
 
-First landed as `usermod/msys2.py` (`find_msys2()`/`install_msys2()`/
-`resolve_msys2()`, `ResolvedMsys2.run()`/`.install_packages()`/
-`.to_posix_path()`) and a `build.py`'s `build_windows()` that ran through
-it for all three arches — this genuinely worked: a real `windows-latest`
-run of `usermod-dev.yml` produced a real `micropython.exe` with a real
-usermod module linked in, catching and fixing real bugs along the way
-(three in the surrounding code before any MSYS2 code even ran, then a
-fourth in `ResolvedMsys2.to_posix_path()` itself — its first real
-invocation on a fresh runner captured MSYS2's own one-time "Copying
-skeleton files..." login-shell notice into what was supposed to be a
-clean `cygpath -u` result, silently corrupting a real `USER_C_MODULES`
-value fed to `make`; fixed by trusting only the last non-empty stdout
-line rather than the whole captured output).
+**D18, final state — MSYS2 fully superseded, no Windows runner needed for
+any arch.** `usermod/msys2.py` first landed and genuinely worked (a real
+`windows-latest` run produced a real `micropython.exe` with a usermod
+module linked in), catching four real bugs along the way: `build.py`'s
+`Path` handling needed `.as_posix()` everywhere (bare `str()` is
+backslash-separated on Windows and breaks GNU Make); two `test_emsdk.py`
+tests were silently coupled to the CI host being linux-x64;
+`tests/test_build.py`'s `touch`-based test needed a `cmd.exe`-compatible
+replacement (`echo hi > marker`); and `ResolvedMsys2.to_posix_path()` had
+to trust only the last non-empty stdout line, since MSYS2's own first-login
+"Copying skeleton files..." notice was corrupting captured `cygpath -u`
+output.
 
-Superseded in two stages, both live-verified rather than assumed, not
-one clean cutover. **Stage one:** a comparison against upstream
-MicroPython's own CI (`.github/workflows/ports_windows.yml`) turned up a
-fourth build method this project had not considered: `cross-build-on-linux`,
-`tools/ci.sh`'s own `ci_windows_setup`/`ci_windows_build` — `apt install
-gcc-mingw-w64-x86-64`/`gcc-mingw-w64-i686` plus a plain
-`make -C ports/windows CROSS_COMPILE=x86_64-w64-mingw32-`/
-`i686-w64-mingw32-`, no Windows host at all. Verified live in this
-project's own dev sandbox exactly like `unix`/`qemu`/`webassembly`/
-`esp32` already were — the one thing MSYS2 could never get — with a real
-custom C module (`USER_C_MODULES` pointed at an actual `mymod.c`/
-`micropython.mk`, not an empty directory): a genuine `micropython.exe`
-for both `x64` (PE32+, 549376 bytes) and `x86` (PE32, 568792 bytes),
-`strings` confirming the module's own `mymod`/`hello` symbols linked in.
-`x64`/`x86` moved to this; `arm64` initially stayed on MSYS2 (its own
-`CLANGARM64` environment, `mingw-w64-clang-aarch64-gcc-compat`/`-clang`
-— no apt equivalent exists for that target), reasoned at the time to be
-an acceptable gap since nothing in this project's scope appeared to need
-Windows ARM64 usermod builds. That reasoning was wrong, corrected within
-the same session by an explicit statement of a real requirement (a
-consumer's own libraries build Windows ARM64 usermod targets today) —
-recorded here as a real example of why "nothing exercises this yet" is
-worth double-checking against actual consumers before it becomes a
-design decision, not just a placeholder note.
+Superseded by two live-verified findings, not a clean first-guess: upstream
+MicroPython's own CI (`tools/ci.sh`'s `ci_windows_setup`/`_build`) cross-compiles
+`x64`/`x86` from Linux with a plain `apt install gcc-mingw-w64-x86-64`/
+`gcc-mingw-w64-i686` and `make CROSS_COMPILE=...`, no Windows host at all;
+`llvm-mingw` (`mstorsjo/llvm-mingw`) does the same for `arm64`, needing
+three real Clang-vs-GCC diagnostic fixes (`-Wno-double-promotion`,
+`-Wno-uninitialized`/`-Wno-default-const-init-var-unsafe`,
+`COMPILER_TARGET=mingw-forced`/`STRIP=`/`SIZE=true`). All three verified
+live with a real custom C module producing a genuine linked
+`micropython.exe`/`.exe` for that arch.
 
-**Stage two:** mingw-w64's own documentation (https://www.mingw-w64.org,
-"Pre-built Toolchains") names the real fix directly: `llvm-mingw`
-(`mstorsjo/llvm-mingw`) is the one toolchain that both targets ARM64
-Windows and "can be run on Linux, compiling binaries for any of the 4
-target Windows architectures" (its own README). Verified live, the same
-standard this project holds every toolchain resolver to: downloaded a
-real release tarball (`llvm-mingw-20260616-ucrt-ubuntu-22.04-x86_64.tar.xz`),
-cross-compiled `ports/windows` with `CROSS_COMPILE=aarch64-w64-mingw32-`
-and a real custom C module, and got a genuine PE32+ Aarch64
-`micropython.exe` with that module's own symbols linked in via `strings`.
-Getting there took three real, live-found compatibility fixes, not a
-clean first try — worth recording since they are exactly the kind of
-detail a "should be a drop-in GCC replacement" assumption would have
-missed: `-Wno-double-promotion` (`py/binary.c`'s `_Float16`↔`float` union
-trick reads as an implicit precision-increasing promotion to Clang
-specifically), `-Wno-uninitialized` and `-Wno-default-const-init-var-unsafe`
-(`shared/runtime/gchelper_generic.c`'s own `const register long x19
-asm("x19")` idiom — reading a callee-saved register an asm stub already
-wrote — trips two different Clang diagnostics GCC does not apply to a
-bare asm-tied register declaration), and `COMPILER_TARGET=mingw-forced`/
-`STRIP=`/`SIZE=true` (the same overrides MSYS2's own CLANGARM64
-environment already needed — this Clang's own `-dumpmachine` doesn't
-contain "mingw" either, which `ports/windows/Makefile`'s `.exe`-suffix
-and post-link strip logic both grep for). None of these apply to
-`x64`/`x86`'s plain GNU cross-gcc, which needs none of them.
-
-It is the *same* `ports/windows/Makefile` in every case (MSYS2, apt-gcc,
-llvm-mingw) — `USER_C_MODULES`/`FROZEN_MANIFEST` work identically
-throughout; the differences are entirely in what compiler diagnostics
-each toolchain enforces and how each is provisioned. Landed as `build.py`'s
-current `build_windows()` (`WindowsArchSettings`, `WINDOWS_ARCH_SETTINGS`
-for `x64`/`x86`/`arm64`, one function dispatching per arch the same way
-`build_unix()` already dispatches its own standalone/x86 special cases)
-plus `usermod/llvmmingw.py` (pinned in `resources/usermod.toml`'s own
-`[llvm-mingw]` table, same `cached_dir`/`download_file`/`verify_sha256`
-shape `emsdk.py` already uses). `usermod/msys2.py` and its own
-`usermod-dev.yml` `windows`/`windows-live-build`/`windows-arm64-live-build`
-jobs were deleted outright, twice, not kept as a fallback: a second
-working path to the same Makefile is not a hedge, it is surface area
-nothing exercises. `windows` needs no `windows-latest` runner at all now,
-for any of its three arches — relevant to **D20** below, which had
-assumed one for all of them.
+Landed as `build.py`'s current `build_windows()` (`WindowsArchSettings` per
+arch) plus `usermod/llvmmingw.py` for `arm64`'s toolchain (`x64`/`x86` need
+only an apt-installed cross-gcc, no dedicated resolver). `usermod/msys2.py`
+and its own CI jobs were deleted outright, not kept as a fallback: a second
+working path to the same Makefile is surface area nothing exercises.
+`windows` needs no `windows-latest`/`windows-11-arm` runner at all now, for
+any of its three arches — relevant to **D20** below, which had assumed one
+for all of them.
 
 **D20 (revisits D9) — usermod runner selection is structural, confirmed
 live, not a hypothetical "different targets need different runners."**
@@ -2070,16 +1977,14 @@ whatever session) picks this up next.**
   build-only + push on `push:` events):
   `unix-manylinux-{x64,x86,aarch64,armhf,mipsel}`, `windows` (x64+x86
   only, arm64 stays bare-host), `qemu`, `webassembly` (emsdk baked in,
-  ~1.5GB image). **Not started: `esp32`** -- the one remaining port,
-  and the one genuinely open bake-vs-mount call (ESP-IDF is
-  multi-gigabyte, unlike every other port's toolchain here).
+  ~1.5GB image). **Not started: `esp32`** -- the one remaining port.
+  Bake-vs-mount is decided (bake ESP-IDF in, same as `webassembly`'s
+  emsdk, per **D19**); the Dockerfile itself just hasn't been written.
 - Every Dockerfile that builds green also gets pushed to
   `ghcr.io/ballistics-lab/cibuildmp-<dockerfile>:sha-<gitsha>` on every
   real push (not gated behind a release tag -- the user's own explicit
-  call, reversing an earlier "leave publish as a TODO" answer once the
-  actual cost of that became clear: without a real pullable image,
-  `PORT_IMAGES` could never be exercised end to end on a dev branch at
-  all).
+  call: without a real pullable image, `PORT_IMAGES` could never be
+  exercised end to end on a dev branch at all).
 - `resources/docker/*.Dockerfile` all live as real package resources
   (`pyproject.toml`'s own `package-data`), not a top-level `docker/`
   directory -- verified live by building a real wheel and confirming
@@ -2116,8 +2021,9 @@ defaults to Docker for every one of its five arches via
 that succeeds does registering anything in `PORT_IMAGES` as a real
 pinned-release default become a reasonable next move.
 
-**Explicitly not started at all:** `esp32.Dockerfile` (needs its own
-bake-vs-mount decision first, ESP-IDF is multi-gigabyte); `natmod`'s
+**Explicitly not started at all:** `esp32.Dockerfile` (bake-vs-mount is
+decided, see **D19** -- bake ESP-IDF in, same as `webassembly`'s emsdk;
+just not written yet); `natmod`'s
 own single combined Dockerfile (**D30**'s own point 2 -- a genuinely
 separate track from this port-per-image work, confirmed out of scope
 for the manylinux/musllinux split specifically: a `.mpy` loads into an
