@@ -1711,7 +1711,7 @@ that Docker-action gap next.
 (`aarch64`/`armhf`/`mipsel`) closing D23/D24's own open item, and the
 first real `docker build` of either image (neither had ever actually
 been built before this -- both predate real usermod CLI usage
-entirely) surfaced four genuine, non-obvious apt/gcc problems no amount
+entirely) surfaced five genuine, non-obvious apt/gcc problems no amount
 of reading package lists would have caught -- one of them (the
 `i386-linux-gnu` symlink) initially "fixed" wrong and only caught by a
 later, unrelated real build failure.** `examples/usermod-unix`
@@ -1791,16 +1791,49 @@ lesson **D18**'s own `action.Dockerfile`-location bug already taught.
   `linux-libc-dev:i386` is what actually ships a real, arch-correct
   `asm/errno.h` under `i386-linux-gnu/` -- the symlink's one genuine
   job, now done by a real package instead of a borrowed path.
-- All four fixes are Dockerfile-only, not `cibuildmp` itself: none
+- **A fifth real failure, on `unix/aarch64` -- the first arch past the
+  two x86 fixes above to ever actually reach its own compiler in
+  either image:** the same `fatal error: asm/errno.h`, this time out
+  of the *cross* compiler (`aarch64-linux-gnu-gcc`), not `-m32`.
+  Root cause: `gcc-aarch64-linux-gnu` only `Recommends:` its own
+  `libc6-dev-arm64-cross` (confirmed via `apt-cache depends`), not a
+  hard `Depends:` -- and both Dockerfiles use
+  `apt-get install --no-install-recommends` throughout, which silently
+  skips it. The cross-compiler itself still installs and runs; only
+  the target's own kernel/libc headers are missing, so anything
+  touching `<asm/errno.h>` (most of `ports/unix`) fails to even
+  preprocess -- link-time problems would have been obvious immediately,
+  a missing-header compile failure only shows up once a real build is
+  attempted. `gcc-arm-linux-gnueabihf`/`gcc-mipsel-linux-gnu` carry the
+  identical gap (`libc6-dev-armhf-cross`/`libc6-dev-mipsel-cross`,
+  same `Recommends:`-not-`Depends:` shape) -- neither `armhf` nor
+  `mipsel` had been reached yet in either image (`aarch64` fails
+  first, alphabetically/list-order before them), so this was caught
+  and fixed for all three at once, not discovered arch-by-arch.
+  Verified live end to end for all three: purged the cross-libc
+  packages, reproduced the exact failure reinstalling with
+  `--no-install-recommends` alone, then fixed it by naming
+  `libc6-dev-arm64-cross`/`libc6-dev-armhf-cross`/
+  `libc6-dev-mipsel-cross` explicitly (each pulls its own
+  `linux-libc-dev-<arch>-cross` as a hard `Depends`, so naming these
+  three is enough) -- followed by a full real `unix/aarch64`,
+  `unix/armhf`, `unix/mipsel` build each, with a custom C module, three
+  genuine linked binaries (`ARM aarch64`, `ARM armhf`, `MIPS32`) with
+  no header errors at all.
+- All five fixes are Dockerfile-only, not `cibuildmp` itself: none
   affect a bare `ubuntu-latest` runner running the CLI directly
   (**M9b**'s own live verification, and every `build-examples.yml` run
   before this one, already exercised `gcc -m32` successfully outside
   Docker) -- only these two custom images, which now need
-  `gcc-13-multilib`, `libffi-dev`, `pkg-config`, and the real
-  `:i386` packages (not a symlink) to combine x86 multilib support with
-  the cross-compilers in one filesystem. README's own bare-metal
-  install instructions get the same fixes, at the point a reader would
-  actually hit them.
+  `gcc-13-multilib`, `libffi-dev`, `pkg-config`, the real `:i386`
+  packages (not a symlink), and the three `libc6-dev-<arch>-cross`
+  packages `--no-install-recommends` was silently dropping, to combine
+  x86 multilib support with three cross-compilers in one filesystem.
+  README's own bare-metal install instructions get the same fixes, at
+  the point a reader would actually hit them -- though a reader
+  running a plain `apt install` (recommends on by default) would never
+  have hit the fifth bug at all; it is purely a consequence of
+  `--no-install-recommends`, which only these two Dockerfiles use.
 - **cibuildwheel's own answer to "many architectures, one toolchain
   set" is structurally different, not comparably fixed** -- asked and
   answered directly, not assumed: cibuildwheel never combines

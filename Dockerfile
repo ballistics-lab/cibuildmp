@@ -110,6 +110,23 @@ RUN dpkg --add-architecture arm64 && \
 #                             ("possibly undefined macro:
 #                             LT_SYS_SYMBOL_USCORE" -- ltdl.m4's, which
 #                             autoconf/automake/libtool alone don't ship).
+#   libc6-dev-arm64-cross/ -- each cross gcc package only Recommends:
+#   libc6-dev-armhf-cross/    its own libc6-dev-<arch>-cross (confirmed via
+#   libc6-dev-mipsel-cross    apt-cache depends), which --no-install-recommends
+#                             below skips -- silently fine for linking (the
+#                             cross-compiler itself still runs) but leaves
+#                             the target's own kernel/libc headers missing,
+#                             so any source touching <asm/errno.h> (most of
+#                             ports/unix) fails to even preprocess. A real
+#                             build failure caught this on unix/aarch64
+#                             specifically, the first arch past the x86
+#                             fixes above to actually reach the compiler --
+#                             armhf/mipsel share the identical gap,
+#                             reproduced and fixed live the same way before
+#                             either was ever tried for real in either
+#                             image. Each of these three packages pulls its
+#                             own linux-libc-dev-<arch>-cross as a hard
+#                             Depends, so naming them here is enough.
 #   pkg-config             -- ports/unix/Makefile's own LIBFFI_CFLAGS/
 #                             LIBFFI_LDFLAGS (`pkg-config --cflags/--libs
 #                             libffi`) -- without it those stay empty and
@@ -143,8 +160,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libffi-dev:i386 \
     linux-libc-dev:i386 \
     libffi-dev:arm64 \
+    libc6-dev-arm64-cross \
     gcc-arm-linux-gnueabihf \
+    libc6-dev-armhf-cross \
     gcc-mipsel-linux-gnu \
+    libc6-dev-mipsel-cross \
     libltdl-dev \
     pkg-config \
     libusb-1.0-0 \

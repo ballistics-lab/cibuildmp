@@ -115,7 +115,12 @@ Plus, only if you build `unix/aarch64`, `unix/armhf`, or `unix/mipsel`
 (see [Target support](#target-support) below for exactly which apt
 package each needs) — `unix/aarch64` alone needs one extra step first,
 since `libffi-dev:arm64` is a target-arch package Ubuntu's default
-mirrors don't carry:
+mirrors don't carry. (A plain `apt install` like the one below pulls
+each cross-compiler's own `libc6-dev-<arch>-cross` automatically —
+Ubuntu ships it as a `Recommends:`, on by default. Only the Dockerfiles
+building the image above skip it deliberately, with
+`--no-install-recommends`, and name it explicitly instead — see that
+Dockerfile's own comment if you ever pass that flag here too.)
 
 ```console
 $ sudo dpkg --add-architecture arm64

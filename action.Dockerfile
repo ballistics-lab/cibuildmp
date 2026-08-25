@@ -93,6 +93,21 @@ RUN dpkg --add-architecture arm64 && \
 # directory (the symlink's only genuine job) -- no apt package installs
 # one at all otherwise.
 #
+# libc6-dev-arm64-cross/libc6-dev-armhf-cross/libc6-dev-mipsel-cross: a
+# fifth real build failure, on unix/aarch64 -- the first arch past the
+# two x86 fixes above to actually reach its own compiler for the first
+# time in either image. Each cross gcc package only Recommends: its own
+# libc6-dev-<arch>-cross (confirmed via apt-cache depends), which
+# --no-install-recommends below skips -- the cross-compiler itself still
+# runs, but the target's own kernel/libc headers are missing, so any
+# source touching <asm/errno.h> (most of ports/unix) fails to even
+# preprocess. Reproduced and fixed live (purge, reinstall with
+# --no-install-recommends to reproduce, then install these three to
+# fix) before either armhf or mipsel had ever been tried for real in
+# either image -- both share the identical gap. Each package pulls its
+# own linux-libc-dev-<arch>-cross as a hard Depends, so naming these
+# three is enough.
+#
 # wabt: examples/wasm2mpy's own toolchain (wasm2c), pinned by nothing more
 # than "whatever Ubuntu 24.04 carries" -- deliberately, since that is the
 # same version build-examples.yml's own runner-level apt-get used to
@@ -114,8 +129,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libffi-dev:i386 \
     linux-libc-dev:i386 \
     libffi-dev:arm64 \
+    libc6-dev-arm64-cross \
     gcc-arm-linux-gnueabihf \
+    libc6-dev-armhf-cross \
     gcc-mipsel-linux-gnu \
+    libc6-dev-mipsel-cross \
     libltdl-dev \
     pkg-config \
     libusb-1.0-0 \
