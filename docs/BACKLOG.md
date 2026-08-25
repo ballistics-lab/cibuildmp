@@ -2747,10 +2747,37 @@ a third fallback: if neither an override nor a registered default is
 set, but cibuildmp ships this `(port, arch[, libc])`'s own Dockerfile
 (`_DOCKERFILES`, mirroring the five `unix-manylinux-*` plus
 `windows`/`qemu`/`webassembly` files already on disk from D28's own
-migration), it runs `docker build -f <packaged Dockerfile> -t
-cibuildmp-<key>:local <dockerfile's own dir>` and returns that tag --
-relying on Docker's own layer cache for "reuse if already there" rather
-than reinventing one. Returns `None` only where cibuildmp genuinely
+migration), it builds that image and returns the tag -- relying on a
+cache for "reuse if already there" rather than reinventing one, in
+whichever of two shapes actually applies:
+
+- **On a laptop**, a plain `docker build -f <packaged Dockerfile> -t
+  cibuildmp-<key>:local <dockerfile's own dir>`. Docker's own local
+  image/layer cache already gives "build once, instant no-op rebuild
+  until the Dockerfile changes" for free -- nothing to add.
+- **Inside any GitHub Actions job** (`GITHUB_ACTIONS=true`, set by the
+  runner itself, not an opt-in) -- a fresh VM on every run, with no
+  local layer cache persisting between them at all -- `docker buildx
+  build --cache-from type=gha,scope=<dockerfile stem> --cache-to
+  type=gha,mode=max,scope=<dockerfile stem> --load`, first switching to
+  (creating if needed) a `docker-container`-driver builder named
+  `cibuildmp`: the classic default `docker` driver does not support the
+  `type=gha` cache exporter/importer at all. The scope string is
+  deliberately the packaged Dockerfile's own stem (`unix-manylinux-x64`,
+  not `ensure_image()`'s own `key`, which additionally folds in the
+  libc segment `unix` alone carries) -- the same string
+  `build-examples.yml`'s own `verify-docker-images` job already uses for
+  its matrix leg, so this fallback can land in (and, on a cache hit,
+  read from) the exact cache lineage that job populates, not a disjoint
+  one that happens to also say `type=gha`. This is the direct answer to
+  "will this work for other repos, not just this one": a consumer who
+  writes nothing but a `cibuildmp.toml` and `uses: cibuildmp@vX` in
+  their own workflow gets real cross-run image caching in their own CI
+  too, from nothing they had to set up themselves -- matching D2's own
+  framing (cibuildmp owns provisioning) rather than leaving every
+  consumer to reinvent build-examples.yml's own cache wiring by hand.
+
+Returns `None` only where cibuildmp genuinely
 ships no Dockerfile at all yet (`windows/arm64`, `esp32`), which still
 falls all the way through to a bare host build exactly as before.
 `build_unix()` now calls `ensure_image()`, not `image_for()` directly --

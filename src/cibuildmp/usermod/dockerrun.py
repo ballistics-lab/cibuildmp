@@ -154,10 +154,58 @@ def ensure_image(
     if dockerfile_name is None:
         return None
 
+    # The dockerfile's own stem doubles as the cache scope -- deliberately
+    # the same string build-examples.yml's own verify-docker-images job
+    # uses for its matrix leg (resources/docker/<this>.Dockerfile), not
+    # `key` (which additionally folds in the libc segment `unix` alone
+    # carries). A consumer's own CI run through action.yml never sees
+    # that job at all, but *this* repo's own build-usermod-unix job does,
+    # moments earlier in the same workflow run -- sharing the scope
+    # string is what lets this fallback build hit that already-warm cache
+    # instead of starting cold, on the rare event ordering does not
+    # already make it redundant (usermod-unix-x64's own needs:
+    # verify-docker-images plus its env-var override normally skips this
+    # function's build path entirely -- see D32).
+    scope = dockerfile_name.removesuffix(".Dockerfile")
     tag = f"cibuildmp-{key}:local"
     resource = files("cibuildmp").joinpath("resources", "docker", dockerfile_name)
     with as_file(resource) as dockerfile_path:
-        command = [
+        command = _build_command(dockerfile_path, tag, scope)
+        try:
+            subprocess.run(command, check=True)
+        except subprocess.CalledProcessError as exc:
+            raise UsermodBuildError(
+                f"{' '.join(command)} failed with exit code {exc.returncode}"
+            ) from exc
+        except FileNotFoundError as exc:
+            raise UsermodBuildError(
+                f"cibuildmp needs to build its own Docker image for "
+                f"{key} but the docker CLI itself is not on PATH"
+            ) from exc
+    return tag
+
+
+def _build_command(dockerfile_path: Path, tag: str, scope: str) -> list[str]:
+    """The `docker build` invocation for `dockerfile_path`, `type=gha`-cached
+    when running inside a GitHub Actions job (`GITHUB_ACTIONS=true`, set by
+    the runner itself, not something a caller opts into) and a plain local
+    build everywhere else.
+
+    A laptop already gets "build once, reuse until the Dockerfile changes"
+    for free from Docker's own local image/layer cache -- nothing to add
+    there. A GitHub-hosted runner is a fresh VM on every single run, with
+    no local layer cache to persist between them at all, which is exactly
+    what leaves a consumer's own CI paying a full `apt-get install` on
+    every push unless something explicitly persists a cache across runs --
+    the same problem build-examples.yml's own verify-docker-images job
+    already solved for this repo with `cache-from`/`cache-to: type=gha`.
+    Folding the equivalent here means a consumer gets it too, from nothing
+    more than the config + action.yml they already write (D2's own
+    framing: cibuildmp owns provisioning, a caller should not have to
+    reinvent a caching strategy any more than a toolchain download).
+    """
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return [
             "docker",
             "build",
             "-f",
@@ -166,19 +214,59 @@ def ensure_image(
             tag,
             str(dockerfile_path.parent),
         ]
-        try:
-            subprocess.run(command, check=True)
-        except subprocess.CalledProcessError as exc:
-            raise UsermodBuildError(
-                f"docker build -f {dockerfile_path} -t {tag} failed with "
-                f"exit code {exc.returncode}"
-            ) from exc
-        except FileNotFoundError as exc:
-            raise UsermodBuildError(
-                f"cibuildmp needs to build its own Docker image for "
-                f"{key} but the docker CLI itself is not on PATH"
-            ) from exc
-    return tag
+
+    _ensure_buildx_container_builder()
+    return [
+        "docker",
+        "buildx",
+        "build",
+        "-f",
+        str(dockerfile_path),
+        "-t",
+        tag,
+        "--cache-from",
+        f"type=gha,scope={scope}",
+        "--cache-to",
+        f"type=gha,mode=max,scope={scope}",
+        "--load",
+        str(dockerfile_path.parent),
+    ]
+
+
+_BUILDX_BUILDER = "cibuildmp"
+
+
+def _ensure_buildx_container_builder() -> None:
+    """`type=gha` cache export/import needs the `docker-container` buildx
+    driver -- the classic default `docker` driver does not support it at
+    all. Idempotent: `docker buildx inspect` first rather than always
+    `create`, since `create` errors outright if a builder under this name
+    already exists (a real case on a self-hosted runner reused across
+    jobs, not just a hypothetical).
+    """
+    exists = (
+        subprocess.run(
+            ["docker", "buildx", "inspect", _BUILDX_BUILDER],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        ).returncode
+        == 0
+    )
+    if not exists:
+        subprocess.run(
+            [
+                "docker",
+                "buildx",
+                "create",
+                "--name",
+                _BUILDX_BUILDER,
+                "--driver",
+                "docker-container",
+            ],
+            check=True,
+        )
+    subprocess.run(["docker", "buildx", "use", _BUILDX_BUILDER], check=True)
 
 
 def run(command: list[str], *, mounts: list[Path], workdir: Path, image: str) -> None:

@@ -873,6 +873,7 @@ def test_unix_no_registered_image_builds_cibuildmps_own_dockerfile(
     # ensure_image() builds (or reuses) that image and every command
     # after routes through it -- the new default, matching
     # cibuildwheel's own default-to-container behaviour.
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     monkeypatch.delenv("CIBMP_UNIX_X64_MANYLINUX_DOCKER_IMAGE", raising=False)
     monkeypatch.setattr(
         "cibuildmp.usermod.dockerrun.PORT_IMAGES",

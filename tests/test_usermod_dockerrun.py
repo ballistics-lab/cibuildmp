@@ -124,6 +124,13 @@ def test_ensure_image_prefers_a_registered_default_over_building(monkeypatch):
 def test_ensure_image_builds_the_packaged_dockerfile_when_nothing_is_named(
     monkeypatch,
 ):
+    # Forces the plain-`docker build` branch of _build_command()
+    # deterministically -- GITHUB_ACTIONS is set by the runner itself
+    # whenever this suite actually runs in real CI, which would otherwise
+    # make this exact test flip to the buildx+gha-cache branch depending
+    # on where it's run from. See the GITHUB_ACTIONS=true test below for
+    # that branch's own coverage.
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     monkeypatch.delenv("CIBMP_UNIX_X64_MANYLINUX_DOCKER_IMAGE", raising=False)
     monkeypatch.setattr(dockerrun, "PORT_IMAGES", {})
     calls = []
@@ -140,6 +147,39 @@ def test_ensure_image_builds_the_packaged_dockerfile_when_nothing_is_named(
     assert command[2] == "-f"
     assert command[3].endswith("unix-manylinux-x64.Dockerfile")
     assert command[4:6] == ["-t", tag]
+
+
+def test_ensure_image_uses_buildx_gha_cache_inside_github_actions(monkeypatch):
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.delenv("CIBMP_UNIX_X64_MANYLINUX_DOCKER_IMAGE", raising=False)
+    monkeypatch.setattr(dockerrun, "PORT_IMAGES", {})
+    calls = []
+    # inspect (returncode used, not check=True) then use (check=True) --
+    # a bare lambda covers both call shapes; only .returncode is read off
+    # the inspect call's own result, and it always reports "found" here
+    # (0) so create never gets a call to assert on separately.
+    monkeypatch.setattr(
+        dockerrun.subprocess,
+        "run",
+        lambda cmd, **k: calls.append(cmd) or type("R", (), {"returncode": 0})(),
+    )
+
+    tag = dockerrun.ensure_image("unix", "x64", "manylinux")
+
+    assert tag == "cibuildmp-unix-x64-manylinux:local"
+    # inspect, use, then the real buildx build -- create is skipped since
+    # inspect above reports the builder already exists.
+    assert [c[:3] for c in calls[:2]] == [
+        ["docker", "buildx", "inspect"],
+        ["docker", "buildx", "use"],
+    ]
+    build_command = calls[2]
+    assert build_command[:3] == ["docker", "buildx", "build"]
+    assert "--cache-from" in build_command
+    assert "type=gha,scope=unix-manylinux-x64" in build_command
+    assert "--cache-to" in build_command
+    assert "type=gha,mode=max,scope=unix-manylinux-x64" in build_command
+    assert "--load" in build_command
 
 
 def test_ensure_image_is_none_when_no_dockerfile_is_packaged(monkeypatch):
@@ -159,6 +199,7 @@ def test_ensure_image_is_none_when_no_dockerfile_is_packaged(monkeypatch):
 def test_ensure_image_reports_a_failed_build(monkeypatch):
     import subprocess
 
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     monkeypatch.delenv("CIBMP_QEMU_DOCKER_IMAGE", raising=False)
     monkeypatch.setattr(dockerrun, "PORT_IMAGES", {})
 
