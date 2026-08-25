@@ -2010,6 +2010,297 @@ because the output never landed where it should have.
   confirmed to fail without their respective fix before being confirmed
   to pass with it, not just written and trusted.
 
+**D28 — full migration plan: container-per-port for usermod (D26),
+written as a standalone handoff for a fresh session to execute.
+Isolation between ports is the primary driver, not a side benefit** --
+the user's own framing, directly: real builds should not be able to
+break each other across ports the way **D25**'s six bugs all did within
+`unix` alone, and CI's own cache story needs a documented, deliberate
+answer before the migration starts, not discovered mid-flight the way
+**D25**'s bugs were. Nothing below has been implemented past **D26**'s
+own `unix`-only proof-of-concept and **D27**'s two orchestrate.py
+fixes -- this is a plan, not a status report.
+
+**Why isolation is the real driver, restated plainly.** Today, one
+combined image (`action.Dockerfile`, and the standalone `Dockerfile`)
+bakes every port's toolchain into one filesystem: `unix`'s five
+cross-compilers, `windows`'s mingw pair, `esp32`'s ESP-IDF-adjacent
+`libusb-1.0-0`. **D25**'s own six bugs were all *internal* to `unix`
+(its own five architectures colliding), so per-port splitting alone
+would not have caught any of them -- but it does bound the blast
+radius going forward: an ESP-IDF version bump breaking `esp32`'s image
+cannot silently break a `unix`-only build's image the way one shared
+`apt-get install` line can today, and a caller building only `unix`
+never pays for `windows`/`esp32`/`webassembly` toolchain weight at all
+(today's single image pays that cost for every caller, every port,
+unconditionally).
+
+**Current state, precisely.**
+
+- `docker/unix.Dockerfile` exists: `unix`'s own toolchain only (the
+  exact package set **D20/D24/D25** verified live, six real apt/gcc
+  bugs and all), no `cibuildmp` installed inside it -- deliberately,
+  since the whole point of the split is that `cibuildmp` stays on the
+  bare host and only ever `docker run`s a port's own build command as
+  a sibling container (never Docker-in-Docker; **D26**'s own
+  reasoning for why: today's `action.yml` already runs *inside* one
+  container, so nesting a second `docker run` from in there would need
+  the host's Docker socket passed through -- fragile, avoidable by
+  flipping which side runs bare).
+- `usermod/dockerrun.py` exists: a minimal, opt-in sibling-container
+  runner. Selected today only via `CIBMP_<PORT>_DOCKER_IMAGE` (e.g.
+  `CIBMP_UNIX_DOCKER_IMAGE=cibuildmp-unix:local`) -- no config-file
+  knob yet, deliberately, to prove the mechanism before it becomes a
+  real documented option. `build_unix()` in `usermod/build.py` checks
+  this env var and, when set, routes both `run_unix_deplibs()` and the
+  main `make` invocation through `dockerrun.run()` instead of a bare
+  `subprocess.run()`; unset (every real caller today), behaviour is
+  byte-for-byte unchanged.
+- **Not yet wired into the CLI or `action.yml` at all.** `--platform
+  usermod` still always builds on the bare host; there is no flag or
+  config key that makes a caller's own build actually go through
+  `docker/unix.Dockerfile`. This is the single largest remaining gap
+  before the `unix` slice is a real, usable feature rather than a
+  proof-of-concept.
+- `windows`/`qemu`/`webassembly`/`esp32` have no Dockerfile of their
+  own at all yet -- only `unix` has been attempted.
+
+**The full migration plan, in dependency order.**
+
+1. **Five per-port Dockerfiles**, replacing today's one
+   `action.Dockerfile` (root `Dockerfile` likely stays combined a
+   while longer -- it targets a human running `cibuildmp` standalone
+   on their own machine, where one image covering every port is
+   arguably still the right tradeoff; only `action.Dockerfile`, CI's
+   own image, clearly benefits from the split). `docker/unix.Dockerfile`
+   is the template to copy: only that port's own toolchain, no
+   `cibuildmp` baked in.
+   - `docker/windows.Dockerfile` -- `gcc-mingw-w64-x86-64`/
+     `gcc-mingw-w64-i686` only; `arm64` downloads `llvm-mingw` at
+     build time regardless (`usermod/llvmmingw.py`), same as today.
+   - `docker/qemu.Dockerfile` -- whatever `mp-usermod.yml`'s own
+     `qemu-system` job installs today (arm-none-eabi-gcc class
+     toolchain plus qemu-system-arm itself for the execution axis,
+     **D21** -- confirm the exact package list against that workflow
+     before writing this one, do not re-derive from memory).
+   - `docker/webassembly.Dockerfile` -- emsdk is downloaded at build
+     time (`usermod/emsdk.py`), so this image may need close to
+     nothing baked in beyond `python3`/`git`/`curl`/`ca-certificates`;
+     confirm live whether emsdk's own toolchain needs anything else
+     from the base OS first.
+   - `docker/esp32.Dockerfile` -- the heaviest one: ESP-IDF itself is
+     a multi-gigabyte checkout with its own Python env bootstrap
+     (`usermod/espidf.py`). Worth deciding explicitly whether ESP-IDF
+     bakes into the image (large image, fast job) or stays a
+     download-at-build-time step (small image, slow first job, cache
+     shared across jobs via the cache strategy below) -- a real
+     tradeoff, not an oversight, and should get its own one-paragraph
+     decision when this Dockerfile is written, not silently default
+     one way.
+2. **`usermod/dockerrun.py` grows real mount coverage.** Today it only
+   mounts `mpy_dir` and the caller's own module directory -- correct
+   for `unix` (every `unix` toolchain lives inside the image itself,
+   nothing downloaded into `cache_root()`), wrong for every other
+   port: `windows/arm64` (`llvm-mingw`), `webassembly` (`emsdk`), and
+   `esp32` (`esp-idf`) all download into subdirectories of
+   `sources.cache_root()`, not `mpy_dir`. A sibling container for
+   those ports needs `cache_root()` itself mounted (or, more
+   precisely, whichever of its subdirectories that port's own
+   `resolve_*()` function actually touches), or the download happens
+   again inside the container every single run, defeating the whole
+   point of caching. `build_windows()`/`build_webassembly()`/
+   `build_esp32()` each need their own docker-image-selection branch
+   added alongside `build_unix()`'s existing one, each passing the
+   right mount set for what that port's own toolchain resolver needs.
+3. **`action.yml` stops being a Docker action, becomes a composite
+   action.** `runs: using: "docker"` → `runs: using: "composite"`,
+   steps: ensure `cibuildmp` is installed on the runner (`uv tool
+   install` from a pinned ref or, once GHCR-published images exist,
+   possibly nothing at all if a future release ships a self-contained
+   binary -- not decided, flag it as an open question rather than
+   assuming), then invoke it directly. `entrypoint.sh`'s own
+   input-parsing logic (the `INPUT_PACKAGE-DIR` etc. env-var reading,
+   including the documented bash-not-dash requirement) moves into a
+   composite action's own `run:` step, which gets real named `inputs.*`
+   context instead of raw env vars -- likely simpler, not just moved,
+   worth revisiting rather than transcribing verbatim.
+4. **`cibuildmp` itself picks the right per-port image per target,**
+   by default, once `--platform usermod` (or config-driven mode
+   detection) is active and Docker is available on the runner --
+   not opt-in via env var forever; `CIBMP_<PORT>_DOCKER_IMAGE` should
+   become the *override*, with a real default (see cache strategy
+   below) rather than the only way to select an image at all, the way
+   it is today.
+5. **`publish.yml`'s existing `publish-docker` job extends from one
+   image to five** -- the job already exists (`docker/build-push-action`
+   with `cache-from/cache-to: type=gha`, pushing
+   `ghcr.io/ballistics-lab/cibuildmp:<tag>`/`:latest`); it needs a
+   matrix over the five Dockerfiles, pushing
+   `ghcr.io/ballistics-lab/cibuildmp-<port>:<tag>`/`:latest` each. Note
+   the existing job's own comment: `action.yml` does not even consume
+   this published image today -- it rebuilds `action.Dockerfile` from
+   source on every single consuming job, across every repo, forever.
+   That gap should very likely close in the same pass as this
+   migration (composite `action.yml` pulls the pinned per-port image
+   by default), not stay open a second time.
+
+**Cache strategy -- the direct answer to "we need a `CIBW_CACHE_PATH`
+equivalent," in two genuinely separate parts.** cibuildwheel's own
+`CIBW_CACHE_PATH` covers two different things at once (downloaded
+build dependencies, and pulled container images); cibuildmp already
+has a real answer for the first and needs a deliberate one for the
+second -- conflating them would be a mistake.
+
+1. **Toolchain/source cache -- already exists, `CIBMP_CACHE`.**
+   `sources.cache_root()` (`src/cibuildmp/sources.py`) already reads
+   `CIBMP_CACHE`, falling back to `$XDG_CACHE_HOME/cibuildmp` or
+   `~/.cache/cibuildmp` -- this *is* the direct analogue of
+   `CIBW_CACHE_PATH` for MicroPython checkouts, `mpy-cross`, and every
+   downloaded toolchain (`toolchains.py`, `llvmmingw.py`, `emsdk.py`,
+   `espidf.py` all resolve under it). Nothing new needs inventing
+   here. What genuinely is new, for the migration:
+   - Every sibling container needs the *right* subset of
+     `cache_root()` bind-mounted in (see migration step 2 above) --
+     today only `unix` is exempt from needing this at all.
+   - `mpy-cross` itself should keep building on the bare host, not
+     inside any per-port container -- it is architecture-independent
+     shared infrastructure (`sources.build_mpy_cross()`, called once
+     per `orchestrate.build()` invocation, before the per-target loop
+     starts), not a port-specific toolchain artifact. Do not move it
+     into a container "for consistency" -- there is no real reason to,
+     and it would need its own image otherwise.
+   - In CI, once `action.yml` is a composite action (migration step
+     3), a caller gets to add a completely ordinary `actions/cache`
+     step over `~/.cache/cibuildmp` (or wherever `CIBMP_CACHE` points)
+     around the `cibuildmp` invocation -- something a Docker action
+     structurally cannot offer at all today (GitHub's Docker-action
+     mechanism has no way for a caller to mount a volume into the
+     container it creates; the composite-action conversion is what
+     actually unlocks this, not a new cache mechanism of its own).
+     Document this prominently in README once it's real: it is the
+     single biggest CI speed win this whole migration produces,
+     independent of the isolation motivation.
+2. **Docker image cache -- new, needs a real design, currently only
+   half-built.** Two related but distinct things:
+   - *Building* a per-port image already has a real cache
+     (`publish.yml`'s own `cache-from/cache-to: type=gha`, GitHub's
+     own Actions cache backend, persists across workflow runs in this
+     repo) -- extending this to five images (migration step 5) is
+     mechanical, the pattern is already proven.
+   - *Consuming* a per-port image (any caller's own `uses:
+     ballistics-lab/cibuildmp@vX` build) should default to `docker
+     pull`ing the pinned GHCR tag, which benefits from the registry's
+     own layer cache automatically -- no extra configuration needed,
+     the same way any other published Docker image works. This is
+     where `CIBMP_<PORT>_DOCKER_IMAGE` becomes a real, documented
+     *override* (build your own local image, or pin an older
+     release's image) rather than the only way in.
+   - **Genuinely open, not yet decided:** should there be a
+     `CIBMP_DOCKER_CACHE`-style env var at all, analogous to
+     `CIBW_CACHE_PATH`'s own directory, for a self-hosted runner or a
+     laptop that wants pulled images to live somewhere specific (not
+     Docker's own default storage driver location)? `docker`'s own
+     `--data-root` / `daemon.json` already covers this at the daemon
+     level, arguably making a cibuildmp-specific env var redundant --
+     lean towards *not* inventing one unless a concrete need surfaces,
+     but flag it explicitly here rather than silently deciding either
+     way.
+
+**Risks and open questions to resolve before or during implementation,
+not after:**
+
+- Can a GitHub-hosted runner's own Docker daemon actually be reached
+  from a composite action's plain shell step the same way a Docker
+  action's container currently reaches it? Almost certainly yes
+  (GitHub-hosted runners ship Docker natively, composite actions run
+  directly on the runner, no container boundary in the way at all) --
+  but this session never verified it live, since the whole point of
+  today's proof-of-concept was proving `dockerrun.py`'s own mechanism
+  in isolation, not the composite-action wiring around it. Verify
+  first, on real CI, before assuming.
+- Self-hosted runners without Docker at all (mentioned nowhere in this
+  session, but a real category of `cibuildmp` user going forward) lose
+  the per-port image path entirely under this design -- decide whether
+  `cibuildmp` should fall back to bare-host toolchain resolution
+  automatically when Docker is unavailable (matching `unix`'s own
+  current dual-path behaviour: `CIBMP_UNIX_DOCKER_IMAGE` unset already
+  means "build directly," so this may already be free) or fail loudly
+  instead.
+- Windows/macOS runners: **D2/M2**'s own "why not docker for x86"
+  reasoning, and the open question already in this document's own
+  "Windows/macOS hosts" entry, both predate this plan -- a per-port
+  *Linux* container obviously cannot run on a bare Windows/macOS
+  runner at all, so this migration is implicitly Linux-runner-only
+  unless and until that open question resolves separately.
+- This is genuinely large, multi-session work -- five Dockerfiles, a
+  real `action.yml` rewrite affecting three consuming repos'
+  workflows, `publish.yml` extended, `dockerrun.py` mount coverage for
+  four more ports, `docker`-strategy branches in four more
+  `build_<port>()` functions, README's own Docker section rewritten.
+  Do not attempt it in one sitting; **D26**'s own "first slice"
+  precedent (one port, proven live, before committing to the rest) is
+  the right shape to keep following -- `windows` is the natural next
+  slice (apt-only toolchain, no large download like `esp32`'s
+  ESP-IDF or `webassembly`'s emsdk, closest in shape to `unix`).
+
+**D29 — a real GitHub Actions job summary, the way cibuildwheel's own
+action already does it: a table of what got built, visible directly on
+the Action run's own page, not just buried in raw log lines.** The
+user's own explicit ask, independent of **D28**'s container-per-port
+migration -- this can and should land on its own, in either order.
+Not implemented at all today; `$GITHUB_STEP_SUMMARY` is not referenced
+anywhere in this codebase yet (checked directly, not assumed).
+
+- **What cibuildwheel's own action does, precisely:** after a build,
+  it writes a Markdown table into `$GITHUB_STEP_SUMMARY` -- one row
+  per wheel produced, filename and size -- which GitHub renders on the
+  job's own summary page (the "Summary" tab of an Actions run),
+  visible without opening any log at all. `$GITHUB_STEP_SUMMARY` is a
+  file path GitHub Actions itself sets as an env var on every runner;
+  appending Markdown to it is the whole mechanism, no special API or
+  action needed.
+- **`cibuildmp` already computes exactly the data this needs, in both
+  CLIs, today** -- it just only ever goes to plain stdout:
+  - natmod, `src/cibuildmp/cli.py:284-287`:
+    ```python
+    total_duration = sum(r.duration for r in results)
+    print(f"\ncibuildmp: {total} target(s) built in {total_duration:.1f}s")
+    for result in results:
+        print(f"  {result.identifier}: {result.output.name} ({result.size} bytes)")
+    ```
+  - usermod, `src/cibuildmp/usermod/cli.py:115-120`: the identical
+    shape, over `UsermodBuildResult` instead of `BuildResult` --
+    `identifier`, `output`, `size`, `duration` all already exist on
+    both result dataclasses.
+- **The design this suggests:** one small shared helper (a natural
+  home: `src/cibuildmp/cli.py` or a new tiny module either CLI
+  imports, since both natmod's `main()` and usermod's `run()` need
+  it) -- `write_step_summary(results, *, total_duration)` or similar --
+  that:
+  1. No-ops immediately if `os.environ.get("GITHUB_STEP_SUMMARY")` is
+     unset (every local/non-CI invocation, and any CI system that
+     isn't GitHub Actions -- matches cibuildwheel's own behaviour of
+     never requiring GitHub Actions specifically, and keeps this from
+     ever becoming a hard dependency).
+  2. Otherwise appends a Markdown table (identifier, filename, size,
+     build duration) to that file path -- plain `open(path,
+     "a").write(...)`, no library needed.
+  3. Runs *in addition to* the existing stdout prints, not instead of
+     them -- the plain-text summary is still what a local run or a
+     non-GitHub CI system sees.
+- **Scope check:** natmod and usermod both need this (two call sites,
+  not one) but the helper itself is genuinely shared -- both result
+  types already expose the same three fields (`identifier`, a way to
+  get a filename, `size`), so a small `Protocol` or just duck-typing
+  on those three attributes avoids writing it twice. Do not gold-plate
+  this into a generic "reporting" subsystem; it is one Markdown table,
+  written once, called from two places.
+- Genuinely independent of **D28**: this is pure CLI/output-formatting
+  work, touches no Dockerfile, no toolchain resolution, no
+  `action.yml` structure at all -- a good candidate to implement
+  first, quickly, before or in parallel with **D28**'s much larger
+  container migration, if a new session wants an early, low-risk win.
+
 - **M10** — runner/matrix integration, fan-out-by-default for usermod
   identifiers (**D20**).
 - **M11** — execution axis: qemu-system, rp2040py, node, native — four of
