@@ -67,6 +67,14 @@ RUN dpkg --add-architecture arm64 && \
 # alongside gcc-aarch64-linux-gnu/gcc-arm-linux-gnueabihf/
 # gcc-mipsel-linux-gnu installed in the very same transaction.
 #
+# pkg-config: ports/unix/Makefile's own LIBFFI_CFLAGS/LIBFFI_LDFLAGS
+# (`pkg-config --cflags/--libs libffi`) -- without it those stay empty
+# and modffi.c fails to find ffi.h even with libffi-dev installed. A
+# real build failure caught this too, one layer past the -m32 fix
+# above: apt succeeded, gcc -m32 worked, then unix/x64 (no
+# cross-compile at all) still failed the same way for a third,
+# independent reason.
+#
 # wabt: examples/wasm2mpy's own toolchain (wasm2c), pinned by nothing more
 # than "whatever Ubuntu 24.04 carries" -- deliberately, since that is the
 # same version build-examples.yml's own runner-level apt-get used to
@@ -84,10 +92,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc-mingw-w64-x86-64 \
     gcc-mingw-w64-i686 \
     gcc-aarch64-linux-gnu \
+    libffi-dev \
     libffi-dev:arm64 \
     gcc-arm-linux-gnueabihf \
     gcc-mipsel-linux-gnu \
     libltdl-dev \
+    pkg-config \
     libusb-1.0-0 \
     wabt \
     && rm -rf /var/lib/apt/lists/*

@@ -71,6 +71,13 @@ RUN dpkg --add-architecture arm64 && \
 #                             own llvm-mingw toolchain instead (see
 #                             usermod/llvmmingw.py), nothing to apt-install
 #                             for it here.
+#   libffi-dev             -- usermod unix/x64 and unix/x86: modffi.c
+#                             (MICROPY_PY_FFI) needs the host's own
+#                             ffi.h, native amd64, distinct from the
+#                             target-arch libffi-dev:arm64 below. Missed
+#                             on the first pass -- nothing needed it
+#                             until usermod's own unix arches actually
+#                             built here for the first time.
 #   gcc-aarch64-linux-gnu/ -- usermod unix/aarch64, unix/armhf, unix/mipsel
 #   libffi-dev:arm64/         (D20, D24). libltdl-dev is not the
 #   gcc-arm-linux-gnueabihf/  cross-compiler itself -- armhf/mipsel's own
@@ -79,6 +86,16 @@ RUN dpkg --add-architecture arm64 && \
 #                             ("possibly undefined macro:
 #                             LT_SYS_SYMBOL_USCORE" -- ltdl.m4's, which
 #                             autoconf/automake/libtool alone don't ship).
+#   pkg-config             -- ports/unix/Makefile's own LIBFFI_CFLAGS/
+#                             LIBFFI_LDFLAGS (`pkg-config --cflags/--libs
+#                             libffi`) -- without it those stay empty and
+#                             modffi.c fails to find ffi.h even with
+#                             libffi-dev installed. A real build failure
+#                             caught this too, one layer past the -m32
+#                             fix: apt succeeded, gcc -m32 worked, then
+#                             unix/x64 (no cross-compile at all) still
+#                             failed the same way for a third, independent
+#                             reason.
 #   libusb1               -- usermod esp32: openocd-esp32 (part of
 #                             ESP-IDF's own default toolset, installed
 #                             regardless of what a usermod build actually
@@ -98,10 +115,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc-mingw-w64-x86-64 \
     gcc-mingw-w64-i686 \
     gcc-aarch64-linux-gnu \
+    libffi-dev \
     libffi-dev:arm64 \
     gcc-arm-linux-gnueabihf \
     gcc-mipsel-linux-gnu \
     libltdl-dev \
+    pkg-config \
     libusb-1.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
