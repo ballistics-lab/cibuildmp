@@ -118,39 +118,59 @@ runs:
       run: |
         set -eu
         spec="$GITHUB_ACTION_PATH"
-        if [ -n "$CIBMP_EXTRAS" ]; then
-          spec="${spec}[${CIBMP_EXTRAS}]"
+        if [ -n "$ACTION_EXTRAS" ]; then
+          spec="${spec}[${ACTION_EXTRAS}]"
         fi
         uv tool install "$spec"
         echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       env:
-        CIBMP_EXTRAS: ${{ inputs.extras }}
+        ACTION_EXTRAS: ${{ inputs.extras }}
 
     - name: Run cibuildmp
       shell: bash
-      # Clean, explicitly-chosen env var names (CIBMP_PACKAGE_DIR, not
-      # INPUT_PACKAGE-DIR) -- a composite action's own step-level env: block
-      # can map ${{ inputs.package-dir }} to any name it wants, sidestepping
-      # entirely the hyphen problem the old Docker action's own entrypoint.sh
-      # had to work around with `printenv 'INPUT_PACKAGE-DIR'` (GitHub's own
-      # Docker-action INPUT_<NAME> auto-generation keeps input hyphens
-      # verbatim, undocumented, found the hard way). Confirmed against
+      # Clean, explicitly-chosen env var names, `ACTION_*` -- a composite
+      # action's own step-level env: block can map ${{ inputs.package-dir }}
+      # to any name it wants, sidestepping entirely the hyphen problem the
+      # old Docker action's own entrypoint.sh had to work around with
+      # `printenv 'INPUT_PACKAGE-DIR'` (GitHub's own Docker-action
+      # INPUT_<NAME> auto-generation keeps input hyphens verbatim,
+      # undocumented, found the hard way). Confirmed against
       # pypa/cibuildwheel's own real action.yml, which does exactly this.
+      #
+      # `ACTION_*`, deliberately NOT `CIBMP_*` -- a real bug, caught live on
+      # the very first CI run of this conversion: `cibuildmp` itself already
+      # has its own generic `CIBMP_<KEY>` config-override convention
+      # (options.py's own `opt()`, checked before the config file and
+      # before any default -- `CIBMP_VERSION`, `CIBMP_CACHE`, etc. are the
+      # same mechanism). Naming this step's own plumbing variable
+      # `CIBMP_OUTPUT_DIR` collided with it outright: GitHub Actions always
+      # *sets* an env: block's own vars, even for an empty-string input, so
+      # every push silently exported `CIBMP_OUTPUT_DIR=""` -- which
+      # `opt()` reads as "the user explicitly wants an empty output-dir"
+      # (its own `environ.get(...) is not None` check has no way to tell
+      # "empty" from "unset"), overriding `DEFAULT_OUTPUT_DIR` ("mpyhouse")
+      # to nothing at all. Every natmod example built successfully but
+      # collected its output one directory up from where `build-examples.yml`
+      # went looking for it (`examples/template/mpy6.3-natmod-x64/...`
+      # instead of `examples/template/mpyhouse/mpy6.3-natmod-x64/...`) --
+      # confirmed directly from the real build's own "done in Xs -> <path>"
+      # log line. `ACTION_*` cannot collide with any real `cibuildmp.toml`
+      # key, present or future.
       run: |
         set -eu
-        args=("$CIBMP_PACKAGE_DIR")
-        if [ -n "$CIBMP_OUTPUT_DIR" ]; then
-          args+=(--output-dir "$CIBMP_OUTPUT_DIR")
+        args=("$ACTION_PACKAGE_DIR")
+        if [ -n "$ACTION_OUTPUT_DIR" ]; then
+          args+=(--output-dir "$ACTION_OUTPUT_DIR")
         fi
-        if [ -n "$CIBMP_CONFIG_FILE" ]; then
-          args+=(--config-file "$CIBMP_CONFIG_FILE")
+        if [ -n "$ACTION_CONFIG_FILE" ]; then
+          args+=(--config-file "$ACTION_CONFIG_FILE")
         fi
-        if [ -n "$CIBMP_ONLY" ]; then
-          args+=(--only "$CIBMP_ONLY")
+        if [ -n "$ACTION_ONLY" ]; then
+          args+=(--only "$ACTION_ONLY")
         fi
         cibuildmp "${args[@]}"
       env:
-        CIBMP_PACKAGE_DIR: ${{ inputs.package-dir }}
-        CIBMP_OUTPUT_DIR: ${{ inputs.output-dir }}
-        CIBMP_CONFIG_FILE: ${{ inputs.config-file }}
-        CIBMP_ONLY: ${{ inputs.only }}
+        ACTION_PACKAGE_DIR: ${{ inputs.package-dir }}
+        ACTION_OUTPUT_DIR: ${{ inputs.output-dir }}
+        ACTION_CONFIG_FILE: ${{ inputs.config-file }}
+        ACTION_ONLY: ${{ inputs.only }}

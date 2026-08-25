@@ -2056,26 +2056,53 @@ unconditionally).
   main `make` invocation through `dockerrun.run()` instead of a bare
   `subprocess.run()`; unset (every real caller today), behaviour is
   byte-for-byte unchanged.
-- **`action.yml` is now a composite action -- migration step 1, done.**
-  `runs: using: "docker"` → `"composite"`, `entrypoint.sh` deleted
-  (dead code, nothing references it any more), the apt-prerequisite
-  list kept byte-for-byte identical to `action.Dockerfile`'s own
-  (deliberately -- see migration step 1's own note on why slimming it
-  now would have broken every existing usermod build), env vars
-  renamed to clean, explicit names (`CIBMP_PACKAGE_DIR`, not
-  `INPUT_PACKAGE-DIR`) per the cibuildwheel-confirmed win noted above.
-  `publish.yml`'s own `publish-docker` job and `action.Dockerfile`
-  itself both still exist, now explicitly standalone (no longer
-  feeding `action.yml`'s own `runs.image`, since there is no longer
-  one). README updated to match. **Still not yet done:** `--platform
-  usermod` still always builds on the bare host inside this new
-  composite action too -- there is no flag or config key yet that
-  makes a caller's own build actually go through
-  `docker/unix.Dockerfile` as a sibling container (migration step 2).
-  This remains the single largest gap before the `unix` slice is a
-  real, usable feature rather than a proof-of-concept -- step 1 only
-  removed the *structural* blocker (Docker-in-Docker), it did not yet
-  wire the mechanism through.
+- **`action.yml` is now a composite action -- migration step 1, done
+  and live-verified on real CI, not just implemented.** `runs: using:
+  "docker"` → `"composite"`, `entrypoint.sh` deleted (dead code,
+  nothing references it any more), the apt-prerequisite list kept
+  byte-for-byte identical to `action.Dockerfile`'s own (deliberately
+  -- see migration step 1's own note on why slimming it now would have
+  broken every existing usermod build), env vars renamed to clean,
+  explicit names (`ACTION_PACKAGE_DIR`, not `INPUT_PACKAGE-DIR`) per
+  the cibuildwheel-confirmed win noted above. `publish.yml`'s own
+  `publish-docker` job and `action.Dockerfile` itself both still
+  exist, now explicitly standalone (no longer feeding `action.yml`'s
+  own `runs.image`, since there is no longer one). README updated to
+  match.
+  - **A ninth real bug, caught on the very first real CI run of this
+    conversion:** the plumbing env vars were first named `CIBMP_*`
+    (`CIBMP_PACKAGE_DIR`, `CIBMP_OUTPUT_DIR`, ...) -- and collided
+    outright with `cibuildmp`'s own real, pre-existing, documented
+    `CIBMP_<KEY>` config-override convention (`options.py`'s own
+    `opt()`, the same mechanism `CIBMP_VERSION`/`CIBMP_CACHE` already
+    use, checked *before* the config file and before any default).
+    GitHub Actions always sets a step's own `env:` vars, even for an
+    empty-string input, so every push silently exported
+    `CIBMP_OUTPUT_DIR=""` -- and `opt()`'s own `environ.get(...) is
+    not None` check has no way to tell "empty" from "unset", so it
+    read that as an explicit override, replacing `DEFAULT_OUTPUT_DIR`
+    ("mpyhouse") with nothing. Every natmod example built
+    successfully (`cibuildmp: 10 target(s) built`,
+    `cibuildmp: 7 target(s) built`) but collected its own output one
+    directory too high (`examples/template/mpy6.3-natmod-x64/...`
+    instead of `examples/template/mpyhouse/mpy6.3-natmod-x64/...`) --
+    the mismatch only surfaced on the unrelated "List built artifacts"
+    step, `ls: cannot access 'examples/template/mpyhouse': No such
+    file or directory`. Confirmed live, both the reproduction and the
+    fix: `CIBMP_OUTPUT_DIR=""` in the environment resolves
+    `Options.load()`'s own `output_dir` to `Path('.')`; unset, or
+    renamed to `ACTION_OUTPUT_DIR`, it correctly resolves to
+    `Path('mpyhouse')`. Fixed by renaming every one of this step's own
+    plumbing vars to an `ACTION_*` prefix, which cannot collide with
+    any real `cibuildmp.toml` key, present or future.
+  - **Still not yet done:** `--platform usermod` still always builds
+    on the bare host inside this new composite action too -- there is
+    no flag or config key yet that makes a caller's own build actually
+    go through `docker/unix.Dockerfile` as a sibling container
+    (migration step 2). This remains the single largest gap before the
+    `unix` slice is a real, usable feature rather than a
+    proof-of-concept -- step 1 only removed the *structural* blocker
+    (Docker-in-Docker), it did not yet wire the mechanism through.
 - `windows`/`qemu`/`webassembly`/`esp32` have no Dockerfile of their
   own at all yet -- only `unix` has been attempted.
 
