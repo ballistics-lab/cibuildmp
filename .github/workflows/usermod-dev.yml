@@ -1,0 +1,36 @@
+name: usermod dev
+
+# Scratch CI for M9's own usermod work (D18 MSYS2, D19 ESP-IDF): a plain
+# on-push trigger on this one development branch, not a pull_request --
+# opening a PR is a separate, explicit decision (docs/BACKLOG.md's own
+# development history), not something this workflow should force. Delete
+# or fold into publish.yml/build-examples.yml once M9 lands on main.
+#
+# windows-latest here is the actual reason this exists: D18's MSYS2
+# orchestration cannot be verified in a Linux sandbox at all -- this is
+# the only real feedback loop for it, so it needs to run on every push,
+# not wait for a PR.
+
+on:
+  push:
+    branches: [claude/cibuildmp-usermod-support-fvojm8]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - run: uv sync
+      - run: uv run ruff check src tests
+      - run: uv run ruff format --check src tests
+      - run: uv run pyright src
+      - run: uv run pytest -q
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - run: uv sync
+      - run: uv run pytest -q
