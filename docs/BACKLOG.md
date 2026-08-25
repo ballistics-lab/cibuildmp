@@ -2853,6 +2853,56 @@ checked against a real run, not local reasoning):
   owns. Fixed by adding the same `docker/login-action@v3` step (`if:
   github.event_name == 'push'`, matching the env vars it unblocks) plus
   `permissions: packages: read` to `build-usermod-unix`.
+- **A third real bug, this time a genuine link failure inside the
+  actual usermod build**, not CI plumbing: `unix-aarch64` compiled
+  clean but failed to link, `undefined reference to ffi_type_sint8` /
+  `ffi_call` / `ffi_prep_cif` / etc. across every `modffi.c` symbol.
+  Root cause: `resources/docker/unix-manylinux-aarch64.Dockerfile`
+  installed only `libffi-dev:arm64`, not the plain (host/amd64)
+  `libffi-dev` -- a real regression from **D26**'s own per-arch split,
+  since the original combined `action.Dockerfile` always installed
+  both together and nobody re-derived why. Plain `pkg-config` (no
+  cross-wrapper) only searches its own build target's multiarch
+  pkgconfig directory by default (`x86_64-linux-gnu` on this base
+  image), never `aarch64-linux-gnu`'s -- with only the arm64 package
+  present, `pkg-config --libs libffi`
+  (`ports/unix/Makefile`'s own non-standalone `LIBFFI_LDFLAGS`
+  resolution) silently resolved to nothing, so `-lffi` was never
+  passed to the linker at all. Fixed by re-adding the unqualified
+  `libffi-dev` package: the aarch64 cross-linker's own default sysroot
+  search path still finds and links the *correct* arm64 `libffi.so`
+  once `-lffi` is present, regardless of which architecture's `.pc`
+  file supplied the flag.
+  - **A real, considered alternative, raised directly and checked
+    against real source, not memory**: does `cibuildwheel` avoid this
+    entire class of cross-toolchain bug? Confirmed live against a real
+    `pypa/cibuildwheel` checkout (`oci_container.py`): yes -- it never
+    cross-compiles from an x86_64 host at all. `docker run
+    --platform=linux/arm64 <native manylinux2014_aarch64 image>`, via
+    QEMU user-mode emulation (`binfmt_misc`, registered by a
+    `docker/setup-qemu-action`-equivalent step, not present on a
+    GitHub-hosted runner by default) runs a genuinely *native* aarch64
+    container -- native `gcc`, native `libffi`, no multiarch apt
+    sources, no foreign-arch packages, no `pkg-config` cross-arch
+    mismatch possible at all, because nothing is cross-compiled.
+    Switching `unix`'s own aarch64/armhf/mipsel images to this shape
+    would very plausibly make their own Dockerfiles nearly identical to
+    `unix-manylinux-x64`'s (just a different base image tag plus
+    `--platform`), eliminating this entire bug category rather than
+    patching each instance -- but it is a real, separate architecture
+    change (QEMU setup in every workflow that runs these containers,
+    including third-party consumers; `--platform` threaded through
+    `dockerrun.py`'s own `run()`/`ensure_image()`; slower builds under
+    emulation), not a drop-in fix for the specific failure above.
+    **Deliberately not adopted now** -- raised mid-incident, while
+    under real time pressure to get a concrete result rather than a
+    bigger diff, and correctly deferred: swapping the architecture out
+    from under five already-Dockerfiles that were otherwise working
+    (four of five never even hit this bug) is a bigger, riskier change
+    than the one-line fix above, and deserves its own deliberate
+    decision later, not one made reactively mid-debugging. Flagged here
+    precisely so a future session evaluates it as a real option rather
+    than re-discovering cibuildwheel's own approach from scratch.
 
 `windows`/`qemu`/`webassembly` wiring, and `PORT_IMAGES` actually being
 registered (still empty -- `ensure_image()`'s local build is the thing
@@ -3165,6 +3215,41 @@ none of which fit alongside the resolver/image work above. Flagged
 here, precisely, so a future session designs the axis once rather than
 bolting it on ad hoc the way **D25**'s six bugs show what "discovered
 mid-flight" costs.
+
+- **"manylinux" here is a label, not a version pin -- a sharper version
+  of a gap this decision already flagged loosely, made concrete by the
+  user's own real example.** Real manylinux wheel tags carry a specific
+  minimum glibc version as part of the tag itself --
+  `rp2040py-0.3.1-cp314-cp314t-manylinux2014_armv7l.manylinux_2_17_armv7l.manylinux_2_31_armv7l.whl`
+  names `manylinux2014`/`manylinux_2_17`/`manylinux_2_31` as three
+  *specific*, independently-checkable glibc-version floors a wheel with
+  that tag is guaranteed compatible with -- that guarantee is the whole
+  point of the tag, not incidental to it. `cibuildmp`'s own
+  `unix-manylinux-<arch>` images carry no such pin at all: "manylinux"
+  today just means "whatever glibc `ubuntu:24.04` happens to ship,"
+  which changes underneath every image silently whenever the base image
+  itself gets rebuilt or Ubuntu patches it, with nothing recorded
+  anywhere about what floor a binary built there actually needs. Not
+  designed or fixed here -- raised mid-incident, correctly deferred
+  alongside the QEMU/native-image question above rather than expanding
+  scope further while chasing a live CI failure -- but a real, separate
+  gap from the manylinux/musllinux axis itself: even a `unix` build that
+  never touches musl at all still makes no claim about which glibc
+  versions it actually runs on. The user's own explicit follow-up,
+  directly: this isn't just "add a version number somewhere" -- it's
+  "follow the actual convention" rather than reinvent a worse one.
+  Real manylinux tags follow **PEP 600**, which stacks *multiple*
+  compatibility floors on one artifact (`manylinux_2_17_armv7l` *and*
+  `manylinux_2_31_armv7l` together in the one filename above, not a
+  single flag) precisely so a checker can verify the binary's actual
+  symbol versions against each floor independently, and a consumer
+  picks whichever floor its own host clears. Whoever designs the
+  identifier axis above should read PEP 600 itself before inventing
+  anything, and decide deliberately whether `cibuildmp`'s own
+  equivalent adopts that stacking shape, a simpler single-floor
+  version, or is accepted as an explicit non-goal for now -- not left
+  unstated by omission, and not a bespoke scheme that quietly diverges
+  from the convention it's visibly modeled on.
 
 - **M10** — runner/matrix integration, fan-out-by-default for usermod
   identifiers (**D20**).

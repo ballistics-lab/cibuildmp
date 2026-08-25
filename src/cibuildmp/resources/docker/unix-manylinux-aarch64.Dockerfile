@@ -11,6 +11,24 @@
 # Ubuntu's default mirrors carry -- the ports.ubuntu.com rewrite below
 # is D20's own fix for that, transcribed unchanged.
 #
+# Plain `libffi-dev` (host/amd64, unqualified) is ALSO required here,
+# not just libffi-dev:arm64 -- a real bug this exact image hit on its
+# first genuine link (D32's own end-to-end smoke test): plain
+# `pkg-config` (no cross-wrapper) only searches its own build target's
+# multiarch pkgconfig dir (x86_64-linux-gnu here) by default, never
+# aarch64-linux-gnu's, so with only the arm64 package installed,
+# `pkg-config --libs libffi` (ports/unix/Makefile's own non-standalone
+# LIBFFI_LDFLAGS resolution) silently resolved to nothing and `-lffi`
+# was never passed to the linker at all -- "undefined reference to
+# ffi_type_sint8"/`ffi_call`/etc., a real, confirmed CI failure, not
+# guessed. The unqualified package makes some libffi.pc discoverable
+# to plain pkg-config at all; the aarch64 cross-linker's own default
+# sysroot search path still finds and links the *correct*
+# arm64 libffi.so once `-lffi` is present, regardless of which
+# architecture's .pc supplied the flag. Matches the original combined
+# action.Dockerfile, which always installed both together -- dropped
+# here by mistake when unix moved from one image to a per-arch split.
+#
 # Build: docker build -t cibuildmp-unix-manylinux-aarch64 -f src/cibuildmp/resources/docker/unix-manylinux-aarch64.Dockerfile .
 # Use:   CIBMP_UNIX_AARCH64_MANYLINUX_DOCKER_IMAGE=cibuildmp-unix-manylinux-aarch64 cibuildmp ...
 #
