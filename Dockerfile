@@ -48,10 +48,23 @@ RUN dpkg --add-architecture arm64 && \
 
 # Only what cibuildmp cannot self-provision (docs/BACKLOG.md's own D3/M2
 # "why not docker for x86" reasoning, and D18/D20/D24's own addenda):
-#   gcc-multilib          -- natmod's own x86 arch, and usermod unix/x86.
+#   gcc-13-multilib        -- natmod's own x86 arch, and usermod unix/x86.
 #                             No downloadable tarball exists for either;
 #                             this is the one arch/target pair D3 always
-#                             said would need a real Linux userland.
+#                             said would need a real Linux userland. The
+#                             *versioned* package, not the gcc-multilib
+#                             transitional one -- a real, documented apt
+#                             Conflicts: gcc-multilib has against every
+#                             gcc-N-<target>-linux-gnu cross package, every
+#                             GCC version (found only by an actual `docker
+#                             build` failing; this same dev sandbox never
+#                             had gcc-multilib installed at all, so it
+#                             never surfaced locally). gcc-13-multilib
+#                             carries no such Conflicts -- same
+#                             libc6-dev-i386/lib32gcc-13-dev multilib
+#                             support, verified live (a real `gcc -m32`
+#                             build and run) alongside every cross
+#                             package below, in the same transaction.
 #   gcc-mingw-w64-x86-64/  -- usermod windows/x64 and windows/x86. No
 #   gcc-mingw-w64-i686        Linux distro packages an aarch64-w64-mingw32
 #                             target at all -- windows/arm64 downloads its
@@ -81,7 +94,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     python3 \
-    gcc-multilib \
+    gcc-13-multilib \
     gcc-mingw-w64-x86-64 \
     gcc-mingw-w64-i686 \
     gcc-aarch64-linux-gnu \

@@ -77,8 +77,16 @@ machine instead of through Docker needs the same set:
 
 ```console
 $ sudo apt install build-essential git ca-certificates curl python3 \
-    gcc-multilib gcc-mingw-w64-x86-64 gcc-mingw-w64-i686 libusb-1.0-0
+    gcc-13-multilib gcc-mingw-w64-x86-64 gcc-mingw-w64-i686 libusb-1.0-0
 ```
+
+`gcc-13-multilib`, not the plain `gcc-multilib` package — a real,
+documented apt `Conflicts:` against every `gcc-N-<target>-linux-gnu`
+cross-compiler package (found the hard way, a real `docker build`
+failure). Harmless if you only ever build `x64`/`x86`/`windows` and
+never install any of the cross packages below, but there is no reason
+to risk it: `gcc-13-multilib` provides the identical `-m32` multilib
+support with no such conflict, verified live.
 
 Plus, only if you build `unix/aarch64`, `unix/armhf`, or `unix/mipsel`
 (see [Target support](#target-support) below for exactly which apt

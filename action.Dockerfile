@@ -55,6 +55,18 @@ RUN dpkg --add-architecture arm64 && \
 # Kept in sync by hand today; a real drift risk if one changes without
 # the other, not automated away here.
 #
+# gcc-13-multilib, not gcc-multilib: a real, documented package
+# conflict, found only by an actual `docker build` failing (this
+# sandbox never had gcc-multilib installed at all, so it never
+# surfaced locally) -- gcc-multilib (the transitional/meta package)
+# unconditionally Conflicts: every gcc-N-<target>-linux-gnu cross
+# package, every GCC version, apt-cache show's own field says so
+# outright. gcc-13-multilib (the real, versioned package it depends on)
+# carries no such Conflicts at all -- same libc6-dev-i386/lib32gcc-13-dev
+# multilib support, verified live (a real `gcc -m32` build and run)
+# alongside gcc-aarch64-linux-gnu/gcc-arm-linux-gnueabihf/
+# gcc-mipsel-linux-gnu installed in the very same transaction.
+#
 # wabt: examples/wasm2mpy's own toolchain (wasm2c), pinned by nothing more
 # than "whatever Ubuntu 24.04 carries" -- deliberately, since that is the
 # same version build-examples.yml's own runner-level apt-get used to
@@ -68,7 +80,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     python3 \
-    gcc-multilib \
+    gcc-13-multilib \
     gcc-mingw-w64-x86-64 \
     gcc-mingw-w64-i686 \
     gcc-aarch64-linux-gnu \
