@@ -2047,15 +2047,21 @@ unconditionally).
   container, so nesting a second `docker run` from in there would need
   the host's Docker socket passed through -- fragile, avoidable by
   flipping which side runs bare).
-- `usermod/dockerrun.py` exists: a minimal, opt-in sibling-container
-  runner. Selected today only via `CIBMP_<PORT>_DOCKER_IMAGE` (e.g.
-  `CIBMP_UNIX_DOCKER_IMAGE=cibuildmp-unix:local`) -- no config-file
-  knob yet, deliberately, to prove the mechanism before it becomes a
-  real documented option. `build_unix()` in `usermod/build.py` checks
-  this env var and, when set, routes both `run_unix_deplibs()` and the
-  main `make` invocation through `dockerrun.run()` instead of a bare
-  `subprocess.run()`; unset (every real caller today), behaviour is
-  byte-for-byte unchanged.
+- `usermod/dockerrun.py` exists: a sibling-container runner with a real
+  resolver, migration step 2 (below), now implemented. `image_for_port()`
+  checks `CIBMP_<PORT>_DOCKER_IMAGE` first (an override for local
+  testing/forks), then falls back to `PORT_IMAGES`, a plain
+  `dict[str, str]` **in this file's own source** that a maintainer edits
+  to register a port's canonical image -- not a `cibuildmp.toml` key.
+  `PORT_IMAGES` is still empty today: `docker/unix.Dockerfile` exists and
+  builds correctly but isn't published to GHCR yet (step 5), and
+  registering "unix" before a real pullable image exists would make
+  every unopted-in `unix` usermod build start trying, and failing, to
+  pull it -- so `image_for_port()` still returns `None` for every real
+  caller today, unchanged. `build_unix()` in `usermod/build.py` checks
+  this and, when it returns an image, routes both `run_unix_deplibs()`
+  and the main `make` invocation through `dockerrun.run()` instead of a
+  bare `subprocess.run()`.
 - **`action.yml` is now a composite action -- migration step 1, done
   and live-verified on real CI, not just implemented.** `runs: using:
   "docker"` → `"composite"`, `entrypoint.sh` deleted (dead code,
@@ -2169,20 +2175,39 @@ followed by one big wiring pass at the end.
      below), but exactly the shape this migration would need to
      extend into if the Windows/macOS open question ever resolves
      towards "yes."
-2. **The Docker-image resolver becomes real and config-driven, proven
-   on `unix` before any other port gets a Dockerfile at all.** Today
-   `usermod/dockerrun.py`'s own `image_for_port()` only reads
-   `CIBMP_<PORT>_DOCKER_IMAGE` -- fine for a proof-of-concept, not a
-   real feature. This step: give it a real default per port (once
-   Docker is actually available on the runner -- **D30**'s own point 2
-   settles that Docker is required for usermod going forward, not
-   merely preferred), with the env var staying as the override for a
-   local/custom image, not the only way in. The user's own framing of
-   the payoff this unlocks for every port after this one: adding a new
-   port's support becomes "write one Dockerfile, then declare it in
-   the resolver" -- no new Python toolchain-resolution module, no
-   `host`/`download` probing logic duplicated per port, one artifact
-   instead of two.
+2. **The Docker-image resolver becomes real -- done.** `usermod/dockerrun.py`
+   now has `PORT_IMAGES: dict[str, str]`, a maintainer-owned mapping in
+   the module's own source, plus `image_for_port()` checking
+   `CIBMP_<PORT>_DOCKER_IMAGE` first (override) and falling back to
+   `PORT_IMAGES.get(port)` (the registered default). This is the literal
+   shape of the user's own framing: adding a new port's support becomes
+   "write one Dockerfile, then declare it in the resolver" -- a
+   one-line addition to `PORT_IMAGES`, a maintainer editing source, not
+   an end user's `cibuildmp.toml`.
+   - **A real misunderstanding, caught and corrected before any wrong
+     code shipped.** The first pass at this step started down a
+     config-file path instead -- threading a `docker-image` key through
+     `[usermod.<port>]` in `cibuildmp.toml`, `UsermodOptions.load()`, and
+     a new field on `UnixBuildOptions`, on the theory that "declare it in
+     the resolver" meant an end user's own config declaring which image
+     to use. The user stopped this immediately: *"Стоп при чому тут
+     конфіг???????"* / *"Я думав ми постачатимемо Dockerfile's для
+     портів а не юзер через конфіг додаватиме"* (I thought **we** would
+     ship the Dockerfiles for the ports, not that the user adds them via
+     config) -- "the resolver" is `dockerrun.py`'s own Python source;
+     "declare" means a maintainer registers a port's image there when
+     its Dockerfile lands, the same way `UNIX_ARCH_SETTINGS` in
+     `usermod/build.py` is itself a maintainer-owned dict, not a config
+     surface. No `Edit`/`Write` had happened yet under the wrong
+     reading -- caught at the investigation stage, corrected, and
+     re-implemented as `PORT_IMAGES` above. `tests/test_usermod_dockerrun.py`
+     covers all four cases (no override + no registration → host build;
+     registered default used; env override wins over a registered
+     default; an unregistered port with no override stays a host
+     build), and `PORT_IMAGES` stays empty until step 5 actually
+     publishes a pullable `unix` image -- registering it before that
+     would break every unopted-in `unix` build the moment this step
+     lands, not just when the port's own Dockerfile does.
 3. **The remaining four per-port Dockerfiles, one at a time, each
    immediately usable the moment it lands** (step 1 and 2 already
    wired the mechanism, so this stops being "write five images, then
@@ -2581,6 +2606,77 @@ conclusion.
   bare Windows/macOS CI runner) -- this is specifically about a
   Windows *developer's own machine* running Docker locally, a genuinely
   different case from CI.
+
+**D31 — `unix` usermod builds are glibc-only today; there is no
+musllinux-equivalent, and build identifiers carry no libc axis to name
+one even once it exists.** The user's own framing, directly: cibuildwheel
+distinguishes `manylinux`/`musllinux` in its own wheel tags because a
+compiled extension's libc linkage determines which host it actually runs
+on; `cibuildmp`'s own usermod identifiers (`targets.py`'s own
+`identifier` property, `{ABI}-{platform}_{arch}` shaped after
+cibuildwheel's `cp311-manylinux_x86_64`) have no equivalent axis at all
+-- `mpy6.3-usermod-unix-x64` says nothing about which libc the binary
+inside was linked against, because today there is only ever one answer.
+
+Verified live in this session, not assumed:
+
+- `x64`/`x86`/`aarch64` (`usermod/build.py`'s own `UNIX_ARCH_SETTINGS`)
+  build with a plain dynamic link. A real `v1.28.0` `ports/unix` build
+  confirmed via `ldd`: `libc.so.6`, `libffi.so.8`, and the dynamic
+  `ld-linux-x86-64.so.2` interpreter are all real runtime dependencies --
+  this binary will not run at all on a musl-only host (Alpine and
+  similar) with no glibc compatibility layer installed.
+- `armhf`/`mipsel` already build with `MICROPY_STANDALONE=1
+  LDFLAGS_EXTRA=-static` (**D20**'s own deplibs story) -- the natural
+  guess is that this already makes them musl-portable, since a fully
+  static ELF has no dynamic libc dependency at all. **That guess was
+  checked live and is wrong for this codebase.** Rebuilding `x64` with
+  the exact same static recipe still links and runs on the host
+  (confirmed: `file` reports "statically linked", the binary executes),
+  but the linker itself warns, for real, on this exact source:
+  `modffi.c`'s `ffimod_make_new` (the `ffi` module's own `dlopen()`,
+  a real, exercised usermod feature) and `modsocket.c`'s
+  `mod_socket_getaddrinfo` (`getaddrinfo()`) both print "requires at
+  runtime the shared libraries from the glibc version used for linking"
+  -- glibc's own NSS design loads its network/name-resolution backends
+  via `dlopen()` at runtime even from a "static" binary, so a fully
+  static glibc build is *not* actually libc-implementation-portable the
+  moment code reaches either function. `armhf`/`mipsel`'s own existing
+  "static" builds inherit this same latent gap and have never been
+  verified against a real musl host either -- this was not previously
+  known or documented anywhere in this codebase.
+- Not verified live: actually running a build under a real musl host
+  (Alpine). This sandbox's `docker` CLI has no reachable daemon
+  (`failed to connect to the docker API at unix:///var/run/docker.sock`)
+  -- the same gap **D28**'s own "Docker-daemon-reachability" question
+  hit earlier, resolved there only because a real GitHub Actions runner
+  was reachable to test against. Whoever picks this up should confirm
+  the `ldd`/linker-warning findings above against a real Alpine
+  container before trusting them as the final word.
+
+**The real fix is a musl toolchain, not a linker flag** -- `-static`
+alone was the tempting, cheap-looking answer and it does not work, per
+the live finding above. The natural place for this to live is exactly
+the container-per-port machinery **D26**/**D28** are already building:
+a second, Alpine-based image per arch (musl's own `gcc`, not Ubuntu's),
+registered in `usermod/dockerrun.py`'s own `PORT_IMAGES` (**D28** step 2,
+just implemented) the same one-line way a new port is declared today --
+except keyed by *(port, libc)*, not just *(port)*, since `unix` alone
+now needs two images (`docker/unix.Dockerfile` for glibc,
+`docker/unix-musl.Dockerfile` for musl) where every other port still
+needs one. `targets.py`'s own `identifier` property needs a matching new
+axis alongside `arch` (`mpy6.3-usermod-unix-x64-manylinux` /
+`-x64-musllinux`, cibuildwheel-shaped, defaulting to `manylinux` so every
+existing identifier stays valid unless a caller opts into `musllinux`
+explicitly) -- threading this through `UsermodOptions`/`orchestrate.py`'s
+own axis-override machinery (**D20**) the same way `arch`/`board` already
+work is real, multi-file work, not a one-line addition, and is explicitly
+**not attempted in this session**: it needs a real musl cross-toolchain
+resolved per arch, a real Dockerfile, and real verification against an
+actual musl host, none of which fit alongside the resolver fix above.
+Flagged here, precisely, so a future session designs the axis once
+rather than bolting it on ad hoc the way **D25**'s six bugs show what
+"discovered mid-flight" costs.
 
 - **M10** — runner/matrix integration, fan-out-by-default for usermod
   identifiers (**D20**).
