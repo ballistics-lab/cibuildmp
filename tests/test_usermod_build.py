@@ -6,19 +6,23 @@ from cibuildmp.toolchains import ResolvedToolchain
 from cibuildmp.usermod import build
 from cibuildmp.usermod.build import (
     UNIX_ARCH_SETTINGS,
+    Esp32BuildOptions,
     QemuBuildOptions,
     UnixBuildOptions,
     UsermodBuildError,
     WebassemblyBuildOptions,
+    build_esp32,
     build_qemu,
     build_unix,
     build_webassembly,
+    esp32_make_command,
     qemu_make_command,
     run_unix_deplibs,
     unix_make_command,
     webassembly_make_command,
 )
 from cibuildmp.usermod.emsdk import ResolvedEmsdk
+from cibuildmp.usermod.espidf import ResolvedEspIdf
 
 
 def opts(arch: str = "x64", **overrides) -> UnixBuildOptions:
@@ -342,3 +346,108 @@ def test_webassembly_build_failure_names_the_command(monkeypatch, tmp_path):
         build_webassembly(
             wasm_opts(build_dir=tmp_path / "build-wasm"), tmp_path / "mpy"
         )
+
+
+# ── esp32 ────────────────────────────────────────────────────────────────
+
+
+def esp32_opts(**overrides) -> Esp32BuildOptions:
+    defaults = {
+        "user_c_modules": "/gh/ws/micropython/usermod/micropython.cmake",
+        "frozen_manifest": "/gh/ws/a7p_manifest.py",
+    }
+    defaults.update(overrides)
+    return Esp32BuildOptions(**defaults)
+
+
+def fake_idf(tmp_path) -> ResolvedEspIdf:
+    return ResolvedEspIdf(idf_dir=tmp_path / "idf", tools_dir=tmp_path / "tools")
+
+
+def test_esp32_command_matches_build_usermod_esp32_shape():
+    # build-usermod-esp32's own "Build usermod" step -- no BUILD=
+    # override, matching its own documented reason not to pass one at all.
+    command = esp32_make_command(esp32_opts(), Path("/gh/ws/mpy"))
+
+    assert command == [
+        "make",
+        "-C",
+        "/gh/ws/mpy/ports/esp32",
+        "BOARD=ESP32_GENERIC",
+        "USER_C_MODULES=/gh/ws/micropython/usermod/micropython.cmake",
+        "FROZEN_MANIFEST=/gh/ws/a7p_manifest.py",
+    ]
+    assert not any(arg.startswith("BUILD=") for arg in command)
+
+
+def test_esp32_resolves_esp_idf_before_building(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_resolve(version, idf_target, **kwargs):
+        calls.append((version, idf_target))
+        return fake_idf(tmp_path)
+
+    monkeypatch.setattr(build.espidf, "resolve_esp_idf", fake_resolve)
+    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
+    monkeypatch.setattr(ResolvedEspIdf, "env", lambda self, base=None: {})
+
+    build_dir = tmp_path / "mpy" / "ports" / "esp32" / "build-ESP32_GENERIC"
+    build_dir.mkdir(parents=True)
+    (build_dir / "micropython.bin").write_bytes(b"")
+
+    build_esp32(esp32_opts(), tmp_path / "mpy")
+
+    assert calls == [("v5.5.1", "esp32")]
+
+
+def test_esp32_builds_and_returns_bin_path(monkeypatch, tmp_path):
+    build_dir = tmp_path / "mpy" / "ports" / "esp32" / "build-ESP32_GENERIC"
+    build_dir.mkdir(parents=True)
+    (build_dir / "micropython.bin").write_bytes(b"")
+
+    monkeypatch.setattr(
+        build.espidf, "resolve_esp_idf", lambda *a, **k: fake_idf(tmp_path)
+    )
+    monkeypatch.setattr(ResolvedEspIdf, "env", lambda self, base=None: {})
+    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
+
+    result = build_esp32(esp32_opts(), tmp_path / "mpy")
+
+    assert result == build_dir / "micropython.bin"
+
+
+def test_esp32_missing_bin_after_success_is_an_error(monkeypatch, tmp_path):
+    (tmp_path / "mpy" / "ports" / "esp32").mkdir(parents=True)
+
+    monkeypatch.setattr(
+        build.espidf, "resolve_esp_idf", lambda *a, **k: fake_idf(tmp_path)
+    )
+    monkeypatch.setattr(ResolvedEspIdf, "env", lambda self, base=None: {})
+    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
+
+    with pytest.raises(UsermodBuildError, match="build reported success but"):
+        build_esp32(esp32_opts(), tmp_path / "mpy")
+
+
+def test_esp32_build_failure_names_the_command(monkeypatch, tmp_path):
+    import subprocess as sp
+
+    def fake_run(cmd, **kwargs):
+        raise sp.CalledProcessError(1, cmd)
+
+    monkeypatch.setattr(
+        build.espidf, "resolve_esp_idf", lambda *a, **k: fake_idf(tmp_path)
+    )
+    monkeypatch.setattr(ResolvedEspIdf, "env", lambda self, base=None: {})
+    monkeypatch.setattr(build.subprocess, "run", fake_run)
+
+    with pytest.raises(UsermodBuildError, match="failed with exit code"):
+        build_esp32(esp32_opts(), tmp_path / "mpy")
+
+
+def test_esp32_custom_board_and_target():
+    command = esp32_make_command(
+        esp32_opts(board="ESP32S3_GENERIC"), Path("/gh/ws/mpy")
+    )
+
+    assert "BOARD=ESP32S3_GENERIC" in command

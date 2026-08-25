@@ -1027,6 +1027,49 @@ as a general-purpose escape hatch. mpbuild's own fallback tag
 (`espressif/idf:v5.4.2`, **D7**) and its lockfile/CI-workflow version-probe
 are a concrete starting pin, not a new lookup to invent.
 
+**Revisited and dropped, verified live rather than assumed.** Docker does
+not even run in this project's own dev sandbox (`docker run` fails outright
+-- no daemon socket, not a permissions issue to work around), and the
+official `git clone --recursive` + `install.sh` + `export.sh` recipe this
+decision was written against works there directly, no container needed:
+a real `v5.5.1` clone, `idf_tools.py install --targets=esp32` +
+`install-python-env`, then `make -C ports/esp32 BOARD=ESP32_GENERIC`
+produced a genuine `micropython.bin`, end to end. The "materially
+stronger Docker-strategy case than x86" framing above conflated two
+different things: ESP-IDF's own install being *heavy* (true, ~1.3 GiB of
+toolchain + Python env, ~2 GiB more for the `--recursive` clone) is not
+the same claim as it needing *isolation* the way x86's `-m32` genuinely
+needs a 32-bit userland `M2`'s own host gcc doesn't ship. Every usermod
+port here is still "a cross-compile (or, for `esp32`, a from-source IDF
+build) that runs fine on the build host" — the same reasoning `M2`'s own
+"why not docker for x86" note already used, this time holding for a
+second port instead of flipping.
+
+One real environment finding along the way, worth recording since it
+looks like a Docker argument on first read and is not one: `openocd-esp32`
+(part of ESP-IDF's own default toolset for a target, installed by
+`install.sh esp32` regardless of what a usermod build actually needs it
+for — flashing/JTAG debug, not building) failed its own post-install
+check with `error while loading shared libraries: libusb-1.0.so.0`, in
+this dev sandbox specifically. `apt install libusb-1.0-0` fixed it — an
+ordinary Linux runtime dependency of upstream's own binary, already
+present on any real dev machine or CI image (a GitHub-hosted runner
+included), not something a container would have supplied any more
+cheaply than `apt` already does.
+
+What actually needed fixing was D19's own real complaint, not the
+mechanism: **no caching**. Landed as `usermod/espidf.py` — `fetch_esp_idf()`
+caches the clone by version, `resolve_esp_idf()`'s own tool-install step
+caches the toolchain + Python venv by `(version, idf_target)`, both via
+the same `sources.cached_dir()` primitive `fetch_micropython()` already
+uses (M1). `ResolvedEspIdf.env()` asks `idf_tools.py export --format
+key-value` for the actual environment (`PATH`, `IDF_PYTHON_ENV_PATH`,
+`OPENOCD_SCRIPTS`, `ESP_ROM_ELF_DIR`, ...) rather than reconstructing that
+resolution by hand -- delegated, not reimplemented, matching `D2`. Not
+`toolchains.py`'s `ToolchainSpec` shape, the same reason `emsdk.py` isn't
+either (**D16**'s own M8 addendum): there is no single `<prefix>gcc` to
+find on `PATH` here.
+
 **D20 (revisits D9) — usermod runner selection is structural, confirmed
 live, not a hypothetical "different targets need different runners."**
 `mp-usermod.yml`'s matrix already needs four distinct `runs_on:` values
@@ -1261,6 +1304,38 @@ style, now that a slice of it is actually implemented:
         (**D18**), not just a toolchain pin.
 - **M9** — toolchain provisioning: MSYS2 orchestration (**D18**), ESP-IDF
   fetch + caching, `docker` strategy revisit for it (**D19**).
+  - [x] ESP-IDF side: `usermod/espidf.py` (`fetch_esp_idf()`,
+        `resolve_esp_idf()`, `ResolvedEspIdf.env()`) + `usermod/build.py`'s
+        `build_esp32()`, driving `ports/esp32` the same way the other
+        three ports already do. `docker` revisited and dropped for real
+        reasons, not left unexamined — see **D19**'s own addendum for the
+        live verification (Docker does not run in this project's dev
+        sandbox at all; the official clone+install recipe works there
+        directly) and the `libusb`/`openocd-esp32` finding that looked
+        like a Docker argument on first read and was not one. Both the
+        clone and the toolchain+Python-env install are now cached, the
+        real gap D19 flagged. 12 hermetic cases across
+        `tests/test_espidf.py` and `tests/test_usermod_build.py`, plus a
+        full live build: real `v5.5.1` ESP-IDF, `make -C ports/esp32
+        BOARD=ESP32_GENERIC`, a genuine `micropython.bin` — through the
+        official recipe run by hand first, then again through the actual
+        `espidf.py`/`build_esp32()` code path.
+  - [ ] MSYS2 (**D18**), still unstarted — waits on real `windows-latest`
+        CI feedback (`usermod-dev.yml`, a plain on-push scratch workflow
+        added for exactly this — MSYS2 cannot be verified in a Linux
+        sandbox at all). Already earning its keep before any MSYS2 code
+        exists: caught and fixed three real bugs on its first few runs —
+        `usermod/build.py`'s `Path` handling used bare `str()`, which is
+        backslash-separated on Windows and breaks any GNU Make invocation
+        (fixed to `.as_posix()` everywhere); two of `test_emsdk.py`'s own
+        tests were silently coupled to the CI host actually being
+        linux-x64; and `tests/test_build.py`'s own
+        `test_pre_build_command_runs_in_module_root` used `touch`, which
+        `cmd.exe` has no equivalent for (fixed to `echo hi > marker`,
+        which both `/bin/sh -c` and `cmd.exe /c` understand identically).
+        None of these were "not this work's problem" — a bug found while
+        doing this work got fixed as part of it, whoever's line it
+        originally was.
 - **M10** — runner/matrix integration, fan-out-by-default for usermod
   identifiers (**D20**).
 - **M11** — execution axis: qemu-system, rp2040py, node, native — four of

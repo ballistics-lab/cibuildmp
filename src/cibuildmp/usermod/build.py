@@ -30,7 +30,15 @@ attempted now since nothing here exercises it yet.
 own resolver, `usermod/emsdk.py` -- not `toolchains.py`'s shape, see that
 module's own docstring for why.
 
-`windows` is M8's own remaining scope, not started (waits on **M9**'s
+`esp32` (**D19**) is the fourth port: its toolchain (ESP-IDF) is a whole
+environment, not one `<prefix>gcc` -- `usermod/espidf.py` is its own
+resolver, the same split `emsdk.py` already uses for `webassembly`. Not
+part of **M8**'s original port list (`unix`/`webassembly`/`qemu`/
+`windows`) -- added alongside **M9**'s own ESP-IDF provisioning work,
+since a resolver with nothing driving a build through it proves less than
+one that does.
+
+`windows` is **M8**'s own remaining scope, not started (waits on **M9**'s
 MSYS2 orchestration, **D18**).
 
 Every `Path` embedded into a `make` command line here goes through
@@ -51,7 +59,7 @@ from pathlib import Path
 
 from .. import toolchains
 from ..toolchains import ResolvedToolchain
-from . import emsdk
+from . import emsdk, espidf
 
 
 class UsermodBuildError(Exception):
@@ -345,3 +353,82 @@ def build_webassembly(
             f"{produced} is missing"
         )
     return produced
+
+
+# ── esp32 ────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class Esp32BuildOptions:
+    user_c_modules: str
+    frozen_manifest: str
+    board: str = "ESP32_GENERIC"
+    idf_target: str = "esp32"
+    idf_version: str = "v5.5.1"
+    extra_make_args: tuple[str, ...] = ()
+
+
+def esp32_make_command(opts: Esp32BuildOptions, mpy_dir: Path) -> list[str]:
+    # No BUILD= override, even resolving to the exact value the port
+    # already defaults to: build-usermod-esp32's own comment documents a
+    # real CI failure this causes -- passing BUILD= at all (not what it's
+    # set to) makes the port's own internal CMake-driven mpy-cross
+    # sub-build pick up FROZEN_MANIFEST through MAKEFLAGS and fail with
+    # "undefined reference to mp_qstr_frozen_const_pool", a separate copy
+    # of the same symptom build_mpy_cross() being called explicitly,
+    # first, already prevents for the main mpy-cross build.
+    return [
+        "make",
+        "-C",
+        (mpy_dir / "ports" / "esp32").as_posix(),
+        f"BOARD={opts.board}",
+        f"USER_C_MODULES={opts.user_c_modules}",
+        f"FROZEN_MANIFEST={opts.frozen_manifest}",
+        *opts.extra_make_args,
+    ]
+
+
+def build_esp32(
+    opts: Esp32BuildOptions,
+    mpy_dir: Path,
+    *,
+    toolchain_root: Path | None = None,
+    quiet: bool = False,
+) -> Path:
+    """Build ports/esp32 for `opts.board`, returning the produced
+    `micropython.bin`.
+
+    ESP-IDF is resolved via `espidf.resolve_esp_idf()` -- clone + tool
+    install, both cached (D19's own real gap; the composite action this
+    is modelled on has none) -- not Docker; see `usermod/espidf.py`'s own
+    docstring for why.
+
+    mpy-cross is not built here either: `sources.build_mpy_cross()`
+    already does that, and must run *before* any ESP-IDF env is on
+    PATH -- mpy-cross is a host tool, and has no business being built
+    inside IDF's own Python/toolchain environment (same reasoning
+    `build_unix`'s own module docstring gives for natmod's build.py).
+
+    The output path is `mpy_dir / "ports" / "esp32" / "build-<BOARD>" /
+    "micropython.bin"` -- the port's own unmodified default build
+    directory, since nothing here overrides `BUILD=`.
+    """
+    idf = espidf.resolve_esp_idf(
+        opts.idf_version, opts.idf_target, root=toolchain_root, quiet=quiet
+    )
+
+    command = esp32_make_command(opts, mpy_dir)
+    try:
+        subprocess.run(command, env=idf.env(), check=True)
+    except subprocess.CalledProcessError as exc:
+        raise UsermodBuildError(
+            f"esp32/{opts.board}: `{' '.join(command)}` failed with exit "
+            f"code {exc.returncode}"
+        ) from exc
+
+    firmware = mpy_dir / "ports" / "esp32" / f"build-{opts.board}" / "micropython.bin"
+    if not firmware.exists():
+        raise UsermodBuildError(
+            f"esp32/{opts.board}: build reported success but {firmware} is missing"
+        )
+    return firmware
