@@ -14,6 +14,7 @@ name: usermod dev
 on:
   push:
     branches: [claude/cibuildmp-usermod-support-fvojm8]
+  workflow_dispatch:
 
 jobs:
   test:
@@ -34,3 +35,16 @@ jobs:
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - run: uv sync
       - run: uv run pytest -q
+
+  # Real MSYS2 + a full MicroPython compile, not the hermetic suite above
+  # -- only on demand (workflow_dispatch), too slow to run on every push.
+  # See scripts/windows_usermod_smoke.py's own docstring for why this
+  # exists as a throwaway script rather than a package entry point.
+  windows-live-build:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - run: uv sync
+      - run: uv run python .github/workflows/scripts/windows_usermod_smoke.py
