@@ -3263,13 +3263,40 @@ mid-flight" costs.
   `manylinux_2_31_armv7l` together in the one filename above, not a
   single flag) precisely so a checker can verify the binary's actual
   symbol versions against each floor independently, and a consumer
-  picks whichever floor its own host clears. Whoever designs the
-  identifier axis above should read PEP 600 itself before inventing
-  anything, and decide deliberately whether `cibuildmp`'s own
-  equivalent adopts that stacking shape, a simpler single-floor
-  version, or is accepted as an explicit non-goal for now -- not left
-  unstated by omission, and not a bespoke scheme that quietly diverges
-  from the convention it's visibly modeled on.
+  picks whichever floor its own host clears; **musllinux is the same
+  shape under a separate spec, PEP 656**, versioned against musl
+  releases instead of glibc ones. **Decided, not just raised: a future
+  session adopts this for real** -- the user's own explicit call, not
+  merely "worth considering." Whoever picks this up should read both
+  PEPs directly before designing anything (not re-derive the shape from
+  this summary alone), and start from how `cibuildwheel` itself
+  actually resolves them, checked live against a real `v4.2.0`
+  checkout, not assumed: it does **not** compute a floor at all --
+  `resources/defaults.toml` is a static, maintainer-curated table
+  (`manylinux-x86_64-image = "manylinux_2_28"`,
+  `manylinux-armv7l-image = "manylinux_2_31"`, one pinned image per
+  arch from the separate `pypa/manylinux` project, trusted rather than
+  verified at build time) that only decides *which base image* to
+  build inside; the real, computed answer -- what glibc/musl floor a
+  *just-built* binary's own symbols actually require -- comes from
+  shelling out to **`auditwheel repair`** (manylinux) /
+  `auditwheel repair --ldpaths` (musllinux) as the default
+  `repair-wheel-command`, an external CLI cibuildwheel merely invokes
+  as a subprocess inside the container, not a library it imports
+  (`packaging` *is* a real cibuildwheel dependency, but only for
+  `Version`/`SpecifierSet` version-range parsing -- unrelated to tag
+  resolution at all). `cibuildmp`'s own equivalent, if it follows this
+  precedent rather than reinventing it, is therefore two separate
+  pieces, not one: (1) a maintainer-curated `PORT_IMAGES`-shaped table
+  naming which base image backs each floor -- already exactly
+  `dockerrun.py`'s own shape, extended with a floor segment -- and (2)
+  a real post-build checker in that same spirit as `auditwheel` (built
+  on `pyelftools`-style ELF symbol-version inspection, since `unix`
+  produces a bare executable, not a wheel `auditwheel` itself knows how
+  to repair) that verifies a `micropython` binary's own actual glibc
+  symbol versions against the floor its image claims, rather than
+  trusting the claim silently the way today's plain "manylinux" label
+  does.
 
 - **M10** — runner/matrix integration, fan-out-by-default for usermod
   identifiers (**D20**).
