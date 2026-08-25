@@ -2821,12 +2821,39 @@ instead there -- slower, no GHA cache reachable from that job, but
 correct, and exactly the path a consumer with no published image of
 their own takes too.
 
-**Not yet done, flagged rather than assumed:** confirmed green on real
-CI as of this commit landing, not yet re-confirmed after -- there is no
-reachable Docker daemon in the sandbox this was written in (`docker
-info` fails to reach `/var/run/docker.sock`), so, same as every
-Dockerfile in D28's own migration, this is inferred correct from a live
-test run and unit coverage, not locally verified end to end by hand.
+**Two real bugs, both caught from actual CI logs, not guessed** (there is
+no reachable Docker daemon in the sandbox this was written in -- `docker
+info` fails to reach `/var/run/docker.sock` -- so every claim here is
+checked against a real run, not local reasoning):
+
+- The first push through this design broke 11 tests on real CI that
+  passed locally. Root cause: `usermod dev`'s own "test" job runs
+  `pytest` *inside a real GitHub Actions job*, where `GITHUB_ACTIONS=true`
+  is genuinely set -- so any test reaching `ensure_image()`'s default path
+  (no override, nothing registered) hit the real buildx+gha-cache branch,
+  where `_ensure_buildx_container_builder()`'s own
+  `subprocess.run(...).returncode` read broke against several
+  pre-existing tests' bare `lambda *a, **k: None` stub for
+  `subprocess.run` (fine before this branch existed, since nothing used
+  to read a return value). Fixed with an autouse fixture
+  (`tests/conftest.py`) clearing `GITHUB_ACTIONS` for every test by
+  default, verified this time by running the suite locally both with and
+  without `GITHUB_ACTIONS=true` set -- not just whichever one happened to
+  match the sandbox's own ambient environment, which is exactly the gap
+  that let this reach real CI at all.
+- With that fixed, `build-usermod-unix`'s own override path (the
+  `CIBMP_UNIX_*_MANYLINUX_DOCKER_IMAGE` env vars pointed at
+  `verify-docker-images`'s freshly-pushed images) failed for real:
+  `docker: Error response from daemon: ... unauthorized` pulling
+  `ghcr.io/ballistics-lab/cibuildmp-unix-manylinux-x64:sha-<gitsha>`.
+  `verify-docker-images` logs into `ghcr.io` before its own push;
+  `build-usermod-unix` never did, so `dockerrun.run()`'s `docker run
+  --pull missing` hit an unauthenticated pull against what GHCR treats as
+  a private package by default, even for a package this same repository
+  owns. Fixed by adding the same `docker/login-action@v3` step (`if:
+  github.event_name == 'push'`, matching the env vars it unblocks) plus
+  `permissions: packages: read` to `build-usermod-unix`.
+
 `windows`/`qemu`/`webassembly` wiring, and `PORT_IMAGES` actually being
 registered (still empty -- `ensure_image()`'s local build is the thing
 proving the path works at all now, registering a maintained default on

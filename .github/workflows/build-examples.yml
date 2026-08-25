@@ -150,8 +150,25 @@ jobs:
   build-usermod-unix:
     runs-on: ubuntu-latest
     needs: verify-docker-images
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: actions/checkout@v7
+
+      # verify-docker-images pushes these as private GHCR packages by
+      # default (an unauthenticated `docker pull` -- what `docker run
+      # --pull missing` does inside dockerrun.run() -- fails "unauthorized"
+      # even for a package this same repo owns, caught live: the very
+      # first run through this job's own override wiring). Only needed on
+      # a push event, matching the env vars below that are the only thing
+      # that could ever trigger a real pull here.
+      - uses: docker/login-action@v3
+        if: ${{ github.event_name == 'push' }}
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
 
       - name: Build examples/usermod-unix
         # No CIBMP_VERSION here -- usermod output has no package.json to
