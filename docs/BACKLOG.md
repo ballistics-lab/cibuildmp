@@ -2288,28 +2288,42 @@ unconditionally).
     with `Failed to save: Unable to reserve cache with key
     apt-archives-Linux-<hash>, another job may be creating this cache`
     -- and there is never a single "cache restored"/"cache hit" line
-    for that key anywhere. The cause: this session pushed five commits
-    in quick succession, several of which didn't touch `action.yml` at
-    all, so multiple `build-examples.yml` runs across *different*
-    commits ended up racing each other for the exact same
-    hash-derived cache key at overlapping times (confirmed separately:
-    `action.yml`'s own composite action also runs 3 times *within* one
+    for that key anywhere, on any of the (several, individually
+    checked) runs this session pushed. The cause: seven commits landed
+    in about 15 minutes, most sharing an unchanged `action.yml` (hence
+    an identical hash-derived cache key), so multiple
+    `build-examples.yml` runs raced each other to reserve+save it.
+    **Not just simple two-run overlap, checked and ruled out as the
+    whole story**: one run (`3f66aa6`) still failed all three of its
+    own save attempts even though its own save-phase timestamps don't
+    clearly overlap any single other run's own save phase -- consistent
+    with GitHub's own cache API leaving a *stuck* reservation (a
+    `reserve` that never reaches a completed `commit`, from an earlier
+    run in the same pileup) rather than every failure being a clean
+    two-way race at that exact instant. (Also confirmed separately:
+    `action.yml`'s own composite action runs 3 times *within* one
     `build` job -- template/wasm2mpy/usermod-unix -- each with its own
-    identical-keyed "Cache apt archives" step; harmless in the
-    non-racing case, since only the first of the three needs to
-    actually win the save and the other two see the key already exists
-    and skip cleanly, but indistinguishable in the logs from a real
-    cross-run collision without checking timestamps). **Fixed**:
-    `build-examples.yml` and `usermod-dev.yml` both now have a real
-    `concurrency:` block (`group: <workflow>-${{ github.workflow }}-${{
-    github.ref }}`, `cancel-in-progress: true`), the same pattern
-    `publish.yml` already used -- a superseded run on the same branch
-    gets cancelled outright instead of racing the newer one, so only
-    one run per branch is ever trying to save this key at a time.
-    Not yet confirmed live whether this alone makes the very next push
-    actually save and reuse the cache -- watch the next real run's own
-    logs for a genuine "Cache restored"/hit line before trusting it,
-    the same discipline that caught this bug in the first place.
+    identical-keyed "Cache apt archives" step; harmless on its own,
+    since only the first of the three needs to actually win the save
+    and the other two would see the key already exists and skip
+    cleanly -- but every one of the three failed here too, on every run
+    checked, which is itself part of what points at a stuck reservation
+    rather than a plain race.) **Fix attempted**: `build-examples.yml`
+    and `usermod-dev.yml` both now have a real `concurrency:` block
+    (`group: <workflow>-${{ github.workflow }}-${{ github.ref }}`,
+    `cancel-in-progress: true`), the same pattern `publish.yml` already
+    used -- a superseded run on the same branch gets cancelled outright
+    instead of racing the newer one, live-confirmed to actually cancel
+    a run (`3c1b389`'s own run was cancelled the moment `160a361` was
+    pushed). **Still not confirmed whether this alone clears a stuck
+    reservation left over from before the fix landed, only that it
+    stops new ones from piling up** -- `160a361` is the first run with
+    no cancelled/racing predecessor of its own, watch its own "build"
+    job logs for a genuine "Cache restored"/hit line specifically
+    before trusting this is actually fixed; if it still fails, the
+    stuck reservation itself may need to simply age out (GitHub's own
+    cache API does not document a way to manually clear one) before any
+    run can win it, independent of whether the race itself is fixed.
 
 **The full migration plan, in dependency order -- reordered from the
 first pass above, per the user's own explicit follow-up.** The
