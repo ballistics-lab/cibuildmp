@@ -116,37 +116,37 @@ from .build import UsermodBuildError
 PORT_IMAGES: dict[str, str] = {
     "unix-x64-manylinux": (
         "ghcr.io/ballistics-lab/cibuildmp-unix-manylinux-x64"
-        "@sha256:1eb0c762936634c9a38adad5713fe02956ef1ac15af257157d26b77d6fc19cd4"
+        "@sha256:0fefebe8221c1f942114705f8eed42981e6efc4889f8989c9c0b6d86a4fe7d75"
     ),
     "unix-x86-manylinux": (
         "ghcr.io/ballistics-lab/cibuildmp-unix-manylinux-x86"
-        "@sha256:ea312535ea59f78e72e5294920a794ec5fc8acfc1b4733a142a24a53ab317fd0"
+        "@sha256:076b3654a34b6d3a0748f9cb663764bbec9021fa6c42bd4401d498fc6ffbd817"
     ),
     "unix-aarch64-manylinux": (
         "ghcr.io/ballistics-lab/cibuildmp-unix-manylinux-aarch64"
-        "@sha256:72979c6af3311b312101f37c9a5a28d1476d4b1883a3c7b98b8f6325a915726f"
+        "@sha256:be6719bfbeb03f97b16c5728526aa5a752527faaf7557ee0d688ecf1bfaad27e"
     ),
     "unix-armhf-manylinux": (
         "ghcr.io/ballistics-lab/cibuildmp-unix-manylinux-armhf"
-        "@sha256:773a9b0220b8be8e6d76ba6878a596e85bd360c2e18538398c78908af8c8d27c"
+        "@sha256:07374b6efa6146a81a263784b11b6f56ed73eb7764a5c7179edf49edd708b91d"
     ),
     "unix-mipsel-manylinux": (
         "ghcr.io/ballistics-lab/cibuildmp-unix-manylinux-mipsel"
-        "@sha256:c4055efd0ccbd9a4d4d341d6969ee7577d009be190ac174f71e11fe6dfcba14b"
+        "@sha256:427733939aa102405694aa88975278f3f813cc6820d4196187fbe959e1d459c5"
     ),
     # windows-x64/windows-x86 share one combined image (D28 step 3 --
     # this port has no manylinux/musllinux-shaped axis to split on).
     "windows-x64": (
         "ghcr.io/ballistics-lab/cibuildmp-windows"
-        "@sha256:af86047e93e3f7cdf9460674d30c475ab6916277d8684643d63af80258bf350a"
+        "@sha256:2d457b52df9089138d8d85d124026db693c026fc8e41cc84da01e9044f71ec85"
     ),
     "windows-x86": (
         "ghcr.io/ballistics-lab/cibuildmp-windows"
-        "@sha256:af86047e93e3f7cdf9460674d30c475ab6916277d8684643d63af80258bf350a"
+        "@sha256:2d457b52df9089138d8d85d124026db693c026fc8e41cc84da01e9044f71ec85"
     ),
     "qemu": (
         "ghcr.io/ballistics-lab/cibuildmp-qemu"
-        "@sha256:3f204e274f36f15cdd478c9f2a55af3833359568c196955057cf5a2cc31cc336"
+        "@sha256:65cfe7f8882363dc969e8ef93215e0a19f4cc02ab4ff5f103ef6fe80bf81bb12"
     ),
     "webassembly": (
         "ghcr.io/ballistics-lab/cibuildmp-webassembly"
