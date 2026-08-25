@@ -178,10 +178,27 @@ def build_one(
     build_fn = _BUILD_FN[target.port]
     produced = build_fn(port_opts, mpy_dir, toolchain_root=toolchain_root, quiet=quiet)
 
-    identifier_dir = options.output_dir / target.identifier
+    # options.output_dir is deliberately relative ("mpyhouse" by default,
+    # D-shared with natmod's own DEFAULT_OUTPUT_DIR) -- resolved against
+    # package_dir, not the process's own cwd, the same join natmod's own
+    # cli.py does (`options.package_dir / build_options.output_dir`)
+    # before calling collect_output(). A real Docker-action run is what
+    # caught this: cwd there is always the repo root, not package_dir, so
+    # an unjoined output_dir silently wrote to <repo-root>/mpyhouse
+    # instead of <package_dir>/mpyhouse -- invisible in every earlier
+    # verification in this session, which always ran with cwd ==
+    # package_dir.
+    identifier_dir = options.package_dir / options.output_dir / target.identifier
     identifier_dir.mkdir(parents=True, exist_ok=True)
     dest = identifier_dir / _dest_name(produced, target.identifier)
-    shutil.copyfile(produced, dest)
+    # shutil.copy(), not copyfile(): unlike natmod's own .mpy (always
+    # mip.install()-ed or imported, never executed directly -- D23), a
+    # usermod build's own output IS a runnable binary. copyfile() only
+    # copies content, not the executable bit `produced` already has --
+    # confirmed live, a real collected unix-x64 binary silently coming
+    # out `-rw-r--r--` and failing "Permission denied" on the very first
+    # attempt to run it.
+    shutil.copy(produced, dest)
 
     return UsermodBuildResult(
         identifier=target.identifier, output=dest, duration=time.time() - start

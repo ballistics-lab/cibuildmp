@@ -201,3 +201,67 @@ def test_build_fetches_micropython_and_builds_mpy_cross_once(tmp_path, monkeypat
     assert calls == [("fetch", "v1.28.0"), ("mpy-cross", mpy_dir)]
     assert len(results) == 1
     assert results[0].identifier == "unix-x64"
+
+
+def test_build_one_resolves_relative_output_dir_against_package_dir(
+    tmp_path, monkeypatch
+):
+    # Regression check: a real Docker-action run caught this -- process
+    # cwd there is always the repo root, not package_dir, so a relative
+    # output_dir (the real default, "mpyhouse") must resolve against
+    # package_dir, not the bare cwd. This session's own default-output_dir
+    # tests all set an absolute output_dir directly, which never exercised
+    # the bug (Path("x") / "/abs" == "/abs" regardless of the left side).
+    package_dir = tmp_path / "pkg"
+    make_module_dir(package_dir)
+    write_config(package_dir, '[usermod]\nports = ["unix"]\n')
+    options = UsermodOptions.load(package_dir)
+    options.output_dir = Path("mpyhouse")  # relative, the real default
+
+    mpy_dir = tmp_path / "mpy"
+    target = UsermodTarget(port="unix", arch="x64")
+
+    def fake_run(cmd, **kwargs):
+        build_dir = mpy_dir / "ports" / "unix" / "build-unix-x64"
+        build_dir.mkdir(parents=True, exist_ok=True)
+        (build_dir / "micropython").write_bytes(b"\x7fELF")
+
+    monkeypatch.setattr(build_module.subprocess, "run", fake_run)
+    (mpy_dir / "ports" / "unix").mkdir(parents=True)
+
+    result = build_one(options, target, mpy_dir)
+
+    assert result.output == package_dir / "mpyhouse" / "unix-x64" / (
+        "micropython-unix-x64"
+    )
+    assert not (tmp_path / "mpyhouse").exists()  # not resolved against cwd/tmp_path
+
+
+def test_build_one_preserves_executable_bit(tmp_path, monkeypatch):
+    # Regression check: shutil.copyfile() copies content only, not mode --
+    # a real collected unix-x64 binary came out `-rw-r--r--`, unrunnable,
+    # caught only by actually trying to execute it after a real CLI build.
+    # Unlike natmod's own .mpy (never executed directly, D23), a usermod
+    # build's output IS meant to be run.
+    package_dir = tmp_path / "pkg"
+    make_module_dir(package_dir)
+    write_config(package_dir, '[usermod]\nports = ["unix"]\n')
+    options = UsermodOptions.load(package_dir)
+    options.output_dir = tmp_path / "mpyhouse"
+
+    mpy_dir = tmp_path / "mpy"
+    target = UsermodTarget(port="unix", arch="x64")
+
+    def fake_run(cmd, **kwargs):
+        build_dir = mpy_dir / "ports" / "unix" / "build-unix-x64"
+        build_dir.mkdir(parents=True, exist_ok=True)
+        produced = build_dir / "micropython"
+        produced.write_bytes(b"\x7fELF")
+        produced.chmod(0o755)
+
+    monkeypatch.setattr(build_module.subprocess, "run", fake_run)
+    (mpy_dir / "ports" / "unix").mkdir(parents=True)
+
+    result = build_one(options, target, mpy_dir)
+
+    assert result.output.stat().st_mode & 0o111 != 0
