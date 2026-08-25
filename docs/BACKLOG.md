@@ -2121,9 +2121,43 @@ unconditionally).
    assuming), then invoke it directly. `entrypoint.sh`'s own
    input-parsing logic (the `INPUT_PACKAGE-DIR` etc. env-var reading,
    including the documented bash-not-dash requirement) moves into a
-   composite action's own `run:` step, which gets real named `inputs.*`
-   context instead of raw env vars -- likely simpler, not just moved,
-   worth revisiting rather than transcribing verbatim.
+   composite action's own `run:` step -- and this is not just a move,
+   it genuinely simplifies, confirmed against `pypa/cibuildwheel`'s
+   own real `action.yml` (the user supplied its actual source directly,
+   not a description of it): a composite action's own step-level
+   `env:` block maps `${{ inputs.package-dir }}` to *any* env var name
+   the step chooses, e.g. `INPUT_PACKAGE_DIR` with an underscore --
+   cibuildwheel's own action does exactly this. That sidesteps
+   `entrypoint.sh`'s whole `printenv 'INPUT_PACKAGE-DIR'` workaround
+   entirely, not just moves it: the hyphen problem only exists because
+   a *Docker* action's auto-generated `INPUT_<NAME>` env vars keep the
+   input's own hyphens verbatim (undocumented by GitHub, found the hard
+   way, `entrypoint.sh`'s own header comment has the full story) --
+   nothing forces a composite action's own `env:` block to reuse that
+   same broken naming, so the new composite `action.yml` should define
+   clean, underscored env var names explicitly from the start rather
+   than reproducing the workaround.
+   - Two more real patterns worth deliberately deciding on, not just
+     copying, from that same cibuildwheel `action.yml`: it builds an
+     **isolated venv** per run (`venv.EnvBuilder`, installed into
+     `$RUNNER_TEMP`) and exposes only the `cibuildwheel` binary (plus
+     `uv` if requested via `extras`) on `PATH`, rather than a plain
+     `pip install`/`uv tool install` into whatever Python the runner
+     already has -- avoids polluting a job's own Python environment
+     with `cibuildmp`'s own dependencies, relevant since composite
+     actions run directly on the bare runner (unlike today's Docker
+     action, where the whole container is disposable and pollution
+     never mattered). Decide deliberately whether `cibuildmp` needs
+     the same isolation or whether `uv tool install`'s own existing
+     isolation (already a separate venv under `~/.local/share/uv/tools`,
+     not the runner's system Python) already covers it -- plausibly
+     yes, worth confirming rather than assuming either way.
+   - It also branches explicitly on `runner.os == 'Windows'` (`pwsh`
+     vs `bash`, quoting rules genuinely differ) -- irrelevant to
+     `cibuildmp` today (Linux-runner-only, per the open questions
+     below), but exactly the shape this migration would need to
+     extend into if the Windows/macOS open question ever resolves
+     towards "yes."
 4. **`cibuildmp` itself picks the right per-port image per target,**
    by default, once `--platform usermod` (or config-driven mode
    detection) is active and Docker is available on the runner --
