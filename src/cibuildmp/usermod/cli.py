@@ -30,7 +30,12 @@ from ..natmod.toolchains import ToolchainError
 from . import orchestrate
 from .build import UsermodBuildError
 from .options import UsermodOptions
-from .targets import UnknownAxisError, UnknownPortError, UsermodTarget
+from .targets import (
+    UnknownAxisError,
+    UnknownPortError,
+    UsermodTarget,
+    all_usermod_targets,
+)
 
 
 def _plan_line(index: int, total: int, target: UsermodTarget) -> str:
@@ -54,13 +59,23 @@ def run(
         return 2
 
     if args.only is not None:
-        # Same --only semantics as natmod's own (cli.main()): the caller
-        # already decided what this invocation is for.
-        targets = [t for t in targets if t.identifier == args.only]
+        # **0045**: resolved against every identifier that exists, not the
+        # ones this config selects -- and bypassing `build`/`skip`
+        # entirely, which is what this flag's own help has always claimed
+        # and did not do. `options.targets()` above has already applied
+        # them, so filtering *that* could never override anything.
+        #
+        # cibuildwheel's own shape: its `--only` takes `choices` from
+        # `read_all_configs()` and its help says "Overrides
+        # CIBW_BUILD/CIBW_SKIP". "Your config does not select that" is not
+        # an answer the flag should be able to give.
+        known = all_usermod_targets()
+        targets = [t for t in known if t.identifier == args.only]
         if not targets:
             print(
-                f"cibuildmp: error: --only {args.only!r} matches no usermod "
-                f"target this config can produce",
+                f"cibuildmp: error: --only {args.only!r} is not a known usermod "
+                f"identifier. Known: "
+                f"{', '.join(t.identifier for t in known)}",
                 file=sys.stderr,
             )
             return 2

@@ -328,19 +328,30 @@ from the archive when superseded.
   does it in one pass).
 - Every consuming repo's `unix` identifiers change. [0038]'s three repos pin
   cibuildmp and name identifiers in their own workflows.
-- `usermod/targets.py`'s `default_runner` is still a hardcoded
-  `"ubuntu-latest"`, which is what [0043] noticed first. Nothing here needs it
-  to change — the point is that the same config works on either runner — but
-  cibuildmp still cannot *emit* an arm64 runner the way natmod's `runs-on` knob
-  can.
+- ~~`usermod/targets.py`'s `default_runner` is still a hardcoded
+  `"ubuntu-latest"`~~ — **half closed.** It is arch-aware now: `aarch64` and
+  `armv7l` targets name `ubuntu-24.04-arm`, everything else keeps
+  `ubuntu-latest`, so `--print-build-matrix` emits a per-leg runner and an
+  `aarch64` build becomes native instead of ~20x emulated. Two things remain:
+  there is still no per-target config override the way natmod has `runs-on`,
+  and **`armv7l`'s inclusion is a bet rather than a certainty** — a 32-bit ARM
+  binary is native on an arm64 host only if the CPU implements AArch32 at EL0,
+  which server-class parts generally do not. cibuildwheel treats this as a real
+  hazard, carrying an explicit AArch32 EL0 check in
+  `Architecture.bitness_archs()` for exactly ARM64 Linux. If the bet does not
+  pay off the cost is nil (emulated either way) and that entry moves back.
 - **`--only` cannot reach an opt-in cell**, found while verifying musllinux
   here: `--only unix-musllinux_1_2_x86_64` answers "matches no usermod target
   this config can produce", because it filters the axis the config selected
   rather than overriding it. cibuildwheel's own `--only` does override
   architecture selection outright, so this is a real parity gap rather than a
   preference — and it makes every one of the ten opt-in cells unreachable
-  without editing `cibuildmp.toml`. Not fixed here; it belongs to the
-  selector machinery, not to the image model.
+  without editing `cibuildmp.toml`. Not fixed here; it belongs to the selector
+  machinery, not to the image model, and now has its own record: [0045],
+  which also found that the in-code comment claiming cibuildwheel parity for
+  this flag is wrong on both counts.
+
+[0045]: 0045-only-is-a-filter-not-a-forced-identifier.md
 - The `unix` default axis is the old five translated one-for-one, not the new
   fifteen: defaulting to the whole matrix would turn one `ports = ["unix"]` line
   into fifteen mostly-emulated builds. Whether native-only-by-default

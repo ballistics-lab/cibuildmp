@@ -218,15 +218,21 @@ def run(
         return 2
 
     if args.only is not None:
-        # --only overrides build/skip, matching cibuildwheel's own semantics
-        # for the flag: the caller has already decided what this invocation
-        # is for, and a matrix leg that reached here was selected when the
-        # matrix was generated.
-        targets = [t for t in targets if t.identifier == args.only]
+        # --only overrides archs/build/skip and is resolved against every
+        # identifier this config can name, not the ones it selects
+        # (**0045**). The comment that used to sit here claimed exactly
+        # this as already-matching cibuildwheel semantics, and it was not:
+        # `options.targets()` above has already applied `build`/`skip`, so
+        # filtering *that* list could never override them, and a target
+        # dropped by `skip` was gone before this line ran. A divergence
+        # documented as parity is worse than an open one.
+        known = options.all_targets()
+        targets = [t for t in known if t.identifier == args.only]
         if not targets:
             print(
-                f"cibuildmp: error: --only {args.only!r} matches no target this "
-                f"config can produce",
+                f"cibuildmp: error: --only {args.only!r} is not a known "
+                f"identifier. Known: "
+                f"{', '.join(t.identifier for t in known)}",
                 file=sys.stderr,
             )
             return 2

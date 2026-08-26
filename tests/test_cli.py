@@ -63,15 +63,71 @@ def test_dry_run_spans_multiple_micropython_tags(tmp_path, capsys):
 
 
 def test_only_overrides_skip(tmp_path, capsys):
-    config = CONFIG + '\nskip = "*-armv6m"\n'
+    # `skip` goes **above** `[natmod]`, not appended to CONFIG. This test
+    # used to append it, which put it inside the `[natmod]` table -- where
+    # natmod never reads it (`opt()` resolves against the top level, while
+    # `archs` alone also falls back to `natmod.get("archs")`). The skip was
+    # therefore never applied and this case passed without testing
+    # anything. Found while writing 0045; the placement asymmetry itself is
+    # its own bug, see 0048.
+    config = 'micropython = "v1.28.0"\nskip = "*-armv6m"\n'
+    config += '[natmod]\narchs = ["x64", "armv6m"]\n'
     argv = [write(tmp_path, config), "--only", "mpy6.3-natmod-armv6m", "--dry-run"]
     assert main(argv) == 0
     assert "ARCH=armv6m" in capsys.readouterr().out
 
 
 def test_only_unknown_identifier_is_an_error(tmp_path, capsys):
-    assert main([write(tmp_path, CONFIG), "--only", "mpy6.3-natmod-xtensa"]) == 2
-    assert "matches no target" in capsys.readouterr().err
+    # A real arch under a real ABI is *not* the unknown case any more
+    # (0045) -- see test_only_reaches_an_arch_outside_the_config below.
+    # This is a name no config can produce at all.
+    assert main([write(tmp_path, CONFIG), "--only", "mpy6.3-natmod-sparc"]) == 2
+    err = capsys.readouterr().err
+    assert "is not a known identifier" in err
+    assert "mpy6.3-natmod-xtensa" in err
+
+
+def test_only_reaches_an_arch_outside_the_config(tmp_path, capsys):
+    # **0045**: `--only` overrides `archs`/`build`/`skip` and resolves
+    # against every identifier this config can name, matching what the
+    # flag's own help always claimed. `xtensa` is not in CONFIG's own
+    # `archs = ["x64", "armv6m"]`, and naming it directly must still work
+    # -- cibuildwheel's `--only` takes its choices from
+    # `read_all_configs()` and its `--arch` is *computed from* the
+    # identifier rather than checked against it.
+    assert (
+        main(
+            [
+                write(tmp_path, CONFIG),
+                "--only",
+                "mpy6.3-natmod-xtensa",
+                "--print-build-identifiers",
+            ]
+        )
+        == 0
+    )
+    assert capsys.readouterr().out.split() == ["mpy6.3-natmod-xtensa"]
+
+
+def test_only_overrides_skip_for_print_build_identifiers(tmp_path, capsys):
+    # Same override, exercised through --print-build-identifiers rather
+    # than --dry-run. Note the placement again: top level, above
+    # `[natmod]`, because that is the only place natmod reads `skip` at
+    # all (0048).
+    config = 'micropython = "v1.28.0"\nskip = "mpy6.3-natmod-x64"\n'
+    config += '[natmod]\narchs = ["x64", "armv6m"]\n'
+    assert (
+        main(
+            [
+                write(tmp_path, config),
+                "--only",
+                "mpy6.3-natmod-x64",
+                "--print-build-identifiers",
+            ]
+        )
+        == 0
+    )
+    assert capsys.readouterr().out.split() == ["mpy6.3-natmod-x64"]
 
 
 def test_bad_arch_is_an_error(tmp_path, capsys):

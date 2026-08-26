@@ -67,80 +67,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # D28's own per-(port, arch) Docker images (docker/*.Dockerfile, repo
-  # root -- see pyproject.toml's own comment for why they moved out of
-  # src/cibuildmp/resources/). Build-only, on every push AND pull_request
-  # (a fork's own PR included -- no registry credentials needed for a
-  # build that never pushes), catching a broken Dockerfile fast, on the
-  # PR itself, the same "surfaces before release time, not after" split
-  # publish.yml's own build job already documents for the same reason.
-  #
-  # Publishing is a genuinely separate concern now, not this job's own
-  # `push: true` branch any more: .github/workflows/publish-docker-images.yml
-  # is the "real, out-of-band maintainer task" cibuildwheel's own
-  # bin/update_docker.py is for quay.io's manylinux/musllinux pins --
-  # triggered by a push to main, not every push to every branch, and
-  # pins by digest, not `:sha-<gitsha>`/`:latest`. `usermod/dockerrun.py`'s
-  # own PORT_IMAGES is what a maintainer updates from that workflow's own
-  # output; nothing here feeds it any more (the CIBMP_*_DOCKER_IMAGE
-  # override dance that used to point build-usermod at this job's own
-  # per-push GHCR pushes is gone -- a real end user was never going to
-  # think about that env var, and cibuildwheel's own container runtime
-  # never builds an image to begin with, only ever pulls a pin).
-  verify-docker-images:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    strategy:
-      # One arch's upstream base going missing should not cancel the
-      # seventeen cells that are fine -- and with emulated builds in the
-      # matrix, a cancelled run wastes far more than it saves.
-      fail-fast: false
-      matrix:
-        # Record 0043: same eighteen (image, platform) pairs
-        # publish-docker-images.yml pushes, build-checked here on every
-        # push instead. The platform matters as much as the file does now
-        # -- a `manylinux_2_28_aarch64` that only builds as amd64 is not
-        # the image that cell means, and without `platforms:` that is
-        # silently what a build on an amd64 runner would produce.
-        include:
-          - { image: manylinux_2_28_x86_64, platform: linux/amd64 }
-          - { image: musllinux_1_2_x86_64, platform: linux/amd64 }
-          - { image: manylinux_2_28_i686, platform: linux/386 }
-          - { image: musllinux_1_2_i686, platform: linux/386 }
-          - { image: manylinux_2_28_aarch64, platform: linux/arm64 }
-          - { image: musllinux_1_2_aarch64, platform: linux/arm64 }
-          - { image: manylinux_2_28_ppc64le, platform: linux/ppc64le }
-          - { image: musllinux_1_2_ppc64le, platform: linux/ppc64le }
-          - { image: manylinux_2_28_s390x, platform: linux/s390x }
-          - { image: musllinux_1_2_s390x, platform: linux/s390x }
-          - { image: manylinux_2_31_armv7l, platform: linux/arm/v7 }
-          - { image: musllinux_1_2_armv7l, platform: linux/arm/v7 }
-          - { image: manylinux_2_39_riscv64, platform: linux/riscv64 }
-          - { image: musllinux_1_2_riscv64, platform: linux/riscv64 }
-          - { image: manylinux_2_39_mipsel, platform: linux/amd64 }
-          - { image: windows, platform: linux/amd64 }
-          - { image: qemu, platform: linux/amd64 }
-          - { image: webassembly, platform: linux/amd64 }
-    steps:
-      - uses: actions/checkout@v7
-
-      # Needed to build a non-amd64 image at all: the `dnf`/`apk` step
-      # inside those bases runs foreign binaries.
-      - uses: docker/setup-qemu-action@v4
-
-      - uses: docker/setup-buildx-action@v4
-
-      - name: docker build docker/${{ matrix.image }}.Dockerfile
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: docker/${{ matrix.image }}.Dockerfile
-          platforms: ${{ matrix.platform }}
-          push: false
-          cache-from: type=gha,scope=${{ matrix.image }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
-
   build:
     runs-on: ubuntu-latest
     steps:
@@ -179,16 +105,19 @@ jobs:
           cat examples/template/mpyhouse/*/package.json
 
   # Split from `build` above rather than added as one more step there:
-  # dockerrun.ensure_image() (D28's own next step) now backs the usermod
-  # side of examples/template by default, so this needs
-  # verify-docker-images to actually be worth anything -- without that
-  # dependency, this job's own five docker builds would just redo,
-  # uncached, on a second GitHub runner with no shared Docker daemon, the
-  # exact work verify-docker-images already did *with* a real cache
-  # (type=gha) and already pushed to GHCR. `build` above only exercises
-  # examples/template's own natmod side plus wasm2mpy, neither of which
-  # touches Docker at all, so they stay in their own job rather than
-  # getting pulled into this wait too.
+  # the usermod side of examples/template runs every build inside a
+  # container (D26/D30), while `build` above exercises only the natmod
+  # side plus wasm2mpy, neither of which touches Docker at all. Keeping
+  # them separate is what lets the Docker-shaped half fan out per target
+  # without dragging the other two into the same wait.
+  #
+  # The paragraph that used to sit here argued this job needed
+  # `verify-docker-images` so its own docker builds would not "redo,
+  # uncached, the work that job already did". That is no longer what
+  # happens at all: cibuildmp builds no image (record 0033 removed the
+  # fallback) and pulls a published digest instead, so there is no local
+  # build to share a cache with. See the note on the removed `needs:`
+  # below.
   #
   # webassembly is the second usermod port wired to ensure_image()'s
   # Docker path (D26's own "one port, proven live, before the next" --
@@ -198,34 +127,87 @@ jobs:
   # works end to end against a real pushed image, not just that the
   # Dockerfile builds.
   #
-  # No docker/login-action, no CIBMP_*_DOCKER_IMAGE overrides pointed at
-  # verify-docker-images' own pushed :sha-<sha> tags -- the user's own
-  # call, checked against cibuildwheel's real source first: cibuildwheel
-  # never builds its own manylinux/musllinux images at runtime at all
-  # (zero `docker build`/`buildx` anywhere in its repo) -- its container
-  # runtime (`oci_container.py`) only ever does a plain `docker pull` of
-  # an already-published, digest-pinned image
-  # (`resources/pinned_docker_images.cfg`); building one is a rare,
-  # out-of-band maintainer task (`bin/update_docker.py`), never part of a
-  # consumer's own CI. `PORT_IMAGES` (dockerrun.py) is cibuildmp's own
-  # future equivalent of that pinned config -- empty today, since no
-  # `v*`-tagged release has populated it yet (D28 step 5) -- so
-  # per-commit GHCR sha-tags were never going to be the same thing that
-  # config is, just a shape that could be made to resemble it. Real
-  # coverage of `image_for()`'s own pull-a-real-image branch belongs to
-  # `publish.yml`'s own release-tag-gated job once D28 step 5 lands, not
-  # a standing fixture in this dev-branch workflow. ensure_image()'s own
-  # local-build fallback (dockerrun.py's own `_build_command()`) already
-  # does `docker buildx build --cache-from/--cache-to type=gha,scope=
-  # <dockerfile stem>`, the same scope verify-docker-images populates a
-  # few minutes earlier in this same workflow run -- `needs:
-  # verify-docker-images` stays so that cache is warm before this job
-  # starts, not because anything here still pulls what that job pushes.
-  build-usermod:
+  # No docker/login-action and no CIBMP_*_DOCKER_IMAGE overrides here --
+  # the user's own call, checked against cibuildwheel's real source
+  # first: cibuildwheel never builds its own manylinux/musllinux images
+  # at runtime at all (zero `docker build`/`buildx` anywhere in its
+  # repo); its container runtime only ever does a plain `docker pull` of
+  # an already-published, digest-pinned image. cibuildmp does the same,
+  # and `resources/pinned_docker_images.toml` is that pin table -- every
+  # cell filled from a real publish-docker-images.yml run (record 0044),
+  # so these jobs pull published digests anonymously, exactly as a
+  # consumer would.
+  #
+  # **This job used to carry `needs: verify-docker-images`**, and that
+  # dependency is gone with the image build-check itself
+  # (`.github/workflows/verify-docker-images.yml` now). Worth recording
+  # why rather than just deleting it: it was never about ordering
+  # correctness. It existed so a GHA build cache would be warm before
+  # `ensure_image()`'s own local-build fallback ran `docker buildx build
+  # --cache-from/--cache-to type=gha,scope=<dockerfile stem>`. **Record
+  # 0033 deleted that fallback** -- there is no `_build_command()` in
+  # `dockerrun.py` any more, and no `buildx` anywhere in `src/` -- so the
+  # dependency's entire stated reason had been referring to a function
+  # that no longer exists. What it still did was serialize: this job could
+  # not start until eighteen image build-checks, thirteen of them
+  # emulated, had finished.
+
+  # ── usermod: one job per target ─────────────────────────────────────
+  #
+  # Fanned out rather than one job looping over every target -- the
+  # opt-in layout D9 describes, using the `cibuildmp-matrix` action and
+  # the `only` input that have existed for exactly this since D20 and
+  # never had a caller here.
+  #
+  # The reason is measured, not stylistic. Records 0043/0044 made every
+  # `unix` target a native image for its own architecture, so on an
+  # amd64 runner three of the five defaults (`i686`, `aarch64`,
+  # `armv7l`) run under emulation -- and an emulated build is roughly
+  # 20x a native one on the same machine (0044: 46s native x86_64
+  # against 1041s emulated aarch64). Looping makes the run the *sum* of
+  # those; fanning out makes it the *maximum*. It also buys per-target
+  # failure isolation, which matters more now that ten of the fifteen
+  # cells have never been built.
+  #
+  # What this does not buy: emulation getting any faster. The slowest
+  # leg still sets the wall clock. The real fix for that is 0045's
+  # `auto`/`native` arch vocabulary (build natively here, everything
+  # else opt-in), or a runner that is actually arm64 -- which cibuildmp
+  # cannot emit today, since `UsermodTarget.default_runner` is a
+  # hardcoded `ubuntu-latest` (0043's own first observation). The matrix
+  # already carries `os` per entry precisely so that can change without
+  # touching this workflow.
+  usermod-matrix:
     runs-on: ubuntu-latest
-    needs: verify-docker-images
     permissions:
       contents: read
+    outputs:
+      include: ${{ steps.matrix.outputs.include }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: matrix
+        uses: ./.github/actions/cibuildmp-matrix
+        env:
+          # examples/template has both [natmod] and [usermod], so
+          # detect_mode() cannot infer which one is meant -- the same
+          # explicit env this workflow's other usermod steps set.
+          CIBMP_PLATFORM: "usermod"
+        with:
+          package-dir: examples/template
+
+  build-usermod:
+    needs: usermod-matrix
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      # One target failing should not cancel the others -- with most of
+      # the matrix unproven, the useful outcome of a run is knowing
+      # *which* cells work, not stopping at the first that does not.
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.usermod-matrix.outputs.include) }}
     steps:
       - uses: actions/checkout@v7
 
@@ -240,7 +222,7 @@ jobs:
       # `dockerrun._probe_platform()`.
       - uses: docker/setup-qemu-action@v4
 
-      - name: Build examples/template (usermod)
+      - name: Build examples/template (usermod, ${{ matrix.only }})
         # No CIBMP_VERSION here -- usermod output has no package.json to
         # version at all (D23: it's a full port binary, not a
         # mip.install()-able .mpy), so the env var would just be unused.
@@ -249,6 +231,7 @@ jobs:
           CIBMP_PLATFORM: "usermod"
         with:
           package-dir: examples/template
+          only: ${{ matrix.only }}
 
       - name: List built artifacts
         run: ls -laR examples/template/mpyhouse

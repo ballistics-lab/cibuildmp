@@ -81,6 +81,13 @@ _PORT_AXES: dict[str, tuple[str | None, tuple[str, ...]]] = {
 
 KNOWN_PORTS: tuple[str, ...] = tuple(_PORT_AXES)
 
+# Platform-tag suffixes whose builds want an arm64 runner -- matched on
+# the tag's own end (`manylinux_2_28_aarch64`, `musllinux_1_2_armv7l`)
+# rather than by splitting it, so this stays pure and needs no pin-table
+# read. See `UsermodTarget.default_runner` for why `armv7l` is in here
+# despite being the uncertain half.
+_ARM_RUNNER_ARCHS = ("_aarch64", "_armv7l")
+
 
 class UnknownPortError(ValueError):
     pass
@@ -99,6 +106,32 @@ def axis_key(port: str) -> str | None:
         raise UnknownPortError(
             f"unknown usermod port {port!r}. Known: {', '.join(KNOWN_PORTS)}"
         ) from None
+
+
+def all_axis_values(port: str) -> tuple[str, ...]:
+    """Every axis value that *exists* for this port, not the subset it
+    defaults to -- cibuildmp's own `read_all_configs()` (**0045**).
+
+    The two differ for exactly one port today, and only since [0044]:
+    `unix` declares fifteen cells and defaults to five, so
+    `default_axis_values("unix")` is deliberately not the answer to "what
+    can be named". Every other port defaults to everything it has.
+
+    `unix`'s full list comes from the pin table rather than from a
+    literal here, for the same reason `UNIX_RUNNABLE_ARCHS` is derived:
+    `resources/pinned_docker_images.toml`'s own `[image.<arch>]` keys are
+    the matrix, and a second hand-maintained copy would only be a place
+    for the two to drift. That does mean this one function reads a
+    packaged resource, unlike the rest of this module -- acceptable, and
+    the same thing `usermod/portinfo.py` already does with `usermod.toml`;
+    what this module actually promises is that naming targets needs no
+    MicroPython checkout, and that still holds.
+    """
+    if port == "unix":
+        from .dockerrun import unix_targets
+
+        return unix_targets()
+    return default_axis_values(port)
 
 
 def default_axis_values(port: str) -> tuple[str, ...]:
@@ -121,14 +154,40 @@ class UsermodTarget:
 
     @property
     def default_runner(self) -> str:
-        # Every port here builds on a plain ubuntu-latest host today --
-        # D18's own windows conclusion (Linux-hosted cross-compile, all
-        # three arches) and this session's own unix/aarch64 correction
-        # both collapsed what first looked like a structural
-        # runner-selection need (D20) into "building, unlike executing,
-        # needs no special host at all." D21's own execution axis (D6,
-        # not scheduled) is the one that will actually need
-        # aarch64/windows/etc runners -- not this, which is build-only.
+        """The GitHub runner label a matrix leg for this target should use.
+
+        Arch-aware since records 0043/0044 made every `unix` image native
+        to its own architecture. Before that this was a hardcoded
+        `ubuntu-latest` and correctly so: every port cross-compiled from
+        amd64, so no target cared what the host was. Now two of them do --
+        an `aarch64` image on an amd64 runner runs under binfmt/QEMU, and
+        that is measured at roughly 20x a native build (0044: 46s native
+        x86_64 against 1041s emulated aarch64 on the same machine).
+        Naming an arm64 runner for those makes the build native instead.
+
+        0043's own opening observation was that this hardcode existed and
+        that natmod had a `runs-on` knob while usermod did not. This
+        closes half of it: cibuildmp can now *emit* an arm64 runner. There
+        is still no per-target config override, which is the other half.
+
+        **`armv7l` is included with a caveat that is worth stating rather
+        than discovering.** A 32-bit ARM binary is native on an arm64 host
+        only if that CPU implements AArch32 at EL0, and the server-class
+        parts GitHub uses (Graviton, Ampere Altra) generally do not -- so
+        this target may well stay emulated, just on a different host.
+        cibuildwheel treats this as a real hazard rather than a footnote:
+        its own `Architecture.bitness_archs()` carries an explicit AArch32
+        EL0 check for exactly ARM64 Linux. Grouping it with `aarch64` here
+        is therefore a bet, not a certainty; if it does not pay off the
+        cost is nil (emulated either way) and this entry should move back.
+
+        Only `unix` is arch-aware. `windows`, `qemu`, `webassembly` and
+        `esp32` cross-compile to Windows, bare metal and wasm from an
+        amd64 Linux toolchain host, so an arm64 runner would only emulate
+        their images for no gain.
+        """
+        if self.port == "unix" and self.arch.endswith(_ARM_RUNNER_ARCHS):
+            return "ubuntu-24.04-arm"
         return "ubuntu-latest"
 
     def __str__(self) -> str:
@@ -164,6 +223,23 @@ def usermod_targets(
         for value in values:
             targets.append(UsermodTarget(port=port, arch=value))
     return targets
+
+
+def all_usermod_targets() -> list[UsermodTarget]:
+    """Every identifier this project can name, across every known port --
+    what `--only` resolves against (**0045**).
+
+    Deliberately independent of any config: not the ports it selects, not
+    its axis overrides, not its `build`/`skip`. Upstream's `--only` takes
+    its `choices` from `read_all_configs()` for the same reason -- "force
+    exactly this one build" should not be answerable with "your config
+    does not select that".
+    """
+    return [
+        UsermodTarget(port=port, arch=value)
+        for port in KNOWN_PORTS
+        for value in all_axis_values(port)
+    ]
 
 
 def select(

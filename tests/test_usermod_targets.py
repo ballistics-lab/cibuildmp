@@ -115,3 +115,46 @@ def test_usermod_targets_qemu_default_stays_bare_identifier():
 def test_usermod_targets_qemu_board_override_selects_riscv():
     targets = usermod_targets(["qemu"], {"qemu": ["VIRT_RV32", "VIRT_RV64"]})
     assert [t.identifier for t in targets] == ["qemu-VIRT_RV32", "qemu-VIRT_RV64"]
+
+
+# ── default_runner (records 0043/0044) ──────────────────────────────────
+
+
+def test_native_arm_targets_ask_for_an_arm_runner():
+    # An aarch64 image on an amd64 runner is emulated, measured at ~20x a
+    # native build (0044). Naming an arm64 runner makes it native.
+    for tag in ("manylinux_2_28_aarch64", "musllinux_1_2_aarch64"):
+        assert UsermodTarget(port="unix", arch=tag).default_runner == "ubuntu-24.04-arm"
+
+
+def test_armv7l_is_grouped_with_aarch64_despite_the_aarch32_caveat():
+    # Deliberate and uncertain: 32-bit ARM is native on an arm64 host only
+    # if that CPU implements AArch32 at EL0, which server-class parts
+    # generally do not -- cibuildwheel carries an explicit check for this
+    # in `bitness_archs()`. Grouped here because the downside is nil
+    # (emulated either way); this case exists so moving it back is a
+    # visible decision rather than a silent edit.
+    assert (
+        UsermodTarget(port="unix", arch="manylinux_2_31_armv7l").default_runner
+        == "ubuntu-24.04-arm"
+    )
+
+
+def test_every_other_target_stays_on_the_default_runner():
+    for target in (
+        UsermodTarget(port="unix", arch="manylinux_2_28_x86_64"),
+        UsermodTarget(port="unix", arch="manylinux_2_28_i686"),
+        UsermodTarget(port="unix", arch="manylinux_2_39_mipsel"),
+        UsermodTarget(port="unix", arch="manylinux_2_39_riscv64"),
+        UsermodTarget(port="webassembly", arch=""),
+        UsermodTarget(port="qemu", arch=""),
+    ):
+        assert target.default_runner == "ubuntu-latest"
+
+
+def test_cross_compiling_ports_never_ask_for_arm():
+    # `windows`'s own arch axis contains "arm64", and it must not be
+    # confused with a native ARM build: that image is an amd64 Linux
+    # cross host targeting Windows, so an arm64 runner would only emulate
+    # it for no gain.
+    assert UsermodTarget(port="windows", arch="arm64").default_runner == "ubuntu-latest"

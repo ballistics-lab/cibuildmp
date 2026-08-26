@@ -195,6 +195,36 @@ class Options:
         ]
         return select(all_targets, self.build, self.skip)
 
+    def all_targets(self) -> list[Target]:
+        """Every identifier this config can name, ignoring `archs`,
+        `build` and `skip` -- what `--only` resolves against (**0045**).
+
+        Upstream's `--only` takes its `choices` from `read_all_configs()`,
+        i.e. from what exists rather than from what is selected. The
+        natmod analogue is not quite that, and the difference is real
+        rather than a shortcut: an identifier's ABI slot (`mpy6.3-`) comes
+        from the `MPY_VERSION`/`MPY_SUB_VERSION` of an actual MicroPython
+        checkout, so the set of nameable identifiers genuinely depends on
+        this config's own `micropython` key and cannot be enumerated
+        without it. `tag_groups()` therefore stays; `archs`, `build` and
+        `skip` -- which are selection, not existence -- do not.
+
+        `arch_flags` stays for the same reason as `tag_groups()`: **D15**
+        made a `+0x..` suffix part of the identifier, and which variants
+        exist is a config statement ("build every arch-flags variant" is
+        its own request), not a filter over a fixed set.
+        """
+        arch_flags = (
+            [parse_arch_flags("rv32imc", value) for value in self.arch_flags]
+            if self.arch_flags
+            else [0]
+        )
+        return [
+            target
+            for tag, abi in self.tag_groups()
+            for target in natmod_targets(list(NATMOD_ARCHS), abi, tag, arch_flags)
+        ]
+
     def build_options(
         self, target: Target, env: Mapping[str, str] | None = None
     ) -> BuildOptions:

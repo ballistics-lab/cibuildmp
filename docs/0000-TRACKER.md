@@ -37,6 +37,10 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### In progress / Proposed
 
+- [ ] [0045] `--only` is a filter, not a forced identifier -- selector parity with cibuildwheel | `--only` half landed and verified live in both modes (resolves against the full matrix, overrides `archs`/`build`/`skip`, names what exists on error); the `--archs`/`auto`/`all` vocabulary for usermod is still design only
+- [ ] [0048] `build`/`skip` live in opposite tables in the two modes, and a misplaced one is silent | natmod reads them top-level, usermod from `[usermod]`; `archs` accepts both for natmod, which makes the trap look like a rule. Cost a vacuously-passing test that was the only coverage of `--only` vs `skip`
+- [ ] [0046] nothing notices when a pin goes stale, except container images | `bin/update_docker.py` covers both image tables (and found the pypa bases nine days stale on first run); the toolchain tarballs, emsdk build hash, llvm-mingw, the mipsel apt libc pin, and the MicroPython/ESP-IDF tags have no checker at all
+- [ ] [0047] run output should look exactly like cibuildwheel's | mostly a missing mechanism, not styling: no log folding at all (`::group::`/`##[group]`/`travis_fold`), no colour or `✓`/`✕`; the Actions job summary ([0029]) already has parity
 - [ ] [0022] zephyr as a third usermod selector axis (epic) | phase outline M6-M9b mostly landed (boards.py, manifests, five of six build drivers, CLI wiring); zephyr itself and `rp2`'s own build driver not started
 - [ ] [0028] full container-per-port migration plan (epic) | steps 1-3 substantially landed, `PORT_IMAGES` populated for 8 images via [0033]; `esp32.Dockerfile` still explicitly not started, no Docker path for that port at all
 - [ ] [0043] `unix` adopts cibuildwheel's model in full: native per-target images, PEP 600/656, full arch x libc matrix (epic) | implemented by [0044] -- read that record for what actually landed and what is still unverified; this one stays as the design argument
@@ -142,3 +146,7 @@ record is added.
 [0042]: records/0042-windows-docker-wiring-and-resolver-removal.md
 [0043]: records/0043-unix-adopts-cibuildwheel-native-image-model.md
 [0044]: records/0044-unix-native-images-landed.md
+[0045]: records/0045-only-is-a-filter-not-a-forced-identifier.md
+[0046]: records/0046-pin-staleness-checker.md
+[0047]: records/0047-run-output-parity-with-cibuildwheel.md
+[0048]: records/0048-build-skip-live-in-opposite-tables.md

@@ -116,8 +116,77 @@ def test_usermod_only_unknown_identifier_is_an_error(tmp_path, capsys):
     make_module_dir(tmp_path)
     write(tmp_path, '[usermod]\nports = ["unix"]\n')
 
+    # `unix-riscv64` is the bare-arch spelling records 0043/0044 retired;
+    # the real identifier is `unix-manylinux_2_39_riscv64`. The error now
+    # says the name is unknown and lists what exists, rather than blaming
+    # the config -- after 0045 the config is not consulted at all.
     assert main([str(tmp_path), "--only", "unix-riscv64"]) == 2
-    assert "matches no usermod target" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "is not a known usermod identifier" in err
+    assert "unix-manylinux_2_39_riscv64" in err
+
+
+def test_usermod_only_reaches_a_target_the_config_does_not_select(tmp_path, capsys):
+    # **0045**, and the case that produced it: every musllinux cell is
+    # opt-in, so before this `--only` could not name one without editing
+    # cibuildmp.toml -- for the flag whose whole purpose is "build exactly
+    # this one thing". cibuildwheel takes its own `--only` choices from
+    # `read_all_configs()` for the same reason.
+    make_module_dir(tmp_path)
+    write(tmp_path, '[usermod]\nports = ["unix"]\n')
+
+    assert (
+        main(
+            [
+                str(tmp_path),
+                "--only",
+                "unix-musllinux_1_2_ppc64le",
+                "--print-build-identifiers",
+            ]
+        )
+        == 0
+    )
+    assert capsys.readouterr().out.split() == ["unix-musllinux_1_2_ppc64le"]
+
+
+def test_usermod_only_overrides_skip(tmp_path, capsys):
+    # The flag's own help has always claimed this ("overriding the
+    # config's own build/skip selectors") and it was not true: `--only`
+    # filtered a list `select()` had already narrowed, so a skipped target
+    # was gone before it was reached. 0045 found the claim sitting in a
+    # code comment as settled parity.
+    make_module_dir(tmp_path)
+    write(
+        tmp_path,
+        '[usermod]\nports = ["unix"]\nskip = "unix-manylinux_2_28_x86_64"\n',
+    )
+
+    assert (
+        main(
+            [
+                str(tmp_path),
+                "--only",
+                "unix-manylinux_2_28_x86_64",
+                "--print-build-identifiers",
+            ]
+        )
+        == 0
+    )
+    assert capsys.readouterr().out.split() == ["unix-manylinux_2_28_x86_64"]
+
+
+def test_usermod_only_reaches_a_port_the_config_does_not_list(tmp_path, capsys):
+    # Upstream computes the platform *from* the identifier rather than
+    # checking it against configuration; the same reasoning reaches ports
+    # here, so naming a webassembly identifier works from a unix-only
+    # config.
+    make_module_dir(tmp_path)
+    write(tmp_path, '[usermod]\nports = ["unix"]\n')
+
+    assert (
+        main([str(tmp_path), "--only", "webassembly", "--print-build-identifiers"]) == 0
+    )
+    assert capsys.readouterr().out.split() == ["webassembly"]
 
 
 def test_both_tables_without_platform_is_an_error(tmp_path, capsys):

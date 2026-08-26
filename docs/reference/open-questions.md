@@ -72,40 +72,62 @@ the same way [docs/0000-TRACKER.md](../0000-TRACKER.md) folds resolved
   `host` strategy running first means a laptop and CI can silently use
   different compilers — acceptable, but the summary output must always say
   which toolchain was actually used.
-- **Nothing checks whether a pinned version is stale.** Dependabot already
-  watches this repo's own `uv`/Actions dependencies (the "Graph Update"/
-  "github_actions ... Update" runs in Actions history), but it has no
-  visibility into the pins that actually matter here: every toolchain
-  version + sha256 in `resources/natmod.toml` (arm-none-eabi, xtensa-esp,
-  riscv-none-elf), the equivalents baked into `docker/*.Dockerfile`'s own
-  `RUN` steps (emsdk for `webassembly`, llvm-mingw for `windows`/`arm64`
-  — moved out of `resources/usermod.toml` by [0042], which makes those
-  Dockerfiles the pin of record and puts the pins somewhere Dependabot
-  can see even less well), the apt package sets those images install,
-  and the MicroPython release tag each `examples/*/cibuildmp.toml`
-  builds against.
-  All of that goes stale on an upstream's own schedule, same as **D10**
-  already says about the toolchain table specifically — but nothing here
-  today notices *when*, for any of it, MicroPython tag included. Not
-  designed yet: could be a periodic job that diffs each pin against
-  upstream's latest release and opens an issue/PR, a documented manual
-  review cadence, or something narrower per pin (e.g. a script that
-  re-derives the emsdk hash for a given alias and flags drift). Flagged so
-  a real staleness incident (a build that quietly stops matching upstream)
-  doesn't become the way this gap gets found.
-- **The musllinux half of D31.** An Alpine-based `unix-musllinux-<arch>`
-  Dockerfile per arch, plus the identifier axis to name it, is designed but
-  not built — see [0031].
-- **Whether a non-native build should be attempted at all when emulation is absent.**
-  [0043] adopts cibuildwheel's stance (the user provides QEMU/binfmt; cibuildwheel does
-  not probe or install it), but leaves open whether cibuildmp should still detect its
-  absence in order to *fail legibly* — today an amd64 image on an arm64 host produces
-  `exec format error` from inside `make`, which names nothing about architecture.
-- **Whether emulated `unix` builds are fast enough to be the default.** A wheel build is
-  cheap enough that cibuildwheel can shrug at emulation; a MicroPython port build may not
-  be. Flagged in [0043]; wants a real measurement before the default is fixed.
-- **A real glibc-floor checker for `unix` (the `auditwheel`-equivalent PEP
-  600/656 work).** Designed, not built — see [0031]'s own closing section.
+- **Pin staleness** moved out of this file and into its own record, [0046] --
+  it had grown from a question into a work item with an inventory and a decided
+  shape. Short version: `bin/update_docker.py` ([0044]) covers both container
+  image tables and nothing else does, for anything else.
+
+- ~~**The musllinux half of D31.**~~ **Built** ([0044]). Seven
+  `musllinux_1_2_<arch>` cells declared, Dockerfile-backed on pypa's own
+  Alpine images, published, and the identifier axis threaded through.
+  Proven on one cell, `musllinux_1_2_x86_64`: `libc.musl-x86_64.so.1` in
+  `NEEDED`, zero `GLIBC_` symbol references, and both a usermod C module
+  and a frozen Python module running. The other six have never been
+  built. What remains open is narrower than the original question: how
+  far the glibc column's behaviour carries over — and Alpine's own
+  `community/micropython` excludes `ppc64le` and `s390x` outright, which
+  is the strongest available hint about which two to expect trouble from.
+
+- ~~**Whether a non-native build should be attempted at all when emulation
+  is absent.**~~ **Answered** ([0044]): attempted, but it fails legibly
+  first. `dockerrun._probe_platform()` runs one throwaway `uname -m` for
+  any non-native target and turns `exec format error` into a message
+  naming the missing binfmt and how to install it — and separately
+  distinguishes "this image is not published for that platform", which is
+  a pin problem rather than a host one. cibuildwheel's stance is kept
+  otherwise: cibuildmp still neither probes for nor installs emulation as
+  a precondition, it only refuses to fail incomprehensibly.
+
+- **Whether emulated `unix` builds are fast enough to be the default —
+  now with a real measurement, and it is not close.** [0043] asked for
+  one before fixing the default; [0044] has it, on the same machine and
+  the same example project: native `manylinux_2_28_x86_64` **46s**,
+  native `musllinux_1_2_x86_64` **50s**, emulated
+  `manylinux_2_28_aarch64` **1041s** — roughly 20x. The default axis is
+  five cells of which three are emulated on an amd64 host, so a plain
+  local `cibuildmp` run is tens of minutes where a native-only one would
+  be under a minute.
+  What is still open is the *decision*, not the number: cibuildwheel's
+  answer is `CIBW_ARCHS=auto`, native-only by default with everything
+  else opt-in. cibuildmp cannot say that yet — usermod has no `--archs`
+  and no `auto`/`all`/`native` vocabulary at all ([0045]). And it has a
+  wrinkle upstream does not: a cell is (arch × libc), so a "native" arch
+  yields two cells, one of which is musl and therefore native for
+  *building* but not for running on a glibc host. That has to be decided
+  explicitly rather than inherited by analogy.
+
+- ~~**A real glibc-floor checker for `unix` (the `auditwheel`-equivalent
+  PEP 600/656 work).**~~ **Built** ([0044]). `verify_unix_floor()` reads
+  the finished binary's own highest required `GLIBC_x.y` symbol version
+  via `pyelftools` — `auditwheel`'s `elf_find_versioned_symbols` job,
+  reimplemented because that CLI only accepts a `.whl` and `unix`
+  produces a bare executable — and fails when it exceeds the floor the
+  identifier claims. Verified against a real binary: a
+  `manylinux_2_28_x86_64` build requires exactly `GLIBC_2.28`, the check
+  accepts that target and rejects a `manylinux_2_17_x86_64` claim on the
+  same file. The PEP 656 half is deliberately not symmetrical: musl has
+  no symbol versioning, so a musl build's guarantee comes from its pinned
+  base rather than from inspection.
 
 [0018]: ../records/0018-windows-provisioning-fourth-story.md
 [0042]: ../records/0042-windows-docker-wiring-and-resolver-removal.md
@@ -113,3 +135,6 @@ the same way [docs/0000-TRACKER.md](../0000-TRACKER.md) folds resolved
 [0019]: ../records/0019-esp-idf-provisioning-heaviest.md
 [0031]: ../records/0031-unix-musllinux-libc-axis.md
 [0033]: ../records/0033-cibuildmp-never-builds-docker-image-itself.md
+[0042]: ../records/0042-windows-docker-wiring-and-resolver-removal.md
+[0044]: ../records/0044-unix-native-images-landed.md
+[0045]: ../records/0045-only-is-a-filter-not-a-forced-identifier.md
