@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from cibuildmp.natmod.options import ConfigError, Options
+from cibuildmp.natmod.options import DEFAULT_MICROPYTHON, ConfigError, Options
 
 
 def write(tmp_path: Path, text: str, name: str = "cibuildmp.toml") -> Path:
@@ -13,7 +13,10 @@ def write(tmp_path: Path, text: str, name: str = "cibuildmp.toml") -> Path:
 def test_defaults_with_no_config_at_all(tmp_path):
     options = Options.load(tmp_path, env={})
     assert options.config_path is None
-    assert options.micropython == ["v1.28.0"]
+    # Derived, not restated: which release is newest changes on
+    # upstream's schedule, and a test about *defaulting* should not fail
+    # every time it does. `test_targets.py` owns the pin itself.
+    assert options.micropython == [DEFAULT_MICROPYTHON]
     assert len(options.targets()) == 10
     build_options = options.build_options(options.targets()[0], env={})
     assert build_options.module_dir == "natmod"

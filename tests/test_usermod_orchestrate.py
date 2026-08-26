@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from cibuildmp import dockerrun
+from cibuildmp.natmod.options import DEFAULT_MICROPYTHON
 from cibuildmp.usermod import build as build_module
 from cibuildmp.usermod.options import UsermodOptions
 from cibuildmp.usermod.orchestrate import build, build_one
@@ -234,7 +235,7 @@ def test_build_fetches_micropython_and_skips_the_host_mpy_cross(tmp_path, monkey
     # `container_mpy_cross()`, because a host-built one cannot run inside
     # an image of another architecture or another libc. Only `qemu`
     # still reaches the host copy.
-    assert calls == [("fetch", "v1.28.0")]
+    assert calls == [("fetch", DEFAULT_MICROPYTHON)]
     assert len(results) == 1
     assert results[0].identifier == "unix-manylinux_2_28_x86_64"
 
