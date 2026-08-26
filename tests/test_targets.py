@@ -13,6 +13,7 @@ from cibuildmp.platforms.natmod.targets import (
     newest_tag_for_abi,
     parse_arch_flags,
     resolve_abi_selector,
+    resolve_arch_flags,
     resolve_micropython_tags,
 )
 from cibuildmp.selector import parse_selector, select
@@ -53,6 +54,22 @@ def test_parse_arch_flags_rejects_every_other_arch():
     # mpy_ld.py's own validate_arch_flags() raises the same way.
     with pytest.raises(UnknownArchError, match="only valid for rv32imc"):
         parse_arch_flags("rv64imc", "zba")
+
+
+def test_resolve_arch_flags_empty_means_one_zero_target():
+    assert resolve_arch_flags("rv32imc", []) == [0]
+
+
+def test_resolve_arch_flags_dedupes_by_resolved_value_not_raw_string():
+    # "0x3" and "zba,zcmp" are two different spellings of the same
+    # bitmask (zba=1, zcmp=2) -- without dedup this silently produced two
+    # targets sharing one identifier (+0x3 twice), the second overwriting
+    # the first's output.
+    assert resolve_arch_flags("rv32imc", ["0x3", "zba,zcmp"]) == [3]
+
+
+def test_resolve_arch_flags_preserves_first_seen_order():
+    assert resolve_arch_flags("rv32imc", ["zcmp", "zba", "zba,zcmp"]) == [2, 1, 3]
 
 
 def test_natmod_targets_arch_flags_land_only_on_rv32imc():

@@ -26,8 +26,8 @@ from .targets import (
     NATMOD_ARCHS,
     Target,
     natmod_targets,
-    parse_arch_flags,
     resolve_abi_selector,
+    resolve_arch_flags,
     resolve_micropython_tags,
 )
 
@@ -424,11 +424,7 @@ class Options:
         its own request, distinct from "build every arch", so
         `arch-flags = ["", "zba,zcmp"]` is two rv32imc identifiers, not one.
         """
-        arch_flags = (
-            [parse_arch_flags("rv32imc", value) for value in self.arch_flags]
-            if self.arch_flags
-            else [0]
-        )
+        arch_flags = resolve_arch_flags("rv32imc", self.arch_flags)
         all_targets = [
             target
             for tag, abi in self.tag_groups()
@@ -455,11 +451,7 @@ class Options:
         exist is a config statement ("build every arch-flags variant" is
         its own request), not a filter over a fixed set.
         """
-        arch_flags = (
-            [parse_arch_flags("rv32imc", value) for value in self.arch_flags]
-            if self.arch_flags
-            else [0]
-        )
+        arch_flags = resolve_arch_flags("rv32imc", self.arch_flags)
         return [
             target
             for tag, abi in self.tag_groups()

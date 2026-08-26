@@ -242,6 +242,24 @@ def test_arch_flags_list_builds_one_rv32imc_target_per_variant(tmp_path):
     assert "ARCH_FLAGS=0x3" in make_args_by_id["mpy6.3-natmod-rv32imc+0x3"]
 
 
+def test_arch_flags_list_dedupes_two_spellings_of_the_same_value(tmp_path):
+    # "0x3" and "zba,zcmp" both resolve to 3 -- before the dedup fix this
+    # silently produced two targets sharing one identifier (the second
+    # build's output overwriting the first's), the same collision class
+    # D13 exists to prevent for tags.
+    write(
+        tmp_path,
+        """
+        [natmod]
+        archs = ["rv32imc"]
+        arch-flags = ["0x3", "zba,zcmp"]
+        """,
+    )
+    options = Options.load(tmp_path, env={})
+    identifiers = [t.identifier for t in options.targets()]
+    assert identifiers == ["mpy6.3-natmod-rv32imc+0x3"]
+
+
 def test_version_defaults_empty_and_is_settable(tmp_path):
     write(tmp_path, '[natmod]\narchs = ["x64"]\n')
     assert Options.load(tmp_path, env={}).version == ""

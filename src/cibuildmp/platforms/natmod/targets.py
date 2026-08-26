@@ -118,6 +118,26 @@ def parse_arch_flags(arch: str, value: str) -> int:
     return flags
 
 
+def resolve_arch_flags(arch: str, values: Sequence[str]) -> list[int]:
+    """Parse every `arch-flags` list entry and dedupe by the *resolved*
+    integer, not the raw string.
+
+    `parse_arch_flags()` accepts several textual spellings for the same
+    bitmask (a bare numeric string, or a comma-separated flag list) --
+    two different spellings that resolve to the same integer would
+    otherwise silently produce two `Target`s sharing one identifier, the
+    same collision class `resolve_micropython_tags()` already exists to
+    prevent for tags. `dict.fromkeys` preserves first-seen order, the
+    same "whichever came first" rule that function follows too.
+
+    Empty input means "no flags requested" -- one target, `arch_flags=0`,
+    not zero targets.
+    """
+    if not values:
+        return [0]
+    return list(dict.fromkeys(parse_arch_flags(arch, value) for value in values))
+
+
 def resolve_micropython_tags(
     tags: list[str], override: str | None = None
 ) -> list[tuple[str, str]]:
@@ -125,10 +145,15 @@ def resolve_micropython_tags(
 
     Building against several tags is a real use case only when they span an
     ABI boundary (py/persistentcode.h's MPY_VERSION/MPY_SUB_VERSION) --
-    otherwise every one of them produces a byte-for-byte identical native
-    .mpy, since the identifier (and so the output) is keyed on ABI, not tag.
-    A later tag whose ABI an earlier one already covers is silently
-    dropped rather than built again for no different output; order follows
+    otherwise every one of them produces *functionally interchangeable*
+    native `.mpy` output, verified live (D13's own addendum: two same-ABI
+    tags' unix binaries correctly cross-load and run both tags' own
+    output). Not byte-identical -- verified false the same way, `tools/
+    mpy_ld.py`'s own internal encoding can drift within one ABI group with
+    no version bump -- so the tag actually kept is not fully inert, only
+    load-compatible with any other tag its ABI group would have kept. A
+    later tag whose ABI an earlier one already covers is silently dropped
+    rather than built again for no functional difference; order follows
     `tags`, so the kept tag is whichever came first in the config.
     """
     seen: dict[str, str] = {}

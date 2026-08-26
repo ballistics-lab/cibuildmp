@@ -214,6 +214,16 @@ independent of the larger tree/matrix question this record is otherwise
 about — worth landing on its own rather than waiting on 0052's own larger
 scope.
 
+**Fixed, 2026-08-26 (A1 below).** `resolve_arch_flags()`
+(`natmod/targets.py`, next to `parse_arch_flags()`), `dict.fromkeys`
+dedup by resolved integer, wired into both `Options.targets()` and
+`Options.all_targets()`; regression tests in `tests/test_targets.py` and
+an end-to-end one in `tests/test_options.py`
+(`test_arch_flags_list_dedupes_two_spellings_of_the_same_value`). Full
+suite (410, four new), `ruff`, `pyright` all clean.
+about — worth landing on its own rather than waiting on 0052's own larger
+scope.
+
 `mpy-cross{tag}` and `micropython{tag}` were both considered and rejected
 as prefixed alternatives to bare `{tag}`: usermod's own identifier
 (`{tag}-{port}-{arch}`, [0051], already shipped) already uses bare tag
@@ -604,9 +614,14 @@ below.
 
 ### Track A — independent, no design dependency
 
-**A1. `arch_flags` list dedup-by-resolved-value bug**
+**A1. `arch_flags` list dedup-by-resolved-value bug — landed 2026-08-26.**
 (`natmod/targets.py`, function `natmod_targets()`, called from
-`natmod/options.py`'s `Options.targets()`/`Options.all_targets()`).
+`natmod/options.py`'s `Options.targets()`/`Options.all_targets()`.) Shipped
+as `resolve_arch_flags()` rather than the `_dedupe_arch_flags()` name
+sketched below — it does the parse-and-dedupe together, replacing the
+duplicated four-line list comprehension both call sites had, not just
+adding a dedup step after it. Steps below kept as the original plan for
+the record.
 
 1. Add a `_dedupe_arch_flags(values: list[int]) -> list[int]` helper next
    to `parse_arch_flags()`: dedup by the *resolved* integer
