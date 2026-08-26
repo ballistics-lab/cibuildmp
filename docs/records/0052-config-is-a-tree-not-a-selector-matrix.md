@@ -753,6 +753,41 @@ PR, no tests needed.
    after A2 within Track A even though the two are nominally independent
    of each other.
 
+**A6. `build-platforms.toml`, formalized — the tracker's own pending note,
+given an actual spec, and a hard dependency of B4.2's board-node work.**
+Not previously described anywhere beyond one passing mention in this
+record's own "Landed records this touches" section — this closes that
+gap.
+
+Every family's own known-identifier space is *already* offline and
+checkout-free **except one**: `natmod.toml`'s `[mpy-abi]` table already
+is this, hand-transcribed per tag; usermod's own `_PORT_AXES`/
+`WINDOWS_ARCH_SETTINGS`/`unix_targets()` (`resources/pinned_docker_images.toml`)
+are all static, checked-in data too. **`esp32`'s (and `zephyr`'s, [0022])
+own board list is the one real gap** — `usermod/boards.py`'s own
+`Database` reads `board.json` files from a live checkout, meaning today's
+board names are only known *after* fetching MicroPython, unlike every
+other axis in either family. This is exactly what B4.2 needs solved
+before `[esp32.<board>]` node names — or an override's own `select`
+matching one — can be validated by A5's pre-build audit without a
+checkout, the same way every other axis already can be.
+
+Proposed shape, following [0010]'s own already-established rule (pinned
+data lives in `resources/`, generated at development time, not fetched
+during a build) rather than inventing a new one: a `resources/
+build-platforms.toml` (or a same-named table added to an existing pinned
+resource file — naming is a detail, not decided here) holding, per
+family, the boards known at the time it was last regenerated —
+`esp32.boards = ["ESP32_GENERIC", "ESP32_GENERIC_S3", ...]`, refreshed by
+a maintainer-run script (not part of any build invocation) that clones
+MicroPython once, walks `ports/esp32/boards/*/board.json`, and writes the
+result — the same one-time, checked-in, periodically-refreshed shape
+`natmod.toml`'s own `[mpy-abi]` table already has, and the same
+convention the user's own `o-murphy/rp2040py` repo already follows for
+an equivalent problem. A stale board list (a board added upstream since
+the last refresh) fails the same way a stale `[mpy-abi]` tag would today
+— not tested here, not a new failure mode.
+
 ### Track B — the tree/matrix mechanism
 
 This is the part the record's own Status line says still needs a
@@ -954,22 +989,43 @@ today's behaviour) and blocks nothing in Track A or B.
 1. A1 — isolated bug fix, one PR, no dependencies.
 2. A2 — identifier grammar. Before A5 (which tests against the new
    shape) and before B4.5 (which would otherwise migrate fixtures twice).
-3. A5 — reachability audit, sequenced after A2 per A2's own note above.
-4. A3, A4 — either order, independent of everything else.
-5. B0–B3 — a review/accept pass over this addendum's own proposals by
+3. A6 — `build-platforms.toml`'s own board data, before A5 and before
+   B4.2: both need a real, checkout-free board list to validate against,
+   and B4.2 cannot land at all without it now that boards are tree nodes,
+   not a list.
+4. A5 — reachability audit, sequenced after A2 and A6 per their own
+   notes above.
+5. A3, A4 — either order, independent of everything else.
+6. B0–B3 — a review/accept pass over this addendum's own proposals by
    whoever reads it next, *before* B4 writes any code: B4's five
    sub-phases assume B0–B3's answers are settled first.
-6. B4.1 → B4.2 → B4.3 → B4.4 → B4.5, strictly in that order — each
-   depends on the previous one already existing.
-7. [0038] starts only once B4.5 is fully green, per B5 above.
+7. B4.1 → B4.2 → B4.3 → B4.4 → B4.5, strictly in that order — each
+   depends on the previous one already existing, and B4.2 specifically
+   depends on A6.
+8. [0038] starts only once B4.5 is fully green, per B5 above.
 
-### What this addendum deliberately does not resolve
+### B4.2's own flagged question, resolved
 
-The board-nesting-vs-`boards`-list question flagged inside B4.2 above is
-genuinely new — it does not appear in this record's own original "not
-decided" list above — and needs its own explicit answer before B4.2 can
-be implemented. Surfaced here rather than silently resolved one way,
-the same discipline the rest of this record already holds itself to.
+**The tree node replaces the `boards = [...]` list outright — decided,
+not dual-addressable.** Reasoning given directly: per-board settings can
+genuinely differ (a real, distinct `[esp32.ESP32_GENERIC_S3]` node needs
+its own overrides, not just its own presence in a flat list), which a
+list-valued axis key has never been able to express at all — `boards =
+[...]` only ever said *which* boards are in scope, never let one carry
+its own settings the way every other tree node already can. Keeping both
+forms alive at once would mean two ways to select the same board
+(`boards = ["ESP32_GENERIC_S3"]` and `[esp32.ESP32_GENERIC_S3]` both
+present) with no defined precedence between them — exactly the kind of
+two-mechanisms-for-one-concept problem this whole record exists to
+remove, not reintroduce at the leaf. `boards = [...]` is deleted as a
+config key for `esp32`/`zephyr` once B4.2 lands; presence of a board's
+own tree node is what selects it, the same "table presence is the
+selector" rule `[natmod]`/`[unix]`/etc. already follow one level up.
+B4.2's own migration step needs a concrete plan for reading the boards
+that exist without a checkout, in order to validate `[esp32.<name>]`
+node names the same way A5's pre-build audit validates everything else
+offline — see the new "`build-platforms.toml`, formalized" section below,
+added for exactly this reason.
 
 [0001]: 0001-natmod-first.md
 [0004]: 0004-config-file-location.md
