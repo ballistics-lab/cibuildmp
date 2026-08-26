@@ -79,15 +79,20 @@ disagreed with rather than guessed at: things that are *broken* beat things that
 are *missing*; work that unblocks verification beats work that gets verified
 later; and cheap-with-strong-evidence beats expensive-and-speculative.
 
-- [ ] [0051] usermod identifiers carry no MicroPython version | **the task
-      itself, and the reason the premise's last clause fails.** usermod cannot
-      build two releases (they collide on one identifier and one output
-      directory), cannot select one (nothing to glob), and silently drops every
-      tag after the first. natmod has carried its own axis since [0013]. The
-      fix is mechanical once decided -- list, `tag` field, tag in the
-      identifier, and `build`/`skip`/`--only` work unchanged -- and it renames
-      every usermod identifier, which is why it goes **before** [0038] rather
-      than after
+- [ ] [0051] the identifier must name what a build is compatible with, and
+      neither mode does it right | **the task itself, and the reason the
+      premise's last clause fails.** One rule -- the identifier is the complete
+      description of one build, selection is globbing over it -- broken in two
+      places. natmod names its axis (the `.mpy` ABI) and selects it *backwards*:
+      you give tags and the ABI is derived, so building for 6.2 means knowing
+      which release carried it, from a table that maps the other way. usermod
+      does not name its axis (the release) **anywhere** -- not the identifier,
+      not the output filename, not the directory -- so two releases overwrite
+      each other, which is why the tag list is silently truncated to one. And
+      usermod's second axis has three shapes (`archs`/`boards`/none), so a flat
+      `--archs` cannot be the selector primitive; identifier globs already are.
+      Renames every usermod identifier, which is why it goes **before** [0038]
+      rather than after
 - [ ] [0050] natmod's image needs one more publish, and CI has never been
       green on it | **start here, and it is nearly done.** The image gained
       `gcc-i686-linux-gnu` after v1.29.0 changed `dynruntime.mk`'s `x86` from
