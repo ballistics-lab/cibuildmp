@@ -103,29 +103,38 @@ pre-build-command = ""
 select = "*-armv7emsp"
 extra-make-args = ["MP_BCLIBC_PRECISION=single"]
 
-# ── Not implemented yet ───────────────────────────────────────────────────
-# Sketched here so the intended shape is on record, but NOT parsed by
-# cibuildmp today. Do not rely on any of it. See docs/BACKLOG.md.
-#
-# usermod is fully implemented (unlike this section's own name for it
-# implies) -- see examples/template/cibuildmp.toml for a real, live
-# config. This project's own cibuildmp.toml just doesn't build a usermod
-# module itself. Every active usermod port gets its own top-level table,
-# sibling to [natmod] above (Phase F, record 0051 points 4/6):
+# usermod itself is fully implemented -- this repo's own cibuildmp.toml
+# just doesn't build a usermod module, so nothing above uses it. A real,
+# live usermod config -- [unix]/[windows]/[qemu]/[webassembly]/[esp32],
+# each its own top-level table sibling to [natmod] above (Phase F, record
+# 0051 points 4/6), e.g.:
 #
 #     [unix]
 #     archs = ["x64", "x86", "aarch64", "armhf", "mipsel"]
 #
-#     [webassembly]
-#     variant = "pyscript"     # standard's ASYNCIFY is broken on modern emsdk
-#
 #     [esp32]
 #     boards = ["ESP32_GENERIC"]
-#     idf-target = "esp32"     # chip family, deliberately separate from board
-#     idf-ver = "v5.5.1"
 #
+# -- is examples/template/cibuildmp.toml, not sketched here.
 # ("rp2040" was never a real port -- targets.py's own KNOWN_PORTS has no
 # such name; esp32 above is the closest board-axis port that exists.)
+#
+# ── Not implemented yet ───────────────────────────────────────────────────
+# Sketched here so the intended shape is on record, but genuinely NOT
+# parsed by cibuildmp today -- unlike the real, working keys just above,
+# nothing below has a config surface at all yet. Do not rely on any of it.
+# See docs/BACKLOG.md.
+#
+#     [webassembly]
+#     variant = "pyscript"     # standard's ASYNCIFY is broken on modern
+#                               # emsdk -- WebassemblyBuildOptions has a
+#                               # variant field with this exact default,
+#                               # but no config key reads into it yet
+#
+#     [esp32]
+#     idf-target = "esp32"     # chip family, deliberately separate from
+#                               # board, but not a real key either
+#     idf-ver = "v5.5.1"
 #
 # tests (D6) — deferred outright. The axis is an explicit runner
 # (native / qemu-user / qemu-system / node / rp2040py / mpremote / none),
