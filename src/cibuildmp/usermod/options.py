@@ -39,7 +39,14 @@ from ..natmod.options import (
     read_config,
 )
 from ..natmod.targets import parse_selector
-from .targets import KNOWN_PORTS, UsermodTarget, axis_key, select, usermod_targets
+from .targets import (
+    DEFAULT_PORTS,
+    KNOWN_PORTS,
+    UsermodTarget,
+    axis_key,
+    select,
+    usermod_targets,
+)
 
 DEFAULT_MODULE_DIR = "usermod"
 
@@ -224,7 +231,7 @@ class UsermodOptions:
         ports = (
             _as_list(ports_value, "ports")
             if ports_value is not None
-            else list(KNOWN_PORTS)
+            else list(DEFAULT_PORTS)
         )
 
         axis_overrides: dict[str, list[str]] = {}

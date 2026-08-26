@@ -33,6 +33,7 @@ from . import orchestrate
 from .build import UsermodBuildError
 from .options import UsermodConfigError, UsermodOptions
 from .targets import (
+    ARCH_KEYWORDS,
     UnknownAxisError,
     UnknownPortError,
     UsermodTarget,
@@ -55,16 +56,29 @@ def run(
     try:
         options = UsermodOptions.load(package_dir, config_file, preread=preread)
         if args.archs is not None:
-            # Applied to every selected port with an `archs` axis, which
-            # is `unix` and `windows`. `qemu`/`esp32` are keyed by board
-            # and `webassembly` has no axis, so there is nothing for an
-            # arch list to mean there -- and the keywords are no-ops for
-            # `windows` anyway, whose three arches all cross-compile from
-            # one amd64 image (record 0049).
             values = [a.strip() for a in args.archs.split(",") if a.strip()]
+            keywords = [v for v in values if v in ARCH_KEYWORDS]
+            # **Keywords reach every port; explicit names only reach the
+            # ports an arch list can mean something to.** An earlier cut
+            # applied the whole flag only to `archs`-keyed ports, which
+            # silently exempted `webassembly`, `qemu` and `esp32` from
+            # `auto` -- and their images are `linux/amd64`, so on an
+            # arm64 runner `auto` kept selecting work that runs emulated,
+            # which is the one thing `auto` exists to avoid. It cost a
+            # real CI run: `webassembly` built three times, twice by
+            # `auto` on both runners and once by the job that tests it
+            # emulated on purpose.
+            #
+            # An explicit `manylinux_2_28_s390x` still has no meaning for
+            # a board-keyed port, so those keep only the keywords --
+            # `--archs auto,manylinux_2_28_s390x` reads as "what runs
+            # here, plus that one cell" without turning the extra name
+            # into an unknown board.
             for port in options.ports:
                 if axis_key(port) == "archs":
                     options.axis_overrides[port] = values
+                elif keywords:
+                    options.axis_overrides[port] = keywords
         targets = options.targets()
     # UsermodConfigError belongs here as much as the other two and was
     # simply never added: until record 0048 it had one raise site (a

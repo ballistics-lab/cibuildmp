@@ -172,6 +172,32 @@ def _dest_name(produced: Path, identifier: str) -> str:
     return f"{produced.stem}-{identifier}{produced.suffix}"
 
 
+# Ports whose build still runs a *host* mpy-cross, and therefore the only
+# ones that need one built.
+#
+# Record 0044 gave `unix`, `windows` and `webassembly` their own
+# `container_mpy_cross()`, because a host-built mpy-cross cannot run
+# inside a container that is a different architecture or a different
+# libc -- which is every one of their images. They pass
+# `MICROPY_MPYCROSS=` at the one built inside the image instead, so the
+# host copy is dead weight for them: seven seconds of compiling, plus a
+# bare-host build in a mode whose whole point is that it does not do
+# those.
+#
+# `esp32` and `qemu` still need it. `esp32`'s `make` runs outside Docker
+# entirely (ESP-IDF is provisioned, not containerised -- D19), and
+# `qemu` passes no `MICROPY_MPYCROSS`, so both reach
+# `mpy-cross/build/mpy-cross` on the host through `py/mkrules.mk`'s own
+# default. Neither is in the default port set any more -- `esp32` is out
+# of it entirely pending [0028], and `qemu` has no `ensure_image()`
+# caller yet ([0032]) -- so in practice this now skips for every default
+# invocation, which is the point.
+#
+# Built once for the whole run rather than per target, unchanged -- this
+# only stops building it for runs that will never look at it.
+_HOST_MPY_CROSS_PORTS = frozenset({"esp32", "qemu"})
+
+
 def build_one(
     options: UsermodOptions,
     target: UsermodTarget,
@@ -251,7 +277,8 @@ def build(
     being built, only how it is cross-compiled.
     """
     mpy_dir = sources.fetch_micropython(options.micropython)
-    sources.build_mpy_cross(mpy_dir, quiet=quiet)
+    if any(t.port in _HOST_MPY_CROSS_PORTS for t in targets):
+        sources.build_mpy_cross(mpy_dir, quiet=quiet)
 
     results = []
     for target in targets:

@@ -203,7 +203,7 @@ def test_build_one_esp32_passes_board_through(tmp_path, monkeypatch):
     assert result.identifier == "esp32-ESP32_GENERIC_S3"
 
 
-def test_build_fetches_micropython_and_builds_mpy_cross_once(tmp_path, monkeypatch):
+def test_build_fetches_micropython_and_skips_the_host_mpy_cross(tmp_path, monkeypatch):
     package_dir = tmp_path / "pkg"
     make_module_dir(package_dir)
     write_config(package_dir, '[usermod]\nports = ["unix"]\n')
@@ -236,7 +236,11 @@ def test_build_fetches_micropython_and_builds_mpy_cross_once(tmp_path, monkeypat
 
     results = build(options, [UsermodTarget(port="unix", arch="manylinux_2_28_x86_64")])
 
-    assert calls == [("fetch", "v1.28.0"), ("mpy-cross", mpy_dir)]
+    # No host mpy-cross for a `unix` target: record 0044 gave it
+    # `container_mpy_cross()`, because a host-built one cannot run inside
+    # an image of another architecture or another libc. Only `qemu`
+    # still reaches the host copy.
+    assert calls == [("fetch", "v1.28.0")]
     assert len(results) == 1
     assert results[0].identifier == "unix-manylinux_2_28_x86_64"
 

@@ -196,13 +196,29 @@ def test_all_is_every_cell_regardless_of_host():
         )
 
 
-def test_the_keywords_are_no_ops_for_a_host_independent_axis():
-    # windows cross-compiles to three Windows arches out of one amd64
-    # image, so "what runs natively here" is not a question it has.
-    for keyword in ("auto", "native", "all"):
-        assert parse_axis_values("windows", [keyword]) == list(
-            default_axis_values("windows")
-        )
+def test_a_port_with_no_arch_axis_is_still_filtered_by_its_image():
+    # The correction that cost a CI run. `windows`, `webassembly` and
+    # `qemu` have no architecture axis, and an earlier cut exempted them
+    # from `auto` on those grounds. But their images are `linux/amd64`,
+    # so on an arm64 runner they run emulated exactly like a non-native
+    # `unix` cell -- and `auto` kept selecting them. `webassembly` was
+    # built three times in one run as a result.
+    #
+    # The question they lack is which *axis value* is native; the
+    # question they have is whether their one image is.
+    for port in ("windows", "webassembly", "qemu"):
+        assert parse_axis_values(port, ["auto"], machine="x86_64"), port
+        assert parse_axis_values(port, ["auto"], machine="aarch64") == [], port
+
+
+def test_all_still_selects_those_ports_on_any_host():
+    # `all` means every cell, emulated or not -- it is the word that
+    # exists for saying "I do not care what this machine is".
+    for port in ("windows", "webassembly", "qemu"):
+        for machine in ("x86_64", "aarch64", "s390x"):
+            assert parse_axis_values(port, ["all"], machine=machine) == list(
+                default_axis_values(port)
+            ), (port, machine)
 
 
 def test_a_keyword_and_an_explicit_cell_can_be_mixed():

@@ -109,6 +109,27 @@ _PORT_AXES: dict[str, tuple[str | None, tuple[str, ...]]] = {
 
 KNOWN_PORTS: tuple[str, ...] = tuple(_PORT_AXES)
 
+# Ports a bare `[usermod]` with no `ports` key does *not* select.
+#
+# `esp32` is temporarily out. It is the one port with no Docker path at
+# all ([0028]) -- no `esp32.Dockerfile`, no pinned image -- so it is also
+# the one port that cannot satisfy the Docker-only rule D30 states and
+# every other port now follows. Its build provisions ESP-IDF onto the
+# host instead (clone + tool install, D19), which is precisely the
+# bare-host mutation the rest of this module stopped doing.
+#
+# Out of the *default*, not out of `KNOWN_PORTS`: `esp32-ESP32_GENERIC`
+# is still a real identifier, `--only` still reaches it, and a config
+# that names it in `ports` still builds it. What changes is that a
+# config which says nothing no longer gets it, so the ESP-IDF path stops
+# being something every default invocation drags along. [0028] is where
+# it comes back, with an image.
+_NON_DEFAULT_PORTS: frozenset[str] = frozenset({"esp32"})
+
+DEFAULT_PORTS: tuple[str, ...] = tuple(
+    p for p in KNOWN_PORTS if p not in _NON_DEFAULT_PORTS
+)
+
 # ── the auto/native/all vocabulary ────────────────────────────────────
 #
 # Record 0049. cibuildwheel's `Architecture.parse_config()` accepts the
@@ -223,7 +244,7 @@ def resolve_axis_keyword(
     from .dockerrun import platform_for
 
     values = list(all_axis_values(port))
-    if keyword == "all" or axis_key(port) is None or port != "unix":
+    if keyword == "all":
         return values
     wanted = (host_arch(machine),)
     if keyword == "auto":
@@ -240,7 +261,31 @@ def resolve_axis_keyword(
     # actually native on. `platform_for()` reads the same bundled pin
     # table `all_axis_values()` already went through, so this adds no new
     # kind of dependency.
-    return [v for v in values if platform_for(port, v) in native]
+    # **One rule for every port, asked of the image.** An earlier draft
+    # exempted the ports with no architecture axis -- `windows`, `qemu`,
+    # `webassembly` -- on the grounds that "what runs natively here" is
+    # not a question they have. That was wrong in the way that costs
+    # wall-clock: their images are `linux/amd64`, so on an arm64 runner
+    # they run emulated exactly like a non-native `unix` cell does, and
+    # `auto` kept selecting them anyway. `webassembly` was being built
+    # three times in one CI run as a result -- twice by `auto` and once
+    # more by the job that deliberately tests it emulated.
+    #
+    # The question those ports do not have is which *axis value* is
+    # native; the question they very much do have is whether their one
+    # image is. `platform_for()` answers both -- per cell for `unix`,
+    # per port for everything else -- so the same expression covers them
+    # and there is no port-name special case left here at all.
+    #
+    # A port whose image *platform* cannot be resolved at all is kept
+    # rather than dropped: "cannot tell" is not "not native", and it
+    # will fail with its own clear error the moment something tries to
+    # build it. That is not the same as having no image published --
+    # `esp32` has a platform (`linux/amd64`) and no image yet, so `auto`
+    # treats it like any other amd64 port and it is filtered normally.
+    return [
+        v for v in values if (plat := platform_for(port, v)) is None or plat in native
+    ]
 
 
 def parse_axis_values(
@@ -362,7 +407,11 @@ def usermod_targets(
         # ["auto"]` and `--archs auto` mean the same thing without either
         # caller knowing the vocabulary exists (record 0049).
         values = parse_axis_values(port, values)
-        if key is None and values != [""]:
+        # `[]` is a legitimate outcome, not a misconfiguration: `auto` on
+        # a host this port's image is not native to selects nothing here,
+        # and the port is simply skipped. Only a *populated* axis on a
+        # port that has none is the error this guard was written for.
+        if key is None and values not in ([""], []):
             raise UnknownAxisError(
                 f"usermod/{port} has no configurable axis yet -- remove "
                 f"[usermod.{port}] from the config"

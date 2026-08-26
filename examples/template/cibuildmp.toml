@@ -91,5 +91,5 @@ extra-files = ["src/facade.py"]
 # descendant of it.
 [usermod]
 module-dir = "."
-ports = ["unix", "webassembly"]
+ports = ["unix", "webassembly", "windows"]
 manifest = "usermod/manifest.py"

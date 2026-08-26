@@ -3,7 +3,11 @@ from pathlib import Path
 import pytest
 
 from cibuildmp.usermod.options import UsermodConfigError, UsermodOptions
-from cibuildmp.usermod.targets import KNOWN_PORTS, default_axis_values
+from cibuildmp.usermod.targets import (
+    DEFAULT_PORTS,
+    KNOWN_PORTS,
+    default_axis_values,
+)
 
 
 def write_config(tmp_path: Path, text: str) -> Path:
@@ -12,11 +16,16 @@ def write_config(tmp_path: Path, text: str) -> Path:
     return path
 
 
-def test_no_usermod_table_defaults_to_every_known_port(tmp_path):
+def test_no_usermod_table_defaults_to_every_port_with_a_docker_path(tmp_path):
+    # Every known port except `esp32`, which has no Dockerfile and no
+    # pinned image at all ([0028]) and provisions ESP-IDF onto the host
+    # instead. A config that says nothing should not drag that along.
     write_config(tmp_path, "[usermod]\n")
     options = UsermodOptions.load(tmp_path)
 
-    assert options.ports == list(KNOWN_PORTS)
+    assert options.ports == list(DEFAULT_PORTS)
+    assert "esp32" not in options.ports
+    assert "esp32" in KNOWN_PORTS
     assert options.module_dir == "usermod"
     assert options.manifest == ""
 

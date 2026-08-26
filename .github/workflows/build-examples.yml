@@ -170,10 +170,18 @@ jobs:
   # `foreign-host` job below is the standing proof of exactly that.
   #
   # Between the two runners `auto` covers nine of the fifteen unix cells
-  # plus `webassembly` and `windows`. The six left over (`ppc64le`,
-  # `s390x`, `riscv64`, both columns) are native to no runner GitHub
-  # offers and are emulated whatever we do, which is why they are a
-  # descope decision rather than a scheduling one.
+  # plus `webassembly` and all three `windows` arches. The six left over
+  # (`ppc64le`, `s390x`, `riscv64`, both columns) are native to no runner
+  # GitHub offers and are emulated whatever we do, which is why they are
+  # a descope decision rather than a scheduling one.
+  #
+  # `windows` used to have a fan-out job of its own here, three legs of
+  # one arch each. It was wrong twice over: its three arches all come out
+  # of **one** amd64 image, so fanning out pulled the same 2GB three
+  # times instead of once -- and having gone green three runs running,
+  # the port had earned its place in the example's own `ports` anyway.
+  # Fan out by *image*, not by target: `unix` gains from it (a different
+  # image per cell, so the pulls overlap), `windows` only loses.
   build-usermod:
     strategy:
       fail-fast: false
@@ -199,41 +207,6 @@ jobs:
         with:
           package-dir: examples/template
           archs: auto
-
-      - name: List built artifacts
-        run: ls -laR examples/template/mpyhouse
-
-  # ── usermod: ports that have never run here ─────────────────────────
-  #
-  # `continue-on-error` while a target is unproven, off once it passes,
-  # then into the default axis once it is boring. `unix`, `webassembly`
-  # and the four native musllinux cells all went through exactly that.
-  #
-  # `windows` is here because it had never been built by this workflow at
-  # all: record 0042 verified all three arches live, by hand, in a
-  # session, against an image pushed by hand, and nothing re-ran it
-  # since. Its three arches all cross-compile out of one amd64 image, so
-  # `archs: auto` above does not reach them -- they are named.
-  build-usermod-unproven:
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    permissions:
-      contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        only: [windows-x64, windows-x86, windows-arm64]
-    steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-qemu-action@v4
-
-      - name: Build examples/template (usermod, ${{ matrix.only }})
-        uses: ./
-        env:
-          CIBMP_PLATFORM: "usermod"
-        with:
-          package-dir: examples/template
-          only: ${{ matrix.only }}
 
       - name: List built artifacts
         run: ls -laR examples/template/mpyhouse
