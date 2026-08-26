@@ -18,6 +18,18 @@ changes. Not scheduled. No code has changed as a result of this record;
 everything below is documentation for whichever session picks this up
 next.
 
+**Addendum (2026-08-26, later the same session): a full step-by-step
+implementation plan now exists** — see "Implementation plan" below, added
+in response to a direct request to turn this record's own open design
+questions into an actionable plan rather than leave them as a list.
+It is itself still **Proposed, not reviewed or accepted** — it proposes
+concrete answers to every item this record's own "not decided" section
+lists, argued from a fresh, direct rereading of every file the mechanism
+touches, but a proposal is not a decision: whoever reads it next still
+has to accept, amend or reject each one, the same way this record's own
+earlier sections distinguish "Decided" from "not decided" throughout. No
+code has changed.
+
 ## Where this came from
 
 Surfaced while closing out record [0051]'s own last open items (the
@@ -549,6 +561,415 @@ its size (on the order of [0051]'s own Phase F+G combined, by the
 user's and this record's own estimate) and would misfile a genuinely new
 architectural question under a record whose own investigation is already
 closed.
+
+## Implementation plan (addendum, 2026-08-26, later the same session)
+
+The Status line above calls for "its own dedicated Explore/Plan pass
+before any code changes." This addendum is that pass: it rereads every
+file the mechanism actually touches directly — `cibuildmp/selector.py`,
+`cibuildmp/options.py`, both `platforms/*/options.py`, both
+`platforms/*/targets.py`, `cli.py`, `platforms/__init__.py`,
+`resources/natmod.toml`, and every real config this repo has
+(`cibuildmp.toml`, `examples/template/cibuildmp.toml`,
+`examples/wasm2mpy/cibuildmp.toml`) — rather than reasoning about them
+from this record's own earlier description, the same discipline
+CLAUDE.md's own first rule demands for cibuildwheel, applied here to this
+project's own source instead. **It proposes concrete answers to every
+item the "What is decided, and what is not" section above leaves open,
+each argued from what those files actually contain — it does not decide
+them; that is still whoever reviews this addendum's own call**, which is
+exactly why the Status line above stays `Proposed` rather than being
+flipped to `Accepted` by this addendum's own landing. Nothing described
+below has been implemented. Where a proposal here turns out wrong, the
+fix is to correct this addendum in a later dated addendum of its own —
+append, per this project's own record convention — not to silently code
+around it.
+
+### How the two tracks relate
+
+Two independent tracks, not one. **Track A** is every item this record's
+own "Also decided" paragraph already called out as independently
+implementable — landable today, in any order, each its own PR, without
+the tree mechanism existing at all. **Track B** is the tree/matrix
+mechanism itself, and its own steps *are* sequential — each one's
+migration depends on the previous step's shape already existing, the
+same reason [0051]'s own Phase E through I landed in a fixed order
+rather than all at once. Track A should go first, purely because it is
+cheap and de-risks Track B: A2 below (natmod's new identifier grammar)
+changes the exact string Track B's own migration has to carry every test
+fixture and example config through, so doing that move twice — once for
+A2 landing alone, once again for the tree — is waste Track A avoids by
+going first. The full order is spelled out in "Suggested landing order"
+below.
+
+### Track A — independent, no design dependency
+
+**A1. `arch_flags` list dedup-by-resolved-value bug**
+(`natmod/targets.py`, function `natmod_targets()`, called from
+`natmod/options.py`'s `Options.targets()`/`Options.all_targets()`).
+
+1. Add a `_dedupe_arch_flags(values: list[int]) -> list[int]` helper next
+   to `parse_arch_flags()`: dedup by the *resolved* integer
+   (`dict.fromkeys`), preserving first-seen order — the same shape D13's
+   own tag dedup already uses for the same class of problem.
+2. Call it in `natmod/options.py`'s `Options.targets()` and
+   `Options.all_targets()`, right after each one's existing
+   `[parse_arch_flags("rv32imc", value) for value in self.arch_flags]`
+   list comprehension, before the result reaches `natmod_targets()`.
+3. Regression test in `tests/test_targets.py`: `arch-flags = ["0x3",
+   "zba,zcmp"]` must produce exactly one `+0x3` target, not two — this is
+   a real collision, not a hypothetical one, confirmed directly against
+   `resources/natmod.toml`'s own `[arch-flags.rv32imc]` table (`zba = 1`,
+   `zcmp = 2`, so `zba,zcmp` resolves to `1|2 = 3 = 0x3`).
+4. No config-shape change and no doc update beyond marking this record's
+   own bug-list entry above as fixed.
+
+**A2. natmod's identifier grammar:
+`{tag}-mpy{major.minor}[-{arch}][+0x{flags}]`, `natmod` dropped as a
+literal word.**
+
+1. `natmod/targets.py`'s `Target.identifier` (currently `base =
+   f"mpy{self.abi}-{self.mode}-{self.arch}"`) becomes `base =
+   f"{self.tag}-mpy{self.abi}-{self.arch}"`. `self.mode` (always the
+   literal string `"natmod"`) stops being read here; grep every
+   `\.mode\b` reference under `platforms/natmod/` before deciding whether
+   to delete the field outright — a field nothing reads any more is
+   exactly the kind of decorative leftover this project's own no-dead-
+   code discipline says to remove, not merely stop calling.
+2. `Target.tag` currently defaults to `""` for hand-built test targets;
+   the new identifier reads it unconditionally, so a bare
+   `Target(abi=..., mode="natmod", arch=...)` with no `tag=` now
+   produces a leading `-mpy...` (an empty first segment). Audit every
+   direct `Target(` construction in `tests/test_targets.py`,
+   `tests/test_options.py` and `tests/test_build.py` and give each a
+   real tag — there is no config-level default to fall back on for a
+   dataclass built by hand rather than through `natmod_targets()`.
+3. Every comment claiming tag is "not part of the identifier" (the
+   dataclass's own field comment) needs updating to say the opposite,
+   since this step is exactly what makes that claim false.
+4. `docs/reference/design.md`'s own natmod identifier section — verify
+   directly whether it documents the old shape before editing it, rather
+   than assuming — needs the new grammar written in.
+5. Audit every literal identifier-shaped string in `cibuildmp.toml`'s own
+   root example (`build = "mpy6.3-*"`, `skip = "*-armv7emsp"`, `select =
+   "*-armv7emsp"`) and `examples/template/cibuildmp.toml`'s own header
+   comment. `*-armv7emsp` still matches unchanged (arch stays the
+   trailing segment); `mpy6.3-*` does not, since ABI is no longer the
+   leading segment, and must become `*-mpy6.3-*` or a tag-qualified form.
+6. `tests/test_selector.py` and `tests/test_overrides.py`: any hardcoded
+   `mpy6.3-natmod-*`-shaped literal, whether the identifier under test or
+   the glob pattern being matched against it, needs the same audit.
+7. This is a real breaking change for `--only`/`build`/`skip`/
+   `[[overrides]]` patterns already written against today's identifier in
+   the three consumer repos [0038] names — call it out explicitly in
+   whatever release note ships this, and fold it into [0038]'s own
+   migration list alongside the items already there (unix renames,
+   `--toolchain` deletion, natmod's own Docker requirement) rather than
+   treating it as a separate migration event — see B5 below.
+
+**A3. `{name}-{version}-{identifier}` artifact filenames; `version`
+promoted to a genuinely global key; `name` added as new.**
+
+1. Confirm directly (`grep -n '"version"' src/cibuildmp/platforms/usermod/options.py`)
+   that usermod's own schema and `opt()` closure read `version` nowhere
+   today, matching this record's own claim, before treating the key as
+   safe to add. Add `"name"` to `GENERIC_KEYS` in `natmod/options.py`
+   alongside the existing `"version"` entry — that module's copy is the
+   one both platform modules already share (`usermod/options.py` imports
+   from it directly), so there is no second copy to touch.
+2. `natmod/options.py`'s `Options` dataclass already carries `version:
+   str`; add `name: str = ""` beside it, read the same `opt("name", "")`
+   way `version` already is.
+3. `usermod/options.py`'s `UsermodOptions` dataclass has neither field
+   today — add both, read through the same top-level `opt()` closure
+   `UsermodOptions.load()` already has.
+4. `natmod/build.py`'s output-naming function (reread it directly before
+   changing it — this record's own claim is that today's `mylib-
+   {identifier}.mpy` name is a side effect of `mpy_path.stem`, itself
+   derived from the user's own Makefile, not a config value at all) gains
+   the `{name}-{version}-` prefix only when `name` is non-empty, so a
+   project that has not set it yet keeps exactly today's filename rather
+   than gaining a bare leading `-`.
+5. `usermod/build.py`'s `_dest_name()` (three call sites this record
+   already names — `build.py:769,1081,1372`, each hardcoding
+   `"micropython"`/`"micropython.exe"`/`"micropython.bin"`) needs the
+   same prefix, and the literal `"micropython"` stem dropped, at all
+   three call sites together — a partial fix leaving one port on the old
+   bare name recreates the exact "two projects' firmware artifacts
+   indistinguishable" gap this step exists to close for the other two.
+6. Confirm the `package.json` writer (D14) already reads `version` off
+   the now-global key rather than a natmod-local one after step 2 — no
+   behaviour change expected, worth confirming rather than assuming.
+7. New tests: `tests/test_build.py` gains name-set/name-unset cases for
+   natmod's own output naming; `tests/test_usermod_build.py` the same for
+   all three usermod `_dest_name()` call sites.
+8. `docs/reference/design.md`'s config-schema section gains `name`/
+   `version` as documented global keys — check directly whether `version`
+   is already documented as natmod-only there before editing.
+
+**A4. `arch_flags = 0` as a named, documented compatibility class.**
+Pure documentation, no code: a paragraph in `docs/reference/design.md`
+(wherever A2's grammar update lands, or beside it) stating the subset-
+check fact this record already verified directly in
+`py/persistentcode.c` (`(arch_flags & device_extensions) != arch_flags`),
+naming `arch_flags = 0` as the `abi3`-equivalent broad/portable default,
+and cross-referencing `natmod/build.py`'s `verify_output()` docstring,
+which already half-documents the asymmetry from the mip-subset side. One
+PR, no tests needed.
+
+**A5. Pre-build reachability audit — the missing other half of
+`verify_output()`.**
+
+1. New function — `natmod/options.py`, or a new small module
+   (`natmod/audit.py`) only if it grows past a screenful; decide by
+   actual size once written, not in advance. `check_reachable(cfg:
+   Options) -> None`, called once from `Options.targets()` rather than
+   from each of `cli.py`'s own call sites separately — `targets()` is
+   where the real build path, `--print-build-identifiers` and `--dry-run`
+   already converge, so one call site there covers every caller for
+   free, matching how `all_targets()` itself is already the one place
+   every caller goes for the full identifier space.
+2. Implementation: `all_targets()` (already offline, already exists) is
+   the full identifier space; for every `[[overrides]]` entry and for
+   `build`/`skip` themselves, run `matches()` (`selector.py`) against
+   that full set and raise `ConfigError` naming the specific selector
+   string and its config location the moment one matches zero
+   identifiers.
+3. Keep the distinction this record's own text already draws: this is a
+   *reachability* check (could this selector ever match something), not
+   a *selection* check (`build`/`skip` narrowing to zero targets is
+   legitimate today and must stay legitimate) — run only against
+   `all_targets()`, never against `targets()`'s own filtered result, or a
+   deliberate `skip = "*"` config becomes a false-positive error.
+4. Extend the identical way to `usermod/options.py`'s `UsermodOptions`,
+   against `all_usermod_targets()`.
+5. New tests: an override `select` that can never match (`mpy6.2-*` when
+   `micropython = ["v1.29.0"]` only ever produces ABI 6.3) raises a named
+   error; a legitimate `skip = "*"` config does not raise — the second
+   case is what actually proves the reachability/selection distinction
+   holds rather than merely being asserted.
+6. Real ordering dependency on A2: write these new tests against the
+   identifier's post-A2 shape (`{tag}-mpy{abi}-...`), so sequence A5
+   after A2 within Track A even though the two are nominally independent
+   of each other.
+
+### Track B — the tree/matrix mechanism
+
+This is the part the record's own Status line says still needs a
+dedicated design pass. What follows is that pass's own output: concrete
+proposals for each of the "not decided" section's four bullets above,
+each argued from the code reread for this addendum, followed by a phased
+landing plan. Every proposal below is exactly that — a recommendation for
+whoever reviews this addendum to accept, amend or reject, not a decision
+this addendum is entitled to make unilaterally on its own; only this
+record's own explicitly-marked "Decided" sections carry that weight.
+
+**B0. How the tree interacts with [0051]'s own cascade tiers (the
+record's own third open bullet) — proposed: the tree *replaces*
+`platform_tables` as an addressing scheme; `global_table`/`family_table`/
+`env`/`extra_layers` are untouched.**
+
+Rereading `cibuildmp/options.py`'s own `Options.get()` with this question
+in mind: today's cascade has five tiers — `default -> global_table ->
+family_table -> platform_tables[platform] -> env(+platform)`, plus
+`extra_layers` the caller appends for CLI values and `[[overrides]]`
+matches. Of those, only `platform_tables` is genuinely about *where in
+the tree* a value lives: `global_table` is the tree's own root,
+`family_table` is one specific interior node one level below root
+(`usermod`, sibling to `natmod`), and `env`/`extra_layers` are not tree
+positions at all — separate input sources layered on afterward regardless
+of tree shape. **Proposed: the tree subsumes exactly `global_table` +
+`family_table` + `platform_tables` into one recursively-addressed
+structure** — root = today's `global_table`, `usermod` = today's
+`family_table`, `usermod.unix` = today's `platform_tables["unix"]`,
+`usermod.esp32.SOME_BOARD` = a node one level deeper than the current
+three-tier scheme can address at all — **`env` and `extra_layers` stay
+exactly as they are**, appended after tree resolution the same way
+`Options.get()` already appends them after `platform_tables` today.
+Concretely, the five-line layer list in `Options.get()` collapses to:
+walk the target's own tree path from root to leaf, collecting one
+`(value, InheritRule.NONE)` layer per node that defines `name`, in
+root-to-leaf order (most-specific-wins falls out for free, since
+`resolve_cascade()` already takes lowest-priority-first and lets later
+layers win); then append `env`/`extra_layers` exactly as today. This is a
+strict generalization, not a rewrite: natmod's own path (`natmod`, one
+segment) walks to exactly two layers — root, `natmod` — byte-identical to
+today's `global_table -> platform_tables["natmod"]`; a board-less usermod
+port (`unix`) walks to three layers — root, `usermod`, `usermod.unix` —
+identical to today's `global -> family -> platform`; only
+`esp32.SOME_BOARD` (four layers) reaches a depth the current dataclass
+cannot express, which is exactly the gap this record exists to close.
+
+**B1. TOML syntax — proposed: dotted segments, matching TOML's own native
+nested-table addressing directly; no new mini-language for writing
+config.**
+
+The record's own sketch (`[usermod.unix]`, `[usermod.esp32.some_board]`)
+is already legal TOML nested-table syntax today — `tomllib` parses `[a.b.c]`
+into `{"a": {"b": {"c": {...}}}}` with no special handling, confirmed
+directly against this repo's own `tomllib.load()` call in
+`natmod/options.py`'s `_load_toml_tree()`. **Proposed: the config file's
+own nesting *is* the tree; no separate path syntax for writing config,
+only for `select` (see B2).** A board name TOML's bare-key syntax cannot
+hold (a space, e.g. "some board") is written the way TOML has always
+supported this — a quoted key, `[usermod.esp32."some board"]` — rather
+than inventing a cibuildmp-specific escaping convention; `tomllib`
+round-trips this with zero cibuildmp-side parsing. Depth is not uniform:
+`natmod`/`unix`/`windows`/`qemu`/`webassembly` bottom out at platform
+level (two from root); only `esp32` (and `zephyr`, [0022], not started)
+has a real board sub-node (three from root). **The B0 tree-walk must not
+assume a fixed depth** — walk however many segments the config actually
+nests and stop at the deepest one present for this target's own path,
+which recursive `dict.get()` chaining already does with no per-platform
+special-casing needed.
+
+**B2. `[[overrides]]`'s own `select` — proposed: dotted-segment fnmatch,
+joined by literal `.`, added as a second matching mode alongside today's
+identifier-glob matching, not a replacement for it.**
+
+The record's own refinement already settled the *principle* (tree path is
+the selector, not a flattened-string glob); what is still open is the
+exact matching semantics, and rereading `selector.py`'s own `matches()`/
+`_expand_braces()` with that question in mind surfaces something the
+record's own text does not yet distinguish: `fnmatch.fnmatch()` already
+treats `*` as "anything, including characters that would look like a
+separator" — fnmatch has no separator concept at all, unlike
+`glob.glob()`'s own `/`-aware `*` — so `usermod.esp32.*` as one fnmatch
+pattern against the dot-joined string `"usermod.esp32.ESP32_GENERIC"`
+already matches with zero changes to `selector.py`, because fnmatch's `*`
+already crosses what would be a `.` boundary. **But a config node's own
+tree address (`usermod.esp32`, which boards/archs/options that node sets)
+is not the same string as a target's own identifier** (`v1.29.0-esp32-
+ESP32_GENERIC`, A2's `{tag}-mpy{abi}-{arch}` for natmod) — a natmod
+target's identifier carries no literal tree-path segment at all (`natmod`
+has no `{tag}` or `{abi}` sub-node in the config tree; those are resolved
+values, not addresses). Treating both as "the selector" without
+distinguishing them, as the record's own sketch risks by implication,
+would silently break `build`/`skip`, which must keep matching the
+identifier — an ABI, a tag, an arch, none of which are addressable tree
+nodes. **Proposed resolution: `matching_overrides()`
+(`cibuildmp/options.py`) tries a `select` pattern against the *tree path*
+of every node from root to the target's own leaf first** (so `select =
+"usermod.esp32.*"` matches "every esp32 board", the authoring convenience
+the tree exists to provide) **and, unchanged, against `target.identifier`
+second** (so `select = "*-armv7emsp"`, a real cross-cutting arch-suffix
+pattern with no single tree node addressing it, keeps working exactly as
+today) — the two string shapes are different enough that an accidental
+double-match across both modes is unlikely, but should be checked
+explicitly in the B4 test pass below rather than assumed safe. This
+directly answers the record's own residual-fallback question ("whether
+every cross-cutting `[[overrides]]` example ... is expressible as a path
+glob at all, or still needs a residual flattened-string fallback") —
+**yes, keep identifier-glob matching, permanently, not as a migration
+shim** — the two modes answer genuinely different questions (address a
+tree node vs. address a compatibility-axis subset) and neither subsumes
+the other.
+
+**B3. `**`-style multi-depth spanning — proposed: not needed for
+`select` itself** (B2's plain fnmatch `*` already crosses `.` boundaries,
+covering every cross-cutting example this record's own text gives);
+**needed, if ever, only for a future "list every node under this branch"
+convenience on top of `--print-build-identifiers`, out of scope for this
+record's own landing.**
+
+**B4. Migration story — proposed: five sequential sub-phases, each
+independently testable, matching how [0051] itself sequenced Phase E
+through I rather than landing atomically.**
+
+- **B4.1 — data model.** Replace `Options.platform_tables: Mapping[str,
+  Mapping[str, Any]]` (the one field both `natmod.options.Options` and
+  `usermod.options.UsermodOptions` construct today) with a recursive
+  `raw` tree walk per B0. `Options.get()`'s own `platform: str | None`
+  parameter needs to become path-shaped (`path: Sequence[str]`, or
+  `platform: str | tuple[str, ...] | None`) — decide the exact signature
+  by writing both real call sites first (`natmod/options.py` and
+  `usermod/options.py` each currently pass one bare platform string) and
+  seeing which shape keeps both callers simplest, rather than guessing
+  ahead of either caller existing.
+- **B4.2 — config loading.** `read_config()` itself is untouched (it
+  already returns the raw parsed tree with no interpretation); what
+  changes is each platform module's own `check_keys()`/`SCHEMAS` walk,
+  today exactly one level deep (`raw.get(port)` in
+  `usermod/options.py`'s `UsermodOptions.load()`) and needing to become
+  recursive for `esp32`/`zephyr`'s own board sub-nodes. **A genuinely new
+  sub-question surfaces here, not present in the record's own original
+  "not decided" list**: does a board become addressable two ways at once
+  — the existing `boards = [...]` list-valued axis key *and* a real
+  `[esp32.BOARD_NAME]` tree node — or does the tree node replace the
+  list outright? This needs its own explicit answer before B4.2 can be
+  implemented; flagged here rather than silently resolved either way (see
+  "What this addendum deliberately does not resolve" below).
+- **B4.3 — `[[overrides]]` dual matching.** Land B2's two-mode
+  `matching_overrides()` behind a change that behaves identically to
+  today until a config actually writes a tree-path-shaped `select` — a
+  fnmatch pattern that reads ambiguously between "identifier prefix" and
+  "tree path" appears in zero real configs today, confirmed by checking
+  both example configs and this repo's own directly, so this phase is
+  additive with no risk to any existing config.
+- **B4.4 — `targets.py` changes.** Neither `Target` nor `UsermodTarget`
+  gains a new field for the tree itself — the tree lives in config, not
+  in a resolved target. What changes is which config *node*
+  `build_options()` reads from for a given target, which is B0's own
+  tree-walk, driven by the target's own already-known port/board, not a
+  new field on the target.
+- **B4.5 — example/test/fixture migration.**
+  `examples/template/cibuildmp.toml`'s own `[esp32]` table has no board
+  sub-table today at all — this repo's own fixtures have zero real
+  board-axis configs to migrate, so nothing forces B4 to prove the
+  three-deep case end-to-end against a real file unless one is added
+  deliberately as part of this phase (add `[esp32.ESP32_GENERIC]` with
+  one real per-board override, specifically so the new depth is exercised
+  by the same "every claimed target actually builds here" discipline that
+  file's own header comment already holds itself to). Every test file
+  touching `platform_tables`/`SCHEMAS`/`family_table` needs a pass —
+  `tests/test_options_cascade.py`, `tests/test_overrides.py`,
+  `tests/test_usermod_options.py` — roughly 2,100 combined lines across
+  the option/override/cascade test files by direct `wc -l`, not guessed.
+
+**B5. Sequencing against [0038].** Per the tracker's own already-stated
+ordering argument, repeated here rather than re-litigated ("don't tell
+three repos to migrate twice"): Track B must land *before* [0038]'s own
+repo migration starts, the same way [0051]'s full landing was itself the
+tracker's own recorded precondition for starting [0038]. A2 (identifier
+grammar) is the same kind of external-facing break and belongs in the
+same pre-[0038] window, not shipped separately ahead of it — shipping A2
+alone first would mean the three consumer repos migrate their `build`/
+`skip`/`[[overrides]]` strings once for A2 and again for Track B's own
+tree-addressed `select`, exactly the double-migration cost this reasoning
+exists to avoid.
+
+**B6. The tag-generative-axis question (the record's own "one question
+raised but not resolved").** Not re-opened by this addendum. [0013]'s own
+addendum already leans toward keeping dedup-by-ABI with tag merely
+visible on the survivor, and nothing in Track A or B's own design changes
+that calculus — A2 makes tag visible in the identifier regardless of
+whether dedup itself is ever revisited. **Proposed: leave this explicitly
+deferred, not silently defaulted, exactly as the record's own text
+already asks.** If "one build per tag" is ever needed, it is additive (an
+opt-in key, e.g. `dedupe = "abi"|"tag"`, default `"abi"` preserving
+today's behaviour) and blocks nothing in Track A or B.
+
+### Suggested landing order
+
+1. A1 — isolated bug fix, one PR, no dependencies.
+2. A2 — identifier grammar. Before A5 (which tests against the new
+   shape) and before B4.5 (which would otherwise migrate fixtures twice).
+3. A5 — reachability audit, sequenced after A2 per A2's own note above.
+4. A3, A4 — either order, independent of everything else.
+5. B0–B3 — a review/accept pass over this addendum's own proposals by
+   whoever reads it next, *before* B4 writes any code: B4's five
+   sub-phases assume B0–B3's answers are settled first.
+6. B4.1 → B4.2 → B4.3 → B4.4 → B4.5, strictly in that order — each
+   depends on the previous one already existing.
+7. [0038] starts only once B4.5 is fully green, per B5 above.
+
+### What this addendum deliberately does not resolve
+
+The board-nesting-vs-`boards`-list question flagged inside B4.2 above is
+genuinely new — it does not appear in this record's own original "not
+decided" list above — and needs its own explicit answer before B4.2 can
+be implemented. Surfaced here rather than silently resolved one way,
+the same discipline the rest of this record already holds itself to.
 
 [0001]: 0001-natmod-first.md
 [0004]: 0004-config-file-location.md

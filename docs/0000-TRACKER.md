@@ -199,7 +199,13 @@ later; and cheap-with-strong-evidence beats expensive-and-speculative.
       order of [0051]'s own Phase F+G combined by this record's own
       estimate -- and, if it proceeds, likely needs to land **before**
       [0038] rather than after, the same "don't tell three repos to
-      migrate twice" reasoning [0051] itself was sequenced by
+      migrate twice" reasoning [0051] itself was sequenced by. **A full
+      step-by-step implementation plan (Track A: five independent
+      sub-items; Track B: the tree mechanism itself, B0-B6, sequenced
+      B4.1-B4.5) was added to the record 2026-08-26, later the same
+      session** -- still Proposed, not reviewed or accepted, no code
+      changed; read the record's own "Implementation plan" section
+      before picking this up
 
 ### Implemented
 
