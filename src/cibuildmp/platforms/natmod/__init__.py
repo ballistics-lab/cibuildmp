@@ -1,21 +1,18 @@
-"""natmod's own half of the CLI dispatch.
+"""natmod: the platform family for `dynruntime.mk`-based native modules --
+one build per ARCH, no MicroPython port build of its own.
 
-The mirror image of `usermod/cli.py`, and created for the same reason its
-docstring already gives: `cli.py`'s `main()` resolves build mode
-(`detect_mode()`) and then hands off, rather than carrying one mode's
-dispatch inline while the other lives in its own module. `main()` now
-calls `natmod_cli.run(...)` and `usermod_cli.run(...)` through the
-identical four-argument signature, so the two halves are symmetric at the
-call site and neither is the privileged "default" one that happens to be
-written in the dispatcher.
-
-`build()` lives here too, with the `--dry-run`/`--only`/
-`--print-build-identifiers`/`--allow-empty`
-handling that feeds it -- everything downstream of "this invocation is a
-natmod build". What stays in `cli.py` is only what is genuinely shared:
-the argument parser (one CLI, both modes), `detect_mode()`, and the
-cache-clean/config-read/mode-resolve preamble that has to run before
-either half can be chosen.
+Also natmod's own half of CLI dispatch (Phase H, record 0051): this
+module implements the `PlatformModule` contract every entry in
+`platforms.PLATFORM_FAMILY` satisfies -- `resolve_options()` (load config,
+apply CLI overrides) and `run()` (the actual `--dry-run`/`--only`/
+`--print-build-identifiers`/`--allow-empty`/build dispatch). `cli.py`'s
+own `main()` never calls into this module by name: it looks natmod up in
+`PLATFORM_FAMILY` like every other platform and calls the same two
+functions, uniformly. `build_all()` lives here too -- everything
+downstream of "this invocation is a natmod build". What stays in `cli.py`
+is only what is genuinely shared across every family: the one argument
+parser, `active_platforms()`, and the cache-clean/config-read/platform-
+resolve preamble that has to run before any family can be chosen.
 """
 
 from __future__ import annotations
@@ -26,15 +23,15 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .build import BuildError, BuildResult, build_target
-from .options import BuildOptions, ConfigError, Options
-from .sources import (
+from ...sources import (
     SourceError,
     build_mpy_cross,
     fetch_micropython,
     read_mpy_abi,
 )
-from .stepsummary import write_step_summary
+from ...stepsummary import write_step_summary
+from .build import BuildError, BuildResult, build_target
+from .options import BuildOptions, ConfigError, Options
 from .targets import (
     LATEST_KNOWN_ABI,
     NATMOD_ARCHS,
@@ -63,8 +60,17 @@ def _plan_line(index: int, total: int, options: BuildOptions) -> str:
     return f"{counter} {options.target.identifier:<28} {' '.join(make)}"
 
 
-def build(options: Options, targets: list[Target]) -> int:
+def build_all(options: Options, targets: list[Target]) -> int:
     """Build every selected target in one invocation.
+
+    Named `build_all` rather than the bare `build` this function had as
+    `natmod/cli.py`'s own top-level orchestrator (Phase H): once its
+    content moved into this package's own `__init__.py`, `build` would
+    have collided with the `build` *submodule* (`build.py`, holding
+    `build_target()`/`BuildError`/`BuildResult`) already imported into
+    this same namespace above -- the later `def build(...)` would have
+    silently shadowed the submodule reference, breaking any `from
+    cibuildmp.platforms.natmod import build` that meant the module.
 
     Sequential and in-process on purpose (D9), the same shape cibuildwheel
     uses for the Python versions inside one runner. Fetching MicroPython and
@@ -178,22 +184,45 @@ def build(options: Options, targets: list[Target]) -> int:
     return 0
 
 
+def resolve_options(
+    args: Any,
+    package_dir: Path,
+    config_file: Path | None,
+    preread: tuple[Path | None, dict[str, Any]],
+    *,
+    ports: list[str],
+) -> Options:
+    """Load config and apply every CLI override that both `run()` and
+    `cli.py`'s own `--print-build-identifiers`/`--only` narrowing need --
+    previously duplicated between the two (`cli.py`'s own
+    `_print_build_identifiers()` and this module's `run()`, both applying
+    `--output-dir`/`--archs` the same way, Phase H).
+    """
+    assert ports == ["natmod"], (
+        f"natmod is always exactly one platform, got ports={ports!r}"
+    )
+    options = Options.load(package_dir, config_file, preread=preread)
+    if args.output_dir is not None:
+        options.output_dir = args.output_dir
+    if args.archs is not None:
+        options.archs = (
+            list(NATMOD_ARCHS)
+            if args.archs.strip() == "all"
+            else [a.strip() for a in args.archs.split(",") if a.strip()]
+        )
+    return options
+
+
 def run(
     args: Any,
     package_dir: Path,
     config_file: Path | None,
     preread: tuple[Path | None, dict[str, Any]],
+    *,
+    ports: list[str],
 ) -> int:
     try:
-        options = Options.load(package_dir, config_file, preread=preread)
-        if args.output_dir is not None:
-            options.output_dir = args.output_dir
-        if args.archs is not None:
-            options.archs = (
-                list(NATMOD_ARCHS)
-                if args.archs.strip() == "all"
-                else [a.strip() for a in args.archs.split(",") if a.strip()]
-            )
+        options = resolve_options(args, package_dir, config_file, preread, ports=ports)
         targets = options.targets()
     except (ConfigError, UnknownArchError, SourceError) as exc:
         if args.debug_traceback:
@@ -272,7 +301,7 @@ def run(
         return 0
 
     try:
-        return build(options, targets)
+        return build_all(options, targets)
     except (ConfigError, SourceError, BuildError) as exc:
         if args.debug_traceback:
             raise

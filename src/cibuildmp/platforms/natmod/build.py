@@ -5,7 +5,7 @@ Fails fast, one target at a time -- matching cibuildwheel's own
 build-in-container loop (platforms/linux.py), which lets a
 `subprocess.CalledProcessError` from one identifier abort the whole
 invocation rather than collecting per-target failures into a report.
-`cli.build()` already handles that: this module raises, cli.main() catches
+`build_all()` already handles that: this module raises, cli.main() catches
 alongside SourceError.
 
 Also cibuildwheel-shaped: `collect_output()`/`verify_output()` mirror its
@@ -99,7 +99,7 @@ def _natmod_image() -> str:
     machine underneath stops mattering: what is not native to it is
     emulated, like every other port.
     """
-    from .. import dockerrun
+    from ... import dockerrun
 
     image = dockerrun.ensure_image("natmod")
     if image is None:
@@ -116,7 +116,7 @@ def _natmod_image() -> str:
 def _run_in_image(
     command: list[str], *, mounts: list[Path], workdir: Path, what: str
 ) -> None:
-    from .. import dockerrun
+    from ... import dockerrun
 
     try:
         dockerrun.run(

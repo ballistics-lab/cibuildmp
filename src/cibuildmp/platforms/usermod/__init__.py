@@ -1,4 +1,7 @@
-"""usermod's own half of the CLI dispatch. `cli.py`'s `main()` calls into
+"""usermod: board-based ports (rp2, esp32, stm32, ...) plus unix/windows/
+webassembly's variant axis. See docs/BACKLOG.md, "Later -- usermod".
+
+Also usermod's own half of the CLI dispatch. `cli.py`'s `main()` calls into
 `run()` for every usermod port active this invocation (`cli.py`'s own
 `active_platforms()`), mirroring the natmod flow --dry-run/--only/
 --print-build-identifiers/--allow-empty/build --
@@ -31,8 +34,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from ..natmod.sources import SourceError
-from ..natmod.stepsummary import write_step_summary
+from ...sources import SourceError
+from ...stepsummary import write_step_summary
 from . import orchestrate
 from .build import UsermodBuildError
 from .options import UsermodConfigError, UsermodOptions
@@ -51,6 +54,31 @@ def _plan_line(index: int, total: int, target: UsermodTarget) -> str:
     return f"{counter} {target.identifier}"
 
 
+def resolve_options(
+    args: Any,
+    package_dir: Path,
+    config_file: Path | None,
+    preread: tuple[Path | None, dict[str, Any]],
+    *,
+    ports: list[str],
+) -> UsermodOptions:
+    """Load config and apply the one CLI override every caller needs --
+    extracted because `cli.py`'s own `_print_build_identifiers()` and this
+    module's `run()` each applied `--enable` the same way independently
+    (Phase H). `--archs` is deliberately *not* folded in here: `run()`
+    below applies it through a per-port branch (an `archs`-axis port gets
+    the literal value, a board-keyed port only the auto/native/all
+    keywords) that `cli.py`'s own multi-platform paths have never
+    replicated -- preserved exactly as it was, not silently widened.
+    """
+    options = UsermodOptions.load(
+        package_dir, config_file, preread=preread, ports=ports
+    )
+    if args.enable:
+        options.enable = options.enable | frozenset(args.enable)
+    return options
+
+
 def run(
     args: Any,
     package_dir: Path,
@@ -60,11 +88,7 @@ def run(
     ports: list[str],
 ) -> int:
     try:
-        options = UsermodOptions.load(
-            package_dir, config_file, preread=preread, ports=ports
-        )
-        if args.enable:
-            options.enable = options.enable | frozenset(args.enable)
+        options = resolve_options(args, package_dir, config_file, preread, ports=ports)
         if args.archs is not None:
             values = [a.strip() for a in args.archs.split(",") if a.strip()]
             keywords = [v for v in values if v in ARCH_KEYWORDS]

@@ -3,8 +3,8 @@ from pathlib import Path
 import pytest
 
 from cibuildmp import dockerrun
-from cibuildmp.usermod import build
-from cibuildmp.usermod.build import (
+from cibuildmp.platforms.usermod import build
+from cibuildmp.platforms.usermod.build import (
     UNIX_ARCH_SETTINGS,
     WINDOWS_ARCH_SETTINGS,
     Esp32BuildOptions,
@@ -25,7 +25,7 @@ from cibuildmp.usermod.build import (
     webassembly_make_command,
     windows_make_command,
 )
-from cibuildmp.usermod.espidf import ResolvedEspIdf
+from cibuildmp.platforms.usermod.espidf import ResolvedEspIdf
 
 
 def _pe(machine: int, *, pe_offset: int = 0x80) -> bytes:
@@ -150,7 +150,7 @@ def _mock_unix_image(monkeypatch, image=_FAKE_UNIX_IMAGE):
     # second real container, and these cases are about the port build's
     # own command shape.
     monkeypatch.setattr(
-        "cibuildmp.usermod.build.container_mpy_cross",
+        "cibuildmp.platforms.usermod.build.container_mpy_cross",
         lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build-stub" / "mpy-cross",
     )
 
@@ -522,7 +522,7 @@ def test_webassembly_docker_image_override_skips_own_dockerfile_build(
     # See `_mock_windows_image` for why the in-container mpy-cross build
     # is stubbed out here too (record 0044).
     monkeypatch.setattr(
-        "cibuildmp.usermod.build.container_mpy_cross",
+        "cibuildmp.platforms.usermod.build.container_mpy_cross",
         lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build-stub" / "mpy-cross",
     )
     build_dir = tmp_path / "build-wasm"
@@ -551,7 +551,7 @@ def test_webassembly_docker_image_mounts_mpy_dir_and_user_c_modules(
     # See `_mock_windows_image` for why the in-container mpy-cross build
     # is stubbed out here too (record 0044).
     monkeypatch.setattr(
-        "cibuildmp.usermod.build.container_mpy_cross",
+        "cibuildmp.platforms.usermod.build.container_mpy_cross",
         lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build-stub" / "mpy-cross",
     )
     build_dir = tmp_path / "build-wasm"
@@ -577,7 +577,7 @@ def test_webassembly_missing_mjs_after_success_is_an_error(monkeypatch, tmp_path
     # See `_mock_windows_image` for why the in-container mpy-cross build
     # is stubbed out here too (record 0044).
     monkeypatch.setattr(
-        "cibuildmp.usermod.build.container_mpy_cross",
+        "cibuildmp.platforms.usermod.build.container_mpy_cross",
         lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build-stub" / "mpy-cross",
     )
     build_dir = tmp_path / "build-wasm"
@@ -596,7 +596,7 @@ def test_webassembly_build_failure_names_the_command(monkeypatch, tmp_path):
     # See `_mock_windows_image` for why the in-container mpy-cross build
     # is stubbed out here too (record 0044).
     monkeypatch.setattr(
-        "cibuildmp.usermod.build.container_mpy_cross",
+        "cibuildmp.platforms.usermod.build.container_mpy_cross",
         lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build-stub" / "mpy-cross",
     )
 
@@ -618,7 +618,7 @@ def test_webassembly_no_docker_daemon_raises_clear_error(monkeypatch, tmp_path):
     # See `_mock_windows_image` for why the in-container mpy-cross build
     # is stubbed out here too (record 0044).
     monkeypatch.setattr(
-        "cibuildmp.usermod.build.container_mpy_cross",
+        "cibuildmp.platforms.usermod.build.container_mpy_cross",
         lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build-stub" / "mpy-cross",
     )
 
@@ -835,7 +835,7 @@ def _mock_windows_image(monkeypatch, image=_FAKE_WINDOWS_IMAGE):
     command's own shape."""
     monkeypatch.setattr("cibuildmp.dockerrun.ensure_image", lambda *a, **k: image)
     monkeypatch.setattr(
-        "cibuildmp.usermod.build.container_mpy_cross",
+        "cibuildmp.platforms.usermod.build.container_mpy_cross",
         lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build-stub" / "mpy-cross",
     )
 
@@ -971,7 +971,7 @@ def test_unix_docker_image_skips_host_toolchain_probe(monkeypatch, tmp_path):
     # would otherwise start a real container.
     monkeypatch.setattr("cibuildmp.dockerrun._probe_platform", lambda *a, **k: "")
     monkeypatch.setattr(
-        "cibuildmp.usermod.build.container_mpy_cross",
+        "cibuildmp.platforms.usermod.build.container_mpy_cross",
         lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build-stub" / "mpy-cross",
     )
     build_dir = tmp_path / "build-manylinux_2_28_aarch64"
@@ -1001,7 +1001,7 @@ def test_unix_docker_image_mounts_mpy_dir_and_user_c_modules(monkeypatch, tmp_pa
         "CIBMP_UNIX_MANYLINUX_2_28_X86_64_DOCKER_IMAGE", "manylinux_2_28_x86_64:local"
     )
     monkeypatch.setattr(
-        "cibuildmp.usermod.build.container_mpy_cross",
+        "cibuildmp.platforms.usermod.build.container_mpy_cross",
         lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build-stub" / "mpy-cross",
     )
     build_dir = tmp_path / "build-x86_64"

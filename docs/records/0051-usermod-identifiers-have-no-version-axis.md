@@ -1,6 +1,6 @@
 # 0051 — one selector for both modes, and an identifier that names what a build is compatible with
 
-Status: In progress — Shape points 1/2/3/5/7/8 implemented 2026-08-26; 4/6 target architecture decided and phased (see third addendum), Phases E, F and G of it landed the same day (fourth/fifth addenda); a `module-dir`/`user-c-modules` key split decided but not yet implemented (sixth addendum)
+Status: In progress — Shape points 1/2/3/5/7/8 implemented 2026-08-26; 4/6 target architecture decided and phased (see third addendum), Phases E, F, G and H of it landed the same day (fourth/fifth/seventh addenda); a `module-dir`/`user-c-modules` key split decided but not yet implemented (sixth addendum). Phase I (README/docs consolidation) is what remains.
 
 Rewritten twice the same day it was written, before anything was built on it.
 The first draft framed this as "usermod cannot build two MicroPython versions",
@@ -809,7 +809,9 @@ in a real `make` invocation's own argument list, and the tier-2 rejection
 producing a clean CLI error — both run against real configs, not just
 `tmp_path` fixtures.
 
-Phase H (unify CLI dispatch and the build loop) is next.
+Phase H (unify CLI dispatch and the build loop) is next — see the
+seventh addendum for what it actually landed as, including a mid-design
+correction the record's own words above did not anticipate.
 
 ---
 
@@ -897,3 +899,190 @@ collapses from three repeated `module-dir = "."` lines to one shared
 Independent of Phase H's own scope (CLI dispatch unification) — could
 land before it, after it, or folded in alongside it as a small addition;
 not yet decided which.
+
+---
+
+## Addendum, 2026-08-26 — Phase H landed: `natmod`/`usermod` physically
+## merge into `platforms/`, dispatch becomes a family registry
+
+Landed the same day as Phases E, F and G, in the same session — the
+physical restructuring the earlier phases' own config/option-level
+unification had been implicitly standing in for. Confirmed directly by
+checking the actual directory tree partway through this session: after
+Phases F and G, `natmod/` and `usermod/` were still two separate
+top-level packages with two separate CLI dispatch functions, despite
+`cibuildmp.toml` reading as one flattened, cibuildwheel-shaped config
+already. This addendum is that gap closed.
+
+### Scope beyond the record's own original words, stated honestly
+
+The record's own Phase H bullet (top of this file) says only "unify CLI
+dispatch: `natmod_cli.run`/`usermod_cli.run`'s split becomes one loop over
+the combined target list, dispatching per-target by `.port`." What
+actually landed differs from that sentence in two deliberate ways:
+
+1. **A physical `platforms/` package move was never part of the original
+   bullet** — it was added mid-session at the user's own direction,
+   after directly challenging whether Phase F/G's work actually delivered
+   "disassemble the bad architecture and rebuild it like cibuildwheel," and
+   finding, on inspection, that it had not: only the config schema had
+   unified, not the code layout.
+2. **The dispatch is not literally "one loop over the combined target
+   list, dispatching per-target by `.port`."** cibuildwheel's own real
+   source (`cibuildwheel/platforms/__main__.py`, read directly this
+   session) calls `platform_module.build(options, tmp_path)` exactly once
+   per platform, never per identifier — each platform module owns its own
+   internal grouping. Adopting *that* contract instead of the record's
+   literal words is deliberate: natmod's own per-ABI-group setup
+   (`build_mpy_cross()` unconditionally, ABI verification per group) and
+   usermod's own per-tag-group setup (`build_mpy_cross()` only for
+   `esp32`/`qemu`, gated by `_HOST_MPY_CROSS_PORTS`) are genuinely
+   different, and folding both into one shared per-target loop would
+   reintroduce exactly the cross-family coupling this whole redesign has
+   been removing everywhere else. `cli.py` now calls each *family*
+   exactly once (`_group_by_family()`), which is the same contract at one
+   coarser grain than "once per platform," since two of cibuildmp's own
+   modules already implement six platform names.
+
+### Target package layout
+
+```
+src/cibuildmp/
+├── cli.py                  -- dispatch rewritten onto _group_by_family()
+├── dockerrun.py             -- one import line changed
+├── options.py, selector.py, resources.py   -- unchanged
+├── sources.py                -- moved from natmod/sources.py, content unchanged
+├── stepsummary.py              -- moved from natmod/stepsummary.py, content unchanged
+└── platforms/
+    ├── __init__.py           -- PlatformModule Protocol + PLATFORM_FAMILY registry
+    ├── natmod/
+    │   ├── __init__.py         -- natmod/cli.py's content, absorbed, + resolve_options()
+    │   ├── options.py, build.py, targets.py   -- moved, content unchanged
+    └── usermod/
+        ├── __init__.py         -- usermod/cli.py's content, absorbed, + resolve_options()
+        ├── options.py, build.py, orchestrate.py, targets.py,
+        │   portinfo.py, manifests.py, boards.py, espidf.py   -- moved, content unchanged
+```
+
+Natmod stayed a sub-package (four files, ~1,515 lines even after
+`sources.py`/`stepsummary.py` moved out) rather than flattening to one
+file — nearly double cibuildwheel's own single-file-per-platform
+precedent, and this project already keeps cross-referenced concerns in
+separate files as house style. Usermod's five ports (`unix`/`windows`/
+`qemu`/`webassembly`/`esp32`) stayed one shared sub-package, not five —
+verified again directly: `usermod/build.py`'s `_BUILD_FN` dict,
+`usermod/options.py`'s `SCHEMAS`, `usermod/targets.py`'s `_PORT_AXES` are
+already keyed data tables spanning all five, not five independently
+authored pipelines, so splitting into five files would fight that
+structure for a shape cibuildmp does not actually have.
+
+### The dispatch contract — a family registry, corrected mid-design
+
+The first design this session produced (a Plan agent's recommendation,
+initially accepted) hardcoded two branches in `cli.py`: `if natmod_active:
+... else: ...`. The user's own direct pushback caught what that missed —
+*"а коли ми захочемо zephyr додати то як це буде? якщо залишати
+natmod/usermod то це вже не --platform а --mode"* ("what happens when we
+want to add zephyr — if natmod/usermod stay hardcoded, that's `--mode`
+again, not `--platform`"), followed by *"апстрім мікропайтон пропонує 20
+портів!"* (upstream MicroPython has ~20 real ports) and *"більшість
+ПОРТІВ це якраз РІЗНІ ПЛАТФОРМИ"* (most of those ports are genuinely
+different platforms). Two hardcoded branches would have required editing
+`cli.py`'s own dispatch code for every future family — reintroducing the
+exact "hardcoded mode" shape this whole redesign has been fighting, just
+moved one level down.
+
+The corrected design, in `platforms/__init__.py`:
+
+```python
+class PlatformModule(Protocol):
+    def resolve_options(self, args, package_dir, config_file, preread, *, ports): ...
+    def run(self, args, package_dir, config_file, preread, *, ports): ...
+
+PLATFORM_FAMILY: dict[str, PlatformModule] = {
+    "natmod": natmod,
+    **{port: usermod for port in KNOWN_PORTS},
+}
+```
+
+`cli.py` never names `natmod`/`usermod` anywhere in its own dispatch code
+— `_group_by_family(platforms)` groups whatever is active by which module
+implements it, and `_known_identifiers()`/`_print_build_identifiers()`/
+`_run_multi_platform()`/`main()` all iterate that grouping generically.
+Adding zephyr ([0022], still not scheduled) or any other of upstream's
+real ports costs one new module plus new `PLATFORM_FAMILY` entries — zero
+`cli.py` changes, which is the actual property the objection above was
+asking for. `PLATFORM_FAMILY` is built from `KNOWN_PORTS` rather than
+hand-listed a second time next to `cli.py`'s own `ALL_PLATFORMS`, so the
+two lists cannot drift the way record 0048's own bug class was about.
+
+### Two real bugs found and fixed along the way
+
+- **A genuine name collision.** `natmod/cli.py`'s own top-level
+  orchestration function was literally named `build(options, targets)`.
+  Once its content moved into `platforms/natmod/__init__.py` — the same
+  namespace that already binds the name `build` to the `build.py`
+  *submodule* via `from .build import BuildError, BuildResult,
+  build_target` — the later `def build(...)` silently shadowed that
+  submodule reference. `from cibuildmp.platforms.natmod import build`
+  (attribute lookup on the package, which is what `import` resolves once
+  the package's own `__init__.py` has already rebound the name) returned
+  the *function*, not the module, breaking every test that reached
+  `build.py`'s own contents that way — eleven of them, `AttributeError:
+  <function build at ...> has no attribute 'run_make'` being the exact
+  failure that surfaced it. Renamed to `build_all()`; every `cli.build()`
+  docstring cross-reference elsewhere in the moved tree updated to match.
+  Live tests, not static review, is what caught this — the same
+  discipline the Phase G bug (uncaught `ConfigError`) was caught by.
+- **`--platform ","` silently built nothing.** `_parse_platform_names()`
+  splitting a separators-only value to an empty list used to fall through
+  to `usermod_cli.run(ports=[])` by accident of which branch happened to
+  sit in the dispatch `else` — not a considered default. Generalizing the
+  single-platform fast path to `PLATFORM_FAMILY[platforms[0]]` made that
+  accident load-bearing (an `IndexError` on the empty list), which is what
+  surfaced it; fixed by rejecting an empty parse result as a loud
+  `ConfigError` at the same point every other malformed `--platform` value
+  already is rejected, closing the case rather than working around it.
+
+### One inconsistency resolved as a side effect of unifying, not silently
+
+`_print_build_identifiers()`'s own `--only` handling had two different
+rules before this phase: natmod's branch fell back to `all_targets()`
+only when the build/skip-filtered `targets()` list came up empty;
+usermod's branch had no fallback at all, silently printing nothing for an
+identifier `skip` had excluded. Both of the real `run()` implementations
+already agreed on one rule — resolve `--only` against `all_targets()`
+wholesale, never layered onto `targets()` (**0045**) — so the unified
+`_print_build_identifiers()` adopts that rule uniformly rather than
+picking one of the two pre-existing, disagreeing behaviors. Flagged here
+rather than folded in silently, per this session's own scope-honesty
+discipline. A small, symmetric addition made this possible without new
+per-family branching: `UsermodOptions` gained an `all_targets()` method
+(a thin wrapper around the existing `all_usermod_targets()` free
+function), mirroring `natmod.options.Options.all_targets()`, which had no
+free-function equivalent to begin with.
+
+### Verified
+
+Full test suite green (397 tests, ~20 files' import paths mechanically
+rewritten to `cibuildmp.platforms.{natmod,usermod}.*` and
+`cibuildmp.{sources,stepsummary}`; no test assertion needed to change
+beyond import paths and the two bugs above), `ruff`/`pyright` clean. Live
+smoke tests against the real, migrated `examples/template/cibuildmp.toml`
+(spans natmod + unix + windows + webassembly in one invocation): `--dry-run`
+and `--print-build-identifiers --json` both still produce correct merged
+output through the new `_group_by_family()` path; `--only` narrows
+correctly in both directions; a cross-platform `[[overrides]]` entry with
+an out-of-schema key still produces a clean CLI error (not a traceback)
+after relocation, both for natmod's own dry-run path (which resolves
+`build_options()` per target) and — confirmed via the existing automated
+regression test, since usermod's own dry-run path legitimately never
+calls `build_options()` — for usermod's own tier-2 validation.
+`bin/publish_images.py`'s pre-existing broken import (`cibuildmp.usermod.
+dockerrun`, which has not existed since [0050] moved `dockerrun.py` to the
+package root) is fixed as an opportunistic, explicitly-flagged side effect
+of touching every `cibuildmp.natmod`/`cibuildmp.usermod` reference in this
+pass — confirmed broken before, confirmed resolving after.
+
+Phase I (README's target-support tables, `action.yml` review, doc
+consolidation) is what remains of this record's own scope.

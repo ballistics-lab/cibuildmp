@@ -138,12 +138,30 @@ later; and cheap-with-strong-evidence beats expensive-and-speculative.
       A real "raw traceback instead of a clean CLI error" bug in both
       `natmod/cli.py` and `usermod/cli.py` (pre-existing, not introduced
       by this phase) was found by this phase's own live testing and
-      fixed the same day. See the record's own fifth addendum. Phase H
-      (unify CLI dispatch) is next. Still goes **before** [0038] rather
-      than after -- the identifier shape is now settled and the config
-      tree has now already moved twice this session, so telling the
-      three consuming repos to migrate once, after H/I land too, is
-      still the right order
+      fixed the same day. See the record's own fifth addendum. **Phase H
+      (physical `platforms/` restructuring + family-registry dispatch)
+      also landed 2026-08-26**, same session: `natmod/` and `usermod/`
+      physically merged under `src/cibuildmp/platforms/` -- the actual
+      cibuildwheel-shaped tree this whole redesign was for, not just the
+      config-level unification E--G already delivered, caught by the
+      user directly challenging whether that unification alone had
+      actually happened (it had not). Dispatch is a `PLATFORM_FAMILY`
+      registry, not two hardcoded branches -- corrected mid-session after
+      the user's own objection ("what happens when zephyr [0022] is
+      added, or any of upstream's ~20 real ports?") showed the original
+      two-branch design would need `cli.py` code edits per future family;
+      adding one now costs one new module plus registry entries, zero
+      `cli.py` changes. Two real bugs found by this phase's own live
+      testing and fixed the same day: a `build`-named function shadowing
+      the `build` submodule once natmod's CLI content merged into its own
+      package `__init__.py` (renamed `build_all()`), and `--platform ","`
+      silently building nothing (now a loud `ConfigError`, closing an
+      accidental fallback rather than working around it). See the
+      record's own seventh addendum. Phase I (README/docs consolidation)
+      is what remains. Still goes **before** [0038] rather than after --
+      the identifier shape is now settled and the config tree has now
+      already moved twice this session, so telling the three consuming
+      repos to migrate once, after I lands too, is still the right order
 - [ ] [0050] natmod's image needs one more publish, and CI has never been
       green on it | **start here, and it is nearly done.** The image gained
       `gcc-i686-linux-gnu` after v1.29.0 changed `dynruntime.mk`'s `x86` from

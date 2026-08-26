@@ -97,22 +97,28 @@ The floor is *inside* the identifier here, unlike cibuildwheel's own
 `cp313-manylinux_x86_64`, because cibuildmp curates exactly one floor per
 architecture and offers no knob to choose another.
 
-Landed as of [0051]'s Phases F and G (see that record's own fourth/fifth
-addenda): `--platform` names one or more of six platforms (`natmod`,
-`unix`, `windows`, `qemu`, `webassembly`, `esp32`) rather than a build
-mode, the way upstream's own `--platform` names an OS, and the config
-tree matches — `[unix]`/`[esp32]` sibling to `[natmod]`, not
-`[usermod.unix]` nested under a `[usermod]` that no longer exists.
-`cibuildmp/options.py`'s cascade-based option resolution (`default →
-global → platform table → environment → CLI`, matching upstream's own
-`Options.get()`) is wired into both `natmod/options.py` and
-`usermod/options.py`, for the base four layers *and* for `[[overrides]]`/
-`inherit` now — one shared top-level `[[overrides]]` list, validated
-loosely (valid on some platform) at parse time and strictly (valid on the
-*matched* identifier's own platform) at build time, `inherit = {
-extra-make-args = "append"|"prepend"|"none"}` layered in via `Options.get()`'s
-own `extra_layers`. Still open: Phase H (unifying `cli.py`'s dispatch
-loop) and Phase I (docs/README consolidation).
+Landed as of [0051]'s Phases F, G and H (see that record's own
+fourth/fifth/seventh addenda): `--platform` names one or more of six
+platforms (`natmod`, `unix`, `windows`, `qemu`, `webassembly`, `esp32`)
+rather than a build mode, the way upstream's own `--platform` names an
+OS, and the config tree matches — `[unix]`/`[esp32]` sibling to
+`[natmod]`, not `[usermod.unix]` nested under a `[usermod]` that no
+longer exists. `cibuildmp/options.py`'s cascade-based option resolution
+(`default → global → platform table → environment → CLI`, matching
+upstream's own `Options.get()`) is wired into both
+`cibuildmp/platforms/natmod/options.py` and
+`cibuildmp/platforms/usermod/options.py`, for the base four layers *and*
+for `[[overrides]]`/`inherit` now — one shared top-level `[[overrides]]`
+list, validated loosely (valid on some platform) at parse time and
+strictly (valid on the *matched* identifier's own platform) at build
+time, `inherit = {extra-make-args = "append"|"prepend"|"none"}` layered
+in via `Options.get()`'s own `extra_layers`. `natmod`/`usermod` are
+physically under `cibuildmp/platforms/` now too (Phase H), each a
+`PlatformModule` (`resolve_options()`/`run()`) that `cli.py`'s own
+dispatch reaches only through a `PLATFORM_FAMILY` registry — it never
+names either module directly, so a future platform family (zephyr,
+[0022]) costs one new module plus registry entries, not a `cli.py`
+change. Still open: Phase I (docs/README consolidation).
 
 [0043]: ../records/0043-unix-adopts-cibuildwheel-native-image-model.md
 [0044]: ../records/0044-unix-native-images-landed.md

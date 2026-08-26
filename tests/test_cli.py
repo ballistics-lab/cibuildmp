@@ -2,8 +2,8 @@ import json
 from pathlib import Path
 
 from cibuildmp.cli import main
-from cibuildmp.natmod import cli as natmod_cli
-from cibuildmp.natmod.build import BuildResult
+from cibuildmp.platforms import natmod as natmod_cli
+from cibuildmp.platforms.natmod.build import BuildResult
 
 
 def write(tmp_path, text):

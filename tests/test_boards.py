@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from cibuildmp.usermod.boards import (
+from cibuildmp.platforms.usermod.boards import (
     Board,
     BoardDatabaseError,
     Database,

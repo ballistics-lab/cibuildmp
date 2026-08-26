@@ -1,8 +1,8 @@
 import json
 
 from cibuildmp.cli import main
-from cibuildmp.natmod.options import DEFAULT_MICROPYTHON
-from cibuildmp.usermod.targets import default_axis_values
+from cibuildmp.platforms.natmod.options import DEFAULT_MICROPYTHON
+from cibuildmp.platforms.usermod.targets import default_axis_values
 
 
 def write(tmp_path, text):

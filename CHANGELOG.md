@@ -85,6 +85,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   specific error, not silently ignored. `natmod.targets.Target` gained a
   `.port` property (always `"natmod"`) to make the strict check possible
   for natmod too. Record 0051 (Phase G).
+- **`natmod`/`usermod` physically merged into `cibuildmp/platforms/`, and
+  `cli.py`'s dispatch is a family registry.** The previous three bullets
+  unified the *config* shape; this is the matching code-layout move:
+  `natmod/` and `usermod/` (and their own `cli.py` dispatch modules) are
+  now `cibuildmp/platforms/natmod/` and `cibuildmp/platforms/usermod/`,
+  each a `PlatformModule` (`resolve_options()`/`run()`); `sources.py`/
+  `stepsummary.py` moved to the package root, since both were already
+  shared across families. `cli.py` reaches either only through
+  `PLATFORM_FAMILY: dict[str, PlatformModule]`, never by name, so adding a
+  future platform family (zephyr, record 0022) costs one new module plus
+  registry entries, not a `cli.py` change. Record 0051 (Phase H).
 - **natmod builds in a container, and there is no bare-host path.** It used to
   resolve a toolchain onto the invoking machine -- an apt probe, a pinned
   tarball, or the host gcc's own 32-bit multilib -- and run `make` there. One

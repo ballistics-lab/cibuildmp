@@ -5,7 +5,7 @@ from cibuildmp.cli import (
     _parse_platform_names,
     active_platforms,
 )
-from cibuildmp.natmod.options import ConfigError
+from cibuildmp.platforms.natmod.options import ConfigError
 
 
 def test_all_platforms_is_natmod_then_the_five_usermod_ports():

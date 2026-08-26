@@ -200,7 +200,7 @@ def resolve_axis_keyword(
     keyword and an explicit axis value share one namespace, and deciding
     which a string is belongs with the rest of axis parsing.
     """
-    from ..dockerrun import platform_for
+    from ...dockerrun import platform_for
 
     values = list(all_axis_values(port))
     if keyword == "all":
@@ -314,7 +314,7 @@ def all_axis_values(port: str) -> tuple[str, ...]:
     MicroPython checkout, and that still holds.
     """
     if port == "unix":
-        from ..dockerrun import unix_targets
+        from ...dockerrun import unix_targets
 
         return unix_targets()
     return default_axis_values(port)
@@ -322,7 +322,7 @@ def all_axis_values(port: str) -> tuple[str, ...]:
 
 def default_axis_values(port: str) -> tuple[str, ...]:
     if port == "unix":
-        from ..dockerrun import unix_targets
+        from ...dockerrun import unix_targets
 
         return unix_targets()
     try:
@@ -367,7 +367,7 @@ def usermod_targets(
 ) -> list[UsermodTarget]:
     """One `UsermodTarget` per (tag, port, axis value) (**0051**) -- the
     MicroPython release is the leading axis, matching natmod's own
-    per-ABI grouping (`natmod_targets()`/`cli.build()`'s tag_groups()).
+    per-ABI grouping (`natmod_targets()`/`natmod.build_all()`'s tag_groups()).
 
     Axis values come from `axis_overrides[port]` when given, this port's
     own `default_axis_values()` otherwise -- the same "config overrides

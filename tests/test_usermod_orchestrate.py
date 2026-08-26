@@ -3,11 +3,11 @@ from pathlib import Path
 import pytest
 
 from cibuildmp import dockerrun
-from cibuildmp.natmod.options import DEFAULT_MICROPYTHON
-from cibuildmp.usermod import build as build_module
-from cibuildmp.usermod.options import UsermodOptions
-from cibuildmp.usermod.orchestrate import build, build_one
-from cibuildmp.usermod.targets import UsermodTarget
+from cibuildmp.platforms.natmod.options import DEFAULT_MICROPYTHON
+from cibuildmp.platforms.usermod import build as build_module
+from cibuildmp.platforms.usermod.options import UsermodOptions
+from cibuildmp.platforms.usermod.orchestrate import build, build_one
+from cibuildmp.platforms.usermod.targets import UsermodTarget
 
 
 # Every `unix` cell in resources/pinned_docker_images.toml is empty until
@@ -205,7 +205,7 @@ def test_build_fetches_micropython_and_skips_the_host_mpy_cross(tmp_path, monkey
     (mpy_dir / "ports" / "unix").mkdir(parents=True)
     calls = []
 
-    import cibuildmp.usermod.orchestrate as orchestrate_module
+    import cibuildmp.platforms.usermod.orchestrate as orchestrate_module
 
     monkeypatch.setattr(
         orchestrate_module.sources,
@@ -261,7 +261,7 @@ def test_build_groups_by_tag_and_fetches_once_per_group(tmp_path, monkeypatch):
 
     calls = []
 
-    import cibuildmp.usermod.orchestrate as orchestrate_module
+    import cibuildmp.platforms.usermod.orchestrate as orchestrate_module
 
     def fake_fetch(tag, **k):
         calls.append(("fetch", tag))

@@ -6,18 +6,17 @@ through the same `cibuildmp` command), `active_platforms()`, and the
 preamble `main()` has to run before any platform can be chosen at all
 (`--clean-cache`, reading the config once, validating
 `CIBMP_PLATFORM`/`--platform`). Once the active platform set is resolved,
-`main()` hands off to `natmod/cli.py`'s `run()` and/or `usermod/cli.py`'s
-`run()` through the identical four-argument signature -- more than one at
-once is a real, supported case now (Phase F, record 0051 points 4/6:
-cibuildmp's six platforms are Docker images on one host, not OS-bound the
-way cibuildwheel's own platforms are, so nothing forces one platform per
-invocation).
-
-natmod's own dispatch used to be written inline here while usermod's
-already had its own module, which made the two look asymmetric for no
-reason other than which one was written first -- natmod's `build()` and
-its --dry-run/--only/--print-* handling now live in `natmod/cli.py`
-alongside the rest of natmod.
+`main()` hands off to whichever `platforms/` module (a "family") actually
+implements each active platform, through `PLATFORM_FAMILY` -- more than
+one platform at once is a real, supported case (Phase F, record 0051
+points 4/6: cibuildmp's six platforms are Docker images on one host, not
+OS-bound the way cibuildwheel's own platforms are, so nothing forces one
+platform per invocation), and more than one *family* at once is exactly
+as supported, and costs nothing extra: this module never names `natmod`
+or `usermod` anywhere below, only `PLATFORM_FAMILY`/`_group_by_family()`
+(Phase H) -- the actual requirement a future third family (zephyr,
+[0022]; any of upstream's own ~20 real ports) needs this dispatch to
+satisfy, since none of it should have to change to add one.
 """
 
 from __future__ import annotations
@@ -30,19 +29,17 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .natmod import cli as natmod_cli
-from .natmod import targets as natmod_targets
-from .natmod.options import ConfigError, Options, read_config
-from .natmod.sources import cache_root
-from .usermod import cli as usermod_cli
-from .usermod.options import UsermodConfigError, UsermodOptions
-from .usermod.targets import KNOWN_PORTS, all_usermod_targets
+from .platforms import PLATFORM_FAMILY, PlatformModule
+from .platforms.natmod.options import ConfigError, read_config
+from .platforms.usermod.options import UsermodConfigError
+from .sources import cache_root
 
 # Every platform this invocation can build, natmod first (matching every
 # existing zero-config repo's own expectation, and print/merge order
-# below). `platforms/` as its own package -- one module per entry here --
-# is Phase H's job; for now this is just the ordered name list.
-ALL_PLATFORMS: tuple[str, ...] = ("natmod", *KNOWN_PORTS)
+# below). Derived from PLATFORM_FAMILY's own key order rather than
+# hand-listed a second time next to it -- see platforms/__init__.py's own
+# comment on why that would drift the way record 0048's bug class did.
+ALL_PLATFORMS: tuple[str, ...] = tuple(PLATFORM_FAMILY)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -169,6 +166,16 @@ def _parse_platform_names(value: str) -> list[str]:
     still works, since it is a real platform name today.
     """
     names = [v.strip() for v in value.replace(",", " ").split() if v.strip()]
+    if not names:
+        # A separators-only value ("--platform ,") named zero platforms.
+        # Falling through used to silently dispatch to usermod with an
+        # empty port list ("no targets selected"), an accident of which
+        # branch happened to sit in the `else` rather than a considered
+        # default -- loud now, matching every other malformed-input error
+        # in this function (Phase H).
+        raise ConfigError(
+            f"--platform/CIBMP_PLATFORM: no platform name found in {value!r}."
+        )
     unknown = [n for n in names if n not in ALL_PLATFORMS]
     if unknown:
         raise ConfigError(
@@ -258,39 +265,46 @@ def active_platforms(raw: dict, explicit: list[str] | None) -> list[str]:
     return [p for p in ALL_PLATFORMS if p in raw] or ["natmod"]
 
 
+def _group_by_family(platforms: list[str]) -> dict[PlatformModule, list[str]]:
+    """Every active platform, grouped by which module actually implements
+    it, in first-appearance order. The one place any of the functions
+    below ever asks "which platforms share an implementation" -- every
+    caller iterates the result and calls each family's own
+    `resolve_options()`/`run()` exactly once, whether one platform is
+    active or five (cibuildwheel's own real contract: `platform_module.
+    build()` is called once per platform, never per identifier -- adopted
+    here as once per *family*, since two of cibuildmp's own modules
+    already cover six platform names). Adding a third family costs one
+    new module plus a `PLATFORM_FAMILY` entry; nothing below this line
+    changes."""
+    grouped: dict[PlatformModule, list[str]] = {}
+    for p in platforms:
+        grouped.setdefault(PLATFORM_FAMILY[p], []).append(p)
+    return grouped
+
+
 def _known_identifiers(
     args: argparse.Namespace,
     package_dir: Path,
     config_file: Path | None,
     preread: tuple[Path | None, dict],
-    natmod_active: bool,
-    usermod_ports: list[str],
-) -> tuple[set[str], set[str]]:
-    """Every identifier each active side can name, for narrowing `--only`
-    to a single side below. Load errors are swallowed here -- narrowing
-    is a best-effort convenience, and a genuinely broken config still
-    gets its own real error from that side's own `run()`."""
-    natmod_ids: set[str] = set()
-    usermod_ids: set[str] = set()
-    if natmod_active:
+    platforms: list[str],
+) -> dict[PlatformModule, set[str]]:
+    """Every identifier each active family can name, keyed by family
+    module -- for narrowing `--only` to a single family below. Load
+    errors are swallowed here -- narrowing is a best-effort convenience,
+    and a genuinely broken config still gets its own real error from that
+    family's own `run()`."""
+    ids: dict[PlatformModule, set[str]] = {}
+    for family, ports in _group_by_family(platforms).items():
         try:
-            natmod_ids = {
-                t.identifier
-                for t in Options.load(
-                    package_dir, config_file, preread=preread
-                ).all_targets()
-            }
-        except ConfigError:
-            pass
-    if usermod_ports:
-        try:
-            tags = UsermodOptions.load(
-                package_dir, config_file, preread=preread, ports=usermod_ports
-            ).micropython
-            usermod_ids = {t.identifier for t in all_usermod_targets(tags)}
-        except UsermodConfigError:
-            pass
-    return natmod_ids, usermod_ids
+            options = family.resolve_options(
+                args, package_dir, config_file, preread, ports=ports
+            )
+            ids[family] = {t.identifier for t in options.all_targets()}
+        except (ConfigError, UsermodConfigError):
+            ids[family] = set()
+    return ids
 
 
 def _print_build_identifiers(
@@ -298,43 +312,35 @@ def _print_build_identifiers(
     package_dir: Path,
     config_file: Path | None,
     preread: tuple[Path | None, dict],
-    natmod_active: bool,
-    usermod_ports: list[str],
+    platforms: list[str],
 ) -> int:
     """`--print-build-identifiers` across more than one active platform,
     merged into exactly one document. Naive sequential dispatch (each
-    side's own `run()` printing its own block) would emit two separate
+    family's own `run()` printing its own block) would emit two separate
     JSON arrays under `--json` -- invalid as a single document, and
     exactly what `cibuildmp-matrix`'s own `json.loads()` (record 0048)
-    would choke on. This bypasses both `run()`s for this one flag rather
-    than teaching them to cooperate; Phase H's unified dispatch loop
-    replaces this wholesale."""
+    would choke on. This bypasses every family's own `run()` for this one
+    flag rather than teaching them to cooperate.
+
+    `--only` is resolved the same way every family's own `run()` already
+    resolves it -- against `all_targets()` wholesale, never layered onto
+    the build/skip-filtered `targets()` list (**0045**). Before Phase H
+    this function had its own, inconsistent copy of that rule: natmod's
+    branch fell back to `all_targets()` only when the `targets()` filter
+    came up empty, and usermod's branch had no fallback at all, silently
+    printing nothing for an identifier `skip` had excluded. One rule now,
+    matching what both `run()`s already agreed on.
+    """
     identifiers: list[str] = []
-    if natmod_active:
-        options = Options.load(package_dir, config_file, preread=preread)
-        if args.output_dir is not None:
-            options.output_dir = args.output_dir
-        if args.archs is not None:
-            options.archs = (
-                list(natmod_targets.NATMOD_ARCHS)
-                if args.archs.strip() == "all"
-                else [a.strip() for a in args.archs.split(",") if a.strip()]
-            )
-        targets = options.targets()
-        if args.only is not None:
-            targets = [t for t in targets if t.identifier == args.only] or [
-                t for t in options.all_targets() if t.identifier == args.only
-            ]
-        identifiers += [t.identifier for t in targets]
-    if usermod_ports:
-        uoptions = UsermodOptions.load(
-            package_dir, config_file, preread=preread, ports=usermod_ports
+    for family, ports in _group_by_family(platforms).items():
+        options = family.resolve_options(
+            args, package_dir, config_file, preread, ports=ports
         )
-        if args.enable:
-            uoptions.enable = uoptions.enable | frozenset(args.enable)
-        targets = uoptions.targets()
-        if args.only is not None:
-            targets = [t for t in targets if t.identifier == args.only]
+        targets = (
+            [t for t in options.all_targets() if t.identifier == args.only]
+            if args.only is not None
+            else options.targets()
+        )
         identifiers += [t.identifier for t in targets]
     if args.json:
         print(json.dumps(identifiers))
@@ -349,42 +355,32 @@ def _run_multi_platform(
     package_dir: Path,
     config_file: Path | None,
     preread: tuple[Path | None, dict],
-    natmod_active: bool,
-    usermod_ports: list[str],
+    platforms: list[str],
 ) -> int:
-    """The interim bridge for more than one active platform in one
-    invocation -- not a unified dispatch loop (Phase H's own job); it
-    runs each side's existing `run()` for the default/`--dry-run`/real-
-    build paths (combined exit code is the worse of the two), but
-    special-cases `--only` and `--print-build-identifiers`, whose
-    *contract* would silently break under naive sequential dispatch.
-    """
+    """The bridge for more than one active platform in one invocation.
+    Every family active this invocation runs exactly once
+    (`_group_by_family()`), for the default/`--dry-run`/real-build paths
+    (combined exit code is the worse of any of them), but `--only` and
+    `--print-build-identifiers` are special-cased, since naive per-family
+    dispatch would silently break each one's own contract (see their own
+    docstrings)."""
     if args.only is not None:
-        natmod_ids, usermod_ids = _known_identifiers(
-            args, package_dir, config_file, preread, natmod_active, usermod_ports
-        )
-        if args.only in natmod_ids and args.only not in usermod_ids:
-            usermod_ports = []
-        elif args.only in usermod_ids and args.only not in natmod_ids:
-            natmod_active = False
-        # A value matching neither (or, in principle, both) side leaves
-        # both active -- each side's own run() reports its own "not a
-        # known identifier" error below. Phase H's unified loop removes
-        # this rough edge by construction.
+        ids = _known_identifiers(args, package_dir, config_file, preread, platforms)
+        matches = [family for family, known in ids.items() if args.only in known]
+        if len(matches) == 1:
+            keep = matches[0]
+            platforms = [p for p in platforms if PLATFORM_FAMILY[p] is keep]
+        # A value matching zero or more than one family leaves every
+        # platform active -- each family's own run() reports its own
+        # "not a known identifier" error below.
 
     if args.print_build_identifiers:
-        return _print_build_identifiers(
-            args, package_dir, config_file, preread, natmod_active, usermod_ports
-        )
+        return _print_build_identifiers(args, package_dir, config_file, preread, platforms)
 
     rc = 0
-    if natmod_active:
-        rc = natmod_cli.run(args, package_dir, config_file, preread) or rc
-    if usermod_ports:
-        urc = usermod_cli.run(
-            args, package_dir, config_file, preread, ports=usermod_ports
-        )
-        rc = urc if urc != 0 else rc
+    for family, ports in _group_by_family(platforms).items():
+        frc = family.run(args, package_dir, config_file, preread, ports=ports)
+        rc = frc if frc != 0 else rc
     return rc
 
 
@@ -450,17 +446,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"cibuildmp: error: {exc}", file=sys.stderr)
         return 2
 
-    natmod_active = "natmod" in platforms
-    usermod_ports = [p for p in platforms if p != "natmod"]
-
-    if len(platforms) <= 1:
-        # Byte-for-byte today's dispatch shape.
-        if natmod_active:
-            return natmod_cli.run(args, args.package_dir, args.config_file, preread)
-        return usermod_cli.run(
-            args, args.package_dir, args.config_file, preread, ports=usermod_ports
+    if len(platforms) == 1:
+        # Byte-for-byte today's dispatch shape -- skips
+        # _run_multi_platform's own --only narrowing step (a second
+        # config load) for the overwhelmingly common single-platform
+        # case. `platforms` is never empty here: active_platforms()
+        # always returns at least ["natmod"], and _parse_platform_names()
+        # now rejects an explicit value naming zero platforms outright.
+        family = PLATFORM_FAMILY[platforms[0]]
+        return family.run(
+            args, args.package_dir, args.config_file, preread, ports=platforms
         )
 
-    return _run_multi_platform(
-        args, args.package_dir, args.config_file, preread, natmod_active, usermod_ports
-    )
+    return _run_multi_platform(args, args.package_dir, args.config_file, preread, platforms)

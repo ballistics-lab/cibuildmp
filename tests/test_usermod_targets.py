@@ -2,7 +2,7 @@ import fnmatch
 
 import pytest
 
-from cibuildmp.usermod.targets import (
+from cibuildmp.platforms.usermod.targets import (
     GROUPS,
     KNOWN_PORTS,
     UnknownAxisError,

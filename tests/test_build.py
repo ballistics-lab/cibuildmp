@@ -4,8 +4,8 @@ from pathlib import Path
 import pytest
 
 from cibuildmp import dockerrun
-from cibuildmp.natmod import build
-from cibuildmp.natmod.build import (
+from cibuildmp.platforms.natmod import build
+from cibuildmp.platforms.natmod.build import (
     BuildError,
     BuildResult,
     build_target,
@@ -18,8 +18,8 @@ from cibuildmp.natmod.build import (
     run_pre_build_command,
     verify_output,
 )
-from cibuildmp.natmod.options import BuildOptions
-from cibuildmp.natmod.targets import Target
+from cibuildmp.platforms.natmod.options import BuildOptions
+from cibuildmp.platforms.natmod.targets import Target
 
 
 def build_options(

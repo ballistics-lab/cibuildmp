@@ -1,4 +1,4 @@
-from cibuildmp.usermod.manifests import combined_manifest
+from cibuildmp.platforms.usermod.manifests import combined_manifest
 
 
 def test_unix_matches_a7p_workflow_literal():

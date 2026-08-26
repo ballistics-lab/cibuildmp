@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from cibuildmp.natmod.options import DEFAULT_MICROPYTHON, ConfigError, Options
+from cibuildmp.platforms.natmod.options import DEFAULT_MICROPYTHON, ConfigError, Options
 
 
 def write(tmp_path: Path, text: str, name: str = "cibuildmp.toml") -> Path:

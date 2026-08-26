@@ -2,9 +2,9 @@ from pathlib import Path
 
 import pytest
 
-from cibuildmp.natmod.options import DEFAULT_MICROPYTHON
-from cibuildmp.usermod.options import UsermodConfigError, UsermodOptions
-from cibuildmp.usermod.targets import KNOWN_PORTS, default_axis_values
+from cibuildmp.platforms.natmod.options import DEFAULT_MICROPYTHON
+from cibuildmp.platforms.usermod.options import UsermodConfigError, UsermodOptions
+from cibuildmp.platforms.usermod.targets import KNOWN_PORTS, default_axis_values
 
 
 def write_config(tmp_path: Path, text: str) -> Path:

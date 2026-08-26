@@ -1,6 +1,6 @@
 import pytest
 
-from cibuildmp.natmod.targets import (
+from cibuildmp.platforms.natmod.targets import (
     LATEST_KNOWN_ABI,
     NATMOD_ARCH_NATIVE_CODE,
     NATMOD_ARCHS,

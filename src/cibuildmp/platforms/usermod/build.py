@@ -309,7 +309,7 @@ def container_mpy_cross(
     container binary is only needed when the image itself changes, and the
     image is digest-pinned.
     """
-    from .. import dockerrun
+    from ... import dockerrun
 
     build_dir = mpy_dir / "mpy-cross" / f"build-{slug}"
     binary = build_dir / "mpy-cross"
@@ -411,7 +411,7 @@ def unix_extra_cflags(target: str) -> tuple[str, ...]:
     """Every `CFLAGS_EXTRA` flag this cell needs: the libc-wide rule, the
     per-architecture one, and any per-tag one-off. Empty for a cell that
     needs none."""
-    from .. import dockerrun
+    from ... import dockerrun
 
     floor, arch = dockerrun.split_tag(target)
     libc_flags = _MUSL_CFLAGS if floor.startswith("musllinux") else ()
@@ -431,7 +431,7 @@ def unix_arch_settings(target: str) -> UnixArchSettings:
     config or resolver bug, and the two error messages it can produce
     (`split_tag()`'s "not a known architecture" and this one) say which.
     """
-    from .. import dockerrun
+    from ... import dockerrun
 
     return UNIX_ARCH_SETTINGS[dockerrun.split_tag(target)[1]]
 
@@ -498,7 +498,7 @@ def run_unix_deplibs(
         "MICROPY_STANDALONE=1",
         "deplibs",
     ]
-    from .. import dockerrun
+    from ... import dockerrun
 
     dockerrun.run(
         command,
@@ -627,7 +627,7 @@ def verify_unix_floor(target: str, binary: Path) -> None:
 
 
 def _split_target(target: str) -> tuple[str, str]:
-    from .. import dockerrun
+    from ... import dockerrun
 
     return dockerrun.split_tag(target)
 
@@ -722,7 +722,7 @@ def build_unix(
     every `build_<port>()` shares (`orchestrate.py`'s `build_one()`
     passes them uniformly); neither is used on this Docker-only path.
     """
-    from .. import dockerrun
+    from ... import dockerrun
 
     if opts.target not in dockerrun.unix_targets():
         raise UsermodBuildError(
@@ -852,7 +852,7 @@ def build_qemu(
     ports/qemu/Makefile's own `all: $(BUILD)/firmware.elf` target, again
     no globbing needed.
     """
-    from .. import dockerrun
+    from ... import dockerrun
 
     cross = QEMU_BOARD_CROSS.get(opts.board)
     if cross is None:
@@ -960,7 +960,7 @@ def build_webassembly(
     The output path is `opts.build_dir / "micropython.mjs"` --
     `ports/webassembly/Makefile`'s own `all:` target.
     """
-    from .. import dockerrun
+    from ... import dockerrun
 
     docker_image = dockerrun.ensure_image("webassembly")
     if docker_image is None:
@@ -1334,7 +1334,7 @@ def build_windows(
             f"{', '.join(sorted(WINDOWS_ARCH_SETTINGS))}"
         )
 
-    from .. import dockerrun
+    from ... import dockerrun
 
     docker_image = dockerrun.ensure_image("windows", opts.arch)
     if docker_image is None:

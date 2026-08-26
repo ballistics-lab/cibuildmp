@@ -45,6 +45,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ...options import Options as OptionCascade
+from ...options import matching_overrides, override_extra_layers
+from ...selector import parse_selector, select
 from ..natmod.options import (
     DEFAULT_MICROPYTHON,
     DEFAULT_OUTPUT_DIR,
@@ -52,13 +55,11 @@ from ..natmod.options import (
     load_overrides,
     read_config,
 )
-from ..options import Options as OptionCascade
-from ..options import matching_overrides, override_extra_layers
-from ..selector import parse_selector, select
 from .targets import (
     GROUPS,
     KNOWN_PORTS,
     UsermodTarget,
+    all_usermod_targets,
     axis_key,
     usermod_targets,
 )
@@ -266,6 +267,18 @@ class UsermodOptions:
         return select(
             all_targets, self.build, self.skip, enable=self.enable, groups=GROUPS
         )
+
+    def all_targets(self) -> list[UsermodTarget]:
+        """Every identifier this config can name, across every known port
+        -- what `--only` resolves against (**0045**), independent of
+        `ports`/axis-overrides/`build`/`skip`. A thin wrapper around the
+        free function of the same job (`all_usermod_targets()`) added so
+        `cli.py`'s own dispatch can call `resolve_options(...).all_targets()`
+        the same way for every family (Phase H) -- mirrors natmod's own
+        `Options.all_targets()` method, which had no free-function
+        equivalent to begin with.
+        """
+        return all_usermod_targets(self.micropython)
 
     def build_options(
         self, target: UsermodTarget, env: Mapping[str, str] | None = None

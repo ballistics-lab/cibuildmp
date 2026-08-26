@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..natmod import sources
+from ... import sources
 from . import manifests, portinfo
 from .build import (
     Esp32BuildOptions,
@@ -220,7 +220,7 @@ def build_one(
     # genhdr/qstrdefs.generated.h missing this run's own module's QSTRs --
     # `'MP_QSTR_mymod' undeclared` -- the exact same "nothing cleans
     # between invocations" bug natmod's own build/ scratch space had (see
-    # cli.build()'s own comment), just one layer deeper (MicroPython's own
+    # natmod.build_all()'s own comment), just one layer deeper (MicroPython's own
     # qstr pipeline, not cibuildmp's glob). Only safe to delete host-side
     # now that dockerrun.run() passes --user (see its own comment) --
     # every port build here runs in a sibling container as root otherwise,
@@ -270,7 +270,7 @@ def build(
     """Build every selected target in one invocation.
 
     Grouped by MicroPython tag (**0051**), the same D9/D13 reasoning
-    natmod's own `cli.build()` already applies: fetching a checkout (and,
+    natmod's own `build_all()` already applies: fetching a checkout (and,
     for the two ports that still need one, a host mpy-cross) is identical
     for every target sharing a release -- none of the five ports' own
     axes (arch/board) change which MicroPython release is being built,

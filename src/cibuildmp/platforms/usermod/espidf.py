@@ -40,7 +40,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..natmod.sources import cache_root, cached_dir
+from ...sources import cache_root, cached_dir
 
 IDF_GIT_URL = "https://github.com/espressif/esp-idf.git"
 

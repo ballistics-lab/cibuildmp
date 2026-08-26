@@ -55,11 +55,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from cibuildmp.resources import pinned_docker_images
-from cibuildmp.usermod.dockerrun import (
+from cibuildmp.dockerrun import (
     _PORT_OCI_PLATFORM,
     ARCH_OCI_PLATFORM,
 )
+from cibuildmp.resources import pinned_docker_images
 
 
 def cells() -> list[tuple[str, str]]:

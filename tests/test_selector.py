@@ -74,8 +74,8 @@ def test_select_generic_over_any_identifier_bearing_type():
     # The whole point of moving this out of natmod/targets.py: one
     # implementation, used with both real target types, not just the
     # stand-in above.
-    from cibuildmp.natmod.targets import Target
-    from cibuildmp.usermod.targets import UsermodTarget
+    from cibuildmp.platforms.natmod.targets import Target
+    from cibuildmp.platforms.usermod.targets import UsermodTarget
 
     natmod_targets = [Target(abi="6.3", mode="natmod", arch="x64")]
     assert select(natmod_targets, "*", "")[0].identifier == "mpy6.3-natmod-x64"

@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from cibuildmp.usermod import espidf
-from cibuildmp.usermod.espidf import (
+from cibuildmp.platforms.usermod import espidf
+from cibuildmp.platforms.usermod.espidf import (
     EspIdfError,
     ResolvedEspIdf,
     fetch_esp_idf,

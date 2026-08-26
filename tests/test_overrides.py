@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 
 from cibuildmp.cli import main
-from cibuildmp.natmod.options import OVERRIDE_UNION_KEYS, ConfigError, Options
-from cibuildmp.usermod.options import (
+from cibuildmp.platforms.natmod.options import OVERRIDE_UNION_KEYS, ConfigError, Options
+from cibuildmp.platforms.usermod.options import (
     USERMOD_PORT_BASE,
     UsermodConfigError,
     UsermodOptions,
