@@ -116,6 +116,57 @@ runner would be consumed on another. That use case was matrix generation, and
 it no longer exists; a list that disagreed with what the same invocation would
 build would be worse.
 
+## Addendum, 2026-08-26 — proven in both directions, and what it cost
+
+Run [32965518561] is the first to execute the premise's third clause rather
+than assert it. Both legs green:
+
+| direction | target | runner |
+| --- | --- | --- |
+| amd64 image on an arm64 host | `webassembly` | `ubuntu-24.04-arm` |
+| arm64 image on an amd64 host | `unix-manylinux_2_28_aarch64` | `ubuntu-latest` |
+
+So "a foreign runner can still build, through emulation" is two green jobs now,
+not a claim in a record. `--platform` plus binfmt is the entire mechanism and it
+needs nothing else, which is what [0033]'s pull-only design and [0043]'s
+per-target platforms were betting on.
+
+**And it is expensive, which changes where it belongs.** One leg measured 18
+minutes against roughly three for everything else in the workflow combined —
+emulation is 12-20x and there is no version of this job that is not emulated,
+that being the point of it. It moved off `push` to a nightly schedule plus
+`workflow_dispatch`. The reasoning is worth stating because it generalises: a
+job that *proves a property* and a job that *catches regressions* want different
+cadences, and this is the first kind. What it would catch per-push is a
+regression in `--platform` handling — one small, rarely-touched code path — and
+the cost grows with every port added, none of which have landed yet.
+
+Three other things fell out of measuring that run, all in the same commit:
+
+- **`auto` was not filtering the ports without an architecture axis.** Their
+  images are `linux/amd64`, so on an arm64 runner `windows`, `webassembly` and
+  `qemu` ran emulated exactly like a non-native `unix` cell — and `auto` kept
+  selecting them, because the keyword only ever reached `archs`-keyed ports.
+  `webassembly` was built three times in one run. The rule is one rule now:
+  ask `platform_for()`, per cell for `unix` and per port for everything else.
+- **The host mpy-cross is built lazily.** `container_mpy_cross()` replaced it
+  for `unix`/`windows`/`webassembly` in [0044]; it was still being compiled on
+  the host for every run regardless — seven seconds, and a bare-host build in a
+  mode whose whole point is not doing those.
+- **Fan out by image, not by target.** `windows`'s three arches come out of one
+  amd64 image, so its three-leg fan-out pulled the same 2GB three times instead
+  of once. `unix` gains from fanning out (a different image per cell, so pulls
+  overlap); `windows` only lost. It joined `examples/template`'s own `ports`
+  instead, having gone green three runs running.
+
+`esp32` left the default port set in the same change — not `KNOWN_PORTS`. It is
+the one port with no Dockerfile and no pinned image ([0028]), so it is also the
+one that cannot satisfy the Docker-only rule every other port now follows; its
+build provisions ESP-IDF onto the host, which is the bare-host mutation this
+record's premise rules out. `--only` still reaches it.
+
+[32965518561]: https://github.com/ballistics-lab/cibuildmp/actions/runs/32965518561
+
 ## Still open
 
 - **natmod still builds on the bare host.** The premise says "no bare-host

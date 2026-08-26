@@ -52,6 +52,11 @@ on:
       - "**.md"
       - "docs/**"
       - "LICENSE"
+  # For `build-usermod-foreign-host` alone -- see its own `if:` and the
+  # paragraph above it. Everything else here runs on push as before.
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
 
 # Same pattern publish.yml's own concurrency block already uses. A real,
 # live-caught gap this session: without this, several rapid-fire pushes to
@@ -228,9 +233,19 @@ jobs:
   # to pick them here -- that refusal is the thing under test.
   # `webassembly` and `manylinux_2_28_aarch64` because both are green on
   # their own host in every run, so a failure is unambiguously about the
-  # host rather than about the target. Expensive by definition: both legs
-  # are emulated.
+  # host rather than about the target.
+  #
+  # **Not on push.** Both legs are emulated by definition, and one of
+  # them measured 18 minutes -- against roughly three for everything
+  # else in this workflow put together. That is the wrong trade for what
+  # it buys: this job *proves a property*, and the property is proven
+  # (both directions green, 2026-08-26). What it would catch on a
+  # per-push cadence is a regression in `--platform` handling, which is
+  # one small, rarely-touched code path -- not something worth twenty
+  # minutes of every push, and the cost only grows as ports are added.
+  # Nightly, plus on demand.
   build-usermod-foreign-host:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     permissions:
       contents: read
     continue-on-error: true
