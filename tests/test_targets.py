@@ -2,8 +2,8 @@ import pytest
 
 from cibuildmp.natmod.targets import (
     LATEST_KNOWN_ABI,
+    NATMOD_ARCH_NATIVE_CODE,
     NATMOD_ARCHS,
-    NATMOD_CROSS,
     Target,
     UnknownArchError,
     abi_for_tag,
@@ -19,7 +19,6 @@ from cibuildmp.natmod.targets import (
 def test_identifier_shape():
     t = Target(abi="6.3", mode="natmod", arch="armv7emsp")
     assert t.identifier == "mpy6.3-natmod-armv7emsp"
-    assert t.cross == "arm-none-eabi-"
 
 
 def test_identifier_carries_arch_flags_only_when_set():
@@ -74,8 +73,8 @@ def test_natmod_targets_one_rv32imc_target_per_arch_flags_entry():
 def test_ten_arches_five_toolchains():
     # Straight from py/dynruntime.mk's own ifeq chain.
     assert len(NATMOD_ARCHS) == 10
-    assert len(set(NATMOD_CROSS.values())) == 5
-    assert "aarch64" not in NATMOD_CROSS  # dynruntime.mk has no such ARCH
+    assert len(NATMOD_ARCH_NATIVE_CODE) == 10
+    assert "aarch64" not in NATMOD_ARCH_NATIVE_CODE  # dynruntime.mk has no such ARCH
 
 
 def test_abi_spans_many_releases():

@@ -48,18 +48,19 @@ def _plan_line(index: int, total: int, options: BuildOptions) -> str:
     make = ["make", "-C", options.module_dir, f"ARCH={options.target.arch}"]
     make += options.extra_make_args
     make.append(options.make_target)
-    # dynruntime.mk's own hardcoded prefix, with no caveat attached any
-    # more: the image supplies exactly that name (record 0049 moved the
-    # xpack/Espressif prefix reconciliation into symlinks there), so
-    # there is no longer a resolved prefix that could differ from it.
-    prefix = options.target.cross
+    # **No `CROSS=` column.** It showed "the prefix actually in play,
+    # which is not always the one dynruntime.mk hardcodes" -- true while
+    # a resolver could override it, and false in two ways once record
+    # 0050 deleted that: cibuildmp sets no `CROSS` at all now (the image
+    # supplies every prefix under the name dynruntime.mk expects), and
+    # the table it was read from went stale the moment MicroPython
+    # v1.29.0 changed `x86` from an empty prefix to `i686-linux-gnu-`.
+    # It printed `CROSS=(host)` for a build with no host in it, next to a
+    # make command containing no `CROSS=`.
     # Right-align the counter so the columns after it stay put once the
     # index gains a digit ([10/10] is wider than [9/10]).
     counter = f"[{index:>{len(str(total))}}/{total}]"
-    return (
-        f"{counter} {options.target.identifier:<28} "
-        f"CROSS={prefix or '(host)':<22} {' '.join(make)}"
-    )
+    return f"{counter} {options.target.identifier:<28} {' '.join(make)}"
 
 
 def build(options: Options, targets: list[Target]) -> int:

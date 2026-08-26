@@ -12,9 +12,15 @@
 #   [[toolchain]]  third-party toolchain releases, pinned by sha256
 
 # ── Architectures ─────────────────────────────────────────────────────────
-# The ten ARCH values py/dynruntime.mk accepts, each mapped to the CROSS
-# prefix it hardcodes and the toolchain that supplies it. Ten arches, five
-# toolchains.
+# The ten ARCH values py/dynruntime.mk accepts.
+#
+# Only `native-code` now. Each row used to carry the `CROSS` prefix
+# dynruntime.mk hardcodes and the toolchain that supplied it; record 0050
+# deleted the toolchain resolver, and v1.29.0 then made the prefixes
+# wrong as well -- `x86` moved from an empty prefix to `i686-linux-gnu-`
+# and `x64` to `x86_64-linux-gnu-`. Neither was read by anything but a
+# display column, and a prefix printed beside a make command that does
+# not contain it was never worth keeping accurate.
 #
 # `native-code` is the MP_NATIVE_ARCH_* value tools/mpy_ld.py bakes into
 # every native .mpy's header (byte 2, arch in bits 2-5): the verification
@@ -25,16 +31,16 @@
 # No aarch64: dynruntime.mk has no ARCH=aarch64 branch at all as of
 # MicroPython v1.28, so natmod cannot target it under any configuration.
 [arch]
-x86       = { cross = "",   native-code = 1 }
-x64       = { cross = "",                native-code = 2 }
-armv6m    = { cross = "arm-none-eabi-",   native-code = 4 }
-armv7m    = { cross = "arm-none-eabi-",   native-code = 5 }
-armv7emsp = { cross = "arm-none-eabi-",   native-code = 7 }
-armv7emdp = { cross = "arm-none-eabi-",   native-code = 8 }
-xtensa    = { cross = "xtensa-lx106-elf-", native-code = 9 }
-xtensawin = { cross = "xtensa-esp32-elf-",  native-code = 10 }
-rv32imc   = { cross = "riscv64-unknown-elf-",  native-code = 11 }
-rv64imc   = { cross = "riscv64-unknown-elf-",  native-code = 12 }
+x86       = { native-code = 1 }
+x64       = { native-code = 2 }
+armv6m    = { native-code = 4 }
+armv7m    = { native-code = 5 }
+armv7emsp = { native-code = 7 }
+armv7emdp = { native-code = 8 }
+xtensa    = { native-code = 9 }
+xtensawin = { native-code = 10 }
+rv32imc   = { native-code = 11 }
+rv64imc   = { native-code = 12 }
 
 # ── RISC-V arch-flags (rv32imc only) ───────────────────────────────────────
 # Transcribed from tools/mpy_ld.py's RV32_EXTENSIONS. Only rv32imc accepts

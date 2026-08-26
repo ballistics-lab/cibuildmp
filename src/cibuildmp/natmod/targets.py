@@ -25,9 +25,18 @@ from ..resources import natmod_data
 #   [mpy-abi]  py/persistentcode.h's MPY_VERSION/MPY_SUB_VERSION per tag.
 _ARCH_TABLE: dict[str, dict[str, Any]] = natmod_data()["arch"]
 
-NATMOD_CROSS: dict[str, str] = {arch: row["cross"] for arch, row in _ARCH_TABLE.items()}
+# The ten `ARCH` values `py/dynruntime.mk` accepts. Only the keys, since
+# record 0050: the table used to carry each arch's `CROSS` prefix too,
+# read by nothing but a display column, and MicroPython v1.29.0 made
+# those values wrong (`x86` moved from an empty prefix to
+# `i686-linux-gnu-`, `x64` to `x86_64-linux-gnu-`). Wrong data that only
+# reaches a log line is still wrong data, and the image supplies every
+# prefix under the name dynruntime.mk expects anyway.
+NATMOD_ARCH_NATIVE_CODE: dict[str, int] = {
+    arch: row["native-code"] for arch, row in _ARCH_TABLE.items()
+}
 
-NATMOD_ARCHS: tuple[str, ...] = tuple(NATMOD_CROSS)
+NATMOD_ARCHS: tuple[str, ...] = tuple(NATMOD_ARCH_NATIVE_CODE)
 
 # The MP_NATIVE_ARCH_* code tools/mpy_ld.py bakes into a native .mpy's own
 # header. Used to verify a produced file against the identifier it was built
@@ -160,11 +169,6 @@ class Target:
             base += f"+0x{self.arch_flags:x}"
         return base
 
-    @property
-    def cross(self) -> str:
-        """The CROSS prefix dynruntime.mk will use for this arch."""
-        return NATMOD_CROSS[self.arch]
-
     def __str__(self) -> str:
         return self.identifier
 
@@ -183,7 +187,7 @@ def natmod_targets(
     shape everywhere else in this config), so a `[0x1, 0x3]` list produces
     two rv32imc identifiers, `+0x1` and `+0x3`, side by side.
     """
-    unknown = [a for a in archs if a not in NATMOD_CROSS]
+    unknown = [a for a in archs if a not in NATMOD_ARCH_NATIVE_CODE]
     if unknown:
         raise UnknownArchError(
             f"unknown natmod arch(es): {', '.join(sorted(unknown))}. "
