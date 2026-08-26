@@ -28,12 +28,24 @@ outputs:
   include:
     description: >
       JSON array of {only, os} objects, e.g.
-      [{"only":"mpy6.3-natmod-x64","os":"ubuntu-latest"}]. Use it as
-      `matrix: { include: ${{ fromJSON(needs.<job>.outputs.include) }} }`,
-      then pass ${{ matrix.only }} to the cibuildmp action's `only` input and
-      ${{ matrix.os }} to the job's `runs-on`. Carrying the runner in the
-      matrix entry is what lets a target choose its own runner at all -- a
-      composite action cannot set `runs-on` for the job that calls it.
+      [{"only":"mpy6.3-natmod-x64","os":"ubuntu-latest"}]. In the consuming
+      workflow, feed it to a matrix `include:` via
+      fromJSON(needs.<job>.outputs.include), pass matrix.only to the
+      cibuildmp action's `only` input, and matrix.os to the job's
+      `runs-on` -- see .github/workflows/build-examples.yml for a real
+      caller, written with the expression delimiters this description
+      cannot contain. Carrying the runner in the matrix entry is what lets a
+      target choose its own runner at all: a composite action cannot set
+      `runs-on` for the job that calls it.
+
+      Deliberately written without expression delimiters. GitHub evaluates
+      them inside action.yml metadata too, not just in workflow steps, so
+      an example here is parsed as a real expression -- and
+      `needs` is not a valid named value in a composite action's context.
+      This action shipped with such an example in its own description and
+      failed to load the first time anything called it (it had none from
+      D20 until build-examples.yml fanned out), with
+      "Unrecognized named-value: 'needs'" pointing at this very line.
     value: ${{ steps.resolve.outputs.include }}
 
 runs:
