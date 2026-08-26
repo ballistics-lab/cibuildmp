@@ -143,12 +143,3 @@ def test_select_globs():
     ]
     # skip is applied after build, and wins
     assert select(targets, "*-x64", "*-x64") == []
-
-
-def test_every_natmod_arch_shares_one_runner():
-    # The premise behind D9: no natmod target needs a runner another cannot
-    # use, so nothing forces a job per identifier.
-    runners = {
-        Target(abi="6.3", mode="natmod", arch=a).default_runner for a in NATMOD_ARCHS
-    }
-    assert runners == {"ubuntu-latest"}

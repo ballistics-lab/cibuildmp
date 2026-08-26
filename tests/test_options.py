@@ -212,27 +212,6 @@ def test_extra_files_from_publish_table(tmp_path):
     assert options.extra_files() == ["src/facade.py", "src/ffi.py"]
 
 
-def test_runs_on_defaults_and_can_be_overridden(tmp_path):
-    write(
-        tmp_path,
-        """
-        [natmod]
-        archs = ["x64", "armv6m"]
-        [[overrides]]
-        select = "*-armv6m"
-        runs-on = "ubuntu-24.04-arm"
-        """,
-    )
-    options = Options.load(tmp_path, env={})
-    resolved = {
-        t.arch: options.build_options(t, env={}).runs_on for t in options.targets()
-    }
-    assert resolved == {"x64": "ubuntu-latest", "armv6m": "ubuntu-24.04-arm"}
-
-
-# ── record 0048: a key in the wrong table is no longer silent ───────────
-
-
 def test_a_top_level_key_inside_the_natmod_table_names_where_it_goes(tmp_path):
     # The exact trap that cost `test_only_overrides_skip` its meaning:
     # `skip` under `[natmod]` was read by nothing, and `archs` right next

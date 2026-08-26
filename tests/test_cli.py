@@ -35,14 +35,6 @@ def test_print_build_identifiers_json(tmp_path, capsys):
     ]
 
 
-def test_print_build_matrix_carries_the_runner(tmp_path, capsys):
-    assert main([write(tmp_path, CONFIG), "--print-build-matrix"]) == 0
-    assert json.loads(capsys.readouterr().out) == [
-        {"only": "mpy6.3-natmod-x64", "os": "ubuntu-latest"},
-        {"only": "mpy6.3-natmod-armv6m", "os": "ubuntu-latest"},
-    ]
-
-
 def test_dry_run_covers_every_target_and_succeeds(tmp_path, capsys):
     assert main([write(tmp_path, CONFIG), "--dry-run"]) == 0
     out = capsys.readouterr().out

@@ -73,9 +73,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--archs",
         default=None,
-        help="Comma-separated list of architectures to build, or 'all'. Overrides "
-        "the config's own archs. There is no 'auto': every natmod arch is a "
-        "cross-compile, so none of them depends on what this machine is.",
+        help="Comma-separated list of architectures to build, overriding the "
+        "config's own. usermod also accepts the words auto, native and all: "
+        "native is this machine's own architecture, auto adds the 32-bit "
+        "sibling it can run directly, all is every cell. natmod accepts only "
+        "all -- every natmod arch is a cross-compile, so none of them depends "
+        "on what this machine is. Nothing is unbuildable either way: a "
+        "non-native cell builds under emulation, this only picks what to "
+        "build here.",
     )
     parser.add_argument(
         "--toolchain",
@@ -100,13 +105,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--print-build-identifiers",
         action="store_true",
         help="Print the identifiers this config selects, one per line, then exit",
-    )
-    parser.add_argument(
-        "--print-build-matrix",
-        action="store_true",
-        help="Print a JSON array of {only, os} objects, then exit. Feed it to a "
-        "GitHub Actions `strategy.matrix.include` via fromJSON() to get one job "
-        "per target. Only worth it when targets need different runners.",
     )
     parser.add_argument(
         "--json",

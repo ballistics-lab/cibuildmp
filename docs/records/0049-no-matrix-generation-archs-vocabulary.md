@@ -1,0 +1,139 @@
+# 0049 — cibuildmp generates no matrix and chooses no host; `--archs auto` does the work instead
+
+Status: Implemented
+
+Supersedes the runner-selection half of [0020] and closes [0045]'s own
+still-open `--archs`/`auto` half. [0044]'s "usermod has no per-target `runs-on`
+override" item is closed by deletion rather than by adding one.
+
+## The premise this record is measured against
+
+Stated by the user, in one sentence, and worth writing down because every
+decision below follows from it rather than from a local preference:
+
+> cibuildwheel for MicroPython — the same behaviour, but Docker-only and
+> isolated, with no bare-host builds, and a foreign runner must still be able
+> to build through emulation.
+
+Two of those were already true. usermod is Docker-only ([0030]) and every build
+passes an explicit `--platform` ([0043]/[0044]), so a non-native target builds
+anywhere binfmt is registered. The third was not: **cibuildmp had an opinion
+about which host a target should run on, and cibuildwheel has no such concept
+at all.**
+
+## What was there, and why it was the wrong shape
+
+`--print-build-matrix` emitted `{only, os}` objects; `.github/actions/cibuildmp-matrix`
+wrapped it; `UsermodTarget.default_runner` supplied the `os`, arch-aware since
+[0044] so that an `_aarch64` target named `ubuntu-24.04-arm`. natmod had the
+same idea plus a `runs-on` config key to override it; usermod had no override
+anywhere, which [0044] recorded as still open.
+
+None of it was wrong in isolation, and the arch-awareness was a real
+improvement — it is what made the arm64 cells native instead of ~12x emulated.
+The problem is what it *is*: a build tool deciding where builds happen.
+cibuildwheel does not do this, and not because nobody got around to it. It
+generates no matrix, emits no runner and consults the host for exactly one
+thing — `Architecture.parse_config()`'s `auto`/`native`/`all`, which chooses
+*what to build here*, on this machine, and is re-decided on every machine. The
+consumer writes `runs-on` in their own workflow, gives each job `CIBW_ARCHS:
+auto`, and the distribution falls out.
+
+Two concrete costs of the shape cibuildmp had:
+
+- **A suggestion the caller could not refuse.** A consumer whose fleet is one
+  architecture had no way to say "run everything here". The matrix said
+  `ubuntu-24.04-arm` and that was that.
+- **The emulated path was structurally unreachable.** Every target ran only on
+  the host `default_runner` picked, so the "a foreign runner can still build"
+  property — the third clause of the premise, and the one the whole
+  container-per-target design exists to deliver — had never been executed by CI
+  in either direction. It had one local measurement ([0044], 1041s) and nothing
+  else.
+
+## What replaced it
+
+**Deleted:** `--print-build-matrix`, both `default_runner`s, natmod's `runs-on`
+key and `Options.runs_on`, and the `cibuildmp-matrix` action. Nothing outside
+this repo called any of it — the three consuming repos of [0038] never adopted
+the action.
+
+**Added:** `--archs`, extended to usermod, accepting `auto`, `native` and `all`
+beside explicit names, plus an `archs:` input on the root action. Keywords work
+in `[usermod.<port>] archs` too, and mix with explicit names
+(`["auto", "manylinux_2_28_s390x"]` is "what runs here, plus that one"),
+because expansion happens in one place inside `usermod_targets()` and every
+caller gets it without knowing it exists.
+
+`build-examples.yml` is now the cibuildwheel shape: one job per runner, each
+saying `archs: auto`.
+
+## Three things that had to be got right
+
+**Only `unix` has a host-dependent axis.** Its cells are native containers for
+their own architecture ([0043]), so "which run here without emulation" is a real
+question. No other port's axis is: `windows` cross-compiles to three Windows
+arches out of one amd64 image, `qemu`/`esp32` name boards, `webassembly` has no
+axis. For those the keywords all mean the full axis — which is natmod's own
+recorded argument for having no `auto` ("every natmod arch is a cross-compile,
+so none of them depends on what this machine is", [0045]) applied where it also
+holds.
+
+**Ask the image, not the tag.** `manylinux_2_39_mipsel` names `mipsel` and runs
+in a `linux/amd64` container, because pypa publishes no mipsel image and there
+is nothing for it to be native to ([0044]). Matching on the tag's architecture
+suffix would call it non-native on the one host it is actually native on, so
+`resolve_axis_keyword()` asks `dockerrun.platform_for()` instead. This is
+`unix`'s only cell where the two disagree, and it disagrees on the most common
+host there is.
+
+**`native` vs `auto` is one entry that can be wrong, affordably.** `auto` adds
+the 32-bit sibling a host executes directly — `i686` on `x86_64`, `armv7l` on
+`aarch64`. The second is a bet: 32-bit ARM is native on an arm64 host only if
+the CPU implements AArch32 at EL0. cibuildwheel carries a runtime check; a
+static table is enough here because **the cost of being wrong is bounded to
+speed**. A cell wrongly called native still builds, emulated, since
+`--platform` is passed either way. That is a different kind of mistake from one
+that yields a wrong binary, which is why the same shortcut would be
+unacceptable inside `dockerrun`. On the hosts that matter it is measured, not
+assumed ([0044]: `armv8l`, 59.5s against the native `aarch64` build's 88.8s).
+
+## What this does not change
+
+**Nothing became unbuildable anywhere.** `--archs` picks a subset to build
+*here*; it gates nothing. `dockerrun.run()` still passes `--platform` resolved
+from the target, `host_oci_platform()` is still the only place
+`platform.machine()` is consulted in that module and its value still never
+leaves it, and `_probe_platform()` still refuses only when binfmt is genuinely
+missing. The one thing that reads the host for *selection* is this record's own
+vocabulary, and [0045] already drew that line: [0043] forbids host architecture
+in identifiers, image names and pin keys — facts that must mean the same thing
+everywhere — not in a local choice re-made per machine.
+
+**`--print-build-identifiers` now reflects the host when `archs` says `auto`.**
+[0045] cautioned against that on the grounds that a matrix generated on one
+runner would be consumed on another. That use case was matrix generation, and
+it no longer exists; a list that disagreed with what the same invocation would
+build would be worse.
+
+## Still open
+
+- **natmod still builds on the bare host.** The premise says "no bare-host
+  builds", and usermod satisfies it while natmod does not: [0003]'s
+  `host`/`download` toolchain resolution installs and runs cross toolchains on
+  whatever machine invokes it. That is a much larger change than this record
+  and is not attempted here, but it is the remaining distance to the premise
+  and should be recorded as such rather than left implicit.
+- Whether `auto` should become the *default* axis for `unix`, rather than the
+  nine curated cells `_UNIX_DEFAULT_TARGETS` names. It is cibuildwheel's own
+  default and would make a bare `ports = ["unix"]` mean "what this runner can
+  do fast". It is deliberately not taken here: the vocabulary had to exist
+  before the default could be argued about.
+
+[0003]: 0003-toolchain-resolution-per-target.md
+[0020]: 0020-usermod-runner-selection-structural.md
+[0030]: 0030-container-approach-natmod-and-docker-vs-qemu.md
+[0038]: 0038-m5-adopt-in-three-repos.md
+[0043]: 0043-unix-adopts-cibuildwheel-native-image-model.md
+[0044]: 0044-unix-native-images-landed.md
+[0045]: 0045-only-is-a-filter-not-a-forced-identifier.md

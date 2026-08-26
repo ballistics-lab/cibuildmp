@@ -58,7 +58,15 @@ later; and cheap-with-strong-evidence beats expensive-and-speculative.
       named `micropython.exe` and pass -- and usermod still has no per-target
       `runs-on` override, which is why the arm64-host experiment below has to
       hardcode its runner
-- [ ] [0042] `windows` has never been built by `build-examples.yml` | **start
+- [ ] [0049] natmod still builds on the bare host | **start here.** The
+      project's own premise is "cibuildwheel for MicroPython, Docker-only and
+      isolated, no bare-host builds, and a foreign runner can still build
+      through emulation". Three of those hold now; this is the one that does
+      not. usermod is Docker-only ([0030]) but natmod's [0003] toolchain
+      resolution still installs and runs cross toolchains on whatever machine
+      invokes it. Large, and the last structural gap between what the tool is
+      and what it was for
+- [ ] [0042] `windows` has never been built by `build-examples.yml` | **then
       here.** [0042] verified all three arches live -- by hand, in a session,
       against an image pushed by hand -- and nothing has re-run it since, which
       is the state every other port left behind when it got a CI leg. Three
@@ -124,6 +132,7 @@ later; and cheap-with-strong-evidence beats expensive-and-speculative.
 ### Implemented
 
 - [x] [0048] `build`/`skip` are top-level in both modes, and a misplaced or misspelt key in a mode table is an error | fixed 2026-08-26; the audit it asked for also found `CIBMP_MICROPYTHON`/`CIBMP_OUTPUT_DIR` silently ignored in usermod mode, and `UsermodConfigError` never caught by the CLI -- both fixed alongside
+- [x] [0049] cibuildmp generates no matrix and chooses no host; `--archs auto`/`native`/`all` does the work instead | `--print-build-matrix`, both `default_runner`s, natmod's `runs-on` key and the `cibuildmp-matrix` action deleted -- cibuildwheel has no equivalent of any of them. Closes [0045]'s open half and [0044]'s "no per-target `runs-on` override", the latter by deletion. Its own "still open" names natmod's bare-host builds, now the top row above
 - [x] [0043] `unix` adopts cibuildwheel's model in full: native per-target images, PEP 600/656, full arch x libc matrix (epic) | the *decision* shipped -- implemented by [0044], whose row above carries the work that remains. Kept here as the design argument, which is still where the reasoning lives
 - [x] [0042] `windows` wired to `ensure_image()`; `emsdk.py`/`llvmmingw.py` deleted | all three arches verified live, including an anonymous pull of the published digest; that image was pushed by hand rather than by `publish-docker-images.yml` — see the record. **Still open above:** none of it was ever re-run by CI, which is what the row in "In progress" is about
 - [x] [0041] documentation restructure — this scheme | supersedes the monolithic `docs/BACKLOG.md`
@@ -223,3 +232,4 @@ record is added.
 [0046]: records/0046-pin-staleness-checker.md
 [0047]: records/0047-run-output-parity-with-cibuildwheel.md
 [0048]: records/0048-build-skip-live-in-opposite-tables.md
+[0049]: records/0049-no-matrix-generation-archs-vocabulary.md

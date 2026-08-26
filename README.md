@@ -713,7 +713,7 @@ name suffix (`build-natmod-arch` → `build-natmod`). `v0.1.0` had only
 
 The `cibuildmp` package and the actions share one version. The package is
 not on PyPI yet, so every action installs it from its own checkout --
-`cibuildmp-matrix` and the root `action.yml` both do this directly
+the root `action.yml` does this directly
 (`uv tool install "$GITHUB_ACTION_PATH"` -- a composite action's own
 `github.action_path` is already the pinned ref's own source, checked out
 by GitHub Actions itself before any step runs, so this is a real install

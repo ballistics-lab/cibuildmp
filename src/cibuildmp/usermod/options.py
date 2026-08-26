@@ -94,8 +94,8 @@ def _selector(
         return env_value
     if key in usermod:
         # stderr, not stdout: `--print-build-identifiers` and
-        # `--print-build-matrix` write machine-readable output there, and
-        # cibuildmp-matrix's own action does `json.loads()` on it. A
+        # `--print-build-identifiers --json` write machine-readable
+        # output there, and callers parse it. A
         # warning on stdout would not merely be noise, it would corrupt a
         # matrix -- caught by a test asserting the exact stdout of a
         # --print-build-identifiers run.

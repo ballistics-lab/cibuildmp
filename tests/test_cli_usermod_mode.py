@@ -75,16 +75,6 @@ def test_usermod_print_build_identifiers_json(tmp_path, capsys):
     assert json.loads(capsys.readouterr().out) == ["esp32-ESP32_GENERIC"]
 
 
-def test_usermod_print_build_matrix_carries_runner(tmp_path, capsys):
-    make_module_dir(tmp_path)
-    write(tmp_path, '[usermod]\nports = ["qemu"]\n')
-
-    assert main([str(tmp_path), "--print-build-matrix"]) == 0
-    assert json.loads(capsys.readouterr().out) == [
-        {"only": "qemu", "os": "ubuntu-latest"}
-    ]
-
-
 def test_usermod_dry_run_lists_every_target(tmp_path, capsys):
     make_module_dir(tmp_path)
     write(tmp_path, '[usermod]\nports = ["webassembly"]\n')
@@ -92,7 +82,9 @@ def test_usermod_dry_run_lists_every_target(tmp_path, capsys):
     assert main([str(tmp_path), "--dry-run"]) == 0
     out = capsys.readouterr().out
     assert "webassembly" in out
-    assert "runs-on=ubuntu-latest" in out
+    # No runner in the plan line any more -- cibuildmp does not choose a
+    # host for anything (record 0049).
+    assert "runs-on" not in out
 
 
 def test_usermod_only_selects_one_target(tmp_path, capsys):

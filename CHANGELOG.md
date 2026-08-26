@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **Matrix generation.** `--print-build-matrix`, `Target.default_runner` /
+  `UsermodTarget.default_runner`, natmod's `runs-on` config key and the
+  `.github/actions/cibuildmp-matrix` composite action are gone. cibuildwheel
+  has no equivalent of any of them: it emits no matrix and holds no opinion
+  about which host a target should run on, because `runs-on` is the
+  consumer's own workflow's business. cibuildmp had grown the opposite --
+  a tool that routed targets to hosts -- and that routing was also why CI
+  had never once exercised a build on a host it was not native to. See
+  record 0049.
+
+### Added
+
+- **`--archs auto` / `native` / `all` for usermod**, and an `archs:` input on
+  the root action. This is what replaces matrix generation, and it is
+  upstream's own mechanism for spreading work across runners: give each job
+  in your own matrix a `runs-on` and `archs: auto`, and each one builds what
+  it is native to. `native` is the runner's own architecture, `auto` adds
+  the 32-bit sibling it can execute directly, `all` is every cell. Keywords
+  work in `[usermod.<port>] archs` too, and can be mixed with explicit
+  names.
+
+  Nothing is unbuildable on the "wrong" runner: every build runs in a
+  container with an explicit `--platform`, so a non-native cell builds under
+  emulation wherever it lands. `archs` is a choice about time, not about
+  capability.
+- `verify_windows_output()` — reads the COFF `Machine` out of the produced
+  `micropython.exe` and rejects a binary that is not the architecture its
+  identifier names. `windows` previously checked only that the file existed.
+
 ## [0.3.0] - 2026-08-24
 
 First release where `cibuildmp` actually builds a module — `v0.3.0a1` could

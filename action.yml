@@ -19,9 +19,25 @@ inputs:
   only:
     description: >
       Build exactly this one identifier (e.g. mpy6.3-natmod-armv7emsp),
-      ignoring the config's own build/skip selectors. This is what a matrix
-      leg passes back in -- see the cibuildmp-matrix action, which generates
-      the list.
+      ignoring the config's own build/skip selectors and its axis alike.
+      Resolved against every identifier that exists, not against what the
+      config selects (record 0045).
+    required: false
+    default: ""
+  archs:
+    description: >
+      Which architectures to build here, overriding the config's own.
+      Comma-separated names, or one of the words auto, native, all --
+      native is this runner's own architecture, auto adds the 32-bit
+      sibling it can execute directly, all is every cell.
+
+      This is how work is spread across runners, and it replaced
+      cibuildmp generating a matrix (record 0049). Give each job in your
+      own matrix a runs-on and archs&#58; auto, and each one builds what it is
+      native to. Nothing is unbuildable on the wrong runner -- every
+      build runs in a container with an explicit --platform, so a
+      non-native cell builds under emulation -- so this is a choice about
+      time, not about capability.
     required: false
     default: ""
   extras:
@@ -243,9 +259,13 @@ runs:
         if [ -n "$ACTION_ONLY" ]; then
           args+=(--only "$ACTION_ONLY")
         fi
+        if [ -n "$ACTION_ARCHS" ]; then
+          args+=(--archs "$ACTION_ARCHS")
+        fi
         cibuildmp "${args[@]}"
       env:
         ACTION_PACKAGE_DIR: ${{ inputs.package-dir }}
         ACTION_OUTPUT_DIR: ${{ inputs.output-dir }}
         ACTION_CONFIG_FILE: ${{ inputs.config-file }}
         ACTION_ONLY: ${{ inputs.only }}
+        ACTION_ARCHS: ${{ inputs.archs }}

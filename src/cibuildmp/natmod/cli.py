@@ -10,7 +10,7 @@ call site and neither is the privileged "default" one that happens to be
 written in the dispatcher.
 
 `build()` lives here too, with the `--dry-run`/`--only`/
-`--print-build-identifiers`/`--print-build-matrix`/`--allow-empty`
+`--print-build-identifiers`/`--allow-empty`
 handling that feeds it -- everything downstream of "this invocation is a
 natmod build". What stays in `cli.py` is only what is genuinely shared:
 the argument parser (one CLI, both modes), `detect_mode()`, and the
@@ -236,17 +236,6 @@ def run(
                 file=sys.stderr,
             )
             return 2
-
-    if args.print_build_matrix:
-        print(
-            json.dumps(
-                [
-                    {"only": bo.target.identifier, "os": bo.runs_on}
-                    for bo in (options.build_options(t) for t in targets)
-                ]
-            )
-        )
-        return 0
 
     if args.print_build_identifiers:
         identifiers = [t.identifier for t in targets]

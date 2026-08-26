@@ -5,8 +5,11 @@ from cibuildmp.usermod.targets import (
     UnknownAxisError,
     UnknownPortError,
     UsermodTarget,
+    all_axis_values,
     axis_key,
     default_axis_values,
+    host_arch,
+    parse_axis_values,
     usermod_targets,
 )
 
@@ -28,11 +31,6 @@ def test_identifier_includes_axis_when_present():
     assert UsermodTarget(port="esp32", arch="ESP32_GENERIC").identifier == (
         "esp32-ESP32_GENERIC"
     )
-
-
-def test_default_runner_is_ubuntu_latest_for_every_port():
-    for port in KNOWN_PORTS:
-        assert UsermodTarget(port=port).default_runner == "ubuntu-latest"
 
 
 def test_axis_key_names():
@@ -155,42 +153,78 @@ def test_usermod_targets_qemu_board_override_selects_riscv():
 
 # ── default_runner (records 0043/0044) ──────────────────────────────────
 
-
-def test_native_arm_targets_ask_for_an_arm_runner():
-    # An aarch64 image on an amd64 runner is emulated, measured at ~20x a
-    # native build (0044). Naming an arm64 runner makes it native.
-    for tag in ("manylinux_2_28_aarch64", "musllinux_1_2_aarch64"):
-        assert UsermodTarget(port="unix", arch=tag).default_runner == "ubuntu-24.04-arm"
+# ── auto / native / all (record 0049) ───────────────────────────────────
 
 
-def test_armv7l_is_grouped_with_aarch64_despite_the_aarch32_caveat():
-    # Deliberate and uncertain: 32-bit ARM is native on an arm64 host only
-    # if that CPU implements AArch32 at EL0, which server-class parts
-    # generally do not -- cibuildwheel carries an explicit check for this
-    # in `bitness_archs()`. Grouped here because the downside is nil
-    # (emulated either way); this case exists so moving it back is a
-    # visible decision rather than a silent edit.
-    assert (
-        UsermodTarget(port="unix", arch="manylinux_2_31_armv7l").default_runner
-        == "ubuntu-24.04-arm"
+def test_native_is_this_machines_architecture_only():
+    assert parse_axis_values("unix", ["native"], machine="aarch64") == [
+        "manylinux_2_28_aarch64",
+        "musllinux_1_2_aarch64",
+    ]
+
+
+def test_auto_adds_the_32bit_sibling_the_host_can_execute():
+    # The only difference between the two words, upstream too: an x86_64
+    # host runs i686 directly, an aarch64 host runs armv7l directly (on
+    # parts implementing AArch32 at EL0, which GitHub's arm64 runners do
+    # -- 0044 measured it).
+    auto = parse_axis_values("unix", ["auto"], machine="aarch64")
+    assert "manylinux_2_31_armv7l" in auto
+    assert "musllinux_1_2_armv7l" in auto
+
+
+def test_mipsel_is_native_to_an_amd64_host_despite_its_name():
+    # The case that makes "ask the image, not the tag" load-bearing:
+    # manylinux_2_39_mipsel names mipsel and runs in a linux/amd64
+    # container, because pypa publishes no mipsel image and there is
+    # nothing for it to be native to. Matching the tag suffix would call
+    # it non-native on the one host it is actually native on.
+    assert "manylinux_2_39_mipsel" in parse_axis_values(
+        "unix", ["native"], machine="x86_64"
+    )
+    assert "manylinux_2_39_mipsel" not in parse_axis_values(
+        "unix", ["auto"], machine="aarch64"
     )
 
 
-def test_every_other_target_stays_on_the_default_runner():
-    for target in (
-        UsermodTarget(port="unix", arch="manylinux_2_28_x86_64"),
-        UsermodTarget(port="unix", arch="manylinux_2_28_i686"),
-        UsermodTarget(port="unix", arch="manylinux_2_39_mipsel"),
-        UsermodTarget(port="unix", arch="manylinux_2_39_riscv64"),
-        UsermodTarget(port="webassembly", arch=""),
-        UsermodTarget(port="qemu", arch=""),
-    ):
-        assert target.default_runner == "ubuntu-latest"
+def test_all_is_every_cell_regardless_of_host():
+    from cibuildmp.usermod.dockerrun import unix_targets
+
+    for machine in ("x86_64", "aarch64", "s390x"):
+        assert parse_axis_values("unix", ["all"], machine=machine) == list(
+            unix_targets()
+        )
 
 
-def test_cross_compiling_ports_never_ask_for_arm():
-    # `windows`'s own arch axis contains "arm64", and it must not be
-    # confused with a native ARM build: that image is an amd64 Linux
-    # cross host targeting Windows, so an arm64 runner would only emulate
-    # it for no gain.
-    assert UsermodTarget(port="windows", arch="arm64").default_runner == "ubuntu-latest"
+def test_the_keywords_are_no_ops_for_a_host_independent_axis():
+    # windows cross-compiles to three Windows arches out of one amd64
+    # image, so "what runs natively here" is not a question it has.
+    for keyword in ("auto", "native", "all"):
+        assert parse_axis_values("windows", [keyword]) == list(
+            default_axis_values("windows")
+        )
+
+
+def test_a_keyword_and_an_explicit_cell_can_be_mixed():
+    # "what runs here, plus this one" is a legitimate thing to write, and
+    # the result should not depend on which side of the comma a cell
+    # appeared on.
+    values = parse_axis_values(
+        "unix", ["auto", "manylinux_2_28_s390x"], machine="x86_64"
+    )
+    assert "manylinux_2_28_s390x" in values
+    assert "manylinux_2_28_x86_64" in values
+    assert values == sorted(values, key=list(all_axis_values("unix")).index)
+
+
+def test_an_unknown_axis_value_is_left_alone_to_fail_where_it_did():
+    assert parse_axis_values("unix", ["not-a-cell"]) == ["not-a-cell"]
+
+
+def test_host_arch_maps_kernel_spellings_to_the_projects_names():
+    # pypa's names are the project's (0043) and a kernel does not always
+    # agree: an arm/v7 container on an arm64 kernel reports armv8l.
+    assert host_arch("aarch64") == "aarch64"
+    assert host_arch("arm64") == "aarch64"
+    assert host_arch("armv8l") == "armv7l"
+    assert host_arch("AMD64") == "x86_64"

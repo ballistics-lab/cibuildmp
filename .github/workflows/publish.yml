@@ -65,7 +65,7 @@ jobs:
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           # 3.11 is this package's floor (tomllib); 3.14 is what action.yml
-          # and cibuildmp-matrix pin, so every runner here is on one version.
+          # pin, so every runner here is on one version.
           python-version: "3.14"
           github-token: ${{ github.token }}
 

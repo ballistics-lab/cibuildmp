@@ -17,6 +17,7 @@ without a MicroPython checkout.
 
 from __future__ import annotations
 
+import platform
 from dataclasses import dataclass
 
 from ..natmod.targets import matches, parse_selector
@@ -108,12 +109,162 @@ _PORT_AXES: dict[str, tuple[str | None, tuple[str, ...]]] = {
 
 KNOWN_PORTS: tuple[str, ...] = tuple(_PORT_AXES)
 
-# Platform-tag suffixes whose builds want an arm64 runner -- matched on
-# the tag's own end (`manylinux_2_28_aarch64`, `musllinux_1_2_armv7l`)
-# rather than by splitting it, so this stays pure and needs no pin-table
-# read. See `UsermodTarget.default_runner` for why `armv7l` is in here
-# despite being the uncertain half.
-_ARM_RUNNER_ARCHS = ("_aarch64", "_armv7l")
+# ── the auto/native/all vocabulary ────────────────────────────────────
+#
+# Record 0049. cibuildwheel's `Architecture.parse_config()` accepts the
+# literal words `auto`, `native` and `all` beside explicit names, and
+# that is how upstream distributes work across runners: it emits no
+# matrix and has no opinion about hosts, so each job says `CIBW_ARCHS:
+# auto` and the runner it happens to be on decides what that means.
+# cibuildmp had neither -- no vocabulary, and a `default_runner` that
+# routed targets to hosts instead. The routing is gone; this is what
+# replaces it.
+#
+# **Only `unix` has a host-dependent axis, and that is not a
+# simplification.** Its cells are native containers for their own
+# architecture (0043), so which of them this machine runs without
+# emulation is a real question. No other port's axis is: `windows`
+# cross-compiles to three Windows arches out of one amd64 image, `qemu`
+# and `esp32` name boards, `webassembly` has no axis at all. For those,
+# `auto` and `native` mean the same as `all` -- which is natmod's own
+# recorded argument for having no `auto` ("every natmod arch is a
+# cross-compile, so none of them depends on what this machine is",
+# 0045), applied where it also holds.
+#
+# **Nothing here decides what *can* be built.** A non-native cell still
+# builds anywhere: `dockerrun.run()` passes `--platform` and binfmt does
+# the rest, which is the entire mechanism and needs no host knowledge at
+# all. These words choose a *subset to build here*, on this machine, and
+# are re-decided on every machine -- the distinction 0045 drew when it
+# reconciled this with 0043's rule that host architecture appears in no
+# identifier, image name or pin key. Those are facts that must mean the
+# same thing everywhere; this is a local convenience.
+#
+# ── where the native table is a bet, and why that is affordable ───────
+#
+# `native` is exactly this machine's architecture. `auto` adds the
+# 32-bit sibling it can also execute directly -- `i686` on `x86_64`,
+# `armv7l` on `aarch64` -- which is the only difference between the two
+# words upstream, too.
+#
+# The `aarch64` -> `armv7l` entry can be wrong: 32-bit ARM runs natively
+# on an arm64 host only if the CPU implements AArch32 at EL0, and not
+# every server part does. cibuildwheel carries a runtime check for
+# exactly this. A static table is enough here because **the cost of
+# being wrong is bounded to speed**: a cell wrongly called native still
+# builds, emulated, since `--platform` is passed either way. That is a
+# different kind of mistake from one that produces a wrong binary, and
+# it is why the same shortcut would not be acceptable in `dockerrun`.
+#
+# On the hosts that matter it is measured rather than assumed: GitHub's
+# `ubuntu-24.04-arm` runners do implement AArch32 at EL0 -- an `arm/v7`
+# container there reports `armv8l` (a 64-bit ARMv8 kernel's name for a
+# 32-bit process; `qemu-arm` reports `armv7l`) and builds that cell in
+# 59.5s against the native `aarch64` build's own 88.8s (0044).
+#
+# This module still touches no filesystem and no network.
+# `platform.machine()` is a process-local fact and does not break that.
+_NATIVE_SIBLINGS: dict[str, tuple[str, ...]] = {
+    "x86_64": ("i686",),
+    "aarch64": ("armv7l",),
+}
+
+# `platform.machine()` spellings that name an architecture this project
+# already has a name for. pypa's names are the project's (0043), and a
+# kernel does not always agree with them.
+_MACHINE_ALIASES: dict[str, str] = {
+    "amd64": "x86_64",
+    "arm64": "aarch64",
+    "i386": "i686",
+    "i586": "i686",
+    "i686": "i686",
+    "armv7l": "armv7l",
+    "armv8l": "armv7l",
+}
+
+# The OCI platform each architecture name means, for asking "is this
+# image native here". `dockerrun` owns the target->platform direction and
+# is deliberately not asked for the inverse: it has no reason to know
+# what a *host* is beyond `host_oci_platform()`, which never leaves that
+# module (0043).
+_ARCH_OCI_PLATFORMS: dict[str, str] = {
+    "x86_64": "linux/amd64",
+    "i686": "linux/386",
+    "aarch64": "linux/arm64",
+    "armv7l": "linux/arm/v7",
+    "ppc64le": "linux/ppc64le",
+    "s390x": "linux/s390x",
+    "riscv64": "linux/riscv64",
+}
+
+ARCH_KEYWORDS: tuple[str, ...] = ("auto", "native", "all")
+
+
+def host_arch(machine: str | None = None) -> str:
+    """This machine's architecture under the project's own names.
+
+    `machine` is injectable so a test can ask about a host it is not
+    running on; the alternative is monkeypatching `platform.machine`,
+    which makes every such test order-dependent.
+    """
+    raw = (machine if machine is not None else platform.machine()).lower()
+    return _MACHINE_ALIASES.get(raw, raw)
+
+
+def resolve_axis_keyword(
+    port: str, keyword: str, *, machine: str | None = None
+) -> list[str]:
+    """Expand `auto`/`native`/`all` into this port's own axis values.
+
+    Unknown words are returned unexpanded by the caller, not here: a
+    keyword and an explicit axis value share one namespace, and deciding
+    which a string is belongs with the rest of axis parsing.
+    """
+    from .dockerrun import platform_for
+
+    values = list(all_axis_values(port))
+    if keyword == "all" or axis_key(port) is None or port != "unix":
+        return values
+    wanted = (host_arch(machine),)
+    if keyword == "auto":
+        wanted = (*wanted, *_NATIVE_SIBLINGS.get(wanted[0], ()))
+    native = {
+        _ARCH_OCI_PLATFORMS[arch] for arch in wanted if arch in _ARCH_OCI_PLATFORMS
+    }
+    # Asked of the **image**, not of the tag. `manylinux_2_39_mipsel` is
+    # the case that makes the difference: it names `mipsel` and runs in a
+    # `linux/amd64` container, because pypa publishes no mipsel image and
+    # there is nothing for it to be native to (0044), so it cross-compiles
+    # from an amd64 base like the non-`unix` ports do. Matching on the
+    # tag's own suffix would call it non-native on the one host it is
+    # actually native on. `platform_for()` reads the same bundled pin
+    # table `all_axis_values()` already went through, so this adds no new
+    # kind of dependency.
+    return [v for v in values if platform_for(port, v) in native]
+
+
+def parse_axis_values(
+    port: str, values: list[str], *, machine: str | None = None
+) -> list[str]:
+    """A configured or `--archs` axis list, with keywords expanded.
+
+    Order is the axis's own, not the caller's, and duplicates collapse:
+    `["auto", "manylinux_2_28_s390x"]` is a legitimate thing to write --
+    "what runs here, plus this one" -- and it should not depend on which
+    side of the comma a cell appeared on.
+    """
+    expanded: list[str] = []
+    for value in values:
+        expanded.extend(
+            resolve_axis_keyword(port, value, machine=machine)
+            if value in ARCH_KEYWORDS
+            else [value]
+        )
+    axis_order = list(all_axis_values(port))
+    ordered = [v for v in axis_order if v in expanded]
+    # Anything the axis does not know stays, in the order given, so the
+    # existing "unknown axis value" error still fires where it did.
+    return ordered + [v for v in expanded if v not in axis_order]
 
 
 class UnknownPortError(ValueError):
@@ -179,53 +330,6 @@ class UsermodTarget:
     def identifier(self) -> str:
         return f"{self.port}-{self.arch}" if self.arch else self.port
 
-    @property
-    def default_runner(self) -> str:
-        """The GitHub runner label a matrix leg for this target should use.
-
-        Arch-aware since records 0043/0044 made every `unix` image native
-        to its own architecture. Before that this was a hardcoded
-        `ubuntu-latest` and correctly so: every port cross-compiled from
-        amd64, so no target cared what the host was. Now two of them do --
-        an `aarch64` image on an amd64 runner runs under binfmt/QEMU, and
-        that is measured at roughly 20x a native build (0044: 46s native
-        x86_64 against 1041s emulated aarch64 on the same machine).
-        Naming an arm64 runner for those makes the build native instead.
-
-        0043's own opening observation was that this hardcode existed and
-        that natmod had a `runs-on` knob while usermod did not. This
-        closes half of it: cibuildmp can now *emit* an arm64 runner. There
-        is still no per-target config override, which is the other half.
-
-        **`armv7l` was a bet when it was added here, and it paid off.**
-        A 32-bit ARM binary is native on an arm64 host only if that CPU
-        implements AArch32 at EL0, and the server-class parts GitHub uses
-        (Graviton, Ampere Altra) were expected not to -- which would have
-        left this target emulated, just on a different host. Run
-        32958683512 settles it: the `manylinux_2_31_armv7l` leg on
-        `ubuntu-24.04-arm` built in **59.5s, faster than the native
-        `aarch64` leg's own 88.8s on the same runner class**. Emulation
-        costs a multiple, not two thirds, so those parts do implement
-        AArch32 at EL0 and this entry stays.
-
-        Recorded as timing evidence rather than as a direct capability
-        check, and the distinction still matters: cibuildwheel's own
-        `Architecture.bitness_archs()` carries an explicit AArch32 EL0
-        check for exactly ARM64 Linux, which remains the more careful
-        thing for a tool that must be right on *any* arm64 host. What is
-        settled here is GitHub's runners specifically. If that ever stops
-        being true the cost is nil -- emulated either way -- and this
-        entry moves back.
-
-        Only `unix` is arch-aware. `windows`, `qemu`, `webassembly` and
-        `esp32` cross-compile to Windows, bare metal and wasm from an
-        amd64 Linux toolchain host, so an arm64 runner would only emulate
-        their images for no gain.
-        """
-        if self.port == "unix" and self.arch.endswith(_ARM_RUNNER_ARCHS):
-            return "ubuntu-24.04-arm"
-        return "ubuntu-latest"
-
     def __str__(self) -> str:
         return self.identifier
 
@@ -240,6 +344,9 @@ def usermod_targets(
     the built-in default list" shape `natmod_targets()`'s own `archs`
     parameter already has. Preserves `ports`' own order, then each port's
     axis-value order.
+
+    `auto`/`native`/`all` are expanded here, so every caller gets the
+    vocabulary for free and none of them has to know it exists.
     """
     unknown = [p for p in ports if p not in _PORT_AXES]
     if unknown:
@@ -251,6 +358,10 @@ def usermod_targets(
     for port in ports:
         key, defaults = _PORT_AXES[port]
         values = axis_overrides.get(port) or list(defaults)
+        # One place for keyword expansion, so `[usermod.<port>] archs =
+        # ["auto"]` and `--archs auto` mean the same thing without either
+        # caller knowing the vocabulary exists (record 0049).
+        values = parse_axis_values(port, values)
         if key is None and values != [""]:
             raise UnknownAxisError(
                 f"usermod/{port} has no configurable axis yet -- remove "

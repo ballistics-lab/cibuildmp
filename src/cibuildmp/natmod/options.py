@@ -81,7 +81,6 @@ NATMOD_TABLE_KEYS: frozenset[str] = frozenset(
         "arch-flags",
         "module-dir",
         "make-target",
-        "runs-on",
         "extra-make-args",
         "pre-build-command",
     }
@@ -98,7 +97,6 @@ OVERRIDE_TABLE_KEYS: frozenset[str] = frozenset(
         "select",
         "module-dir",
         "make-target",
-        "runs-on",
         "extra-make-args",
         "pre-build-command",
     }
@@ -172,7 +170,6 @@ class BuildOptions:
     output_dir: Path
     module_dir: str
     make_target: str
-    runs_on: str = ""
     extra_make_args: list[str] = field(default_factory=list)
     pre_build_command: str = ""
 
@@ -381,7 +378,6 @@ class Options:
             output_dir=self.output_dir,
             module_dir=str(opt("module-dir", DEFAULT_MODULE_DIR)),
             make_target=str(opt("make-target", DEFAULT_MAKE_TARGET)),
-            runs_on=str(opt("runs-on", target.default_runner)),
             extra_make_args=extra_make_args,
             pre_build_command=str(opt("pre-build-command", "")),
         )

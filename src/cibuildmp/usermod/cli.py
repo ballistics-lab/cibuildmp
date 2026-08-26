@@ -1,7 +1,7 @@
 """usermod's own half of the CLI dispatch. `cli.py`'s `main()` calls
 into `run()` once build mode is resolved to `"usermod"` (`cli.py`'s own
 `detect_mode()`), mirroring the natmod flow --dry-run/--only/
---print-build-identifiers/--print-build-matrix/--allow-empty/build --
+--print-build-identifiers/--allow-empty/build --
 but driven by `UsermodOptions`/`orchestrate.build()` instead of
 `options.Options`/`build.build_target()`. Kept in its own module rather
 than inlined into `cli.py` so that file does not grow a second,
@@ -9,12 +9,14 @@ differently-shaped copy of the same dispatch logic.
 
 Not wired here, deliberately, same as `usermod/options.py`'s and
 `usermod/orchestrate.py`'s own docstrings already flag:
-- `--archs`/`--toolchain` are natmod-specific and stay that way -- a
-  usermod target's axis (arch/board) is config-only for now
-  (`[usermod.<port>]`), and toolchain resolution always goes through
-  whatever each `build_<port>()` already does internally (apt probe,
-  `shutil.which()`, or a pinned download), no `auto`/`host`/`download`
-  override yet.
+- `--toolchain` is natmod-specific and stays that way: toolchain
+  resolution always goes through whatever each `build_<port>()` already
+  does internally, with no `auto`/`host`/`download` override.
+
+`--archs` *was* on that list and no longer is (record 0049). It is how
+work is spread across runners now that cibuildmp generates no matrix and
+picks no host: `auto`/`native`/`all` beside explicit names, applied to
+every selected port with an `archs` axis.
 """
 
 from __future__ import annotations
@@ -35,12 +37,13 @@ from .targets import (
     UnknownPortError,
     UsermodTarget,
     all_usermod_targets,
+    axis_key,
 )
 
 
 def _plan_line(index: int, total: int, target: UsermodTarget) -> str:
     counter = f"[{index:>{len(str(total))}}/{total}]"
-    return f"{counter} {target.identifier:<28} runs-on={target.default_runner}"
+    return f"{counter} {target.identifier}"
 
 
 def run(
@@ -51,6 +54,17 @@ def run(
 ) -> int:
     try:
         options = UsermodOptions.load(package_dir, config_file, preread=preread)
+        if args.archs is not None:
+            # Applied to every selected port with an `archs` axis, which
+            # is `unix` and `windows`. `qemu`/`esp32` are keyed by board
+            # and `webassembly` has no axis, so there is nothing for an
+            # arch list to mean there -- and the keywords are no-ops for
+            # `windows` anyway, whose three arches all cross-compile from
+            # one amd64 image (record 0049).
+            values = [a.strip() for a in args.archs.split(",") if a.strip()]
+            for port in options.ports:
+                if axis_key(port) == "archs":
+                    options.axis_overrides[port] = values
         targets = options.targets()
     # UsermodConfigError belongs here as much as the other two and was
     # simply never added: until record 0048 it had one raise site (a
@@ -85,14 +99,6 @@ def run(
                 file=sys.stderr,
             )
             return 2
-
-    if args.print_build_matrix:
-        print(
-            json.dumps(
-                [{"only": t.identifier, "os": t.default_runner} for t in targets]
-            )
-        )
-        return 0
 
     if args.print_build_identifiers:
         identifiers = [t.identifier for t in targets]
