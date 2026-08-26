@@ -858,6 +858,27 @@ nests and stop at the deepest one present for this target's own path,
 which recursive `dict.get()` chaining already does with no per-platform
 special-casing needed.
 
+**Confirmed explicitly, since it is the whole point of this shape: a
+per-port override and a per-board override are the same mechanism at two
+different depths, no separate feature for either.**
+
+```toml
+[usermod.unix]
+extra-make-args = ["-DFOO=1"]        # every unix build gets this
+
+[usermod.esp32.ESP32_GENERIC_S3]
+extra-make-args = ["-DBAR=1"]        # only this one board does
+```
+
+Neither line needs `[[overrides]]`/`select` at all — writing directly
+into the tree node *is* the per-port or per-board override, B0's own
+tree-walk picks both up automatically at whatever depth they were
+written. `[[overrides]]`'s own `select` (B2, next) is only for the
+residual case neither of these can express — a pattern spanning several
+nodes with no single common parent narrower than the whole family (e.g.
+"every arch ending in `emsp`," which touches sibling `[natmod.<arch>]`
+nodes directly, not one port or one board).
+
 **B2. `[[overrides]]`'s own `select` — proposed: dotted-segment fnmatch,
 joined by literal `.`, added as a second matching mode alongside today's
 identifier-glob matching, not a replacement for it.**
@@ -973,6 +994,22 @@ alone first would mean the three consumer repos migrate their `build`/
 tree-addressed `select`, exactly the double-migration cost this reasoning
 exists to avoid.
 
+**This record's own priority is over the tracker as a whole, not only
+[0038]** — clarified directly, since the point above reads narrower than
+intended. Every other "In progress / Proposed" epic that touches config
+shape or identifiers waits on this one, not just [0038]: **[0022]**
+(zephyr as a third family) is the actual generalization test for the
+family-registry dispatch [0051] already built and for this record's own
+tree depth — starting it against today's still-flat config, only to
+re-shape it again once Track B lands, is the same double-work risk B5
+already names for [0038], one level earlier. **[0040]** (usermod
+test-runner axis) adds config surface of its own and should wait for the
+same reason. Epics this record's own "Landed records this touches"
+section already marked orthogonal — **[0028]**/**[0032]**/**[0044]**/
+**[0046]**/**[0047]**/the remaining pieces of **[0050]** — are container/
+CI/runner plumbing this record has no opinion about and are not blocked
+by it; nothing here asks a future session to hold off on those.
+
 **B6. The tag-generative-axis question (the record's own "one question
 raised but not resolved").** Not re-opened by this addendum. [0013]'s own
 addendum already leans toward keeping dedup-by-ABI with tag merely
@@ -1038,6 +1075,12 @@ added for exactly this reason.
 [0016]: 0016-usermod-user-c-modules-dir-vs-cmake.md
 [0022]: 0022-zephyr-third-selector-axis.md
 [0024]: 0024-unix-armhf-mipsel-cross-compiles.md
+[0028]: 0028-container-per-port-migration-plan.md
+[0032]: 0032-unix-docker-default-and-webassembly-wiring.md
+[0040]: 0040-usermod-tests-deferred.md
+[0044]: 0044-unix-native-images-landed.md
+[0046]: 0046-pin-staleness-checker.md
+[0047]: 0047-run-output-parity-with-cibuildwheel.md
 [0043]: 0043-unix-adopts-cibuildwheel-native-image-model.md
 [0049]: 0049-no-matrix-generation-archs-vocabulary.md
 [0050]: 0050-natmod-is-docker-only.md
