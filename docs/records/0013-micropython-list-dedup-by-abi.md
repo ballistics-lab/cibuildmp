@@ -109,13 +109,16 @@ bearing work" goal is still correct, because functional compatibility
 (the thing that actually matters for whether a build serves its purpose)
 is confirmed, independently, by a real cross-load test. What changes is
 the *stated reason* (fixed above: "functionally interchangeable", not
-"byte-for-byte identical") and one downstream consequence: because the
-literal tag chosen out of a same-ABI group is not fully inert (it affects
-the exact bytes shipped, even if not what those bytes do), keeping `tag`
-a real, visible component of the identifier — rather than folding it away
-once ABI is known — has a genuine justification: reproducibility/audit,
-not compatibility. See [0052]'s own identifier-grammar section for where
-this lands.
+"byte-for-byte identical") and how the "which tag survives" rule itself
+works: because the literal tag chosen out of a same-ABI group is not
+fully inert (it affects the exact bytes shipped, even if not what those
+bytes do), silently keeping "whichever came first in the list" is no
+longer good enough — [0052]'s own identifier-grammar section, after
+working through and rejecting both "make tag visible in the identifier"
+and "reposition it next to ABI", lands on turning ambiguity itself into
+a loud `ConfigError` when two *distinct* tags share one ABI, with the
+literal tag actually used recorded as build provenance (`package.json`),
+never in the selector-facing identifier.
 
 [0023]: 0023-usermod-identifier-scheme-config-output.md
 [0052]: 0052-config-is-a-tree-not-a-selector-matrix.md

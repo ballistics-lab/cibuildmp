@@ -3,8 +3,11 @@
 Status: Proposed — the divergence itself is argued and decided, and a wide
 follow-up chat session (2026-08-26, same day as [0051]'s own ninth
 addendum) settled several concrete sub-questions along the way: natmod's
-own identifier grammar (`{tag}-mpy{major.minor}[-{arch}][+0x{flags}]`,
-dropping the literal word `natmod`), that usermod's own identifier needs
+own identifier grammar (`mpy{major.minor}[-{arch}][+0x{flags}]`, dropping
+the literal word `natmod`; tag never part of it, kept out of the
+selector-facing name entirely and recorded as build provenance instead —
+`resolve_micropython_tags()` also now rejects two distinct tags sharing
+one ABI rather than silently picking one), that usermod's own identifier needs
 no equivalent change, a `{name}-{version}-` artifact-filename prefix (two
 new/extended global config keys), a pre-build companion to `verify_output()`'s
 own post-build audit, and a correction to [0013] (byte-identical is false,
@@ -146,52 +149,76 @@ decided grammar for natmod's own identifier — independent of the tree/
 matrix question above, but feeding the same record because it changes what
 a tree node's own leaf identifier looks like.
 
-**The tag becomes a real, leading, visible identifier component.**
-Today's identifier (`mpy{abi}-natmod-{arch}[+0x{flags}]`) deliberately
-excludes the tag — `natmod/targets.py`'s own `Target.tag` field comment
-says so explicitly: "not part of the identifier (that's ABI, the
-compatibility axis)". That exclusion rested on D13's own claim that
-same-ABI tags produce byte-for-byte identical output, so which one was
-used is inert. **Tested directly this session, not assumed — see [0013]'s
-own addendum for the full experiment — the claim is false**: `v1.28.0`
-and `v1.29.0` (both ABI 6.3) produce different-sized, different-hashed
-`.mpy` output from byte-identical source, because `tools/mpy_ld.py`'s own
-x64 GOT-jump encoding changed between the two tags with no `MPY_VERSION`/
-`MPY_SUB_VERSION` bump. **Functional/load compatibility is still real and
-independently verified** (a live cross-load test: both tags' `unix`
-binaries loaded and correctly ran both tags' `.mpy` output, all four
-combinations) — so the practical dedup-by-ABI *decision* D13 made stays
-correct, but the *reason* to keep `tag` invisible does not: which tag
-actually built a given artifact is real information (reproducibility,
-audit, "why does this specific file differ from that one built last
-week"), even though it does not gate whether the artifact loads.
+**Corrected in place, same session — this section churned through four
+positions before landing** (tag leading the identifier; tag repositioned
+after the ABI; tag dropped from the identifier entirely; ambiguous same-
+ABI tags made a loud error with an override escape hatch; the escape
+hatch itself dropped as unneeded). Recorded honestly rather than only
+keeping the final answer, since the reasoning at each step is what a
+future session needs, not just the destination.
 
-Decided shape: **`{tag}-mpy{major.minor}[-{arch}][+0x{flags}]`** — tag
-leads unconditionally, the same position and the same "not conditional"
-reasoning [0051] already gave usermod's own leading tag (a component that
-only appears sometimes makes `build = "*-v1.29.0"` match in some configs
-and not others). `natmod` itself is dropped as a literal word: `mpy` is
-already a natmod-exclusive prefix (no usermod identifier has ever started
-with it), so spelling out `natmod` too is exactly the redundancy a wheel
-tag avoids by never writing `cpython` next to `cp311` — the prefix already
-says which family this is, matching wheel's `{python_tag}-{abi_tag}`
-convention where the interpreter family is implied by the tag's own
-letters, not restated. `arch_flags`, when present, stays attached to
-`{arch}` (`rv32imc+0x1`), not to the abi component (`mpy6.3+0x1`) — flags
-are conditionally meaningful only for one arch family
-(`MPY_FEATURE_ARCH_TEST(MP_NATIVE_ARCH_RV32IMC)`, verified directly in
-`py/persistentcode.c`), not a property of the ABI itself.
+**Tag does not belong in the identifier at all — not even repositioned.**
+`natmod/targets.py`'s own `Target.tag` field comment already said so:
+"not part of the identifier (that's ABI, the compatibility axis)" — that
+claim rested on D13's own (unverified, at the time) assumption that
+same-ABI tags produce byte-for-byte identical output. **Tested directly
+this session — see [0013]'s own addendum — the byte-identity claim is
+false**: `v1.28.0` and `v1.29.0` (both ABI 6.3) produce different-sized,
+different-hashed `.mpy` output from byte-identical source, because
+`tools/mpy_ld.py`'s own x64 GOT-jump encoding changed between the two
+tags with no `MPY_VERSION`/`MPY_SUB_VERSION` bump. This first read as "so
+tag *is* real information, make it visible" — corrected again, directly:
+the identifier's own job ([0051]'s own words) is naming **what a build is
+compatible with**, and tag names **what it was built with** (which
+`dynruntime.mk`/`mpy_ld.py` revision compiled it, an input) — not a
+compatibility fact at all. Functional/load compatibility is fully,
+independently verified as ABI-only (a live cross-load test: both tags'
+`unix` binaries loaded and correctly ran both tags' `.mpy` output, all
+four combinations) — nothing about *which* tag built a given artifact
+changes whether it loads. Tag belongs in build **provenance** (D14's own
+`package.json`, a new field there), never in the selector-facing name.
 
-Example, module `mylib`, `tag=v1.29.0`, `x64`:
-`mylib-v1.29.0-mpy6.3-x64.mpy` (today: `mylib-mpy6.3-natmod-x64.mpy`).
-`rv32imc` with `arch_flags=0x1`: `mylib-v1.29.0-mpy6.3-rv32imc+0x1.mpy`.
+Decided shape: **`mpy{major.minor}[-{arch}][+0x{flags}]`** — unchanged
+from today except dropping the literal word `natmod`: `mpy` is already a
+natmod-exclusive prefix (no usermod identifier has ever started with it),
+so spelling out `natmod` too is exactly the redundancy a wheel tag avoids
+by never writing `cpython` next to `cp311`. `arch_flags`, when present,
+stays attached to `{arch}` (`rv32imc+0x1`), conditionally meaningful only
+for that one arch family (`MPY_FEATURE_ARCH_TEST(MP_NATIVE_ARCH_RV32IMC)`,
+verified directly in `py/persistentcode.c`).
 
-**This does not reopen D13's dedup decision** — tag becomes visible for
-provenance, not as a new generative axis: `micropython = ["v1.28.0",
-"v1.29.0"]` (same ABI) still collapses to one build; the surviving tag is
-now visible in the output rather than silently chosen. Whether a future
-config should be able to opt into "one build per tag, dedup off" is a real
-question this record does not resolve — noted as still open below.
+Example, module `mylib`, `x64`: `mylib-mpy6.3-x64.mpy` (today:
+`mylib-mpy6.3-natmod-x64.mpy` — only `natmod` drops). `rv32imc` with
+`arch_flags=0x1`: `mylib-mpy6.3-rv32imc+0x1.mpy`.
+
+**D13's own dedup decision changes too, once tag is off the table as a
+visible axis — not by adding a generative axis or an override, but by
+turning silent ambiguity into a loud one.** Two *different* tags
+resolving to the same ABI is not "the same request spelled two ways" the
+way two spellings of one `arch_flags` value are (A1) — `v1.28.0` and
+`v1.29.0` are genuinely different build recipes that happen to share an
+ABI number, and D13's own "keep whichever came first" rule silently
+picked a winner with no way for a user to know it happened, let alone
+which one. **Decided: `resolve_micropython_tags()` raises a `ConfigError`
+when two distinct tags resolve to one ABI** — `micropython = ["v1.28.0",
+"v1.29.0"]` (same ABI) is rejected outright, not resolved; the same list
+with two ABIs (`["v1.22.0", "v1.28.0"]`, 6.2 and 6.3) is unaffected,
+still the real multi-version case D13 exists for. Listing the identical
+tag twice is not ambiguous (`seen[abi] == tag`) and stays legal, purely
+redundant.
+
+**An initial version of this also proposed a per-target override to pin
+a specific tag when the top-level list is ambiguous — dropped, directly,
+as solving a case nobody has**: pinning a different `dynruntime`/tag per
+architecture within one invocation is a genuine edge case, and the
+override would have needed new mechanism (it has to run *before* targets
+exist, since tag is a target-generating input, not a target-configuring
+one — unlike every other override today, which matches against an
+already-generated `target.identifier`). Building that mechanism for a
+need nobody has is exactly the kind of thing this project's own record
+history (CLAUDE.md's own four cited examples) warns against. If the need
+turns out to be real later, it gets its own record then, not preemptively
+here.
 
 **A second, narrower dedup gap found while checking this: `arch_flags`
 needs the same treatment `micropython`/tag already gets, and does not have
@@ -268,7 +295,7 @@ decided above):
 
 ```
 natmod:  {name}-{version}-{identifier}.mpy
-         mylib-1.2.0-v1.29.0-mpy6.3-x64.mpy
+         mylib-1.2.0-mpy6.3-x64.mpy
 
 usermod: {name}-{version}-{identifier}[.ext]
          mylib-1.2.0-v1.29.0-unix-manylinux_2_28_x86_64
@@ -429,7 +456,8 @@ is that argument.
 
 **Also decided, this session, independent of the tree/matrix mechanism
 itself** (each detailed in its own section above): natmod's identifier
-grammar (`{tag}-mpy{major.minor}[-{arch}][+0x{flags}]`); usermod's own
+grammar (`mpy{major.minor}[-{arch}][+0x{flags}]`, `natmod` dropped, tag
+never part of it); usermod's own
 identifier needs no change; the `{name}-{version}-{identifier}` artifact-
 filename convention and the two config keys it needs; `arch_flags = 0` as
 a named, documented stable/broad compatibility class; a pre-build
@@ -440,18 +468,17 @@ require the tree mechanism to land first — each is independently
 implementable, and a future session could pick any one off without
 waiting on the others.
 
-**One question raised but not resolved this session:** whether `tag`
-becoming a real, visible identifier component should also make it a real
-*generative* axis (one build per distinct tag, dedup off) rather than
-keeping today's dedup-by-ABI with tag merely visible on the survivor.
-[0013]'s own addendum leans toward keeping dedup (functional
-compatibility is confirmed, not merely assumed, so there is no
-correctness reason to build twice) — but this record does not treat that
-as fully settled, since "the exact bytes shipped are provenance-
-meaningful" (this record's own reasoning for making `tag` visible at all)
-is in tension with "so don't bother producing more than one set of
-bytes". Whoever designs the tree/matrix mechanism should resolve this
-explicitly rather than let it default silently either way.
+**A question raised, and then actually resolved, later the same
+session:** whether `tag` should become a visible identifier component,
+and whether that makes it a real *generative* axis (one build per
+distinct tag, dedup off). Resolved the opposite way from this paragraph's
+own first framing — tag never becomes visible in the identifier at all
+(it names a build input, not a compatibility fact — [0051]'s own words
+for what the identifier is *for*), and dedup-by-ABI stays exactly as
+D13 had it, except that two genuinely *distinct* tags sharing one ABI are
+now a loud `ConfigError` instead of a silent pick. Full reasoning, and
+the two intermediate positions this went through before landing there,
+in "Identifier grammar for natmod" above.
 
 **Not decided, and explicitly not scoped into this session:**
 
@@ -518,9 +545,9 @@ mechanism is exactly this record's own subject:**
   all` vocabulary. The *decision* (`--only` never globs, verified against
   real `cibuildwheel/__main__.py` this session) is unaffected and
   reaffirmed; the *strings* `--only` matches against change under the new
-  identifier grammar (`{tag}-mpy{abi}-{arch}` instead of
-  `mpy{abi}-natmod-{arch}`) — a mechanical follow-on, not a design
-  question.
+  identifier grammar (`mpy{abi}-{arch}` instead of `mpy{abi}-natmod-{arch}`
+  — only `natmod` drops, tag was never added) — a mechanical follow-on,
+  not a design question.
 - **[0023]** — usermod's own identifier scheme and output convention.
   The identifier itself (`{tag}-{port}-{arch}`) is confirmed unchanged;
   its own filename convention gains the `{name}-{version}-` prefix this
@@ -538,8 +565,10 @@ mechanism is exactly this record's own subject:**
   feed this record's own `package.json` output.
 - **[0013]** — corrected in its own addendum this session (byte-identical
   claim false, functional interchangeability confirmed instead); this
-  record's own identifier-grammar section is what the correction's
-  practical consequence (`tag` becomes visible) actually lands in.
+  record's own identifier-grammar section is where the correction's
+  practical consequence actually lands — not by making `tag` visible
+  (considered, then dropped), but by turning D13's own silent "two same-
+  ABI tags, keep the first" into a loud `ConfigError`.
 - **[0005]** — "one identifier namespace, one override mechanism,
   `[[overrides]]` collapses three shapes into one." This record's own
   proposed shape is a second such collapse-and-generalize step, same
@@ -639,48 +668,52 @@ the record.
 4. No config-shape change and no doc update beyond marking this record's
    own bug-list entry above as fixed.
 
-**A2. natmod's identifier grammar:
-`{tag}-mpy{major.minor}[-{arch}][+0x{flags}]`, `natmod` dropped as a
-literal word.**
+**A2. natmod's identifier drops the literal word `natmod`; tag is never
+part of it. `resolve_micropython_tags()` rejects two distinct tags
+sharing one ABI instead of silently picking one.**
 
 1. `natmod/targets.py`'s `Target.identifier` (currently `base =
    f"mpy{self.abi}-{self.mode}-{self.arch}"`) becomes `base =
-   f"{self.tag}-mpy{self.abi}-{self.arch}"`. `self.mode` (always the
-   literal string `"natmod"`) stops being read here; grep every
-   `\.mode\b` reference under `platforms/natmod/` before deciding whether
-   to delete the field outright — a field nothing reads any more is
-   exactly the kind of decorative leftover this project's own no-dead-
-   code discipline says to remove, not merely stop calling.
-2. `Target.tag` currently defaults to `""` for hand-built test targets;
-   the new identifier reads it unconditionally, so a bare
-   `Target(abi=..., mode="natmod", arch=...)` with no `tag=` now
-   produces a leading `-mpy...` (an empty first segment). Audit every
-   direct `Target(` construction in `tests/test_targets.py`,
-   `tests/test_options.py` and `tests/test_build.py` and give each a
-   real tag — there is no config-level default to fall back on for a
-   dataclass built by hand rather than through `natmod_targets()`.
-3. Every comment claiming tag is "not part of the identifier" (the
-   dataclass's own field comment) needs updating to say the opposite,
-   since this step is exactly what makes that claim false.
-4. `docs/reference/design.md`'s own natmod identifier section — verify
+   f"mpy{self.abi}-{self.arch}"` — `self.mode` (always the literal string
+   `"natmod"`) stops being read here; grep every `\.mode\b` reference
+   under `platforms/natmod/` before deciding whether to delete the field
+   outright — a field nothing reads any more is exactly the kind of
+   decorative leftover this project's own no-dead-code discipline says to
+   remove, not merely stop calling. No change to `Target.tag` itself, no
+   change to any hand-built `Target(...)` construction in tests — this
+   step is smaller than it first looked (see this section's own note
+   above on how many positions it went through before landing here).
+2. `resolve_micropython_tags()` (`natmod/targets.py`): the `seen: dict[str,
+   str]` loop gains one check — `if abi in seen and seen[abi] != tag:
+   raise ConfigError(...)` naming both conflicting tags and the shared
+   ABI, before the silent `seen[abi] = tag` overwrite it does today. The
+   same literal tag listed twice (`seen[abi] == tag`) stays legal.
+3. Audit every literal identifier-shaped string in `cibuildmp.toml`'s own
+   root example and `examples/template/cibuildmp.toml`'s header comment
+   for the now-dropped `-natmod-` segment (`mpy6.3-natmod-x64` ->
+   `mpy6.3-x64`); `*-armv7emsp`-shaped globs are unaffected (arch stays
+   the trailing segment, unchanged).
+4. `tests/test_selector.py`/`tests/test_overrides.py`: any hardcoded
+   `mpy6.3-natmod-*`-shaped literal needs the same `-natmod-` removal.
+   New tests for step 2: two distinct tags at one ABI raises, naming
+   both; the same tag listed twice does not.
+5. `docs/reference/design.md`'s own natmod identifier section — verify
    directly whether it documents the old shape before editing it, rather
-   than assuming — needs the new grammar written in.
-5. Audit every literal identifier-shaped string in `cibuildmp.toml`'s own
-   root example (`build = "mpy6.3-*"`, `skip = "*-armv7emsp"`, `select =
-   "*-armv7emsp"`) and `examples/template/cibuildmp.toml`'s own header
-   comment. `*-armv7emsp` still matches unchanged (arch stays the
-   trailing segment); `mpy6.3-*` does not, since ABI is no longer the
-   leading segment, and must become `*-mpy6.3-*` or a tag-qualified form.
-6. `tests/test_selector.py` and `tests/test_overrides.py`: any hardcoded
-   `mpy6.3-natmod-*`-shaped literal, whether the identifier under test or
-   the glob pattern being matched against it, needs the same audit.
-7. This is a real breaking change for `--only`/`build`/`skip`/
-   `[[overrides]]` patterns already written against today's identifier in
-   the three consumer repos [0038] names — call it out explicitly in
-   whatever release note ships this, and fold it into [0038]'s own
-   migration list alongside the items already there (unix renames,
-   `--toolchain` deletion, natmod's own Docker requirement) rather than
-   treating it as a separate migration event — see B5 below.
+   than assuming — needs the new grammar written in, plus a note that
+   `micropython` accepting a list is for spanning *distinct* ABIs, not
+   picking among tags that share one.
+6. Real breaking change for `--only`/`build`/`skip`/`[[overrides]]`
+   patterns already written against today's `-natmod-`-bearing identifier
+   in the three consumer repos [0038] names, and a new, previously-silent
+   failure mode (two same-ABI tags) becomes a hard error where it used to
+   just work by accident — call both out explicitly in whatever release
+   note ships this, fold into [0038]'s own migration list rather than
+   treating either as a separate migration event — see B5 below.
+7. `natmod/build.py`'s D14 `package.json` writer gains the tag actually
+   used as a new field (provenance, not identifier) — the concrete
+   deliverable the "tag belongs in metadata, not the name" conclusion
+   above calls for; sequenced with A3 below since both touch that
+   writer.
 
 **A3. `{name}-{version}-{identifier}` artifact filenames; `version`
 promoted to a genuinely global key; `name` added as new.**
@@ -764,8 +797,8 @@ PR, no tests needed.
    case is what actually proves the reachability/selection distinction
    holds rather than merely being asserted.
 6. Real ordering dependency on A2: write these new tests against the
-   identifier's post-A2 shape (`{tag}-mpy{abi}-...`), so sequence A5
-   after A2 within Track A even though the two are nominally independent
+   identifier's post-A2 shape (`mpy{abi}-{arch}`, `natmod` dropped), so
+   sequence A5 after A2 within Track A even though the two are nominally independent
    of each other.
 
 **A6. `build-platforms.toml`, formalized — the tracker's own pending note,
@@ -911,14 +944,13 @@ already matches with zero changes to `selector.py`, because fnmatch's `*`
 already crosses what would be a `.` boundary. **But a config node's own
 tree address (`usermod.esp32`, which boards/archs/options that node sets)
 is not the same string as a target's own identifier** (`v1.29.0-esp32-
-ESP32_GENERIC`, A2's `{tag}-mpy{abi}-{arch}` for natmod) — a natmod
+ESP32_GENERIC` for usermod, A2's `mpy{abi}-{arch}` for natmod) — a natmod
 target's identifier carries no literal tree-path segment at all (`natmod`
-has no `{tag}` or `{abi}` sub-node in the config tree; those are resolved
-values, not addresses). Treating both as "the selector" without
-distinguishing them, as the record's own sketch risks by implication,
-would silently break `build`/`skip`, which must keep matching the
-identifier — an ABI, a tag, an arch, none of which are addressable tree
-nodes. **Proposed resolution: `matching_overrides()`
+has no `{abi}` sub-node in the config tree; that is a resolved value, not
+an address). Treating both as "the selector" without distinguishing
+them, as the record's own sketch risks by implication, would silently
+break `build`/`skip`, which must keep matching the identifier — an ABI,
+an arch, neither an addressable tree node. **Proposed resolution: `matching_overrides()`
 (`cibuildmp/options.py`) tries a `select` pattern against the *tree path*
 of every node from root to the target's own leaf first** (so `select =
 "usermod.esp32.*"` matches "every esp32 board", the authoring convenience
@@ -1026,15 +1058,23 @@ CI/runner plumbing this record has no opinion about and are not blocked
 by it; nothing here asks a future session to hold off on those.
 
 **B6. The tag-generative-axis question (the record's own "one question
-raised but not resolved").** Not re-opened by this addendum. [0013]'s own
-addendum already leans toward keeping dedup-by-ABI with tag merely
-visible on the survivor, and nothing in Track A or B's own design changes
-that calculus — A2 makes tag visible in the identifier regardless of
-whether dedup itself is ever revisited. **Proposed: leave this explicitly
-deferred, not silently defaulted, exactly as the record's own text
-already asks.** If "one build per tag" is ever needed, it is additive (an
-opt-in key, e.g. `dedupe = "abi"|"tag"`, default `"abi"` preserving
-today's behaviour) and blocks nothing in Track A or B.
+raised but not resolved") — now actually resolved, in the "Identifier
+grammar for natmod" section above, not left deferred.** Settled the
+opposite way from this addendum's own first pass at it (which is the
+whole reason that section above documents its own churn rather than only
+its answer): tag is **not** a generative axis and never becomes visible
+in the identifier at all — it is a build input (which `dynruntime.mk`/
+`mpy_ld.py` revision compiled the output), not a compatibility fact, so
+it belongs in `package.json`'s own provenance metadata (A2's own step 7),
+never in the selector-facing name. What actually needed resolving instead
+was D13's own silent-pick behavior: two *distinct* tags sharing one ABI
+is now a loud `ConfigError` (A2's own step 2), not resolved by an
+implicit rule or an opt-in `dedupe = "abi"|"tag"` switch — a per-target
+tag-pinning override was designed and then deliberately dropped as
+solving a case (pinning a different `dynruntime` per architecture) nobody
+actually has, argued in full above. If that need turns out real later, it
+is new mechanism and gets its own record then, not a speculative knob
+here.
 
 ### Suggested landing order
 
