@@ -112,7 +112,7 @@ def test_every_default_unix_cell_has_a_published_image():
     # exact failure mode `pinned_docker_images.toml`'s own "a key with an
     # empty value is a declared cell with nothing published yet" comment
     # describes.
-    from cibuildmp.usermod import dockerrun
+    from cibuildmp import dockerrun
 
     for target in default_axis_values("unix"):
         assert dockerrun.image_for("unix", target), target
@@ -188,7 +188,7 @@ def test_mipsel_is_native_to_an_amd64_host_despite_its_name():
 
 
 def test_all_is_every_cell_regardless_of_host():
-    from cibuildmp.usermod.dockerrun import unix_targets
+    from cibuildmp.dockerrun import unix_targets
 
     for machine in ("x86_64", "aarch64", "s390x"):
         assert parse_axis_values("unix", ["all"], machine=machine) == list(

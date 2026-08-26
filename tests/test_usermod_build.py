@@ -2,8 +2,9 @@ from pathlib import Path
 
 import pytest
 
+from cibuildmp import dockerrun
 from cibuildmp.natmod.toolchains import ResolvedToolchain
-from cibuildmp.usermod import build, dockerrun
+from cibuildmp.usermod import build
 from cibuildmp.usermod.build import (
     UNIX_ARCH_SETTINGS,
     WINDOWS_ARCH_SETTINGS,
@@ -138,17 +139,13 @@ def _mock_unix_image(monkeypatch, image=_FAKE_UNIX_IMAGE):
     mock dockerrun's own subprocess.run -- not build.subprocess, which
     build_unix() no longer calls under any circumstance now that there
     is no bare-host path left."""
-    monkeypatch.setattr(
-        "cibuildmp.usermod.dockerrun.ensure_image", lambda *a, **k: image
-    )
+    monkeypatch.setattr("cibuildmp.dockerrun.ensure_image", lambda *a, **k: image)
     # Neutralise the emulation/linux32 probe too (record 0043). It starts
     # a real throwaway container for any non-native platform, which every
     # target but one is on an x86_64 host -- and it has its own dedicated
     # coverage in test_usermod_dockerrun.py. These cases are about the
     # make/deplibs command shape, not about how the image is reached.
-    monkeypatch.setattr(
-        "cibuildmp.usermod.dockerrun._probe_platform", lambda *a, **k: ""
-    )
+    monkeypatch.setattr("cibuildmp.dockerrun._probe_platform", lambda *a, **k: "")
     # ...and the in-container mpy-cross build (record 0043's own live
     # finding: the host's binary cannot run inside these images). It is a
     # second real container, and these cases are about the port build's
@@ -162,7 +159,7 @@ def _mock_unix_image(monkeypatch, image=_FAKE_UNIX_IMAGE):
 def test_deplibs_command_shape(monkeypatch):
     calls = []
     monkeypatch.setattr(
-        "cibuildmp.usermod.dockerrun.subprocess.run",
+        "cibuildmp.dockerrun.subprocess.run",
         lambda cmd, **k: calls.append(cmd),
     )
     run_unix_deplibs(
@@ -218,12 +215,10 @@ def test_unix_no_image_registered_is_a_clear_error(monkeypatch, tmp_path, arch):
     # the same shape build_webassembly() already has. That is the state
     # every `unix` cell is actually in on this branch (record 0044), not
     # a hypothetical.
-    monkeypatch.setattr(
-        "cibuildmp.usermod.dockerrun.ensure_image", lambda *a, **k: None
-    )
+    monkeypatch.setattr("cibuildmp.dockerrun.ensure_image", lambda *a, **k: None)
     calls = []
     monkeypatch.setattr(
-        "cibuildmp.usermod.dockerrun.subprocess.run",
+        "cibuildmp.dockerrun.subprocess.run",
         lambda cmd, **k: calls.append(cmd),
     )
 
@@ -238,7 +233,7 @@ def test_mipsel_runs_deplibs_before_build(monkeypatch, tmp_path, arch):
     _mock_unix_image(monkeypatch)
     run_calls = []
     monkeypatch.setattr(
-        "cibuildmp.usermod.dockerrun.subprocess.run",
+        "cibuildmp.dockerrun.subprocess.run",
         lambda cmd, **k: run_calls.append(cmd),
     )
     build_dir = tmp_path / f"build-{arch}"
@@ -257,9 +252,7 @@ def test_mipsel_builds_and_returns_binary_path(monkeypatch, tmp_path, arch):
     build_dir = tmp_path / f"build-{arch}"
     build_dir.mkdir()
     (build_dir / "micropython").write_bytes(fake_elf(arch))
-    monkeypatch.setattr(
-        "cibuildmp.usermod.dockerrun.subprocess.run", lambda *a, **k: None
-    )
+    monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", lambda *a, **k: None)
 
     result = build_unix(opts(arch, build_dir=build_dir), tmp_path / "mpy")
 
@@ -272,9 +265,7 @@ def test_x86_64_builds_and_returns_binary_path(tmp_path, monkeypatch):
     build_dir.mkdir()
     (build_dir / "micropython").write_bytes(fake_elf())
 
-    monkeypatch.setattr(
-        "cibuildmp.usermod.dockerrun.subprocess.run", lambda *a, **k: None
-    )
+    monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", lambda *a, **k: None)
     result = build_unix(opts(build_dir=build_dir), tmp_path / "mpy")
 
     assert result == build_dir / "micropython"
@@ -285,9 +276,7 @@ def test_missing_binary_after_success_is_an_error(tmp_path, monkeypatch):
     build_dir = tmp_path / "build-x86_64"
     build_dir.mkdir()
 
-    monkeypatch.setattr(
-        "cibuildmp.usermod.dockerrun.subprocess.run", lambda *a, **k: None
-    )
+    monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", lambda *a, **k: None)
     with pytest.raises(UsermodBuildError, match="build reported success but"):
         build_unix(opts(build_dir=build_dir), tmp_path / "mpy")
 
@@ -300,7 +289,7 @@ def test_build_failure_names_the_command(tmp_path, monkeypatch):
     def fake_run(cmd, **kwargs):
         raise sp.CalledProcessError(1, cmd)
 
-    monkeypatch.setattr("cibuildmp.usermod.dockerrun.subprocess.run", fake_run)
+    monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", fake_run)
     with pytest.raises(UsermodBuildError, match="failed with exit code"):
         build_unix(opts(build_dir=tmp_path / "build-x86_64"), tmp_path / "mpy")
 
@@ -324,9 +313,7 @@ def test_aarch64_builds_and_returns_binary_path(monkeypatch, tmp_path):
     build_dir.mkdir()
     (build_dir / "micropython").write_bytes(fake_elf("manylinux_2_28_aarch64"))
 
-    monkeypatch.setattr(
-        "cibuildmp.usermod.dockerrun.subprocess.run", lambda *a, **k: None
-    )
+    monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", lambda *a, **k: None)
 
     result = build_unix(
         opts("manylinux_2_28_aarch64", build_dir=build_dir), tmp_path / "mpy"
@@ -511,14 +498,12 @@ def test_webassembly_no_image_registered_is_a_clear_error(monkeypatch, tmp_path)
     # resources/pinned_docker_images.toml, build_webassembly() must fail
     # loudly, not fall back to building docker/webassembly.Dockerfile.
     monkeypatch.delenv("CIBMP_WEBASSEMBLY_DOCKER_IMAGE", raising=False)
-    monkeypatch.setattr(
-        "cibuildmp.usermod.dockerrun._pins", lambda: {"image": {}, "port": {}}
-    )
+    monkeypatch.setattr("cibuildmp.dockerrun._pins", lambda: {"image": {}, "port": {}})
     build_dir = tmp_path / "build-wasm"
 
     calls = []
     monkeypatch.setattr(
-        "cibuildmp.usermod.dockerrun.subprocess.run",
+        "cibuildmp.dockerrun.subprocess.run",
         lambda cmd, **k: calls.append(cmd) or None,
     )
 
@@ -544,7 +529,7 @@ def test_webassembly_docker_image_override_skips_own_dockerfile_build(
 
     calls = []
     monkeypatch.setattr(
-        "cibuildmp.usermod.dockerrun.subprocess.run",
+        "cibuildmp.dockerrun.subprocess.run",
         lambda cmd, **k: calls.append(cmd) or None,
     )
 
@@ -573,7 +558,7 @@ def test_webassembly_docker_image_mounts_mpy_dir_and_user_c_modules(
 
     calls = []
     monkeypatch.setattr(
-        "cibuildmp.usermod.dockerrun.subprocess.run",
+        "cibuildmp.dockerrun.subprocess.run",
         lambda cmd, **k: calls.append(cmd) or None,
     )
 
@@ -596,9 +581,7 @@ def test_webassembly_missing_mjs_after_success_is_an_error(monkeypatch, tmp_path
     build_dir = tmp_path / "build-wasm"
     build_dir.mkdir()
 
-    monkeypatch.setattr(
-        "cibuildmp.usermod.dockerrun.subprocess.run", lambda *a, **k: None
-    )
+    monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", lambda *a, **k: None)
 
     with pytest.raises(UsermodBuildError, match="build reported success but"):
         build_webassembly(wasm_opts(build_dir=build_dir), tmp_path / "mpy")
@@ -618,7 +601,7 @@ def test_webassembly_build_failure_names_the_command(monkeypatch, tmp_path):
     def fake_run(cmd, **kwargs):
         raise sp.CalledProcessError(1, cmd)
 
-    monkeypatch.setattr("cibuildmp.usermod.dockerrun.subprocess.run", fake_run)
+    monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", fake_run)
 
     with pytest.raises(UsermodBuildError, match="failed with exit code"):
         build_webassembly(
@@ -640,7 +623,7 @@ def test_webassembly_no_docker_daemon_raises_clear_error(monkeypatch, tmp_path):
     def fake_run(cmd, **kwargs):
         raise FileNotFoundError("docker")
 
-    monkeypatch.setattr("cibuildmp.usermod.dockerrun.subprocess.run", fake_run)
+    monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", fake_run)
 
     with pytest.raises(UsermodBuildError, match="docker CLI itself is not on PATH"):
         build_webassembly(
@@ -848,9 +831,7 @@ def _mock_windows_image(monkeypatch, image=_FAKE_WINDOWS_IMAGE):
     container to compile FROZEN_MANIFEST. It is a second real container
     and has its own live coverage; these cases are about the make
     command's own shape."""
-    monkeypatch.setattr(
-        "cibuildmp.usermod.dockerrun.ensure_image", lambda *a, **k: image
-    )
+    monkeypatch.setattr("cibuildmp.dockerrun.ensure_image", lambda *a, **k: image)
     monkeypatch.setattr(
         "cibuildmp.usermod.build.container_mpy_cross",
         lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build-stub" / "mpy-cross",
@@ -863,12 +844,10 @@ def test_windows_no_image_registered_is_a_clear_error(monkeypatch, tmp_path, arc
     # nothing ever read. All three arches now resolve through
     # ensure_image(), so with no override and nothing registered they
     # must fail loudly rather than quietly cross-compiling on the host.
-    monkeypatch.setattr(
-        "cibuildmp.usermod.dockerrun.ensure_image", lambda *a, **k: None
-    )
+    monkeypatch.setattr("cibuildmp.dockerrun.ensure_image", lambda *a, **k: None)
     calls = []
     monkeypatch.setattr(
-        "cibuildmp.usermod.dockerrun.subprocess.run",
+        "cibuildmp.dockerrun.subprocess.run",
         lambda cmd, **k: calls.append(cmd),
     )
 
@@ -890,7 +869,7 @@ def test_windows_runs_make_inside_the_container(monkeypatch, tmp_path, arch):
     _mock_windows_image(monkeypatch)
     calls = []
     monkeypatch.setattr(
-        "cibuildmp.usermod.dockerrun.subprocess.run",
+        "cibuildmp.dockerrun.subprocess.run",
         lambda cmd, **k: calls.append(cmd),
     )
 
@@ -924,7 +903,7 @@ def test_windows_mounts_mpy_dir_and_user_c_modules(monkeypatch, tmp_path):
     _mock_windows_image(monkeypatch)
     calls = []
     monkeypatch.setattr(
-        "cibuildmp.usermod.dockerrun.subprocess.run",
+        "cibuildmp.dockerrun.subprocess.run",
         lambda cmd, **k: calls.append(cmd),
     )
 
@@ -943,9 +922,7 @@ def test_windows_mounts_mpy_dir_and_user_c_modules(monkeypatch, tmp_path):
 
 def test_windows_missing_exe_after_success_is_an_error(monkeypatch, tmp_path):
     _mock_windows_image(monkeypatch)
-    monkeypatch.setattr(
-        "cibuildmp.usermod.dockerrun.subprocess.run", lambda *a, **k: None
-    )
+    monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", lambda *a, **k: None)
     build_dir = tmp_path / "build-arm64"
     build_dir.mkdir()
 
@@ -961,7 +938,7 @@ def test_windows_build_failure_names_the_command(monkeypatch, tmp_path):
     def fake_run(cmd, **kwargs):
         raise sp.CalledProcessError(1, cmd)
 
-    monkeypatch.setattr("cibuildmp.usermod.dockerrun.subprocess.run", fake_run)
+    monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", fake_run)
 
     with pytest.raises(UsermodBuildError, match="failed with exit code"):
         build_windows(
@@ -990,9 +967,7 @@ def test_unix_docker_image_skips_host_toolchain_probe(monkeypatch, tmp_path):
     # than `_mock_unix_image`, so it has to silence the emulation probe
     # itself -- aarch64 is non-native on an x86_64 host, and the probe
     # would otherwise start a real container.
-    monkeypatch.setattr(
-        "cibuildmp.usermod.dockerrun._probe_platform", lambda *a, **k: ""
-    )
+    monkeypatch.setattr("cibuildmp.dockerrun._probe_platform", lambda *a, **k: "")
     monkeypatch.setattr(
         "cibuildmp.usermod.build.container_mpy_cross",
         lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build-stub" / "mpy-cross",
@@ -1003,7 +978,7 @@ def test_unix_docker_image_skips_host_toolchain_probe(monkeypatch, tmp_path):
 
     calls = []
     monkeypatch.setattr(
-        "cibuildmp.usermod.dockerrun.subprocess.run",
+        "cibuildmp.dockerrun.subprocess.run",
         lambda cmd, **k: calls.append(cmd) or None,
     )
 
@@ -1033,7 +1008,7 @@ def test_unix_docker_image_mounts_mpy_dir_and_user_c_modules(monkeypatch, tmp_pa
 
     calls = []
     monkeypatch.setattr(
-        "cibuildmp.usermod.dockerrun.subprocess.run",
+        "cibuildmp.dockerrun.subprocess.run",
         lambda cmd, **k: calls.append(cmd) or None,
     )
 

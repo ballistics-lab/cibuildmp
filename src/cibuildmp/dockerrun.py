@@ -83,8 +83,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from ..resources import pinned_docker_images, pinned_pypa_images
-from .build import UsermodBuildError
+from .resources import pinned_docker_images, pinned_pypa_images
+from .usermod.build import UsermodBuildError
 
 
 # ── where the pins live now ───────────────────────────────────────────

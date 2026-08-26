@@ -78,6 +78,7 @@ jobs:
           - { image: manylinux_2_39_riscv64, platform: linux/riscv64 }
           - { image: musllinux_1_2_riscv64, platform: linux/riscv64 }
           - { image: manylinux_2_39_mipsel, platform: linux/amd64 }
+          - { image: natmod, platform: linux/amd64 }
           - { image: windows, platform: linux/amd64 }
           - { image: qemu, platform: linux/amd64 }
           - { image: webassembly, platform: linux/amd64 }

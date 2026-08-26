@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
+from cibuildmp import dockerrun
 from cibuildmp.usermod import build as build_module
-from cibuildmp.usermod import dockerrun
 from cibuildmp.usermod.options import UsermodOptions
 from cibuildmp.usermod.orchestrate import build, build_one
 from cibuildmp.usermod.targets import UsermodTarget

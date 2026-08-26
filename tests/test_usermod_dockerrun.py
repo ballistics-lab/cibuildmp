@@ -15,7 +15,7 @@ every republish is a test that will be edited without being read.
 
 import pytest
 
-from cibuildmp.usermod import dockerrun
+from cibuildmp import dockerrun
 from cibuildmp.usermod.build import UsermodBuildError
 
 _FAKE_PINS = {

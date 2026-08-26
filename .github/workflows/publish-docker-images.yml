@@ -98,6 +98,17 @@ jobs:
           # own documented exception).
           - { image: manylinux_2_39_mipsel, platform: linux/amd64 }
           # Cross-compile hosts targeting Windows, bare metal and wasm.
+          # natmod's own image, and the one that is not a *port*: every
+          # other row here is a `[usermod] ports` entry, while this one
+          # holds the ten `dynruntime.mk` cross toolchains. One image
+          # rather than one per arch, and `linux/amd64` rather than a
+          # native platform per target, because a `.mpy` is relocatable
+          # machine code with its architecture in a header byte -- there
+          # is nothing for a native image to be native *to*, every
+          # toolchain in it is a cross-compiler, and all four downloaded
+          # ones ship an x86_64 binary and no other. Record 0049.
+          - { image: natmod, platform: linux/amd64 }
+
           - { image: windows, platform: linux/amd64 }
           - { image: qemu, platform: linux/amd64 }
           - { image: webassembly, platform: linux/amd64 }

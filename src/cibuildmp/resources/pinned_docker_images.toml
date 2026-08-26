@@ -163,6 +163,19 @@ manylinux_2_39 = "ghcr.io/ballistics-lab/manylinux_2_39_mipsel@sha256:740276d705
 # republishing it, not editing a string here.
 
 [port]
+# natmod is not a usermod port and sits here anyway: this table is "what
+# a build pulls", and after record 0049 natmod pulls one too. Its shape
+# is the cross-compiling one -- a single `linux/amd64` image holding all
+# ten `dynruntime.mk` toolchains, for the reasons `natmod.Dockerfile`'s
+# own header gives.
+#
+# Empty until a real `publish-docker-images.yml` run fills it, exactly as
+# every `[image.*]` cell was after record 0043: a missing entry is an
+# immediate, explicit "no image registered" error, while a wrong digest
+# either fails deep inside `make` or quietly builds the wrong thing.
+# Local work goes through `CIBMP_NATMOD_DOCKER_IMAGE=<local tag>`.
+natmod = ""
+
 windows = "ghcr.io/ballistics-lab/windows@sha256:7caab34597a3cb2d9f4a412549d4a806134a17a1411aeb612ff61bbbcc151fcd"
 qemu = "ghcr.io/ballistics-lab/qemu@sha256:d0348b84cc684a45ca6f71e6475b5b1ea9fe73ceb6d242af028562795f944928"
 webassembly = "ghcr.io/ballistics-lab/webassembly@sha256:ed489afc6aef801d74d8d3b5673525a24878afc37e6f535cffac60ecff5ce73e"
