@@ -31,7 +31,7 @@ from .targets import (
 
 CONFIG_FILENAME = "cibuildmp.toml"
 
-DEFAULT_MICROPYTHON = "v1.28.0"
+DEFAULT_MICROPYTHON = "v1.29.0"
 DEFAULT_OUTPUT_DIR = "mpyhouse"
 DEFAULT_MODULE_DIR = "natmod"
 DEFAULT_MAKE_TARGET = "dist"

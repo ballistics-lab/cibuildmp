@@ -32,11 +32,25 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # ── apt: the host-native half ─────────────────────────────────────────
 #
-# `gcc-13-multilib` + `linux-libc-dev:i386` are for `x86` alone, and
-# `build-essential` covers `x64` (plain host gcc, no cross prefix). Record
-# 0025 paid for six real apt/gcc bugs finding this list; what is left here
-# is what survived record 0033's slimming, minus everything the `unix`
-# cross-toolchains needed before those moved into their own images.
+# **Two generations of `x86`, because the tool supports both.**
+# `dynruntime.mk` changed in MicroPython v1.29.0: `x86` went from
+# `CFLAGS_ARCH += -m32` on the host gcc to `CROSS = i686-linux-gnu-`, and
+# `x64` from an empty prefix to `CROSS = x86_64-linux-gnu-`. Upstream
+# dropping multilib for a real cross-compiler is the same conclusion this
+# image reached, arrived at independently -- but `micropython` accepts a
+# list of tags ([0013]), so a single run can span the change and the
+# image has to satisfy both spellings:
+#
+#   <= v1.28.0   host gcc + `gcc-13-multilib` + `linux-libc-dev:i386`
+#   >= v1.29.0   `gcc-i686-linux-gnu`
+#
+# `x86_64-linux-gnu-gcc` needs nothing: `build-essential` already
+# installs gcc under exactly that name on an amd64 base.
+#
+# `linux-libc-dev:i386` is not optional for the older path and was
+# re-added once after being cut: `py/dynruntime.h`'s include chain pulls
+# `<asm/errno.h>`, and amd64's own copy does not satisfy it under `-m32`
+# (record 0025's own live finding, one of six).
 RUN set -eux; \
     dpkg --add-architecture i386; \
     sed -i '/^Types: deb$/a Architectures: amd64 i386' \
@@ -48,6 +62,7 @@ RUN set -eux; \
         curl \
         git \
         gcc-13-multilib \
+        gcc-i686-linux-gnu \
         linux-libc-dev:i386 \
         python3 \
         xz-utils; \

@@ -36,7 +36,7 @@
 # one tag; D13's multi-tag path is covered by tests/test_options.py and
 # tests/test_targets.py instead.
 
-micropython = "v1.28.0"
+micropython = "v1.29.0"
 
 [natmod]
 archs = [

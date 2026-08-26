@@ -22,7 +22,7 @@
 # Upstream wasm2mpy presumably handles this in its own CI toolchain choice
 # or an unmerged dynruntime.mk difference (see its now-obsolete
 # mpy-ld-link-archives fork); not something to guess a fix for here.
-micropython = "v1.28.0"
+micropython = "v1.29.0"
 
 [natmod]
 archs = ["x64", "x86", "armv6m", "armv7m", "armv7emsp", "armv7emdp",
@@ -39,4 +39,25 @@ extra-make-args = ["APP=zig"]
 # cross-toolchains. pre-build-command is exactly what this config knob
 # exists for -- a7p's own real cibuildmp.toml already uses it the same
 # way for its own nanopb fetch.
-pre-build-command = "command -v wasm2c >/dev/null || sudo apt-get install -y wabt"
+#
+# **It fetches wabt rather than apt-installing it** (record 0050). The
+# command used to be `… || sudo apt-get install -y wabt`, written for a
+# bare host: `pre-build-command` runs inside the build's own container
+# now, where there is no `sudo` and the process is the caller's own uid
+# (`dockerrun.run`'s `--user`, so output lands host-owned), which is
+# exactly the shape cibuildwheel's `before-all` has and the right one --
+# a pre-build step should meet the same tools as the compile it precedes.
+#
+# What it cannot do is install system packages, and that is a feature
+# here: it keeps this example's own dependency out of a shared image the
+# same way cutting it from `action.yml` kept it off every consumer's
+# runner. A pinned release tarball into the module directory needs no
+# privileges at all and pins a version, which the apt package never did.
+pre-build-command = """
+command -v wasm2c >/dev/null && exit 0
+test -x .wabt/bin/wasm2c || {
+  mkdir -p .wabt
+  curl -fsSL https://github.com/WebAssembly/wabt/releases/download/1.0.37/wabt-1.0.37-ubuntu-20.04.tar.gz \
+    | tar -xz --strip-components=1 -C .wabt
+}
+"""

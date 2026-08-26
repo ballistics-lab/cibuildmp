@@ -22,6 +22,13 @@ BUILD ?= build
 
 # x86, x64, armv6m, armv7m, armv7emsp, armv7emdp, xtensa, xtensawin
 ARCH ?= armv6m
+# `wasm2c` from PATH when a host happens to have it, otherwise the copy
+# `pre-build-command` fetched into `.wabt/`. Record 0050 moved that step
+# into the build's own container, where it runs as the caller's uid and so
+# cannot apt-install anything -- which is what keeps this example's own
+# dependency out of the shared natmod image.
+WASM2C ?= $(if $(shell command -v wasm2c 2>/dev/null),wasm2c,$(CURDIR)/.wabt/bin/wasm2c)
+
 MOD ?= $(APP)
 SRC += runtime/runtime.c        \
   runtime/libc.c                \
@@ -51,7 +58,7 @@ CFLAGS += -Os -Iruntime -I$(BUILD) -Wno-unused-value -Wno-unused-function \
 $(BUILD)/wasm.c: $(WASM)
 	$(Q)$(MKDIR) -p $(BUILD)
 	$(ECHO) "W2C $<"
-	$(Q)wasm2c -o $@ --no-debug-names --module-name="wasm" $<
+	$(Q)$(WASM2C) -o $@ --no-debug-names --module-name="wasm" $<
 	$(Q)sed -i 's/#if defined(__GNUC__) || defined(__clang__)/#if 0/' $@
 	# Remove memchecks, assuming we trust the module
 	#$(Q)sed -i 's/MEMCHECK(mem, addr, t1);//' $@
