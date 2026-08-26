@@ -58,14 +58,6 @@ later; and cheap-with-strong-evidence beats expensive-and-speculative.
       named `micropython.exe` and pass -- and usermod still has no per-target
       `runs-on` override, which is why the arm64-host experiment below has to
       hardcode its runner
-- [ ] [0049] natmod still builds on the bare host | **start here.** The
-      project's own premise is "cibuildwheel for MicroPython, Docker-only and
-      isolated, no bare-host builds, and a foreign runner can still build
-      through emulation". Three of those hold now; this is the one that does
-      not. usermod is Docker-only ([0030]) but natmod's [0003] toolchain
-      resolution still installs and runs cross toolchains on whatever machine
-      invokes it. Large, and the last structural gap between what the tool is
-      and what it was for
 - [ ] [0042] `windows` has never been built by `build-examples.yml` | **then
       here.** [0042] verified all three arches live -- by hand, in a session,
       against an image pushed by hand -- and nothing has re-run it since, which
@@ -76,8 +68,10 @@ later; and cheap-with-strong-evidence beats expensive-and-speculative.
       pass. Alongside it, `build-usermod-amd64-image-on-arm64-host` finally
       exercises [0044]'s never-run claim that an amd64 image runs emulated on an
       arm64 host -- every cross-compiling port resolves to `ubuntu-latest`, so
-      that path was structurally unreachable. `qemu` is further behind still:
-      not wired to `ensure_image()` at all ([0032]), so it has no CI leg to give
+      that path was structurally unreachable. `qemu` is wired to
+      `ensure_image()` now too ([0050] closed [0032] by force) and is in the
+      default port set, so it needs a CI leg of its own -- it has never been
+      built here either, and unlike `windows` it has never been built by hand
 - [ ] [0031] the musllinux column | **four of seven cells done and in the
       default axis** as of 2026-08-26 -- every musl cell with a runner it is
       native to (`x86_64`, `i686`, `aarch64`, `armv7l`), after the
@@ -89,10 +83,6 @@ later; and cheap-with-strong-evidence beats expensive-and-speculative.
       (`ppc64le`, `s390x`, `riscv64`) are emulated on every runner GitHub
       offers, and Alpine's own `community/micropython` excludes the first two
       outright, so they belong with [0044]'s descope decision rather than here
-- [ ] [0032] wire `qemu` to `ensure_image()` | the last port with a published,
-      pinned image and no caller. Small. Worth doing after [0044]'s output
-      verification is extended, so the new path is checked from day one rather
-      than added to the unchecked pile
 - [ ] [0045] `--only` is a filter, not a forced identifier | the `--only` half is
       **done** and verified live in both modes; what remains is `--archs` plus
       the `auto`/`all`/`native` vocabulary. Deliberately after the cells above:
@@ -132,7 +122,9 @@ later; and cheap-with-strong-evidence beats expensive-and-speculative.
 ### Implemented
 
 - [x] [0048] `build`/`skip` are top-level in both modes, and a misplaced or misspelt key in a mode table is an error | fixed 2026-08-26; the audit it asked for also found `CIBMP_MICROPYTHON`/`CIBMP_OUTPUT_DIR` silently ignored in usermod mode, and `UsermodConfigError` never caught by the CLI -- both fixed alongside
+- [x] [0050] natmod builds in a container; the bare-host path and its toolchain resolver are deleted | closes [0049]'s own "still open" and, by force, [0032] -- `qemu` was the only other thing holding the resolver up. One amd64 image for all ten arches (a `.mpy` is relocatable code, nothing is native to anything); `x86` stops being amd64-host-only; `toolchains.py`, `--toolchain` and `[[toolchain]]` deleted; tarball pins moved into the Dockerfile and became sha256-checked. Its own "still open" names the 3.91GB image, `action.yml`'s now-pointless apt step, and natmod's host mpy-cross
 - [x] [0049] cibuildmp generates no matrix and chooses no host; `--archs auto`/`native`/`all` does the work instead | `--print-build-matrix`, both `default_runner`s, natmod's `runs-on` key and the `cibuildmp-matrix` action deleted -- cibuildwheel has no equivalent of any of them. Closes [0045]'s open half and [0044]'s "no per-target `runs-on` override", the latter by deletion. Its own "still open" names natmod's bare-host builds, now the top row above
+- [x] [0032] `qemu` wired to `ensure_image()` | closed by [0050] rather than on its own: `qemu` was the last bare-host build path in usermod and survived only because `toolchains.resolve()` kept working, so deleting that resolver forced it
 - [x] [0043] `unix` adopts cibuildwheel's model in full: native per-target images, PEP 600/656, full arch x libc matrix (epic) | the *decision* shipped -- implemented by [0044], whose row above carries the work that remains. Kept here as the design argument, which is still where the reasoning lives
 - [x] [0042] `windows` wired to `ensure_image()`; `emsdk.py`/`llvmmingw.py` deleted | all three arches verified live, including an anonymous pull of the published digest; that image was pushed by hand rather than by `publish-docker-images.yml` — see the record. **Still open above:** none of it was ever re-run by CI, which is what the row in "In progress" is about
 - [x] [0041] documentation restructure — this scheme | supersedes the monolithic `docs/BACKLOG.md`
@@ -233,3 +225,4 @@ record is added.
 [0047]: records/0047-run-output-parity-with-cibuildwheel.md
 [0048]: records/0048-build-skip-live-in-opposite-tables.md
 [0049]: records/0049-no-matrix-generation-archs-vocabulary.md
+[0050]: records/0050-natmod-is-docker-only.md
