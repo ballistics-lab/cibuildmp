@@ -1,6 +1,6 @@
 # 0051 — one selector for both modes, and an identifier that names what a build is compatible with
 
-Status: In progress — Shape points 1/2/3/5/7/8 implemented 2026-08-26; 4/6 target architecture decided and phased (see third addendum), Phases E, F and G of it landed the same day (fourth/fifth addenda)
+Status: In progress — Shape points 1/2/3/5/7/8 implemented 2026-08-26; 4/6 target architecture decided and phased (see third addendum), Phases E, F and G of it landed the same day (fourth/fifth addenda); a `module-dir`/`user-c-modules` key split decided but not yet implemented (sixth addendum)
 
 Rewritten twice the same day it was written, before anything was built on it.
 The first draft framed this as "usermod cannot build two MicroPython versions",
@@ -810,3 +810,90 @@ producing a clean CLI error — both run against real configs, not just
 `tmp_path` fixtures.
 
 Phase H (unify CLI dispatch and the build loop) is next.
+
+---
+
+## Addendum, 2026-08-26 — `module-dir` is one name for two different
+## things, and that is *why* it has to be repeated per usermod port
+
+Surfaced by direct questioning after Phase G landed, working through a
+real config (`examples/template/cibuildmp.toml`'s own `[unix]`/
+`[webassembly]`/`[windows]` each repeating `module-dir = "."`) rather than
+assumed. Verified against real code and a real directory tree, not
+recalled — this addendum records a genuine naming defect and its fix,
+**not yet implemented**.
+
+### The confusion
+
+`module-dir` names the same *purpose* in both schemas — "where does your
+module's own source live" — but two different *consumers* read it, and
+they need genuinely different values:
+
+- **natmod**: `natmod/cli.py:48` runs `make -C <module-dir>` directly.
+  That directory must itself contain the project's own Makefile
+  (`include $(TOP)/py/dynruntime.mk`). Default `"natmod"`.
+- **usermod**: the value is forwarded as `USER_C_MODULES=<module-dir>`
+  into the *MicroPython port's own* Makefile/CMake — a file that lives
+  inside the fetched checkout, not in the consumer's repo at all
+  (`usermod/portinfo.py::resolve_user_c_modules()`, `usermod/orchestrate.py:96`).
+  `module-dir` itself never needs its own Makefile: `py/py.mk` globs
+  `$(USER_C_MODULES)/*/micropython.mk` — **one level below** whatever
+  `module-dir` points at — and picks up every subdirectory that has its
+  own `micropython.mk`. Default `"usermod"`, on the assumption a project
+  puts its actual C-module folder(s) one level inside that.
+
+That default assumption doesn't hold for `examples/template`: its own
+`usermod/micropython.mk` sits *directly* inside `usermod/`, one level
+shallower than the default glob expects, precisely because
+`natmod/template.c` and `usermod/template_usermod.c` both wrap the shared
+`src/template_core.c` and `usermod/micropython.mk`'s own `SRC_USERMOD`
+entry needs to see `src/` too (`dockerrun.py` only mounts `USER_C_MODULES`
+itself). So the config overrides `module-dir = "."` (the whole project
+root) instead — which makes `usermod/` itself the one subdirectory the
+glob picks up. This override is legitimate and necessary; the problem is
+where it *has* to be written.
+
+### Why it has to be repeated three times
+
+Phase F/G's cascade treats the global (top-level) table as every
+platform's own default, natmod included. Because both schemas read the
+identical key name `module-dir`, writing `module-dir = "."` once at the
+top level would silently become natmod's own default too — overriding
+`"natmod"` with `"."` and pointing `make -C` at the wrong directory. There
+is no "usermod-family" tier between "global" and "one specific platform"
+to write a value shared by the five usermod ports but not natmod, so the
+only safe place left is each usermod port's own table — hence three
+copies of the identical value in `examples/template/cibuildmp.toml`.
+
+### The fix: two distinct key names, one of them promotable
+
+Rename usermod's own key to `user-c-modules` — the literal name of the
+variable it feeds — and leave natmod's own `module-dir` untouched. Once
+the two schemas no longer share a key name, the collision that forces the
+repetition disappears on its own: `user-c-modules = "."` written once at
+the top level becomes every active usermod port's own default (natmod's
+schema simply never reads a key by that name, so it is untouched),
+without inventing any new cascade tier. `examples/template/cibuildmp.toml`
+collapses from three repeated `module-dir = "."` lines to one shared
+`user-c-modules = "."`.
+
+**Scope, sketched, not yet sized into a phase:**
+- `usermod/options.py`: `USERMOD_PORT_BASE`'s `"module-dir"` member
+  becomes `"user-c-modules"`; `UsermodOptions`'s and
+  `UsermodBuildOptions`'s own `module_dir` field renames to
+  `user_c_modules` throughout (`build_options()`'s own `opt("module-dir",
+  ...)` call becomes `opt("user-c-modules", ...)`).
+- `usermod/orchestrate.py`: `build_options.module_dir` references rename
+  to match.
+- `examples/template/cibuildmp.toml` and this repo's own commented usermod
+  sketch in `cibuildmp.toml` migrate to the new key, `module-dir` promoted
+  from three per-port copies to one shared top-level `user-c-modules`.
+- Every `module-dir`-shaped usermod test fixture renames.
+- Breaking, no deprecation window — the same precedent Phase F's own
+  `[usermod]` removal already set, for the same reason: nothing outside
+  this repo consumes the usermod config shape yet ([0038] is still
+  pending on all of E–I landing first).
+
+Independent of Phase H's own scope (CLI dispatch unification) — could
+land before it, after it, or folded in alongside it as a small addition;
+not yet decided which.
