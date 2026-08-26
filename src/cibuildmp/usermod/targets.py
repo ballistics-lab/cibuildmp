@@ -53,21 +53,48 @@ from .build import WINDOWS_ARCH_SETTINGS
 # would silently turn every existing consumer's single `[usermod] ports =
 # ["unix"]` line into fifteen emulated container builds.
 #
-# What is listed is the *previous* default, translated one-for-one into
-# the new names and floors -- `x64`->`manylinux_2_28_x86_64`,
+# The five manylinux entries are the *previous* default translated
+# one-for-one into the new names and floors -- `x64`->`manylinux_2_28_x86_64`,
 # `x86`->`manylinux_2_28_i686`, `aarch64`->`manylinux_2_28_aarch64`,
 # `armhf`->`manylinux_2_31_armv7l` (armv7l's lowest floor upstream
-# publishes), `mipsel`->`manylinux_2_39_mipsel`. Nothing newly gained a default:
-# `ppc64le`/`s390x`/`riscv64` and the whole musllinux column are
-# selectable via `[usermod.unix] archs = [...]`, which is the same
-# "default = everything actually proven at the time it became the
-# default" rule `qemu`'s own boards and `esp32`'s own single board
-# already follow.
+# publishes), `mipsel`->`manylinux_2_39_mipsel`.
+#
+# **The four musllinux entries were added on 2026-08-26, when the rule
+# above started requiring them.** They are exactly the musl cells with a
+# runner they are native to, and all four are green and required in CI
+# (run 32961216804) -- so by "default = everything actually proven" they
+# qualified, and leaving them out would have meant the rule said one
+# thing and the list another.
+#
+# The argument for holding them back was cost, and it did not survive
+# being stated: the default CI layout is one job looping over every
+# target (**D9**), where nothing is native to anything and `aarch64`/
+# `armv7l` are emulated regardless of which libc column they are in. The
+# default already carried two such cells before this change. Adding two
+# more of the same shape is a quantitative difference in an already-known
+# cost, not a new kind of cost -- and the *right* fix for it is 0045's
+# `auto`/`native` vocabulary, which makes "which cells does a bare
+# `ports = ["unix"]` mean" a question about the host rather than a
+# hardcoded list. Until that exists, the rule as written wins.
+#
+# Still not defaulted to, and for the original reason: `ppc64le`,
+# `s390x`, `riscv64` (both columns) are emulated on every runner GitHub
+# offers, have never been built, and Alpine's own `community/micropython`
+# excludes the first two outright. They stay selectable via
+# `[usermod.unix] archs = [...]` or `--only`.
+#
+# Ordered the way `dockerrun.unix_targets()` orders the full matrix --
+# by architecture, both libcs together, `mipsel` last -- so there is one
+# ordering rule in the codebase rather than two.
 _UNIX_DEFAULT_TARGETS: tuple[str, ...] = (
     "manylinux_2_28_x86_64",
+    "musllinux_1_2_x86_64",
     "manylinux_2_28_i686",
+    "musllinux_1_2_i686",
     "manylinux_2_28_aarch64",
+    "musllinux_1_2_aarch64",
     "manylinux_2_31_armv7l",
+    "musllinux_1_2_armv7l",
     "manylinux_2_39_mipsel",
 )
 

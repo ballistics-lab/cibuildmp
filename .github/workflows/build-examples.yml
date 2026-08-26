@@ -160,30 +160,34 @@ jobs:
   # never had a caller here.
   #
   # The reason is measured, not stylistic. Records 0043/0044 made every
-  # `unix` target a native image for its own architecture, so on an
-  # amd64 runner three of the five defaults (`i686`, `aarch64`,
-  # `armv7l`) run under emulation -- and an emulated build is roughly
-  # 20x a native one on the same machine (0044: 46s native x86_64
-  # against 1041s emulated aarch64). Looping makes the run the *sum* of
-  # those; fanning out makes it the *maximum*. It also buys per-target
-  # failure isolation, which matters more now that ten of the fifteen
-  # cells have never been built.
+  # `unix` target a native image for its own architecture, and an
+  # emulated build is roughly 12-20x a native one on the same machine
+  # (0044: 88.8s native aarch64 against 1041s emulated). Looping makes a
+  # run the *sum* of every target's cost; fanning out makes it the
+  # *maximum*. It also buys per-target failure isolation, which is what
+  # made the first musllinux run useful -- three cells green and one
+  # named its own problem, in one run.
   #
-  # What this does not buy: emulation getting any faster. The slowest
-  # leg still sets the wall clock. The real fix for that is 0045's
-  # `auto`/`native` arch vocabulary (build natively here, everything
-  # else opt-in), or a runner that is actually arm64 -- which cibuildmp
-  # cannot emit today, since `UsermodTarget.default_runner` is a
-  # hardcoded `ubuntu-latest` (0043's own first observation). The matrix
-  # already carries `os` per entry precisely so that can change without
-  # touching this workflow.
+  # **Fanning out is also what makes the arm64 cells native at all**,
+  # which the paragraph here used to say cibuildmp could not do. It can:
+  # `UsermodTarget.default_runner` is arch-aware since 0044 and names
+  # `ubuntu-24.04-arm` for every `_aarch64`/`_armv7l` target, and the
+  # matrix carries that `os` per entry. Four of the nine default cells
+  # now run natively that way and none of the nine is emulated -- so on
+  # this layout emulation is not a cost the default axis pays anywhere.
+  #
+  # It is still a cost the *default layout* pays, and that is the part
+  # left open: D9's one-job loop runs every target on one runner, where
+  # `os` cannot vary and the arm cells are emulated whatever their libc.
+  # 0045's `auto`/`native` vocabulary is the real answer to that, not
+  # this workflow.
   usermod-matrix:
     runs-on: ubuntu-latest
     permissions:
       contents: read
     outputs:
       include: ${{ steps.matrix.outputs.include }}
-      optin: ${{ steps.optin.outputs.include }}
+      unproven: ${{ steps.unproven.outputs.include }}
     steps:
       - uses: actions/checkout@v7
 
@@ -197,34 +201,30 @@ jobs:
         with:
           package-dir: examples/template
 
-      # The musllinux column, resolved separately because it is not what
-      # this config selects. Record 0031 proved the *mechanism* on
-      # `musllinux_1_2_x86_64` -- a real musl link, zero GLIBC_ symbols,
-      # the C module and the frozen module both running -- but that was
-      # one cell, built by hand, and the column has had no CI leg since.
+      # `windows`, which has never been built by this workflow at all.
+      # Record 0042 verified all three arches live, including an
+      # anonymous pull of the published digest -- by hand, in a session,
+      # against an image that had been pushed by hand. Nothing since has
+      # re-run it, and "it worked once on a laptop" is the state every
+      # other port left behind when it got a leg here.
       #
-      # These four rather than all seven: they are exactly the musl cells
-      # with a runner they are native to (`x86_64`/`i686` on amd64,
-      # `aarch64`/`armv7l` on the arm64 runner record 0044 measured).
-      # `ppc64le`, `s390x` and `riscv64` are emulated on every runner
-      # GitHub offers, and Alpine's own community/micropython excludes
-      # the first two outright (`arch="all !ppc64le !s390x"`), so they are
-      # a separate decision about cost rather than more of this one.
-      #
-      # Resolved through the action's own `only` input, not written out as
-      # {only, os} pairs here, so the runner still comes from
-      # UsermodTarget.default_runner -- see that input's own description.
-      - id: optin
+      # Reached through `only` rather than by adding `windows` to
+      # examples/template's own `ports`, because that config is the
+      # *default axis* demo and a target joins it after it is proven
+      # here, not before. The four native musllinux cells went through
+      # exactly this: `only` legs allowed to fail, then required, then
+      # into `_UNIX_DEFAULT_TARGETS` -- which is why they no longer need
+      # a step of their own here and arrive in the default matrix above.
+      - id: unproven
         uses: ./.github/actions/cibuildmp-matrix
         env:
           CIBMP_PLATFORM: "usermod"
         with:
           package-dir: examples/template
           only: |
-            unix-musllinux_1_2_x86_64
-            unix-musllinux_1_2_i686
-            unix-musllinux_1_2_aarch64
-            unix-musllinux_1_2_armv7l
+            windows-x64
+            windows-x86
+            windows-arm64
 
   build-usermod:
     needs: usermod-matrix
@@ -266,40 +266,24 @@ jobs:
       - name: List built artifacts
         run: ls -laR examples/template/mpyhouse
 
-  # ── usermod: the opt-in cells ───────────────────────────────────────
+  # ── usermod: ports that have never run here ─────────────────────────
   #
-  # Same job as above in every respect except which identifiers it runs.
-  # Split rather than concatenated into one matrix on purpose: these
-  # cells were unproven when the job was added, and a red leg here must
-  # not be able to hide a regression in the six that are green.
-  #
-  # **It carried `continue-on-error: true` for exactly one run.** That is
-  # the difference between "we know which of these work" and "these are
-  # required", and the first run (32960761641) answered the first
-  # question: three of four green immediately, and
-  # `musllinux_1_2_aarch64` failing on the same gcc 14 `mbedtls_xor`
-  # false positive `manylinux_2_28_aarch64` already had a suppression
-  # for -- which turned out to be an architecture rule filed as a
-  # per-cell one (record 0044's second addendum). With that moved, all
-  # four pass (32961216804), so the flag is off and these are required
-  # like everything else.
-  #
-  # The three musl cells that are *not* here -- `ppc64le`, `s390x`,
-  # `riscv64` -- are emulated on every runner GitHub offers, and Alpine's
-  # own community/micropython excludes the first two outright. They are a
-  # decision about cost, not more of this one.
-  build-usermod-optin:
+  # `continue-on-error` while a target is unproven, off once it passes,
+  # then into the default axis once it is boring. `unix`, `webassembly`
+  # and the four native musllinux cells all went through exactly that;
+  # `windows` is at the first step of it.
+  build-usermod-unproven:
     needs: usermod-matrix
     runs-on: ${{ matrix.os }}
+    continue-on-error: true
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.usermod-matrix.outputs.optin) }}
+        include: ${{ fromJSON(needs.usermod-matrix.outputs.unproven) }}
     steps:
       - uses: actions/checkout@v7
-
       - uses: docker/setup-qemu-action@v4
 
       - name: Build examples/template (usermod, ${{ matrix.only }})
@@ -309,6 +293,48 @@ jobs:
         with:
           package-dir: examples/template
           only: ${{ matrix.only }}
+
+      - name: List built artifacts
+        run: ls -laR examples/template/mpyhouse
+
+  # ── does an amd64 image actually run on an arm64 runner? ────────────
+  #
+  # Record 0044 states that passing `--platform=linux/amd64` "is what now
+  # lets [the cross-compiling ports] run on an arm64 host at all --
+  # emulated, instead of failing with `exec format error`", and calls it
+  # "a requirement in its own right rather than a side effect". Nothing
+  # has ever run it. Every cross-compiling port resolves to
+  # `ubuntu-latest`, which is amd64, so the emulated path the claim is
+  # about is the one path this workflow structurally cannot reach.
+  #
+  # `webassembly` because it is the control: it is green on amd64 in
+  # every run, so a failure here is unambiguously about the host
+  # architecture and not about the port.
+  #
+  # **The runner is hardcoded here, deliberately, and this is the one
+  # place that is right.** Everywhere else in this workflow the runner
+  # comes from `UsermodTarget.default_runner`, because it is a property
+  # of the target. This job is an experiment about the *host*, which is
+  # the one thing cibuildmp records nowhere and should not choose. The
+  # honest alternative would be usermod's missing per-target `runs-on`
+  # override -- 0044's own still-open item, and a config-schema feature
+  # rather than the evidence this job is after.
+  build-usermod-amd64-image-on-arm64-host:
+    runs-on: ubuntu-24.04-arm
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v4
+
+      - name: Build examples/template (usermod, webassembly, emulated amd64)
+        uses: ./
+        env:
+          CIBMP_PLATFORM: "usermod"
+        with:
+          package-dir: examples/template
+          only: webassembly
 
       - name: List built artifacts
         run: ls -laR examples/template/mpyhouse

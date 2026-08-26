@@ -48,21 +48,40 @@ def test_axis_key_unknown_port_rejected():
         axis_key("stm32")
 
 
-def test_default_axis_values_unix_is_the_old_five_translated():
-    # Record 0043 took this matrix from five cells to fifteen, and the
-    # default deliberately did not grow with it: defaulting to all
-    # fifteen would turn every existing consumer's single `ports =
-    # ["unix"]` line into fifteen emulated container builds. What is here
-    # is the previous default translated one-for-one into the new names
-    # and floors -- `ppc64le`/`s390x`/`riscv64` and the whole musllinux
-    # column are selectable, not defaulted.
+def test_default_axis_values_unix_is_everything_proven_and_nothing_else():
+    # The rule is "default = everything actually proven", not "everything
+    # buildable": record 0043 took this matrix from five cells to
+    # fifteen and the default did not grow with it, because defaulting to
+    # all fifteen turns one `ports = ["unix"]` line into fifteen mostly
+    # emulated container builds.
+    #
+    # The five manylinux entries are the pre-0043 default translated
+    # one-for-one. The four musl entries joined on 2026-08-26, when they
+    # went green and required in CI -- exactly the musl cells with a
+    # runner they are native to. Holding them out at that point would
+    # have meant the rule said one thing and this tuple another.
     assert default_axis_values("unix") == (
         "manylinux_2_28_x86_64",
+        "musllinux_1_2_x86_64",
         "manylinux_2_28_i686",
+        "musllinux_1_2_i686",
         "manylinux_2_28_aarch64",
+        "musllinux_1_2_aarch64",
         "manylinux_2_31_armv7l",
+        "musllinux_1_2_armv7l",
         "manylinux_2_39_mipsel",
     )
+
+
+def test_the_emulated_everywhere_cells_are_still_not_defaulted():
+    # `ppc64le`, `s390x` and `riscv64` -- both columns -- are emulated on
+    # every runner GitHub offers and have never been built. The rule that
+    # let musl in is the same rule that keeps these out, so assert the
+    # other half of it explicitly rather than trusting the tuple above to
+    # stay short by accident.
+    defaults = set(default_axis_values("unix"))
+    for arch in ("ppc64le", "s390x", "riscv64"):
+        assert not any(d.endswith(f"_{arch}") for d in defaults), arch
 
 
 def test_default_axis_values_windows_includes_all_three():
@@ -77,11 +96,28 @@ def test_usermod_targets_uses_defaults_when_no_override():
     targets = usermod_targets(["unix"], {})
     assert [t.identifier for t in targets] == [
         "unix-manylinux_2_28_x86_64",
+        "unix-musllinux_1_2_x86_64",
         "unix-manylinux_2_28_i686",
+        "unix-musllinux_1_2_i686",
         "unix-manylinux_2_28_aarch64",
+        "unix-musllinux_1_2_aarch64",
         "unix-manylinux_2_31_armv7l",
+        "unix-musllinux_1_2_armv7l",
         "unix-manylinux_2_39_mipsel",
     ]
+
+
+def test_every_default_unix_cell_has_a_published_image():
+    # The default axis is what a bare `ports = ["unix"]` resolves to, so
+    # a cell in here with an empty pin fails at build time with "no image
+    # registered" for every consumer at once. Cheap to assert, and the
+    # exact failure mode `pinned_docker_images.toml`'s own "a key with an
+    # empty value is a declared cell with nothing published yet" comment
+    # describes.
+    from cibuildmp.usermod import dockerrun
+
+    for target in default_axis_values("unix"):
+        assert dockerrun.image_for("unix", target), target
 
 
 def test_usermod_targets_axis_override_replaces_default():

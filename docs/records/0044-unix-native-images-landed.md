@@ -537,6 +537,53 @@ no cell cibuildmp declares can reach it. cibuildwheel's code is still right to
 carry it (an arbitrary 32-bit image on a 64-bit kernel does need it); it simply
 has nothing to do in this matrix.
 
+### The musllinux cells joined the default axis, and `windows` got its first leg
+
+Two consequences of the above, both taken the same day.
+
+**`_UNIX_DEFAULT_TARGETS` is nine cells now, not five.** The rule written next
+to that tuple is "default = everything actually proven at the time it became the
+default", and once the four native musl cells were green and required, they
+qualified — leaving them out would have meant the rule said one thing and the
+list another. The argument for holding them back was cost, and it did not
+survive being stated: the cost only exists in D9's one-job-loop layout, where
+nothing is native to anything and `aarch64`/`armv7l` are emulated regardless of
+libc, and the default axis already carried two such cells. Adding two more of
+the same shape is a bigger known cost, not a new kind of one. 0045's
+`auto`/`native` vocabulary is the actual fix and will make this list a question
+about the host rather than a hardcode; until it exists, the rule as written
+wins. `ppc64le`, `s390x` and `riscv64` stay out for the original reason, which
+is unchanged: emulated on every runner GitHub offers, and never built.
+
+That also collapsed the CI job those cells had. They arrive in the default
+matrix now, so the `--only` opt-in leg is gone — the lifecycle it exists for
+(`only` legs allowed to fail → required → into the default axis) ran to
+completion in one day.
+
+**`windows` entered that same lifecycle at step one.** It had never been built
+by `build-examples.yml` at all: [0042] verified all three arches live, by hand,
+in a session, against an image pushed by hand, and nothing since re-ran it —
+"it worked once on a laptop" is exactly the state every other port left behind
+when it got a leg here. Three `only` legs, `continue-on-error`, promoted when
+green. Checked locally first against the pinned image: `windows-x64` from
+`examples/template` builds in 206.9s and produces `PE32+ executable ... x86-64`,
+so the legs are expected to pass rather than hoped to.
+
+**And the one claim this record made that nothing had ever executed now has a
+job.** It says `--platform=linux/amd64` "is what now lets [the cross-compiling
+ports] run on an arm64 host at all — emulated, instead of failing with `exec
+format error`", and calls it a requirement in its own right. Every
+cross-compiling port resolves to `ubuntu-latest`, which is amd64, so the
+emulated path the claim is about was the one path the workflow structurally
+could not reach. `build-usermod-amd64-image-on-arm64-host` runs `webassembly`
+— green on amd64 in every run, so a failure is unambiguously about the host —
+on `ubuntu-24.04-arm`. Its runner is hardcoded, deliberately: everywhere else
+the runner is a property of the target and comes from `default_runner`, while
+this job is an experiment about the *host*, which cibuildmp records nowhere and
+should not choose. The honest alternative is usermod's missing per-target
+`runs-on` override, still open above, and that is a config-schema feature rather
+than the evidence this job is after.
+
 [32961216804]: https://github.com/ballistics-lab/cibuildmp/actions/runs/32961216804
 
 [32960761641]: https://github.com/ballistics-lab/cibuildmp/actions/runs/32960761641

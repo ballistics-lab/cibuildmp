@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from cibuildmp.usermod.options import UsermodConfigError, UsermodOptions
-from cibuildmp.usermod.targets import KNOWN_PORTS
+from cibuildmp.usermod.targets import KNOWN_PORTS, default_axis_values
 
 
 def write_config(tmp_path: Path, text: str) -> Path:
@@ -25,14 +25,14 @@ def test_ports_list_selects_a_subset(tmp_path):
     write_config(tmp_path, '[usermod]\nports = ["unix", "esp32"]\n')
     options = UsermodOptions.load(tmp_path)
 
+    # Derived rather than spelled out: what this test is about is that
+    # `ports` selects a subset of *ports*, in order. Restating the unix
+    # default axis here would make it a second owner of that list, and
+    # every change to the axis would land as a failure in a test that has
+    # no opinion about it. `test_usermod_targets.py` owns the list.
     identifiers = [t.identifier for t in options.targets()]
-    assert identifiers == [
-        "unix-manylinux_2_28_x86_64",
-        "unix-manylinux_2_28_i686",
-        "unix-manylinux_2_28_aarch64",
-        "unix-manylinux_2_31_armv7l",
-        "unix-manylinux_2_39_mipsel",
-        "esp32-ESP32_GENERIC",
+    assert identifiers == [f"unix-{value}" for value in default_axis_values("unix")] + [
+        "esp32-ESP32_GENERIC"
     ]
 
 

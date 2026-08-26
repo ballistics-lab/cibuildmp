@@ -1,6 +1,7 @@
 import json
 
 from cibuildmp.cli import detect_mode, main
+from cibuildmp.usermod.targets import default_axis_values
 
 
 def write(tmp_path, text):
@@ -56,13 +57,13 @@ def test_usermod_table_dispatches_to_usermod_cli(tmp_path, capsys):
     make_module_dir(tmp_path)
     write(tmp_path, '[usermod]\nports = ["unix"]\n')
 
+    # This test is about dispatch -- a `[usermod]` table reaching the
+    # usermod CLI at all -- not about which unix cells the default axis
+    # holds, so it derives them. See test_usermod_targets.py for the one
+    # place that asserts the list itself.
     assert main([str(tmp_path), "--print-build-identifiers"]) == 0
     assert capsys.readouterr().out.split() == [
-        "unix-manylinux_2_28_x86_64",
-        "unix-manylinux_2_28_i686",
-        "unix-manylinux_2_28_aarch64",
-        "unix-manylinux_2_31_armv7l",
-        "unix-manylinux_2_39_mipsel",
+        f"unix-{value}" for value in default_axis_values("unix")
     ]
 
 

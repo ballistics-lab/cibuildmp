@@ -44,32 +44,43 @@ disagreed with rather than guessed at: things that are *broken* beat things that
 are *missing*; work that unblocks verification beats work that gets verified
 later; and cheap-with-strong-evidence beats expensive-and-speculative.
 
-- [ ] [0044] finish the `unix` matrix | **start here.** All six default targets
-      are green on CI as of 2026-08-26, twice in a row (runs 32958683512 and
-      32959019090) -- 435ae82's amd64-host fix to `action.yml`'s apt step was
-      the last thing holding the two arm64 legs. Both settled questions are
-      recorded in the record's own addendum: `aarch64` is native (88.8s vs
-      1041s emulated, ~12x) and **`armv7l` on an arm64 runner is native too**
-      (59.5s, faster than the native `aarch64` build), so `default_runner`'s
-      bet stands. What remains is the ten opt-in cells, or an explicit
-      decision to descope them -- the four musl cells with a native runner are
-      green now (see [0031]), so what is left under "opt-in" is exactly the six
-      emulated-everywhere cells. One known gap left alongside:
+- [ ] [0044] finish the `unix` matrix | **nine of fifteen cells are in the
+      default axis and green on CI** as of 2026-08-26; every arm64 leg is
+      native, both settled directly rather than inferred (`aarch64` 88.8s vs
+      1041s emulated; `armv7l` reports `armv8l`, which qemu-arm does not). What
+      is left is exactly the six emulated-everywhere cells -- `ppc64le`,
+      `s390x`, `riscv64` in both columns -- and that is a **descope decision**
+      rather than work: it is cheap to say "no" and expensive to say "yes", and
+      it currently blocks [0045] from defining `all`. Two gaps alongside:
       `verify_unix_output`/`verify_unix_floor` exist for `unix` only -- the
       other four ports check `binary.exists()` and nothing else, so a
       `windows` build with an empty `CROSS_COMPILE=` would produce a Linux ELF
-      named `micropython.exe` and pass
-- [ ] [0031] the musllinux column | **four of seven cells green on CI** as of
-      2026-08-26 (run 32960761641) -- every musl cell that has a runner it is
-      native to: `x86_64`, `i686`, `armv7l`, and `aarch64` after the
+      named `micropython.exe` and pass -- and usermod still has no per-target
+      `runs-on` override, which is why the arm64-host experiment below has to
+      hardcode its runner
+- [ ] [0042] `windows` has never been built by `build-examples.yml` | **start
+      here.** [0042] verified all three arches live -- by hand, in a session,
+      against an image pushed by hand -- and nothing has re-run it since, which
+      is the state every other port left behind when it got a CI leg. Three
+      `only` legs are wired now with `continue-on-error`, the first step of the
+      lifecycle musllinux just finished walking; `windows-x64` was checked
+      locally first (206.9s, real `PE32+ ... x86-64`), so they are expected to
+      pass. Alongside it, `build-usermod-amd64-image-on-arm64-host` finally
+      exercises [0044]'s never-run claim that an amd64 image runs emulated on an
+      arm64 host -- every cross-compiling port resolves to `ubuntu-latest`, so
+      that path was structurally unreachable. `qemu` is further behind still:
+      not wired to `ensure_image()` at all ([0032]), so it has no CI leg to give
+- [ ] [0031] the musllinux column | **four of seven cells done and in the
+      default axis** as of 2026-08-26 -- every musl cell with a runner it is
+      native to (`x86_64`, `i686`, `aarch64`, `armv7l`), after the
       `-Wno-error=array-bounds` rule moved from per-cell to per-arch (it had
       been derived from one data point and was on the wrong axis; see [0044]'s
-      second addendum). All four are green and required -- the
-      `build-usermod-optin` job carried `continue-on-error` for exactly one run
-      and no longer does (32961216804). The remaining three (`ppc64le`, `s390x`,
-      `riscv64`) are emulated on every runner GitHub offers, and Alpine's own
-      `community/micropython` excludes the first two outright, so they belong
-      with [0044]'s descope decision rather than here
+      second addendum). They walked the whole lifecycle in a day: `--only` legs
+      allowed to fail (32960761641), then required (32961216804), then into
+      `_UNIX_DEFAULT_TARGETS`, which is nine cells now. The remaining three
+      (`ppc64le`, `s390x`, `riscv64`) are emulated on every runner GitHub
+      offers, and Alpine's own `community/micropython` excludes the first two
+      outright, so they belong with [0044]'s descope decision rather than here
 - [ ] [0032] wire `qemu` to `ensure_image()` | the last port with a published,
       pinned image and no caller. Small. Worth doing after [0044]'s output
       verification is extended, so the new path is checked from day one rather
@@ -114,7 +125,7 @@ later; and cheap-with-strong-evidence beats expensive-and-speculative.
 
 - [x] [0048] `build`/`skip` are top-level in both modes, and a misplaced or misspelt key in a mode table is an error | fixed 2026-08-26; the audit it asked for also found `CIBMP_MICROPYTHON`/`CIBMP_OUTPUT_DIR` silently ignored in usermod mode, and `UsermodConfigError` never caught by the CLI -- both fixed alongside
 - [x] [0043] `unix` adopts cibuildwheel's model in full: native per-target images, PEP 600/656, full arch x libc matrix (epic) | the *decision* shipped -- implemented by [0044], whose row above carries the work that remains. Kept here as the design argument, which is still where the reasoning lives
-- [x] [0042] `windows` wired to `ensure_image()`; `emsdk.py`/`llvmmingw.py` deleted | all three arches verified live, including an anonymous pull of the published digest; that image was pushed by hand rather than by `publish-docker-images.yml` — see the record
+- [x] [0042] `windows` wired to `ensure_image()`; `emsdk.py`/`llvmmingw.py` deleted | all three arches verified live, including an anonymous pull of the published digest; that image was pushed by hand rather than by `publish-docker-images.yml` — see the record. **Still open above:** none of it was ever re-run by CI, which is what the row in "In progress" is about
 - [x] [0041] documentation restructure — this scheme | supersedes the monolithic `docs/BACKLOG.md`
 - [x] [0033] cibuildmp never builds a Docker image itself, only pulls a published one | separate `docker/` + `publish-docker-images.yml`; `ensure_image()`'s local-build fallback removed
 - [x] [0030] extending the container approach to natmod; "Docker or QEMU" answered (both, different jobs) | Docker required for usermod, preferred (not required) for natmod
