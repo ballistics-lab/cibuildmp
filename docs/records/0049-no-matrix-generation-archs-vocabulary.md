@@ -167,6 +167,41 @@ record's premise rules out. `--only` still reaches it.
 
 [32965518561]: https://github.com/ballistics-lab/cibuildmp/actions/runs/32965518561
 
+## The shape costs wall-clock, measured, and is kept anyway
+
+Worth recording precisely, because the number is bad enough that someone will
+eventually propose undoing this without knowing it was measured:
+
+| run | workflow shape | wall-clock |
+| --- | --- | --- |
+| 9908be4 | fourteen parallel legs, one per target | 2m53s |
+| 7393e25 | fourteen parallel legs | 3m08s |
+| fdb22b8 | fourteen parallel legs | 3m43s |
+| **a10ce76** | **one job per runner, `archs: auto`** | **10m56s** |
+
+`build-usermod (ubuntu-latest)` alone is 10m35s of that. The mechanism is
+plain: `auto` selects nine targets there across **seven distinct images** --
+one per `unix` cell, one for `webassembly`, one shared by all three `windows`
+arches -- and seven sequential 32-second pulls is nearly four minutes of
+nothing but fetching, before a single compile. Fanning out makes the run the
+*maximum* of its legs; looping makes it the *sum*.
+
+**Kept, on the user's call.** The trade being bought is that the workflow
+looks exactly like a cibuildwheel workflow -- `runs-on` in the consumer's own
+matrix, `archs: auto` in each job, nothing about hosts inside the tool -- and
+that is the premise this whole record serves. Eleven minutes on a push is a
+real cost and not a hidden one.
+
+It is also worth being clear about what *would* fix it without touching any of
+the above, if the cost ever stops being acceptable: **the workflow fanning out
+on its own.** Deleting matrix generation from the tool and deleting fan-out
+from the workflow were two separate things, and only the first was required.
+cibuildwheel users fan out all the time; they write the matrix themselves,
+which is exactly the distinction. The one refinement that would need is to fan
+out **by image rather than by target** -- `windows`'s three arches share one
+image, so three legs pull the same 2GB three times, which is the mistake this
+record's own perf commit had already made once and corrected.
+
 ## Still open
 
 - **natmod still builds on the bare host.** The premise says "no bare-host
