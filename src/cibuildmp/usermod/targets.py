@@ -170,16 +170,25 @@ class UsermodTarget:
         closes half of it: cibuildmp can now *emit* an arm64 runner. There
         is still no per-target config override, which is the other half.
 
-        **`armv7l` is included with a caveat that is worth stating rather
-        than discovering.** A 32-bit ARM binary is native on an arm64 host
-        only if that CPU implements AArch32 at EL0, and the server-class
-        parts GitHub uses (Graviton, Ampere Altra) generally do not -- so
-        this target may well stay emulated, just on a different host.
-        cibuildwheel treats this as a real hazard rather than a footnote:
-        its own `Architecture.bitness_archs()` carries an explicit AArch32
-        EL0 check for exactly ARM64 Linux. Grouping it with `aarch64` here
-        is therefore a bet, not a certainty; if it does not pay off the
-        cost is nil (emulated either way) and this entry should move back.
+        **`armv7l` was a bet when it was added here, and it paid off.**
+        A 32-bit ARM binary is native on an arm64 host only if that CPU
+        implements AArch32 at EL0, and the server-class parts GitHub uses
+        (Graviton, Ampere Altra) were expected not to -- which would have
+        left this target emulated, just on a different host. Run
+        32958683512 settles it: the `manylinux_2_31_armv7l` leg on
+        `ubuntu-24.04-arm` built in **59.5s, faster than the native
+        `aarch64` leg's own 88.8s on the same runner class**. Emulation
+        costs a multiple, not two thirds, so those parts do implement
+        AArch32 at EL0 and this entry stays.
+
+        Recorded as timing evidence rather than as a direct capability
+        check, and the distinction still matters: cibuildwheel's own
+        `Architecture.bitness_archs()` carries an explicit AArch32 EL0
+        check for exactly ARM64 Linux, which remains the more careful
+        thing for a tool that must be right on *any* arm64 host. What is
+        settled here is GitHub's runners specifically. If that ever stops
+        being true the cost is nil -- emulated either way -- and this
+        entry moves back.
 
         Only `unix` is arch-aware. `windows`, `qemu`, `webassembly` and
         `esp32` cross-compile to Windows, bare metal and wasm from an

@@ -44,19 +44,15 @@ disagreed with rather than guessed at: things that are *broken* beat things that
 are *missing*; work that unblocks verification beats work that gets verified
 later; and cheap-with-strong-evidence beats expensive-and-speculative.
 
-- [ ] [0044] finish the `unix` matrix | **start here.** Six default targets, four
-      green: `manylinux_2_28_x86_64`, `manylinux_2_28_i686` and
-      `manylinux_2_39_mipsel` on CI from published pins, plus `webassembly`;
-      `manylinux_2_28_aarch64` green locally (1041s emulated) but not yet on CI.
-      Both arm64 legs were failing in `action.yml`'s apt step (an amd64-host
-      assumption, fixed in 435ae82) and have not been re-run since -- **that
-      re-run is the first thing to look at**, and it also settles whether
-      `armv7l` on an arm64 runner is native or still emulated (see
-      `default_runner`'s own docstring). After that: the ten opt-in cells, or an
-      explicit decision to descope them. Two known gaps to close alongside:
-      the `linux32` wrap is still unexercised (probed live -- `uname -m` inside
-      a `linux/386` container on an amd64 host already reports `i686`, so
-      `_kernel_is_64bit()` is False and the wrap never fires), and
+- [ ] [0044] finish the `unix` matrix | **start here.** All six default targets
+      are green on CI as of 2026-08-26, twice in a row (runs 32958683512 and
+      32959019090) -- 435ae82's amd64-host fix to `action.yml`'s apt step was
+      the last thing holding the two arm64 legs. Both settled questions are
+      recorded in the record's own addendum: `aarch64` is native (88.8s vs
+      1041s emulated, ~12x) and **`armv7l` on an arm64 runner is native too**
+      (59.5s, faster than the native `aarch64` build), so `default_runner`'s
+      bet stands. What remains is the ten opt-in cells, or an explicit
+      decision to descope them. One known gap left alongside:
       `verify_unix_output`/`verify_unix_floor` exist for `unix` only -- the
       other four ports check `binary.exists()` and nothing else, so a
       `windows` build with an empty `CROSS_COMPILE=` would produce a Linux ELF
@@ -97,7 +93,11 @@ later; and cheap-with-strong-evidence beats expensive-and-speculative.
 - [ ] [0047] run output should look exactly like cibuildwheel's | nothing depends
       on it, which is why it is here and not higher. Worth more since the
       usermod job fanned out -- six logs instead of one -- and it is mostly a
-      missing mechanism (log folding) rather than styling
+      missing mechanism (log folding) rather than styling. The one thing that
+      was actively *wrong* rather than merely absent is fixed: every `print()`
+      was block-buffered and landed at interpreter exit, out of order with
+      `make`'s own output (`cli.main()` sets line buffering now, and
+      `_probe_platform()` reports what it measured) -- see [0044]'s addendum
 - [ ] [0028] full container-per-port migration plan (epic) | `esp32.Dockerfile`
       still not started; that port has no Docker path at all. Genuinely large
 - [ ] [0022] zephyr as a third usermod selector axis (epic) | phase outline

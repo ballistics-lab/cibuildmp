@@ -1,6 +1,8 @@
 # 0044 — landing [0043]: pypa-based native images, the full arch × libc matrix, and the two things it broke
 
-Status: Implemented (code, tests and tooling landed; images not published yet, most cells not verified live)
+Status: Implemented (code, tests and tooling landed; the matrix is published and all
+six default cells are green on CI as of 2026-08-26 -- see the addendum; the ten opt-in
+cells remain unbuilt)
 
 Supersedes nothing. This is the implementation record for [0043], which was
 accepted as a plan with "nothing here is verified live yet" written into its own
@@ -365,3 +367,94 @@ from the archive when superseded.
 [0031]: 0031-unix-musllinux-libc-axis.md
 [0038]: 0038-m5-adopt-in-three-repos.md
 [0043]: 0043-unix-adopts-cibuildwheel-native-image-model.md
+
+---
+
+## Addendum, 2026-08-26 — the six default cells are green on CI, and the `armv7l` bet paid off
+
+Two consecutive `Build examples` runs on `feat/usermod` — [32958683512] (435ae82)
+and [32959019090] (c1ba45b) — completed with **all six default `unix` targets
+passing**, not the four the tracker had recorded. What changed between them and
+the failures before is one commit: 435ae82, which fixed the composite action's
+apt step assuming an amd64 host (`dpkg --add-architecture i386` and the i386
+sources-list rewrite exist for **natmod's `x86` arch alone** and cannot apply on
+arm64). That was the last amd64-host constant left anywhere in the tree, and it
+was outside `dockerrun.py` entirely — the same correction this record made
+everywhere else, applied to the one place still assuming it.
+
+| target | runner | `cibuildmp` step | mechanism |
+| --- | --- | --- | --- |
+| `manylinux_2_28_x86_64` | `ubuntu-latest` | — | native container |
+| `manylinux_2_28_i686` | `ubuntu-latest` | — | native container |
+| `manylinux_2_39_mipsel` | `ubuntu-latest` | — | cross, amd64 host |
+| `webassembly` | `ubuntu-latest` | — | cross, amd64 host |
+| `manylinux_2_28_aarch64` | `ubuntu-24.04-arm` | **88.8s** | native container |
+| `manylinux_2_31_armv7l` | `ubuntu-24.04-arm` | **59.5s** | see below |
+
+**`aarch64` is native, and the figure is the argument.** 88.8s inside
+`ghcr.io/ballistics-lab/manylinux_2_28_aarch64@sha256:498ac07…`, against the
+1041s an emulated build of the same cell took locally — ~12x, which is the ratio
+emulation costs and not something a faster runner explains. [0043]'s own step 1
+is closed by this, and the "no emulated build has completed here" caveat above
+is answered from the other direction: the point was never to make emulation
+work, it was to stop needing it.
+
+**`armv7l` was called "a bet rather than a certainty" in *Still open* above, and
+the bet won.** 59.5s — *faster than the native `aarch64` build on the same
+runner class*. Under `qemu-arm` it would be some multiple of 88.8s, not two
+thirds of it, so GitHub's `ubuntu-24.04-arm` parts do implement AArch32 at EL0
+and `default_runner`'s `armv7l` → `ubuntu-24.04-arm` entry stays where it is
+rather than moving back. Recorded as timing evidence rather than as a direct
+observation, because the one thing that would settle it outright is not visible
+— see the next paragraph. cibuildwheel's own explicit AArch32-EL0 check in
+`Architecture.bitness_archs()` remains the more careful thing to do for a tool
+that must be right on *any* arm64 host; this is a statement about GitHub's
+runners specifically.
+
+**A diagnosability wart, found while reading these logs.** The `armv7l` job's
+log contains no image pull at all — no `Unable to find image`, no digest, no
+`ghcr.io` anywhere — yet it built in the right container. `linux/arm/v7` is not
+the host's native platform, so `_probe_platform()` ran first and its
+`docker run --pull missing` is `capture_output=True`; it silently fetched the
+image, and `run()`'s own `--pull missing` then found it cached and printed
+nothing. The only trace the container was ever pulled is a **19-second gap with
+no output** between `LINK build/mpy-cross` and the target build starting. So for
+every non-native target the first pull is invisible, and its cost looks like a
+hang. This belongs to [0047] rather than here, but it is worth naming: the probe
+that exists to turn a silent failure into a sentence also turned a visible pull
+into silence.
+
+**Still not verified, and now for a sharper reason.** `linux32` handling was
+listed above as "no `i686` or `armv7l` build has run" — both have now run and
+both passed, but that does *not* close it. `_kernel_is_64bit()` reads
+`_probe_platform()`'s `uname -m`, and that value is captured, never printed. An
+`arm/v7` container on an arm64 kernel reports either `armv8l` (not in
+`_64BIT_MACHINES`, wrap does not fire) or `aarch64` (in it, wrap fires), and the
+logs cannot distinguish the two. The `i686` case is already known from a live
+probe to report `i686` on an amd64 host — so the wrap does not fire there
+either. Either way the branch that has never executed is the one that *does*
+wrap, on both 32-bit cells. Printing the probed machine would close this and
+[0047]'s gap in the same line.
+
+**And then the probe reported it, which settled `i686` on the spot.**
+`_probe_platform()` now prints what it measured (and announces itself before
+the silent pull), which required fixing a larger thing first: *every* `print()`
+in cibuildmp was block-buffered and arrived at interpreter exit — in the run
+above, "downloaded micropython.tar.xz (104 MiB)" carries the same timestamp as
+the final summary, ninety seconds late and after `make`'s own output.
+`cli.main()` sets line buffering now.
+
+With that in place, one local probe against the real pinned image answers the
+`i686` half: `ghcr.io/ballistics-lab/manylinux_2_28_i686` at `linux/386` on an
+amd64 host reports `uname -m = i686`, not `x86_64` — so `_kernel_is_64bit()` is
+False and **the `linux32` wrap does not fire on this cell and never will**.
+That is a property of the *image*, not of the platform: plain `alpine:3.22` at
+the same `linux/386` on the same host reports `x86_64`, because pypa's 32-bit
+images already apply the `PER_LINUX32` personality themselves. cibuildwheel's
+wrap is still correct to carry — it is what makes an arbitrary 32-bit image
+behave — it simply has nothing left to do here. `armv7l` was not probed;
+the printed line settles it on its next CI run without anyone having to reason
+about it.
+
+[32958683512]: https://github.com/ballistics-lab/cibuildmp/actions/runs/32958683512
+[32959019090]: https://github.com/ballistics-lab/cibuildmp/actions/runs/32959019090

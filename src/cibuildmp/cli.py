@@ -163,6 +163,37 @@ def detect_mode(raw: dict, explicit: str | None) -> str | None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Every `print()` in this tool is progress output, and until this line
+    # existed none of it *was* progress output on CI. Python block-buffers
+    # stdout whenever it is not a tty, so a build's own narration
+    # ("downloaded micropython.tar.xz", "mpy-cross: building", the
+    # per-target result lines) sat in a 8KiB buffer until interpreter exit
+    # and then arrived all at once, at the very end -- while `make`, an
+    # ordinary subprocess inheriting the same fd, wrote straight through
+    # and got interleaved ahead of all of it.
+    #
+    # Read off a real run rather than reasoned about: in run 32958683512
+    # every one of cibuildmp's own lines carries the timestamp
+    # `10:34:25.606`, including "downloaded micropython.tar.xz (104 MiB)",
+    # which describes something that finished ninety seconds earlier and
+    # is printed *after* the final `LINK`. Anything this tool says about
+    # what it is currently doing is worthless under that ordering, which
+    # makes line buffering a precondition for the probe reporting in
+    # `usermod/dockerrun.py` rather than a cosmetic fix -- and part of
+    # what record 0047 is about.
+    #
+    # Line buffering, not `flush=True` per call site: the property wanted
+    # is of the stream, and scattering flushes leaves the next `print()`
+    # anyone adds silently wrong again. `reconfigure()` is guarded because
+    # stdout can be a plain object with no such method (pytest's own
+    # capture, an embedding host), and buffering is never worth an
+    # exception.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(line_buffering=True)  # type: ignore[union-attr]
+        except (AttributeError, ValueError, OSError):
+            pass
+
     parser = build_parser()
     args = parser.parse_args(argv)
 

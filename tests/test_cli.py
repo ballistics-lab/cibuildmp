@@ -173,3 +173,40 @@ def test_real_build_writes_github_step_summary_when_set(monkeypatch, tmp_path):
     assert "1 target(s) built in 0.5s" in text
     assert "mpy6.3-natmod-x64" in text
     assert "42 bytes" in text
+
+
+def test_output_is_line_buffered_and_survives_a_stream_without_reconfigure(
+    tmp_path, monkeypatch, capsys
+):
+    # Two things at once, because they are the same line. First: every
+    # `print()` in this tool is progress output, and block buffering made
+    # all of it arrive at interpreter exit -- run 32958683512 stamps
+    # "downloaded micropython.tar.xz" with the same timestamp as the final
+    # summary, ninety seconds after the download and after `make`'s own
+    # output, which wrote straight through the inherited fd.
+    #
+    # Second: `reconfigure()` is not on every stream object (pytest's own
+    # capture, an embedding host), and buffering is never worth an
+    # exception at the entry point of the whole CLI.
+    class NoReconfigure:
+        def __init__(self):
+            self.text = ""
+
+        def write(self, s):
+            self.text += s
+            return len(s)
+
+        def flush(self):
+            pass
+
+    calls = []
+
+    class Reconfigurable(NoReconfigure):
+        def reconfigure(self, **kwargs):
+            calls.append(kwargs)
+
+    monkeypatch.setattr("sys.stdout", Reconfigurable())
+    monkeypatch.setattr("sys.stderr", NoReconfigure())
+    assert main([write(tmp_path, CONFIG), "--print-build-identifiers"]) == 0
+
+    assert calls == [{"line_buffering": True}]

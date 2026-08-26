@@ -434,9 +434,32 @@ def _probe_platform(image: str, oci_platform: str) -> str:
     clear errors already, and `run()` below is about to surface them
     itself. This function only ever converts the two failures that
     otherwise arrive unreadable.
+
+    **It reports what it measured, on both sides of the call.** Two lines
+    per (image, platform), which is at most two per build: one before, so
+    the silent `--pull` inside a `capture_output=True` subprocess is not
+    an unexplained pause, and one after carrying the `uname -m` value
+    itself. Both are additions made once record 0044's addendum showed
+    that a probe whose whole purpose is legibility had been quietly
+    costing it elsewhere -- the pull looked like a hang, and the machine
+    string, the sole input to `_kernel_is_64bit()`, never reached a log at
+    all. They are only useful because `cli.main()` sets line buffering;
+    see the comment there.
     """
     if (image, oci_platform) in _PROBED:
         return _PROBED[(image, oci_platform)]
+    # Announced before it runs, because this is the one place a build
+    # legitimately stops for a long time with nothing to show: `--pull
+    # missing` here is `capture_output=True`, so the *first* fetch of any
+    # non-native image happens inside this call and is completely silent.
+    # Measured on run 32958683512's `armv7l` leg: nineteen seconds between
+    # `LINK build/mpy-cross` and the target build starting, with no line in
+    # the log mentioning a pull, a digest or even the registry -- the image
+    # was fetched here, and `run()`'s own `--pull missing` then found it
+    # cached and printed nothing. A silent pull is indistinguishable from a
+    # hang, and the probe added to make one failure legible should not
+    # create another.
+    print(f"  {oci_platform}: probing (pulls {image} if not cached)")
     probe = subprocess.run(
         [
             "docker",
@@ -460,6 +483,18 @@ def _probe_platform(image: str, oci_platform: str) -> str:
     if probe.returncode == 0:
         machine = (probe.stdout or "").strip()
         _PROBED[(image, oci_platform)] = machine
+        # The probed value itself, not just "the probe passed". It is the
+        # sole input to `_kernel_is_64bit()`, and therefore decides whether
+        # a 32-bit target's command gets the `linux32` wrap -- so keeping
+        # it captured meant the `linux32` branch could not be told apart
+        # from its opposite even after a successful build. Record 0044's
+        # addendum hit exactly that: `i686` and `armv7l` both went green on
+        # CI while "no `linux32` build has run" stayed just as unverified
+        # as before, because an `arm/v7` container on an arm64 kernel
+        # reports `armv8l` (no wrap) or `aarch64` (wrap) and the logs could
+        # not say which. One word of output settles it per run.
+        kernel = "64-bit kernel" if machine in _64BIT_MACHINES else "32-bit kernel"
+        print(f"  {oci_platform}: uname -m = {machine} ({kernel})")
         return machine
     stderr = probe.stderr or ""
     if "exec format error" in stderr:

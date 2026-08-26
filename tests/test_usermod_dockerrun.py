@@ -515,3 +515,93 @@ def test_run_kills_the_container_on_timeout(monkeypatch, tmp_path):
     assert calls[0][:2] == ["docker", "run"]
     run_name = calls[0][calls[0].index("--name") + 1]
     assert calls[1] == ["docker", "kill", run_name]
+
+
+# ── the probe reports what it measured ──────────────────────────────────
+
+
+def test_the_probed_machine_reaches_stdout(monkeypatch, tmp_path, capsys):
+    # Record 0044's addendum: `i686` and `armv7l` both went green on CI
+    # while `linux32` stayed exactly as unverified as before, because the
+    # only input to that decision -- this `uname -m` -- was captured and
+    # never printed. A passing build is not evidence about a branch whose
+    # output nothing can see, so the value itself is the assertion here.
+    import subprocess as sp
+
+    monkeypatch.setattr(dockerrun, "host_oci_platform", lambda: "linux/arm64")
+
+    def fake_run(cmd, **k):
+        if "uname" in cmd:
+            return sp.CompletedProcess(cmd, 0, stdout="armv8l\n", stderr="")
+        return sp.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
+
+    dockerrun.run(
+        ["make"],
+        mounts=[tmp_path],
+        workdir=tmp_path,
+        image="manylinux_2_31_armv7l:local",
+        oci_platform="linux/arm/v7",
+        linux32=True,
+    )
+
+    out = capsys.readouterr().out
+    assert "uname -m = armv8l" in out
+    assert "32-bit kernel" in out
+
+
+def test_the_silent_pull_is_announced_before_it_happens(monkeypatch, tmp_path, capsys):
+    # The probe's own `docker run` is `capture_output=True`, so it is
+    # where the first fetch of a non-native image happens and where it
+    # stays invisible -- nineteen seconds of nothing on run 32958683512's
+    # armv7l leg. The announcement has to precede the call, not follow it.
+    import subprocess as sp
+
+    monkeypatch.setattr(dockerrun, "host_oci_platform", lambda: "linux/amd64")
+    seen_before_probe = []
+
+    def fake_run(cmd, **k):
+        if "uname" in cmd:
+            seen_before_probe.append(capsys.readouterr().out)
+            return sp.CompletedProcess(cmd, 0, stdout="x86_64\n", stderr="")
+        return sp.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
+
+    dockerrun.run(
+        ["make"],
+        mounts=[tmp_path],
+        workdir=tmp_path,
+        image="manylinux_2_28_aarch64@sha256:deadbeef",
+        oci_platform="linux/arm64",
+    )
+
+    assert "linux/arm64: probing" in seen_before_probe[0]
+    assert "manylinux_2_28_aarch64@sha256:deadbeef" in seen_before_probe[0]
+
+
+def test_a_cached_probe_says_nothing_a_second_time(monkeypatch, tmp_path, capsys):
+    # Two containers per build is the normal shape (unix/armhf's own
+    # deplibs pre-step plus the main build), and `_PROBED` exists so the
+    # probe runs once. The reporting has to be cached with it rather than
+    # repeating a line about a container that never started.
+    import subprocess as sp
+
+    monkeypatch.setattr(dockerrun, "host_oci_platform", lambda: "linux/amd64")
+    monkeypatch.setattr(
+        dockerrun.subprocess,
+        "run",
+        lambda cmd, **k: sp.CompletedProcess(cmd, 0, stdout="x86_64\n", stderr=""),
+    )
+
+    for _ in range(2):
+        dockerrun.run(
+            ["make"],
+            mounts=[tmp_path],
+            workdir=tmp_path,
+            image="img:local",
+            oci_platform="linux/arm64",
+        )
+
+    assert capsys.readouterr().out.count("uname -m") == 1
