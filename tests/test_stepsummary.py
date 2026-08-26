@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from cibuildmp.stepsummary import write_step_summary
+from cibuildmp.natmod.stepsummary import write_step_summary
 
 
 class FakeResult:

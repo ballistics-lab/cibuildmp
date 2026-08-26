@@ -29,8 +29,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ..options import DEFAULT_MICROPYTHON, DEFAULT_OUTPUT_DIR, read_config
-from ..targets import parse_selector
+from ..natmod.options import DEFAULT_MICROPYTHON, DEFAULT_OUTPUT_DIR, read_config
+from ..natmod.targets import parse_selector
 from .targets import KNOWN_PORTS, UsermodTarget, axis_key, select, usermod_targets
 
 DEFAULT_MODULE_DIR = "usermod"

@@ -10,7 +10,7 @@ Python" pattern) -- see docs/BACKLOG.md D16 and D17.
 
 from __future__ import annotations
 
-from ..resources import usermod_data
+from ..natmod.resources import usermod_data
 
 _PORTS: dict[str, dict[str, str]] = usermod_data()["port"]
 

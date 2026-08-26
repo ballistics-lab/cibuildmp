@@ -19,8 +19,9 @@ to them.
 "In progress / Proposed" section is the only maintained answer: right now that's [0022]
 (zephyr, plus the unstarted `rp2` usermod build driver), [0028] (`esp32.Dockerfile` still
 not started — no Docker path for that port at all), [0031] (the musllinux half of the unix
-libc axis), [0032] (`windows`/`qemu` never wired to `ensure_image()`, despite [0030]'s
-Docker-only mandate), [0038] (two open M5 cleanup items), and [0040] (the usermod
+libc axis), [0032] (`qemu` never wired to `ensure_image()`, despite [0030]'s Docker-only
+mandate — `windows` was wired by [0042]), [0038] (two open M5 cleanup items), and [0040]
+(the usermod
 test-runner axis, not scheduled). "Implemented" below it is everything already landed —
 including [0008], whose only unfinished aside (reserving the PyPI name) was never
 committed follow-up work, just a "worth doing" note in the decision's own text. A summary
@@ -50,3 +51,4 @@ From there, drill down rather than infer:
 [0033]: docs/records/0033-cibuildmp-never-builds-docker-image-itself.md
 [0038]: docs/records/0038-m5-adopt-in-three-repos.md
 [0040]: docs/records/0040-usermod-tests-deferred.md
+[0042]: docs/records/0042-windows-docker-wiring-and-resolver-removal.md

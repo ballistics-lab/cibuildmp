@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .. import sources
+from ..natmod import sources
 from . import manifests, portinfo
 from .build import (
     Esp32BuildOptions,

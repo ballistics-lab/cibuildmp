@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from cibuildmp import build
-from cibuildmp.build import (
+from cibuildmp.natmod import build
+from cibuildmp.natmod.build import (
     BuildError,
     BuildResult,
     build_target,
@@ -19,9 +19,9 @@ from cibuildmp.build import (
     run_pre_build_command,
     verify_output,
 )
-from cibuildmp.options import BuildOptions
-from cibuildmp.targets import Target
-from cibuildmp.toolchains import ResolvedToolchain
+from cibuildmp.natmod.options import BuildOptions
+from cibuildmp.natmod.targets import Target
+from cibuildmp.natmod.toolchains import ResolvedToolchain
 
 HOST_CHAIN = ResolvedToolchain("none", "", "", None)
 

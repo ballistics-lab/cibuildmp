@@ -1,8 +1,8 @@
 import pytest
 
-from cibuildmp import toolchains
-from cibuildmp.targets import NATMOD_ARCHS, NATMOD_CROSS
-from cibuildmp.toolchains import (
+from cibuildmp.natmod import toolchains
+from cibuildmp.natmod.targets import NATMOD_ARCHS, NATMOD_CROSS
+from cibuildmp.natmod.toolchains import (
     ARCH_TOOLCHAIN,
     TOOLCHAINS,
     ResolvedToolchain,

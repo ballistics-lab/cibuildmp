@@ -1,6 +1,6 @@
 import pytest
 
-from cibuildmp.targets import (
+from cibuildmp.natmod.targets import (
     LATEST_KNOWN_ABI,
     NATMOD_ARCHS,
     NATMOD_CROSS,

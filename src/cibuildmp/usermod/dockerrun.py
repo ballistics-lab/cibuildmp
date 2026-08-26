@@ -102,17 +102,28 @@ from .build import UsermodBuildError
 # triggered by the user) and pushed all eight -- digests below are copied
 # from that run's own "Record the pinned digest" step, not guessed.
 #
-# **These GHCR packages are private as of that run** -- confirmed live,
-# not assumed: an unauthenticated `docker pull` of the qemu image above
-# returned `401 unauthorized`. A real consumer with no GHCR credentials
-# at all (the entire point of this table) cannot pull any of these until
-# a repo admin flips each `cibuildmp-*` package to Public under
-# ballistics-lab's own package settings. Registered here anyway, since
-# the digests themselves are correct and this is the one place they
-# belong -- but until that visibility change happens, every usermod
-# build that reaches this table (including this repo's own
-# build-usermod, which no longer logs in to GHCR at all -- see D33)
-# fails to pull, the same as before this table had anything in it.
+# These GHCR packages were private as of that run and are **public
+# now** -- both states confirmed live rather than assumed: an
+# unauthenticated pull returned `401 unauthorized` then, and an
+# unauthenticated manifest fetch of unix-manylinux-x64, windows, qemu
+# and webassembly returns `200` today. That was the one thing standing
+# between this table and a real credential-less consumer being able to
+# use it, so nothing here is blocked on a repo-admin visibility change
+# any more.
+#
+# The three `windows-*` digests below are **not** from that run -- they
+# are from a later push of the rebuilt image, after
+# docker/windows.Dockerfile gained its baked-in llvm-mingw layer (D42's
+# windows wiring: that arch has no apt toolchain and used to download one
+# onto the host per build). All three keys share it, the one combined
+# image D28 step 3 designed for this port. Pushed by hand rather than by
+# publish-docker-images.yml -- the exception, not the cadence: that
+# workflow stays the normal way these get published, and a later run of
+# it against the same Dockerfile is what this digest should be
+# reconciled with. Verified after pushing, not assumed: an
+# unauthenticated manifest fetch of this exact digest returns 200, and a
+# real ports/windows build of all three arches was run through
+# `dockerrun.run()` against this pinned reference.
 PORT_IMAGES: dict[str, str] = {
     "unix-x64-manylinux": (
         "ghcr.io/ballistics-lab/cibuildmp-unix-manylinux-x64"
@@ -134,15 +145,21 @@ PORT_IMAGES: dict[str, str] = {
         "ghcr.io/ballistics-lab/cibuildmp-unix-manylinux-mipsel"
         "@sha256:427733939aa102405694aa88975278f3f813cc6820d4196187fbe959e1d459c5"
     ),
-    # windows-x64/windows-x86 share one combined image (D28 step 3 --
-    # this port has no manylinux/musllinux-shaped axis to split on).
+    # All three windows arches share one combined image (D28 step 3 --
+    # this port has no manylinux/musllinux-shaped axis to split on), and
+    # it is the only one here carrying a toolchain that is not an apt
+    # package: arm64's llvm-mingw (D42).
     "windows-x64": (
         "ghcr.io/ballistics-lab/cibuildmp-windows"
-        "@sha256:2d457b52df9089138d8d85d124026db693c026fc8e41cc84da01e9044f71ec85"
+        "@sha256:0adc927c7a837b1f58a74f52586bfc323a84bd66ba42bbc3ae8e5124e8062ba6"
     ),
     "windows-x86": (
         "ghcr.io/ballistics-lab/cibuildmp-windows"
-        "@sha256:2d457b52df9089138d8d85d124026db693c026fc8e41cc84da01e9044f71ec85"
+        "@sha256:0adc927c7a837b1f58a74f52586bfc323a84bd66ba42bbc3ae8e5124e8062ba6"
+    ),
+    "windows-arm64": (
+        "ghcr.io/ballistics-lab/cibuildmp-windows"
+        "@sha256:0adc927c7a837b1f58a74f52586bfc323a84bd66ba42bbc3ae8e5124e8062ba6"
     ),
     "qemu": (
         "ghcr.io/ballistics-lab/cibuildmp-qemu"

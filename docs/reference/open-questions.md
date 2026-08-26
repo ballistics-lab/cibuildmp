@@ -76,9 +76,14 @@ the same way [docs/0000-TRACKER.md](../0000-TRACKER.md) folds resolved
   watches this repo's own `uv`/Actions dependencies (the "Graph Update"/
   "github_actions ... Update" runs in Actions history), but it has no
   visibility into the pins that actually matter here: every toolchain
-  version + sha256 in `resources/natmod.toml`/`resources/usermod.toml`
-  (arm-none-eabi, xtensa-esp, riscv-none-elf, and now emsdk), and the
-  MicroPython release tag each `examples/*/cibuildmp.toml` builds against.
+  version + sha256 in `resources/natmod.toml` (arm-none-eabi, xtensa-esp,
+  riscv-none-elf), the equivalents baked into `docker/*.Dockerfile`'s own
+  `RUN` steps (emsdk for `webassembly`, llvm-mingw for `windows`/`arm64`
+  — moved out of `resources/usermod.toml` by [0042], which makes those
+  Dockerfiles the pin of record and puts the pins somewhere Dependabot
+  can see even less well), the apt package sets those images install,
+  and the MicroPython release tag each `examples/*/cibuildmp.toml`
+  builds against.
   All of that goes stale on an upstream's own schedule, same as **D10**
   already says about the toolchain table specifically — but nothing here
   today notices *when*, for any of it, MicroPython tag included. Not
@@ -95,6 +100,7 @@ the same way [docs/0000-TRACKER.md](../0000-TRACKER.md) folds resolved
   600/656 work).** Designed, not built — see [0031]'s own closing section.
 
 [0018]: ../records/0018-windows-provisioning-fourth-story.md
+[0042]: ../records/0042-windows-docker-wiring-and-resolver-removal.md
 [0019]: ../records/0019-esp-idf-provisioning-heaviest.md
 [0031]: ../records/0031-unix-musllinux-libc-axis.md
 [0033]: ../records/0033-cibuildmp-never-builds-docker-image-itself.md

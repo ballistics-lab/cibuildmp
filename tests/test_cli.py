@@ -1,10 +1,10 @@
 import json
 from pathlib import Path
 
-from cibuildmp import cli
-from cibuildmp.build import BuildResult
 from cibuildmp.cli import main
-from cibuildmp.toolchains import ResolvedToolchain
+from cibuildmp.natmod import cli as natmod_cli
+from cibuildmp.natmod.build import BuildResult
+from cibuildmp.natmod.toolchains import ResolvedToolchain
 
 
 def write(tmp_path, text):
@@ -90,11 +90,13 @@ def test_real_build_writes_github_step_summary_when_set(monkeypatch, tmp_path):
     package_dir = Path(write(tmp_path, config))
 
     monkeypatch.setattr(
-        cli, "resolve", lambda arch, **k: ResolvedToolchain("none", "", "", None)
+        natmod_cli, "resolve", lambda arch, **k: ResolvedToolchain("none", "", "", None)
     )
-    monkeypatch.setattr(cli, "fetch_micropython", lambda tag, **k: tmp_path / "mpy")
-    monkeypatch.setattr(cli, "build_mpy_cross", lambda mpy_dir, **k: None)
-    monkeypatch.setattr(cli, "read_mpy_abi", lambda mpy_dir: "6.3")
+    monkeypatch.setattr(
+        natmod_cli, "fetch_micropython", lambda tag, **k: tmp_path / "mpy"
+    )
+    monkeypatch.setattr(natmod_cli, "build_mpy_cross", lambda mpy_dir, **k: None)
+    monkeypatch.setattr(natmod_cli, "read_mpy_abi", lambda mpy_dir: "6.3")
 
     produced = tmp_path / "template-mpy6.3-natmod-x64.mpy"
     produced.write_bytes(b"\x00" * 42)
@@ -104,7 +106,7 @@ def test_real_build_writes_github_step_summary_when_set(monkeypatch, tmp_path):
             identifier=build_options.identifier, output=produced, duration=0.5
         )
 
-    monkeypatch.setattr(cli, "build_target", fake_build_target)
+    monkeypatch.setattr(natmod_cli, "build_target", fake_build_target)
 
     summary_path = tmp_path / "summary.md"
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_path))

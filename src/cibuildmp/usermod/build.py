@@ -52,16 +52,17 @@ selectable via `[usermod.qemu] boards = [...]`, not defaulted to, the
 same "default = everything actually proven at the time it became the
 default" rule `unix`/`esp32` already follow for their own axes.
 
-`webassembly` is the third port here: its toolchain (`emsdk`) needs its
-own resolver, `usermod/emsdk.py` -- not `toolchains.py`'s shape, see that
-module's own docstring for why. `build_webassembly()` itself is
-Docker-only (docs/BACKLOG.md's D30): `emsdk.py`'s resolver now only pins
-what the packaged `webassembly.Dockerfile` bakes in at image-build time,
-not something a build invokes directly.
+`webassembly` is the third port here: Docker-only (**D30**), with its
+toolchain (`emsdk`) baked into `docker/webassembly.Dockerfile` at
+image-build time. It used to have a host-side resolver of its own
+(`usermod/emsdk.py`, not `toolchains.py`'s `<prefix>gcc` shape); that
+went away with the bare-host path itself, and that Dockerfile is now the
+pin of record.
 
 `esp32` (**D19**) is the fourth port: its toolchain (ESP-IDF) is a whole
 environment, not one `<prefix>gcc` -- `usermod/espidf.py` is its own
-resolver, the same split `emsdk.py` already uses for `webassembly`. Not
+resolver, and the last host-side one left here (`esp32` has no Docker
+image yet, D28). Not
 part of **M8**'s original port list (`unix`/`webassembly`/`qemu`/
 `windows`) -- added alongside **M9**'s own ESP-IDF provisioning work,
 since a resolver with nothing driving a build through it proves less than
@@ -69,10 +70,11 @@ one that does.
 
 `windows` (**D18**) is the fifth and last port here: a plain Linux-hosted
 cross-compile for all three arches this project covers (`x64`/`x86` via
-an apt-installed mingw-w64 GCC, `arm64` via a downloaded `llvm-mingw`
-toolchain -- `usermod/llvmmingw.py`, since no Linux distro packages a GCC
-targeting `aarch64-w64-mingw32` at all), no Windows host or MSYS2 needed
-for any of them. This is **not** what `a7p`'s own `mp-usermod.yml` does
+an apt-installed mingw-w64 GCC, `arm64` via a pinned `llvm-mingw`
+toolchain, since no Linux distro packages a GCC targeting
+`aarch64-w64-mingw32` at all), no Windows host or MSYS2 needed for any of
+them -- all three baked into `docker/windows.Dockerfile` and run there,
+never on the host (**D30**/**D32**). This is **not** what `a7p`'s own `mp-usermod.yml` does
 (it runs MSYS2 on `windows-latest` for all three arches, and two earlier
 versions of this port matched that -- first for all three, then just for
 `arm64` once `x64`/`x86` were confirmed to cross-compile more simply)
@@ -100,14 +102,13 @@ here, not just the one that surfaced it.
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from .. import toolchains
-from ..toolchains import ResolvedToolchain
-from . import espidf, llvmmingw
+from ..natmod import toolchains
+from ..natmod.toolchains import ResolvedToolchain
+from . import espidf
 
 
 class UsermodBuildError(Exception):
@@ -458,11 +459,9 @@ def build_webassembly(
     `dockerrun.PORT_IMAGES`-registered, digest-pinned default published
     by `publish-docker-images.yml` -- cibuildmp itself never builds
     `docker/webassembly.Dockerfile` (see usermod/dockerrun.py's own
-    docstring for why). emsdk itself is baked into that image
-    (`usermod/emsdk.py`'s own resolver stays what pins/verifies the same
-    download for the Dockerfile's own `RUN` step to match, not something
-    a build invokes directly any more -- no `sdk.env()` to inject, the
-    image's own `ENV PATH` already covers it). `toolchain_root`/`quiet`
+    docstring for why). emsdk itself is baked into that image, which is
+    also the pin of record for it -- there is no `sdk.env()` to inject,
+    the image's own `ENV PATH` already covers it. `toolchain_root`/`quiet`
     are accepted only for the same call shape every `build_<port>()`
     shares (`orchestrate.py`'s `build_one()` passes them uniformly);
     neither is used on this Docker-only path.
@@ -585,13 +584,27 @@ def build_esp32(
 @dataclass(frozen=True)
 class WindowsArchSettings:
     cross_compile: str
-    # Empty means "no apt package -- resolved via llvm-mingw instead",
-    # arm64's own case (see resolve_windows_toolchain()).
-    apt_package: str = ""
     # Clang-specific diagnostics MicroPython's own C wasn't written to
     # satisfy under -Werror -- empty for the GCC-based x64/x86 arches,
-    # which need none. See resources/usermod.toml's own [llvm-mingw]
-    # table for exactly which and why, verified live rather than guessed.
+    # which need none. All three are load-bearing, not cosmetic, and were
+    # found live rather than guessed: llvm-mingw's clang is strict about
+    # things GCC (every other cross-compiler this project uses) is not.
+    #   -Wno-double-promotion  py/binary.c's _Float16<->float union trick
+    #                          reads as an implicit precision-increasing
+    #                          promotion under Clang specifically.
+    #   -Wno-uninitialized
+    #   -Wno-default-const-init-var-unsafe
+    #                          shared/runtime/gchelper_generic.c's own
+    #                          `const register long x19 asm("x19")` idiom
+    #                          (reading a callee-saved register an asm
+    #                          stub already wrote) reads as "used
+    #                          uninitialized" to Clang; GCC does not
+    #                          apply this diagnosis to a bare asm-tied
+    #                          register declaration the way Clang does.
+    # (Migrated here from resources/usermod.toml's own [llvm-mingw]
+    # table, deleted along with usermod/llvmmingw.py once windows went
+    # Docker-only -- these are Make-level flags and belong with the rest
+    # of them, not with a toolchain download pin.)
     extra_cflags: str = ""
     # COMPILER_TARGET=/STRIP=/SIZE= -- the same overrides MSYS2's own
     # CLANGARM64 environment already needed (D18's own history): this
@@ -601,22 +614,30 @@ class WindowsArchSettings:
     extra_make_args: tuple[str, ...] = ()
 
 
-# CROSS_COMPILE prefixes for each Windows arch this project builds, and how
-# each toolchain is resolved. x64/x86: the same apt packages upstream's own
+# CROSS_COMPILE prefixes for each Windows arch this project builds. All
+# three now come from docker/windows.Dockerfile's own image, not from the
+# host: x64/x86 as the same apt mingw-w64 GCC packages upstream's own
 # tools/ci.sh (ci_windows_setup/ci_windows_build) and
-# .github/workflows/ports_windows.yml's own cross-build-on-linux job use --
-# like unix's own x86 (toolchains.py's own "cannot provision itself" case),
-# ordinary Debian/Ubuntu packages, not something with a standalone tarball
-# worth pinning separately. arm64: Debian/Ubuntu ship no
-# aarch64-w64-mingw32 GCC target at all -- llvm-mingw (usermod/llvmmingw.py)
+# .github/workflows/ports_windows.yml's own cross-build-on-linux job use,
+# arm64 as a pinned llvm-mingw tarball baked into that same image (no
+# Debian/Ubuntu package targets aarch64-w64-mingw32 at all -- llvm-mingw
 # is the one Linux-hosted alternative mingw-w64's own docs point at by
 # name, verified live with a real custom C module producing a genuine
-# PE32+ Aarch64 micropython.exe.
+# PE32+ Aarch64 micropython.exe).
+#
+# No apt_package field any more, same as UnixArchSettings above and for
+# the same reason (D30: usermod is Docker-only, build_windows() never
+# probes a host toolchain, so nothing ever reads it programmatically) --
+# what this port's image installs is documented in
+# docker/windows.Dockerfile instead of in a second, code-adjacent copy.
+# That Dockerfile's own `ENV PATH` appends rather than prepends
+# llvm-mingw's bin/, deliberately: it ships x86_64-/i686- wrapper names
+# of its own that would otherwise shadow the apt GCC these two arches
+# are pinned to. See its own comment -- the prefixes below are what
+# depend on that ordering being right.
 WINDOWS_ARCH_SETTINGS: dict[str, WindowsArchSettings] = {
-    "x64": WindowsArchSettings(
-        "x86_64-w64-mingw32-", apt_package="gcc-mingw-w64-x86-64"
-    ),
-    "x86": WindowsArchSettings("i686-w64-mingw32-", apt_package="gcc-mingw-w64-i686"),
+    "x64": WindowsArchSettings("x86_64-w64-mingw32-"),
+    "x86": WindowsArchSettings("i686-w64-mingw32-"),
     "arm64": WindowsArchSettings(
         "aarch64-w64-mingw32-",
         extra_cflags=(
@@ -676,23 +697,53 @@ def build_windows(
     covers, not MSYS2: verified live against a real v1.28.0 checkout --
     x64/x86 with an apt-installed GCC (matching upstream's own
     cross-build-on-linux CI job exactly, tools/ci.sh's ci_windows_build),
-    arm64 with a downloaded llvm-mingw toolchain (usermod/llvmmingw.py --
-    no Linux distro packages a GCC targeting aarch64-w64-mingw32 at all).
-    Each produced a genuine micropython.exe with a real USER_C_MODULES's
-    own symbols confirmed present via `strings`. It is the exact same
-    ports/windows/Makefile MSYS2 runs either way, just invoked with
-    CROSS_COMPILE=<prefix>- like every other cross-compiled port here
-    (unix's x86/armhf, qemu) instead of running inside an MSYS2 shell --
-    superseded MSYS2 for all three arches this project builds (D18's own
-    backlog entry has the full three-stage history: MSVC ruled out first,
-    then MSYS2 for all arches, then this). MSYS2 stays a real option for
-    an arch this project doesn't cover yet outside these three.
+    arm64 with an llvm-mingw toolchain (no Linux distro packages a GCC
+    targeting aarch64-w64-mingw32 at all). Each produced a genuine
+    micropython.exe with a real USER_C_MODULES's own symbols confirmed
+    present via `strings`. It is the exact same ports/windows/Makefile
+    MSYS2 runs either way, just invoked with CROSS_COMPILE=<prefix>- like
+    every other cross-compiled port here (unix's x86/armhf, qemu) instead
+    of running inside an MSYS2 shell -- superseded MSYS2 for all three
+    arches this project builds (D18's own backlog entry has the full
+    three-stage history: MSVC ruled out first, then MSYS2 for all arches,
+    then this). MSYS2 stays a real option for an arch this project
+    doesn't cover yet outside these three.
+
+    Docker-only (D30), closing D32's own last named gap: `windows` was
+    the port whose `PORT_IMAGES` entries were registered but dead code,
+    since nothing here ever called `ensure_image()`. All three arches now
+    run inside docker/windows.Dockerfile's own image, resolved through an
+    explicit `CIBMP_WINDOWS_<ARCH>_DOCKER_IMAGE` override or a
+    `dockerrun.PORT_IMAGES`-registered, digest-pinned default published by
+    publish-docker-images.yml -- cibuildmp itself never builds that image
+    (see usermod/dockerrun.py's own docstring for why). No `libc`
+    argument, unlike build_unix(): D31's manylinux/musllinux axis is real
+    for `unix` alone -- there is no second Windows libc a binary could be
+    built against -- so all three arches key on (port, arch) only.
+
+    The bare-host path this used to have is gone, both halves of it: the
+    `shutil.which("<prefix>gcc")` probe with its "apt install ..." hint
+    for x64/x86, and `llvmmingw.resolve_llvm_mingw()`'s own download-and-
+    cache for arm64. That download was this port's last real reason to
+    touch the host at all, and D30's mandate leaves no room for it --
+    docker/windows.Dockerfile bakes the same pinned tarball in instead,
+    exactly the way webassembly.Dockerfile already bakes emsdk, and is
+    now the pin of record for it. `usermod/llvmmingw.py` and the
+    `[llvm-mingw]` table it read were both deleted rather than left as
+    uncalled scaffolding, along with `usermod/emsdk.py` and its own
+    table for the identical reason.
 
     mpy-cross is not built here either, same as every other port:
     it is a host tool (freezes the manifest at build time, is not part of
     the target binary), so it needs no cross-compiling at all --
     sources.build_mpy_cross() already builds a native one, shared with
     every other port.
+
+    `toolchain_root`/`quiet` are accepted only for the same call shape
+    every `build_<port>()` shares (`orchestrate.py`'s `build_one()`
+    passes them uniformly); neither is used on this Docker-only path --
+    the same vestigial-but-uniform pair build_unix()/build_webassembly()
+    already carry.
 
     The output path is `opts.build_dir / "micropython.exe"` --
     ports/windows/Makefile's own `PROG ?= micropython` plus the `.exe`
@@ -703,28 +754,27 @@ def build_windows(
             f"unknown windows arch {opts.arch!r}. Known: "
             f"{', '.join(sorted(WINDOWS_ARCH_SETTINGS))}"
         )
-    settings = WINDOWS_ARCH_SETTINGS[opts.arch]
 
-    env = None
-    if opts.arch == "arm64":
-        toolchain = llvmmingw.resolve_llvm_mingw(root=toolchain_root, quiet=quiet)
-        env = toolchain.env()
-    else:
-        gcc = shutil.which(f"{settings.cross_compile}gcc")
-        if gcc is None:
-            raise UsermodBuildError(
-                f"windows/{opts.arch}: {settings.cross_compile}gcc is not on "
-                f"PATH. Install it with: apt install {settings.apt_package}"
-            )
+    from . import dockerrun
+
+    docker_image = dockerrun.ensure_image("windows", opts.arch)
+    if docker_image is None:
+        raise UsermodBuildError(
+            f"windows/{opts.arch}: no Docker image registered for this "
+            f"arch and usermod builds are Docker-only -- set "
+            f"CIBMP_WINDOWS_{opts.arch.upper()}_DOCKER_IMAGE, or "
+            f"wait for publish-docker-images.yml to publish one and "
+            f"register it in dockerrun.PORT_IMAGES"
+        )
 
     command = windows_make_command(opts, mpy_dir)
-    try:
-        subprocess.run(command, env=env, check=True)
-    except subprocess.CalledProcessError as exc:
-        raise UsermodBuildError(
-            f"windows/{opts.arch}: `{' '.join(command)}` failed with exit "
-            f"code {exc.returncode}"
-        ) from exc
+    dockerrun.run(
+        command,
+        mounts=[mpy_dir, Path(opts.user_c_modules)],
+        workdir=_windows_dir(mpy_dir),
+        image=docker_image,
+        timeout=dockerrun.timeout_for("windows", opts.arch),
+    )
 
     binary = opts.build_dir / "micropython.exe"
     if not binary.exists():

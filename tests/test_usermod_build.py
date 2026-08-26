@@ -2,10 +2,11 @@ from pathlib import Path
 
 import pytest
 
-from cibuildmp.toolchains import ResolvedToolchain
+from cibuildmp.natmod.toolchains import ResolvedToolchain
 from cibuildmp.usermod import build
 from cibuildmp.usermod.build import (
     UNIX_ARCH_SETTINGS,
+    WINDOWS_ARCH_SETTINGS,
     Esp32BuildOptions,
     QemuBuildOptions,
     UnixBuildOptions,
@@ -25,7 +26,6 @@ from cibuildmp.usermod.build import (
     windows_make_command,
 )
 from cibuildmp.usermod.espidf import ResolvedEspIdf
-from cibuildmp.usermod.llvmmingw import ResolvedLlvmMingw
 
 
 def opts(arch: str = "x64", **overrides) -> UnixBuildOptions:
@@ -654,73 +654,14 @@ def test_windows_unknown_arch_rejected(tmp_path):
         build_windows(windows_opts(arch="riscv64"), tmp_path / "mpy")
 
 
-def test_windows_missing_toolchain_names_apt_package(monkeypatch, tmp_path):
-    monkeypatch.setattr(build.shutil, "which", lambda name: None)
-
-    with pytest.raises(UsermodBuildError, match="apt install gcc-mingw-w64-x86-64"):
-        build_windows(windows_opts(), tmp_path / "mpy")
-
-
-def test_windows_probes_toolchain_before_building(monkeypatch, tmp_path):
-    calls = []
-    monkeypatch.setattr(
-        build.shutil, "which", lambda name: calls.append(name) or f"/usr/bin/{name}"
-    )
-    build_dir = tmp_path / "build-x64"
-    build_dir.mkdir()
-    (build_dir / "micropython.exe").write_bytes(b"MZ")
-    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
-
-    build_windows(windows_opts(build_dir=build_dir), tmp_path / "mpy")
-
-    assert calls == ["x86_64-w64-mingw32-gcc"]
-
-
-def test_windows_builds_and_returns_exe_path(monkeypatch, tmp_path):
-    build_dir = tmp_path / "build-x64"
-    build_dir.mkdir()
-    (build_dir / "micropython.exe").write_bytes(b"MZ")
-
-    monkeypatch.setattr(build.shutil, "which", lambda name: f"/usr/bin/{name}")
-    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
-
-    result = build_windows(windows_opts(build_dir=build_dir), tmp_path / "mpy")
-
-    assert result == build_dir / "micropython.exe"
-
-
-def test_windows_missing_exe_after_success_is_an_error(monkeypatch, tmp_path):
-    build_dir = tmp_path / "build-x64"
-    build_dir.mkdir()
-
-    monkeypatch.setattr(build.shutil, "which", lambda name: f"/usr/bin/{name}")
-    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
-
-    with pytest.raises(UsermodBuildError, match="build reported success but"):
-        build_windows(windows_opts(build_dir=build_dir), tmp_path / "mpy")
-
-
-def test_windows_build_failure_names_the_command(monkeypatch, tmp_path):
-    import subprocess as sp
-
-    def fake_run(cmd, **kwargs):
-        raise sp.CalledProcessError(1, cmd)
-
-    monkeypatch.setattr(build.shutil, "which", lambda name: f"/usr/bin/{name}")
-    monkeypatch.setattr(build.subprocess, "run", fake_run)
-
-    with pytest.raises(UsermodBuildError, match="failed with exit code"):
-        build_windows(windows_opts(build_dir=tmp_path / "build-x64"), tmp_path / "mpy")
-
-
 # ── windows/arm64 (llvm-mingw) ───────────────────────────────────────────
 
 
 def test_windows_arm64_command_matches_verified_shape():
     # Verified live: COMPILER_TARGET=/STRIP=/SIZE= and the three
     # CFLAGS_EXTRA suppressions are load-bearing (see
-    # resources/usermod.toml's own [llvm-mingw] table for exactly why),
-    # not cosmetic. No apt_package -- this arch has none.
+    # WINDOWS_ARCH_SETTINGS' own comments for exactly why), not
+    # cosmetic.
     command = windows_make_command(
         windows_opts(
             arch="arm64", build_dir=Path("/gh/ws/usermod/build/windows-arm64")
@@ -747,83 +688,122 @@ def test_windows_arm64_command_matches_verified_shape():
     ]
 
 
-def test_windows_arm64_resolves_llvm_mingw_not_apt(monkeypatch, tmp_path):
-    resolve_calls = []
+_FAKE_WINDOWS_IMAGE = "cibuildmp-windows:local"
 
-    def fake_resolve(**kwargs):
-        resolve_calls.append(kwargs)
-        return ResolvedLlvmMingw(install_dir=tmp_path / "llvm-mingw")
 
-    monkeypatch.setattr(build.llvmmingw, "resolve_llvm_mingw", fake_resolve)
+def _mock_windows_image(monkeypatch, image=_FAKE_WINDOWS_IMAGE):
+    """Docker-only (D30/D32), same helper shape `_mock_unix_image` has
+    and for the same reason: build_windows() has no bare-host path left
+    at all, so every real build path needs ensure_image() to resolve
+    something first. Tests that only care about the make command shape
+    fake a resolved image here and mock dockerrun's own subprocess.run
+    -- build.subprocess is no longer called by this port under any
+    circumstance."""
     monkeypatch.setattr(
-        build.shutil,
-        "which",
-        lambda name: (_ for _ in ()).throw(
-            AssertionError("arm64 must not probe PATH for a gcc")
-        ),
+        "cibuildmp.usermod.dockerrun.ensure_image", lambda *a, **k: image
     )
 
-    run_calls = []
-    monkeypatch.setattr(build.subprocess, "run", lambda cmd, **k: run_calls.append(k))
 
-    build_dir = tmp_path / "build-arm64"
-    build_dir.mkdir()
-    (build_dir / "micropython.exe").write_bytes(b"MZ")
-
-    build_windows(windows_opts(arch="arm64", build_dir=build_dir), tmp_path / "mpy")
-
-    assert len(resolve_calls) == 1
-    # The resolved toolchain's own PATH is what subprocess.run() gets --
-    # not a bare host lookup.
-    assert "PATH" in run_calls[0]["env"]
-
-
-def test_windows_arm64_builds_and_returns_exe_path(monkeypatch, tmp_path):
-    build_dir = tmp_path / "build-arm64"
-    build_dir.mkdir()
-    (build_dir / "micropython.exe").write_bytes(b"MZ")
-
+@pytest.mark.parametrize("arch", ["x64", "x86", "arm64"])
+def test_windows_no_image_registered_is_a_clear_error(monkeypatch, tmp_path, arch):
+    # D32's own closing gap: `windows` used to have PORT_IMAGES entries
+    # nothing ever read. All three arches now resolve through
+    # ensure_image(), so with no override and nothing registered they
+    # must fail loudly rather than quietly cross-compiling on the host.
     monkeypatch.setattr(
-        build.llvmmingw,
-        "resolve_llvm_mingw",
-        lambda **k: ResolvedLlvmMingw(install_dir=tmp_path / "llvm-mingw"),
+        "cibuildmp.usermod.dockerrun.ensure_image", lambda *a, **k: None
     )
-    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
+    calls = []
+    monkeypatch.setattr(
+        "cibuildmp.usermod.dockerrun.subprocess.run",
+        lambda cmd, **k: calls.append(cmd),
+    )
+
+    with pytest.raises(UsermodBuildError, match="no Docker image registered"):
+        build_windows(
+            windows_opts(arch=arch, build_dir=tmp_path / f"build-{arch}"),
+            tmp_path / "mpy",
+        )
+
+    assert calls == []
+
+
+@pytest.mark.parametrize("arch", ["x64", "x86", "arm64"])
+def test_windows_runs_make_inside_the_container(monkeypatch, tmp_path, arch):
+    # Every arch, arm64 included: the llvm-mingw toolchain arm64 needs is
+    # baked into docker/windows.Dockerfile now, so there is no host-side
+    # resolve step and nothing to inject into the environment -- the
+    # image's own ENV PATH covers it.
+    _mock_windows_image(monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        "cibuildmp.usermod.dockerrun.subprocess.run",
+        lambda cmd, **k: calls.append(cmd),
+    )
+
+    build_dir = tmp_path / f"build-{arch}"
+    build_dir.mkdir()
+    (build_dir / "micropython.exe").write_bytes(b"MZ")
 
     result = build_windows(
-        windows_opts(arch="arm64", build_dir=build_dir), tmp_path / "mpy"
+        windows_opts(arch=arch, build_dir=build_dir), tmp_path / "mpy"
     )
 
     assert result == build_dir / "micropython.exe"
+    assert len(calls) == 1
+    docker_command = calls[0]
+    assert docker_command[0] == "docker"
+    assert _FAKE_WINDOWS_IMAGE in docker_command
+    # The make command is passed through unchanged, at the same absolute
+    # paths -- dockerrun mounts them identically inside (D26).
+    assert "make" in docker_command
+    assert f"CROSS_COMPILE={WINDOWS_ARCH_SETTINGS[arch].cross_compile}" in (
+        docker_command
+    )
 
 
-def test_windows_arm64_missing_exe_after_success_is_an_error(monkeypatch, tmp_path):
+def test_windows_mounts_mpy_dir_and_user_c_modules(monkeypatch, tmp_path):
+    _mock_windows_image(monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        "cibuildmp.usermod.dockerrun.subprocess.run",
+        lambda cmd, **k: calls.append(cmd),
+    )
+
+    build_dir = tmp_path / "build-x64"
+    build_dir.mkdir()
+    (build_dir / "micropython.exe").write_bytes(b"MZ")
+
+    opts_ = windows_opts(arch="x64", build_dir=build_dir)
+    build_windows(opts_, tmp_path / "mpy")
+
+    mounts = [calls[0][i + 1] for i, part in enumerate(calls[0]) if part == "-v"]
+    mpy = (tmp_path / "mpy").as_posix()
+    assert f"{mpy}:{mpy}" in mounts
+    assert any(opts_.user_c_modules in m for m in mounts)
+
+
+def test_windows_missing_exe_after_success_is_an_error(monkeypatch, tmp_path):
+    _mock_windows_image(monkeypatch)
+    monkeypatch.setattr(
+        "cibuildmp.usermod.dockerrun.subprocess.run", lambda *a, **k: None
+    )
     build_dir = tmp_path / "build-arm64"
     build_dir.mkdir()
-
-    monkeypatch.setattr(
-        build.llvmmingw,
-        "resolve_llvm_mingw",
-        lambda **k: ResolvedLlvmMingw(install_dir=tmp_path / "llvm-mingw"),
-    )
-    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
 
     with pytest.raises(UsermodBuildError, match="build reported success but"):
         build_windows(windows_opts(arch="arm64", build_dir=build_dir), tmp_path / "mpy")
 
 
-def test_windows_arm64_build_failure_names_the_command(monkeypatch, tmp_path):
+def test_windows_build_failure_names_the_command(monkeypatch, tmp_path):
     import subprocess as sp
+
+    _mock_windows_image(monkeypatch)
 
     def fake_run(cmd, **kwargs):
         raise sp.CalledProcessError(1, cmd)
 
-    monkeypatch.setattr(
-        build.llvmmingw,
-        "resolve_llvm_mingw",
-        lambda **k: ResolvedLlvmMingw(install_dir=tmp_path / "llvm-mingw"),
-    )
-    monkeypatch.setattr(build.subprocess, "run", fake_run)
+    monkeypatch.setattr("cibuildmp.usermod.dockerrun.subprocess.run", fake_run)
 
     with pytest.raises(UsermodBuildError, match="failed with exit code"):
         build_windows(
@@ -844,11 +824,10 @@ def test_unix_docker_image_skips_host_toolchain_probe(monkeypatch, tmp_path):
         "CIBMP_UNIX_AARCH64_MANYLINUX_DOCKER_IMAGE",
         "cibuildmp-unix-manylinux-aarch64:local",
     )
-    monkeypatch.setattr(
-        build.shutil,
-        "which",
-        lambda name: pytest.fail(f"unexpected host toolchain probe: {name}"),
-    )
+    # `build` no longer imports shutil at all -- with no bare-host path
+    # left for any port there is nothing to probe PATH with, which is a
+    # stronger guarantee than mocking shutil.which to fail was.
+    assert not hasattr(build, "shutil")
     build_dir = tmp_path / "build-aarch64"
     build_dir.mkdir()
     (build_dir / "micropython").write_bytes(b"\x7fELF")

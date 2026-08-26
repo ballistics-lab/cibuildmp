@@ -24,8 +24,8 @@ machine or CI image already has (`apt install libusb-1.0-0` fixed it),
 not something a toolchain tarball could supply either way.
 
 Deliberately not `toolchains.py`'s `ToolchainSpec`/`resolve()` shape, the
-same reason `usermod/emsdk.py` isn't: there is no single `<prefix>gcc` to
-find on `PATH` here, and `idf_tools.py export`'s own env additions (PATH,
+same reason the since-deleted `usermod/emsdk.py` wasn't: there is no
+single `<prefix>gcc` to find on `PATH` here, and `idf_tools.py export`'s own env additions (PATH,
 IDF_PYTHON_ENV_PATH, OPENOCD_SCRIPTS, ESP_ROM_ELF_DIR, ...) are resolved
 by asking ESP-IDF's own tool for them -- delegated, not reimplemented,
 the same D2 "delegate the compile, own the environment" split every other
@@ -40,9 +40,17 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..sources import cache_root, cached_dir
+from ..natmod.sources import cache_root, cached_dir
 
 IDF_GIT_URL = "https://github.com/espressif/esp-idf.git"
+
+
+# The last host-side toolchain resolver in usermod. `emsdk.py` and
+# `llvmmingw.py` were both deleted once `webassembly` and `windows` went
+# Docker-only (D30/D32) and their pins moved into the port Dockerfiles
+# that bake those toolchains in. This one survives only because `esp32`
+# has no Docker image yet (D28's own not-started `esp32.Dockerfile`) --
+# when it gets one, this module follows them.
 
 
 class EspIdfError(Exception):

@@ -25,10 +25,10 @@
 # around. The real, live-checked tradeoff is image size: the extracted
 # emsdk here is ~1.5GB (`tar tJf`'d and measured directly, not
 # guessed), noticeably larger than any other image here -- baking it
-# in duplicates it against the same download `usermod/emsdk.py`'s own
-# `resolve_emsdk()` already caches for a bare-host build, rather than
-# sharing one copy the way a `sources.cache_root()` mount would. Baking
-# in won anyway (the user's own call, asked directly): it needs no
+# in cost more disk than sharing one copy the way a
+# `sources.cache_root()` mount would (back when a bare-host build still
+# cached its own download). Baking in won anyway (the user's own call,
+# asked directly): it needs no
 # `dockerrun.py` mount/PATH-injection support at all (`ENV PATH` below
 # is enough, matching how a normal `docker run` against any of these
 # images already works, no design changes needed elsewhere), and ships
@@ -51,12 +51,48 @@
 # regardless of which Make target is running.**
 # a target cibuildmp itself never asks for.
 #
-# The emsdk version/URL/sha256 below MUST stay in sync with
-# resources/usermod.toml's own `[emsdk]` table -- there is no tooling
-# that keeps a Dockerfile RUN step and a TOML file in sync
-# automatically, so a future emsdk version bump needs both edited
-# together, or this image silently starts shipping a stale toolchain
-# while the bare-host path moves on.
+# **This file is the emsdk pin of record.** It used to be a second copy
+# of `resources/usermod.toml`'s own `[emsdk]` table, kept in sync by hand
+# with `usermod/emsdk.py`'s host-side resolver reading that table -- both
+# are gone now (D30/D32: every usermod port is Docker-only, so a
+# host-side emsdk resolver had no caller left, and a TOML table only that
+# resolver read had no reader left either). The version/URL/sha256 in the
+# `RUN` step below are now the single source of truth; what follows is
+# the provenance that table carried, migrated here rather than deleted
+# with it.
+#
+# Pinned to one specific resolved version, not "latest" -- unlike
+# build-usermod-webassembly's own `emsdk_ref: latest` default (its own
+# doc comment already calls this "a moving target... some future emsdk
+# release could break a build with no change on either side of this
+# action"). Floating is a defensible choice for ephemeral CI; it trades
+# away exactly the reproducibility the `download` strategy exists for in
+# a locally-reproducible tool (D2/D3) -- see docs/reference/
+# open-questions.md's own "Toolchain pinning vs. reproducibility"
+# question, and its note that nothing checks whether a pinned version is
+# stale.
+#
+# The pinned version is the emscripten-releases-tags.json alias "6.0.8",
+# recorded as the value it resolved to when pinned, not the literal
+# string "latest". `9d70dbe8860ccdd3595f6e6065d94bfb543ae955` in the URL
+# is the emscripten-releases build hash that alias resolved to; the URL
+# itself follows emsdk's own
+# emscripten_releases_download_url_template
+# (storage.googleapis.com/webassembly/emscripten-releases-builds/
+# {os}/{hash}/wasm-binaries{arch-suffix}.{ext}). The sha256 is a literal
+# pin computed locally -- Emscripten publishes no checksum sidecar for
+# this asset, the same Espressif/micropython.org case D10 already
+# documents. linux-x64 is the only host ever pinned: a7p's own
+# mp-usermod.yml (the reference D16-D21 rest on) only ever runs this
+# port on `ubuntu-latest`.
+#
+# Bypasses emsdk's own installer (`git clone emsdk` + `./emsdk
+# install/activate`) entirely -- verified live, not assumed: extracting
+# this tarball and putting its `emscripten/` and `bin/` directories on
+# PATH is sufficient on its own. emcc's own tools/config.py auto-derives
+# LLVM_ROOT (from `clang`) and BINARYEN_ROOT (from `wasm-opt`) by
+# searching PATH when no `.emscripten` config file exists, so no config
+# file needs writing either.
 #
 # Build: docker build -t cibuildmp-webassembly -f src/cibuildmp/resources/docker/webassembly.Dockerfile .
 # Use:   CIBMP_WEBASSEMBLY_DOCKER_IMAGE=cibuildmp-webassembly cibuildmp ...

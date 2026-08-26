@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..targets import matches, parse_selector
+from ..natmod.targets import matches, parse_selector
 from .build import UNIX_RUNNABLE_ARCHS, WINDOWS_ARCH_SETTINGS
 
 # port -> (config axis key, every axis value this project can currently

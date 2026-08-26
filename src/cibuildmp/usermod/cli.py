@@ -24,9 +24,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from ..sources import SourceError
-from ..stepsummary import write_step_summary
-from ..toolchains import ToolchainError
+from ..natmod.sources import SourceError
+from ..natmod.stepsummary import write_step_summary
+from ..natmod.toolchains import ToolchainError
 from . import orchestrate
 from .build import UsermodBuildError
 from .options import UsermodOptions
