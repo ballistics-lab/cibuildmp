@@ -3,7 +3,6 @@ from pathlib import Path
 import pytest
 
 from cibuildmp import dockerrun
-from cibuildmp.natmod.toolchains import ResolvedToolchain
 from cibuildmp.usermod import build
 from cibuildmp.usermod.build import (
     UNIX_ARCH_SETTINGS,
@@ -324,8 +323,6 @@ def test_aarch64_builds_and_returns_binary_path(monkeypatch, tmp_path):
 
 # ── qemu ───────────────────────────────────────────────────────────────────
 
-HOST_CHAIN = ResolvedToolchain("host", "arm-none-eabi-", "arm-none-eabi-", None)
-
 
 def qemu_opts(**overrides) -> QemuBuildOptions:
     defaults = {
@@ -339,7 +336,7 @@ def qemu_opts(**overrides) -> QemuBuildOptions:
 
 def test_qemu_command_matches_build_usermod_armv7m_shape():
     # build-usermod-armv7m's own "Build usermod (armv7m, MPS2_AN385)" step.
-    command = qemu_make_command(qemu_opts(), Path("/gh/ws/mpy"), HOST_CHAIN)
+    command = qemu_make_command(qemu_opts(), Path("/gh/ws/mpy"))
 
     assert command == [
         "make",
@@ -353,23 +350,26 @@ def test_qemu_command_matches_build_usermod_armv7m_shape():
     ]
 
 
-def test_qemu_probes_armv7m_toolchain_not_a_new_one(monkeypatch, tmp_path):
-    """qemu must reuse toolchains.resolve("armv7m") -- natmod's own
-    arm-none-eabi- pin -- not a second toolchain resolution path."""
+def test_qemu_runs_in_its_own_image(monkeypatch, tmp_path):
+    # Record 0032's gap, closed by 0049: qemu was the last usermod port
+    # still compiling on the bare host. It survived because it *worked* --
+    # `toolchains.resolve()` found an arm-none-eabi- on the runner and
+    # subprocess ran it -- and deleting that resolver is what finally
+    # forced the wiring D30 had required all along.
     calls = []
-    monkeypatch.setattr(
-        build.toolchains,
-        "resolve",
-        lambda arch, **k: calls.append(arch) or HOST_CHAIN,
-    )
+    monkeypatch.setattr(dockerrun, "ensure_image", lambda *a, **k: "qemu:test")
+    monkeypatch.setattr(dockerrun, "run", lambda command, **kw: calls.append(kw))
     build_dir = tmp_path / "build-armv7m"
     build_dir.mkdir()
     (build_dir / "firmware.elf").write_bytes(b"\x7fELF")
-    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
 
     build_qemu(qemu_opts(build_dir=build_dir), tmp_path / "mpy")
 
-    assert calls == ["armv7m"]
+    assert calls[0]["image"] == "qemu:test"
+    # An amd64 image cross-compiling to bare metal, which no Linux
+    # container is native to -- so it is emulated on an arm64 host, the
+    # same as windows and webassembly.
+    assert calls[0]["oci_platform"] == "linux/amd64"
 
 
 def test_qemu_builds_and_returns_firmware_path(monkeypatch, tmp_path):
@@ -377,8 +377,8 @@ def test_qemu_builds_and_returns_firmware_path(monkeypatch, tmp_path):
     build_dir.mkdir()
     (build_dir / "firmware.elf").write_bytes(b"\x7fELF")
 
-    monkeypatch.setattr(build.toolchains, "resolve", lambda arch, **k: HOST_CHAIN)
-    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
+    monkeypatch.setattr(dockerrun, "ensure_image", lambda *a, **k: "qemu:test")
+    monkeypatch.setattr(dockerrun, "run", lambda *a, **k: None)
 
     result = build_qemu(qemu_opts(build_dir=build_dir), tmp_path / "mpy")
 
@@ -389,21 +389,22 @@ def test_qemu_missing_firmware_after_success_is_an_error(monkeypatch, tmp_path):
     build_dir = tmp_path / "build-armv7m"
     build_dir.mkdir()
 
-    monkeypatch.setattr(build.toolchains, "resolve", lambda arch, **k: HOST_CHAIN)
-    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
+    monkeypatch.setattr(dockerrun, "ensure_image", lambda *a, **k: "qemu:test")
+    monkeypatch.setattr(dockerrun, "run", lambda *a, **k: None)
 
     with pytest.raises(UsermodBuildError, match="build reported success but"):
         build_qemu(qemu_opts(build_dir=build_dir), tmp_path / "mpy")
 
 
-def test_qemu_build_failure_names_the_command(monkeypatch, tmp_path):
-    import subprocess as sp
-
-    def fake_run(cmd, **kwargs):
-        raise sp.CalledProcessError(1, cmd)
-
-    monkeypatch.setattr(build.toolchains, "resolve", lambda arch, **k: HOST_CHAIN)
-    monkeypatch.setattr(build.subprocess, "run", fake_run)
+def test_qemu_build_failure_surfaces(monkeypatch, tmp_path):
+    monkeypatch.setattr(dockerrun, "ensure_image", lambda *a, **k: "qemu:test")
+    monkeypatch.setattr(
+        dockerrun,
+        "run",
+        lambda *a, **k: (_ for _ in ()).throw(
+            UsermodBuildError("failed with exit code 1")
+        ),
+    )
 
     with pytest.raises(UsermodBuildError, match="failed with exit code"):
         build_qemu(qemu_opts(build_dir=tmp_path / "build-armv7m"), tmp_path / "mpy")
@@ -415,37 +416,38 @@ def test_qemu_unsupported_board_rejected(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("board", "expected_arch"),
-    [("MPS2_AN385", "armv7m"), ("VIRT_RV32", "rv32imc"), ("VIRT_RV64", "rv64imc")],
+    ("board", "expected_cross"),
+    [
+        ("MPS2_AN385", "arm-none-eabi-"),
+        ("VIRT_RV32", "riscv64-unknown-elf-"),
+        ("VIRT_RV64", "riscv64-unknown-elf-"),
+    ],
 )
-def test_qemu_resolves_board_specific_toolchain(
-    board, expected_arch, monkeypatch, tmp_path
+def test_qemu_uses_its_boards_own_cross_prefix(
+    board, expected_cross, monkeypatch, tmp_path
 ):
-    """Each board must probe its own arch's toolchain, not always
-    armv7m's -- VIRT_RV32/VIRT_RV64 need rv32imc/rv64imc's
-    riscv-none-elf, not arm-none-eabi-."""
-    calls = []
+    """Each board gets its own prefix, not always armv7m's --
+    VIRT_RV32/VIRT_RV64 are RISC-V. The prefixes used to come from
+    `toolchains.resolve()` answering "which one works on this machine";
+    record 0049 deleted that question, so the map states them and the
+    image supplies exactly those names."""
+    commands = []
+    monkeypatch.setattr(dockerrun, "ensure_image", lambda *a, **k: "qemu:test")
     monkeypatch.setattr(
-        build.toolchains,
-        "resolve",
-        lambda arch, **k: calls.append(arch) or HOST_CHAIN,
+        dockerrun, "run", lambda command, **kw: commands.append(command)
     )
     build_dir = tmp_path / f"build-{board}"
     build_dir.mkdir()
     (build_dir / "firmware.elf").write_bytes(b"\x7fELF")
-    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
 
     build_qemu(qemu_opts(board=board, build_dir=build_dir), tmp_path / "mpy")
 
-    assert calls == [expected_arch]
+    assert f"CROSS_COMPILE={expected_cross}" in commands[0]
 
 
-def test_qemu_riscv_command_uses_the_resolved_prefix(tmp_path):
-    riscv_chain = ResolvedToolchain(
-        "host", "riscv64-unknown-elf-", "riscv64-unknown-elf-", None
-    )
+def test_qemu_riscv_command_carries_the_riscv_prefix(tmp_path):
     command = qemu_make_command(
-        qemu_opts(board="VIRT_RV64"), Path("/gh/ws/mpy"), riscv_chain
+        qemu_opts(board="VIRT_RV64"), Path("/gh/ws/mpy"), "riscv64-unknown-elf-"
     )
 
     assert command == [

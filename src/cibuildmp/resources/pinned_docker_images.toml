@@ -169,12 +169,17 @@ manylinux_2_39 = "ghcr.io/ballistics-lab/manylinux_2_39_mipsel@sha256:740276d705
 # ten `dynruntime.mk` toolchains, for the reasons `natmod.Dockerfile`'s
 # own header gives.
 #
-# Empty until a real `publish-docker-images.yml` run fills it, exactly as
-# every `[image.*]` cell was after record 0043: a missing entry is an
-# immediate, explicit "no image registered" error, while a wrong digest
-# either fails deep inside `make` or quietly builds the wrong thing.
-# Local work goes through `CIBMP_NATMOD_DOCKER_IMAGE=<local tag>`.
-natmod = ""
+# **Pushed by hand, not by `publish-docker-images.yml`** -- the second
+# time that has happened, after `windows` (record 0042), and worth the
+# same note: the workflow row exists and is correct, it simply has not
+# run yet. The digest below is the image all ten `dynruntime.mk` arches
+# were verified against locally before it was pushed (record 0049), and
+# `docker buildx build --platform linux/amd64 --push` is what produced
+# it, so the platform is stated rather than inherited from whichever
+# machine did the push.
+#
+# Local work still goes through `CIBMP_NATMOD_DOCKER_IMAGE=<local tag>`.
+natmod = "ghcr.io/ballistics-lab/natmod@sha256:f83c1e0c994a3ff948db70c01e7dbeb07d5963e94671edba96a6a7cb34da18db"
 
 windows = "ghcr.io/ballistics-lab/windows@sha256:7caab34597a3cb2d9f4a412549d4a806134a17a1411aeb612ff61bbbcc151fcd"
 qemu = "ghcr.io/ballistics-lab/qemu@sha256:d0348b84cc684a45ca6f71e6475b5b1ea9fe73ceb6d242af028562795f944928"

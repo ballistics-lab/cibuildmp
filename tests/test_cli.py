@@ -4,7 +4,6 @@ from pathlib import Path
 from cibuildmp.cli import main
 from cibuildmp.natmod import cli as natmod_cli
 from cibuildmp.natmod.build import BuildResult
-from cibuildmp.natmod.toolchains import ResolvedToolchain
 
 
 def write(tmp_path, text):
@@ -132,14 +131,15 @@ def test_real_build_writes_github_step_summary_when_set(monkeypatch, tmp_path):
     # Integration check for D29's own wiring, not just stepsummary.py in
     # isolation: a real (mocked-at-the-edges) build through main() must
     # actually call write_step_summary with the same results/duration the
-    # plain-text summary above it already prints -- x64 only, host gcc, to
-    # keep the mocking surface minimal (no cross-toolchain resolution).
+    # plain-text summary above it already prints -- x64 only, to keep the
+    # mocking surface minimal.
+    #
+    # No toolchain resolution to mock any more: record 0049 deleted it
+    # along with the bare-host path, so there is nothing between the CLI
+    # and `build_target` but the container call `_stub_build` replaces.
     config = '\nmicropython = "v1.28.0"\n[natmod]\narchs = ["x64"]\n'
     package_dir = Path(write(tmp_path, config))
 
-    monkeypatch.setattr(
-        natmod_cli, "resolve", lambda arch, **k: ResolvedToolchain("none", "", "", None)
-    )
     monkeypatch.setattr(
         natmod_cli, "fetch_micropython", lambda tag, **k: tmp_path / "mpy"
     )
@@ -149,7 +149,7 @@ def test_real_build_writes_github_step_summary_when_set(monkeypatch, tmp_path):
     produced = tmp_path / "template-mpy6.3-natmod-x64.mpy"
     produced.write_bytes(b"\x00" * 42)
 
-    def fake_build_target(build_options, chain, mpy_dir, module_root, output_dir, **k):
+    def fake_build_target(build_options, mpy_dir, module_root, output_dir, **k):
         return BuildResult(
             identifier=build_options.identifier, output=produced, duration=0.5
         )

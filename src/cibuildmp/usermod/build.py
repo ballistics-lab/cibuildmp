@@ -45,7 +45,7 @@ arm-none-eabi-` (`MPS2_AN385`, Cortex-M3) is the exact toolchain natmod's
 own `armv7m` arch already resolves -- reused rather than pinning it a
 second time. `ports/qemu` also has RISC-V boards, `VIRT_RV32`/`VIRT_RV64`
 (`CROSS_COMPILE ?= riscv64-unknown-elf-`, natmod's own `rv32imc`/
-`rv64imc` toolchain) -- `QEMU_BOARD_TOOLCHAIN` below resolves whichever
+`rv64imc` toolchain) -- `QEMU_BOARD_CROSS` below resolves whichever
 one `opts.board` names. `MPS2_AN385` stays the only board `qemu`'s own
 axis defaults to (targets.py's own `_PORT_AXES`); the RISC-V boards are
 selectable via `[usermod.qemu] boards = [...]`, not defaulted to, the
@@ -108,8 +108,6 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..natmod import toolchains
-from ..natmod.toolchains import ResolvedToolchain
 from . import espidf
 
 
@@ -791,10 +789,10 @@ def build_unix(
 # Passing the arch-appropriate key to resolve() anyway (rv32imc for
 # VIRT_RV32, rv64imc for VIRT_RV64) keeps this call's own intent legible
 # and its error messages honest, even though either would work today.
-QEMU_BOARD_TOOLCHAIN: dict[str, str] = {
-    "MPS2_AN385": "armv7m",
-    "VIRT_RV32": "rv32imc",
-    "VIRT_RV64": "rv64imc",
+QEMU_BOARD_CROSS: dict[str, str] = {
+    "MPS2_AN385": "arm-none-eabi-",
+    "VIRT_RV32": "riscv64-unknown-elf-",
+    "VIRT_RV64": "riscv64-unknown-elf-",
 }
 
 
@@ -807,23 +805,28 @@ class QemuBuildOptions:
     extra_make_args: tuple[str, ...] = ()
 
 
+# `ports/qemu/Makefile`'s own `CROSS_COMPILE ?= arm-none-eabi-` default,
+# stated rather than relied upon. It used to come from
+# `toolchains.resolve("armv7m")`, whose whole job was answering "which
+# prefix actually works on this machine" -- a question record 0049
+# deleted along with the resolver: the image supplies `arm-none-eabi-`
+# and nothing else can be in play.
+QEMU_CROSS_COMPILE = "arm-none-eabi-"
+
+
 def qemu_make_command(
-    opts: QemuBuildOptions, mpy_dir: Path, chain: ResolvedToolchain
+    opts: QemuBuildOptions, mpy_dir: Path, cross_compile: str = QEMU_CROSS_COMPILE
 ) -> list[str]:
-    # ports/qemu/Makefile uses CROSS_COMPILE=, not natmod's own CROSS= --
-    # ResolvedToolchain.make_overrides is dynruntime.mk-specific (that
-    # variable name), so this builds its own override from chain.prefix
-    # instead of reusing it. Always passed explicitly rather than relying
-    # on the Makefile's own `CROSS_COMPILE ?= arm-none-eabi-` default
-    # coinciding with it -- harmless when they already match, and correct
-    # when resolve() ever returns a different working prefix.
+    # ports/qemu/Makefile uses CROSS_COMPILE=, not natmod's own CROSS=.
+    # Passed explicitly rather than left to the Makefile's own default,
+    # so the prefix in play is visible in the command that ran.
     return [
         "make",
         "-C",
         (mpy_dir / "ports" / "qemu").as_posix(),
         f"BOARD={opts.board}",
         f"BUILD={opts.build_dir.as_posix()}",
-        f"CROSS_COMPILE={chain.prefix}",
+        f"CROSS_COMPILE={cross_compile}",
         f"USER_C_MODULES={opts.user_c_modules}",
         f"FROZEN_MANIFEST={opts.frozen_manifest}",
         *opts.extra_make_args,
@@ -842,30 +845,50 @@ def build_qemu(
     The toolchain is always one natmod already resolves -- `armv7m`
     (`arm-none-eabi-`) for `MPS2_AN385`, `rv32imc`/`rv64imc`
     (`riscv-none-elf`) for `VIRT_RV32`/`VIRT_RV64` -- via
-    `QEMU_BOARD_TOOLCHAIN` above, rather than pinning a second copy of
+    `QEMU_BOARD_CROSS` above, rather than pinning a second copy of
     any of them.
 
     The output path is `opts.build_dir / "firmware.elf"` --
     ports/qemu/Makefile's own `all: $(BUILD)/firmware.elf` target, again
     no globbing needed.
     """
-    toolchain_arch = QEMU_BOARD_TOOLCHAIN.get(opts.board)
-    if toolchain_arch is None:
+    from .. import dockerrun
+
+    cross = QEMU_BOARD_CROSS.get(opts.board)
+    if cross is None:
         raise UsermodBuildError(
             f"qemu board {opts.board!r} not supported yet. Known: "
-            f"{', '.join(QEMU_BOARD_TOOLCHAIN)}"
+            f"{', '.join(QEMU_BOARD_CROSS)}"
         )
 
-    chain = toolchains.resolve(toolchain_arch, root=toolchain_root, quiet=quiet)
-
-    command = qemu_make_command(opts, mpy_dir, chain)
-    try:
-        subprocess.run(command, env=chain.env(), check=True)
-    except subprocess.CalledProcessError as exc:
+    # **Wired to `ensure_image()` at last** -- record 0032's own gap, and
+    # the last bare-host build path in usermod. It survived this long
+    # because it worked: `toolchains.resolve()` found an `arm-none-eabi-`
+    # on the runner and `subprocess.run` used it. Record 0049 deleted
+    # that resolver along with natmod's dependence on it, so what kept
+    # this port off Docker is gone and the wiring is what D30 has
+    # required of every port since it was written.
+    docker_image = dockerrun.ensure_image("qemu")
+    if docker_image is None:
         raise UsermodBuildError(
-            f"qemu/{opts.board}: `{' '.join(command)}` failed with exit "
-            f"code {exc.returncode}"
-        ) from exc
+            "no image registered for qemu -- see "
+            "`resources/pinned_docker_images.toml`, or point "
+            "CIBMP_QEMU_DOCKER_IMAGE at a local tag"
+        )
+
+    command = qemu_make_command(opts, mpy_dir, cross)
+    dockerrun.run(
+        command,
+        mounts=[mpy_dir, Path(opts.user_c_modules)],
+        workdir=mpy_dir / "ports" / "qemu",
+        image=docker_image,
+        timeout=dockerrun.timeout_for("qemu"),
+        # `linux/amd64`: a statement about the image, not about the build
+        # target. qemu cross-compiles to bare metal, which no Linux
+        # container is native to (0043) -- so on an arm64 host this runs
+        # emulated, like `windows` and `webassembly` do.
+        oci_platform=dockerrun.platform_for("qemu"),
+    )
 
     firmware = opts.build_dir / "firmware.elf"
     if not firmware.exists():

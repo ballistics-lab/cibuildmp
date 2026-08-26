@@ -83,18 +83,10 @@ def build_parser() -> argparse.ArgumentParser:
         "build here.",
     )
     parser.add_argument(
-        "--toolchain",
-        default="auto",
-        choices=["auto", "host", "download"],
-        help="How to obtain each target's cross toolchain. auto (default) uses "
-        "one already on PATH and downloads a pinned tarball otherwise; host "
-        "refuses to download; download ignores what is on PATH.",
-    )
-    parser.add_argument(
         "--clean-cache",
         action="store_true",
         help="Delete cibuildmp's cache (MicroPython checkouts, mpy-cross builds "
-        "and downloaded toolchains) and exit",
+        "and any downloaded sources) and exit",
     )
     parser.add_argument(
         "--dry-run",

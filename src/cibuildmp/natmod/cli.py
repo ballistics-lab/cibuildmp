@@ -42,22 +42,17 @@ from .targets import (
     UnknownArchError,
     is_abi_known,
 )
-from .toolchains import ResolvedToolchain, ToolchainError, resolve
 
 
-def _plan_line(
-    index: int,
-    total: int,
-    options: BuildOptions,
-    chain: ResolvedToolchain | None = None,
-) -> str:
+def _plan_line(index: int, total: int, options: BuildOptions) -> str:
     make = ["make", "-C", options.module_dir, f"ARCH={options.target.arch}"]
     make += options.extra_make_args
     make.append(options.make_target)
-    # The prefix actually in play, which is not always the one dynruntime.mk
-    # hardcodes -- showing target.cross here would contradict the CROSS=
-    # override sitting in the same line's make command.
-    prefix = chain.prefix if chain is not None else options.target.cross
+    # dynruntime.mk's own hardcoded prefix, with no caveat attached any
+    # more: the image supplies exactly that name (record 0049 moved the
+    # xpack/Espressif prefix reconciliation into symlinks there), so
+    # there is no longer a resolved prefix that could differ from it.
+    prefix = options.target.cross
     # Right-align the counter so the columns after it stay put once the
     # index gains a digit ([10/10] is wider than [9/10]).
     counter = f"[{index:>{len(str(total))}}/{total}]"
@@ -67,7 +62,7 @@ def _plan_line(
     )
 
 
-def build(options: Options, targets: list[Target], *, toolchain: str = "auto") -> int:
+def build(options: Options, targets: list[Target]) -> int:
     """Build every selected target in one invocation.
 
     Sequential and in-process on purpose (D9), the same shape cibuildwheel
@@ -103,27 +98,19 @@ def build(options: Options, targets: list[Target], *, toolchain: str = "auto") -
     ):
         shutil.rmtree(module_root / "build", ignore_errors=True)
 
-    # Toolchains are resolved before the plan is printed, not after: where a
-    # toolchain's prefix is not the one dynruntime.mk hardcodes, resolution
-    # adds a CROSS= override, and a plan printed first would show a make
-    # command that is not the one about to run.
-    print(f"cibuildmp: resolving toolchains for {total} target(s)")
-    chains = []
-    for build_options in resolved:
-        chain = resolve(build_options.target.arch, strategy=toolchain)
-        chains.append(chain)
-        build_options.extra_make_args = [
-            *chain.make_overrides,
-            *build_options.extra_make_args,
-        ]
-
+    # No toolchain resolution step any more (record 0049). It existed to
+    # answer "is a usable compiler for this arch on this machine, and if
+    # not where do we get one" -- apt probe, pinned tarball, host
+    # multilib -- and to reconcile a prefix the tarball ships with the
+    # one dynruntime.mk hardcodes. Every one of those questions is
+    # answered by `docker/natmod.Dockerfile` now: the image has all ten
+    # arches' compilers under exactly the names dynruntime.mk expects,
+    # so there is nothing to probe, nothing to download and no `CROSS=`
+    # override to add.
     tags = ", ".join(tag for tag, _abi in options.tag_groups())
     print(f"\ncibuildmp: {total} target(s) against MicroPython {tags}")
-    for index, (build_options, chain) in enumerate(
-        zip(resolved, chains, strict=True), 1
-    ):
-        print("  " + _plan_line(index, total, build_options, chain))
-        print(f"        {chain.describe()}")
+    for index, build_options in enumerate(resolved, 1):
+        print("  " + _plan_line(index, total, build_options))
 
     # Resolved once, not per target: the same files and version apply to
     # every identifier's own package.json (D14). Checked up front so a
@@ -141,12 +128,8 @@ def build(options: Options, targets: list[Target], *, toolchain: str = "auto") -
     # earlier one just because it sorts first.
     build_tags = list(dict.fromkeys(bo.target.tag for bo in resolved))
     for tag in build_tags:
-        group = [
-            (bo, chain)
-            for bo, chain in zip(resolved, chains, strict=True)
-            if bo.target.tag == tag
-        ]
-        abi = group[0][0].target.abi  # one ABI per tag group, by construction
+        group = [bo for bo in resolved if bo.target.tag == tag]
+        abi = group[0].target.abi  # one ABI per tag group, by construction
 
         # Shared setup, paid once per ABI group rather than once per target
         # in it -- see build()'s own docstring and D9.
@@ -169,17 +152,17 @@ def build(options: Options, targets: list[Target], *, toolchain: str = "auto") -
             )
 
         print(f"\ncibuildmp: building {len(group)} target(s) for MicroPython {tag}")
-        for build_options, chain in group:
+        for build_options in group:
             index += 1
-            print("\n  " + _plan_line(index, total, build_options, chain))
+            print("\n  " + _plan_line(index, total, build_options))
             module_root = options.package_dir / build_options.module_dir
             output_dir = options.package_dir / build_options.output_dir
             result = build_target(
                 build_options,
-                chain,
                 mpy_dir,
                 module_root,
                 output_dir,
+                package_dir=options.package_dir,
                 extra_files=extra_files,
                 version=options.version,
             )
@@ -276,8 +259,8 @@ def run(
         return 0
 
     try:
-        return build(options, targets, toolchain=args.toolchain)
-    except (SourceError, ToolchainError, BuildError) as exc:
+        return build(options, targets)
+    except (SourceError, BuildError) as exc:
         if args.debug_traceback:
             raise
         print(f"cibuildmp: error: {exc}", file=sys.stderr)

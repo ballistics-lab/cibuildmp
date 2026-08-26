@@ -104,14 +104,8 @@ def test_build_one_qemu_uses_default_board_not_empty_string(tmp_path, monkeypatc
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "firmware.elf").write_bytes(FAKE_X86_64_ELF)
 
-    monkeypatch.setattr(build_module.subprocess, "run", fake_run)
-    monkeypatch.setattr(
-        build_module.toolchains,
-        "resolve",
-        lambda arch, **k: build_module.ResolvedToolchain(
-            "host", "arm-none-eabi-", "arm-none-eabi-", None
-        ),
-    )
+    monkeypatch.setattr(dockerrun, "ensure_image", lambda *a, **k: "qemu:test")
+    monkeypatch.setattr(dockerrun, "run", lambda cmd, **k: fake_run(cmd, **k))
     (mpy_dir / "ports" / "qemu").mkdir(parents=True)
 
     result = build_one(options, target, mpy_dir)

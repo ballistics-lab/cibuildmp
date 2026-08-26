@@ -28,7 +28,6 @@ from typing import Any
 
 from ..natmod.sources import SourceError
 from ..natmod.stepsummary import write_step_summary
-from ..natmod.toolchains import ToolchainError
 from . import orchestrate
 from .build import UsermodBuildError
 from .options import UsermodConfigError, UsermodOptions
@@ -148,7 +147,7 @@ def run(
     )
     try:
         results = orchestrate.build(options, targets)
-    except (SourceError, ToolchainError, UsermodBuildError) as exc:
+    except (SourceError, UsermodBuildError) as exc:
         if args.debug_traceback:
             raise
         print(f"cibuildmp: error: {exc}", file=sys.stderr)

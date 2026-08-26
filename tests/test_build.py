@@ -1,10 +1,9 @@
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
+from cibuildmp import dockerrun
 from cibuildmp.natmod import build
 from cibuildmp.natmod.build import (
     BuildError,
@@ -21,9 +20,6 @@ from cibuildmp.natmod.build import (
 )
 from cibuildmp.natmod.options import BuildOptions
 from cibuildmp.natmod.targets import Target
-from cibuildmp.natmod.toolchains import ResolvedToolchain
-
-HOST_CHAIN = ResolvedToolchain("none", "", "", None)
 
 
 def build_options(
@@ -80,60 +76,103 @@ def test_make_command_carries_python_and_arch(tmp_path):
     assert command == [
         "make",
         "-C",
-        str(tmp_path / "natmod"),
+        (tmp_path / "natmod").as_posix(),
         "ARCH=armv7emsp",
-        f"MPY_DIR={tmp_path / 'mpy'}",
-        f"PYTHON={sys.executable}",
+        f"MPY_DIR={(tmp_path / 'mpy').as_posix()}",
+        # `python3`, not sys.executable: D12's mechanism for reaching
+        # pyelftools named a path inside cibuildmp's own virtualenv, and
+        # that path does not exist inside the image the build now runs in
+        # (record 0049). The image carries pyelftools instead.
+        "PYTHON=python3",
         "MP_BCLIBC_PRECISION=single",
         "dist",
     ]
 
 
 # -- run_pre_build_command / run_make ----------------------------------------
+#
+# Both go through a container now (record 0049), so these patch
+# `dockerrun.run` rather than `subprocess` -- the same shape the usermod
+# build tests already had.
 
 
-def test_pre_build_command_noop_when_empty(tmp_path):
-    run_pre_build_command(tmp_path, "", {})  # must not raise / must not shell out
-
-
-def test_pre_build_command_runs_in_module_root(tmp_path):
-    # "echo hi > marker", not "touch marker": both /bin/sh -c and
-    # cmd.exe /c understand echo + redirection, so this actually tests
-    # cwd handling on every host shell=True picks, not just Unix ones --
-    # touch has no cmd.exe equivalent (found by a real windows-latest CI
-    # run of this same test, docs/BACKLOG.md's own "Windows/macOS hosts").
-    run_pre_build_command(tmp_path, "echo hi > marker", {})
-    assert (tmp_path / "marker").exists()
-
-
-def test_pre_build_command_failure_is_a_build_error(tmp_path):
-    with pytest.raises(BuildError, match="pre-build-command failed"):
-        run_pre_build_command(tmp_path, "exit 1", {})
-
-
-def test_run_make_failure_names_the_command(tmp_path, monkeypatch):
-    def fake_run(command, **kwargs):
-        raise subprocess.CalledProcessError(2, command)
-
-    monkeypatch.setattr(build.subprocess, "run", fake_run)
-    with pytest.raises(BuildError, match="exit code 2"):
-        run_make(build_options(), tmp_path / "mpy", tmp_path, {})
-
-
-def test_run_make_does_not_also_pass_cwd(tmp_path, monkeypatch):
-    # `-C module_root` in the command already makes make chdir there; also
-    # passing cwd=module_root double-applies it, breaking whenever
-    # module_root is relative (options.package_dir defaults to ".") --
-    # make then looks for module_root nested inside itself.
+def _capture_docker(monkeypatch):
     calls = []
+    monkeypatch.setattr(build, "_natmod_image", lambda: "natmod:test")
+    monkeypatch.setattr(
+        dockerrun, "run", lambda command, **kw: calls.append((command, kw))
+    )
+    return calls
 
-    def fake_run(command, **kwargs):
-        calls.append(kwargs)
 
-    monkeypatch.setattr(build.subprocess, "run", fake_run)
-    relative_module_root = Path("natmod")
-    run_make(build_options(), tmp_path / "mpy", relative_module_root, {})
-    assert "cwd" not in calls[0]
+def test_pre_build_command_noop_when_empty(tmp_path, monkeypatch):
+    calls = _capture_docker(monkeypatch)
+    run_pre_build_command(tmp_path, "", tmp_path / "mpy", tmp_path)
+    assert calls == []  # no container started at all
+
+
+def test_pre_build_command_runs_in_the_same_image_as_the_build(tmp_path, monkeypatch):
+    # It moved into the container with the compile it precedes: a7p's own
+    # `make fetch-nanopb` is a build step, and running it against a
+    # different set of tools than the compile that follows is the kind of
+    # difference that surfaces as a link error several steps later.
+    calls = _capture_docker(monkeypatch)
+    run_pre_build_command(tmp_path, "make fetch-nanopb", tmp_path / "mpy", tmp_path)
+
+    command, kwargs = calls[0]
+    assert command == ["bash", "-c", "make fetch-nanopb"]
+    assert kwargs["workdir"] == tmp_path.resolve()
+    assert kwargs["image"] == "natmod:test"
+
+
+def test_pre_build_command_failure_is_a_build_error(tmp_path, monkeypatch):
+    monkeypatch.setattr(build, "_natmod_image", lambda: "natmod:test")
+    monkeypatch.setattr(
+        dockerrun, "run", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
+    with pytest.raises(BuildError, match="pre-build-command"):
+        run_pre_build_command(tmp_path, "exit 1", tmp_path / "mpy", tmp_path)
+
+
+def test_run_make_failure_names_the_target(tmp_path, monkeypatch):
+    monkeypatch.setattr(build, "_natmod_image", lambda: "natmod:test")
+    monkeypatch.setattr(
+        dockerrun,
+        "run",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("exit code 2")),
+    )
+    with pytest.raises(BuildError, match="exit code 2"):
+        run_make(build_options(), tmp_path / "mpy", tmp_path, tmp_path)
+
+
+def test_run_make_mounts_the_package_root_not_the_module_dir(tmp_path, monkeypatch):
+    # A project's Makefile is entitled to reach outside `natmod/` -- the
+    # documented layout has `natmod/`, `usermod/` and `src/` as siblings,
+    # and the template compiles `../src/template_core.c`. Mounting only
+    # the module directory made that file not exist, reported three
+    # layers down as "No rule to make target '../src/template_core.c'".
+    calls = _capture_docker(monkeypatch)
+    package_dir = tmp_path / "project"
+    module_root = package_dir / "natmod"
+    module_root.mkdir(parents=True)
+    run_make(build_options(), tmp_path / "mpy", module_root, package_dir)
+
+    _command, kwargs = calls[0]
+    assert package_dir.resolve() in kwargs["mounts"]
+    assert kwargs["workdir"] == module_root.resolve()
+
+
+def test_run_make_resolves_relative_paths(tmp_path, monkeypatch):
+    # Docker refuses a relative `-w` and cannot bind-mount a relative
+    # source, and `module_root` is routinely relative on the host: it is
+    # `package_dir / module_dir` and `package_dir` defaults to ".". The
+    # bare-host `subprocess.run` this replaced never cared.
+    calls = _capture_docker(monkeypatch)
+    run_make(build_options(), Path("mpy"), Path("natmod"), Path("."))
+
+    _command, kwargs = calls[0]
+    assert all(m.is_absolute() for m in kwargs["mounts"])
+    assert kwargs["workdir"].is_absolute()
 
 
 # -- collect_output -----------------------------------------------------------
@@ -241,12 +280,15 @@ def _stub_make(tmp_path, native_code=7, arch_flags=0):
 
 
 def test_build_target_writes_into_its_own_identifier_directory(tmp_path, monkeypatch):
-    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
     monkeypatch.setattr(build, "run_make", _stub_make(tmp_path))
 
     opts = build_options()
     result = build_target(
-        opts, HOST_CHAIN, tmp_path / "mpy", tmp_path / "natmod", tmp_path / "out"
+        opts,
+        tmp_path / "mpy",
+        tmp_path / "natmod",
+        tmp_path / "out",
+        package_dir=tmp_path,
     )
     assert isinstance(result, BuildResult)
     expected = (
@@ -261,29 +303,27 @@ def test_build_target_writes_into_its_own_identifier_directory(tmp_path, monkeyp
 
 
 def test_build_target_skips_package_json_without_a_version(tmp_path, monkeypatch):
-    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
     monkeypatch.setattr(build, "run_make", _stub_make(tmp_path))
 
     result = build_target(
         build_options(),
-        HOST_CHAIN,
         tmp_path / "mpy",
         tmp_path / "natmod",
         tmp_path / "out",
+        package_dir=tmp_path,
     )
     assert not (result.output.parent / "package.json").exists()
 
 
 def test_build_target_writes_package_json_with_a_version(tmp_path, monkeypatch):
-    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
     monkeypatch.setattr(build, "run_make", _stub_make(tmp_path))
 
     result = build_target(
         build_options(),
-        HOST_CHAIN,
         tmp_path / "mpy",
         tmp_path / "natmod",
         tmp_path / "out",
+        package_dir=tmp_path,
         version="0.3.0",
     )
     manifest_path = result.output.parent / "package.json"
@@ -296,7 +336,6 @@ def test_build_target_writes_package_json_with_a_version(tmp_path, monkeypatch):
 
 
 def test_build_target_copies_extra_files_and_lists_them(tmp_path, monkeypatch):
-    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
     monkeypatch.setattr(build, "run_make", _stub_make(tmp_path))
 
     facade = tmp_path / "src" / "facade.py"
@@ -305,10 +344,10 @@ def test_build_target_copies_extra_files_and_lists_them(tmp_path, monkeypatch):
 
     result = build_target(
         build_options(),
-        HOST_CHAIN,
         tmp_path / "mpy",
         tmp_path / "natmod",
         tmp_path / "out",
+        package_dir=tmp_path,
         extra_files=[facade],
         version="0.3.0",
     )
@@ -318,16 +357,15 @@ def test_build_target_copies_extra_files_and_lists_them(tmp_path, monkeypatch):
 
 
 def test_build_target_missing_extra_file_is_a_build_error(tmp_path, monkeypatch):
-    monkeypatch.setattr(build.subprocess, "run", lambda *a, **k: None)
     monkeypatch.setattr(build, "run_make", _stub_make(tmp_path))
 
     with pytest.raises(BuildError, match="extra-files entry not found"):
         build_target(
             build_options(),
-            HOST_CHAIN,
             tmp_path / "mpy",
             tmp_path / "natmod",
             tmp_path / "out",
+            package_dir=tmp_path,
             extra_files=[tmp_path / "nope.py"],
             version="0.3.0",
         )

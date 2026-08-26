@@ -55,11 +55,13 @@ RUN set -eux; \
 
 # ── the four downloaded cross toolchains ──────────────────────────────
 #
-# URLs are a transcription of `resources/natmod.toml`'s own `[[toolchain]]`
-# table, and that file stays the single source of truth for *which*
-# version is pinned -- the same split `unix`'s Dockerfiles keep from
-# `pinned_pypa_images.toml`. Bumping one is a data diff there and a
-# rebuild here.
+# **This file is the pin.** The URLs and hashes lived in
+# `resources/natmod.toml`'s `[[toolchain]]` table while a host-side
+# resolver read them at build time; record 0049 deleted that resolver,
+# and data whose only consumer is a Dockerfile belongs in the Dockerfile
+# rather than in a table nothing reads. Each entry carries its sha256 and
+# is checked below, which the old host path also did and this image had
+# briefly stopped doing.
 #
 # Every one of them ships a `linux-x64`/`x86_64` binary and has no other
 # build, which is the second reason this image is amd64: there is no arm64
@@ -71,28 +73,38 @@ RUN set -eux; \
 # expects `xtensa-esp32-elf-*` (record 0036 found both, live). The symlinks
 # below make the expected names real on PATH, so a build inside this image
 # needs no prefix logic at all.
-ARG ARM_NONE_EABI=https://github.com/xpack-dev-tools/arm-none-eabi-gcc-xpack/releases/download/v15.2.1-1.1/xpack-arm-none-eabi-gcc-15.2.1-1.1-linux-x64.tar.gz
-ARG RISCV_NONE_ELF=https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack/releases/download/v15.2.0-1/xpack-riscv-none-elf-gcc-15.2.0-1-linux-x64.tar.gz
-ARG XTENSA_LX106=https://micropython.org/resources/xtensa-lx106-elf-standalone.tar.gz
-ARG XTENSA_ESP=https://github.com/espressif/crosstool-NG/releases/download/esp-16.1.0_20260609/xtensa-esp-elf-16.1.0_20260609-x86_64-linux-gnu.tar.xz
-
+# Versions, for the record and for a reviewer diffing a bump:
+# arm-none-eabi     15.2.1-1.1
+# riscv-none-elf    15.2.0-1
+# xtensa-lx106-elf  standalone
+# xtensa-esp-elf    16.1.0_20260609
 RUN set -eux; \
     mkdir -p /opt/toolchains; \
     for spec in \
-        "arm-none-eabi:${ARM_NONE_EABI}" \
-        "riscv-none-elf:${RISCV_NONE_ELF}" \
-        "xtensa-lx106-elf:${XTENSA_LX106}" \
-        "xtensa-esp-elf:${XTENSA_ESP}" \
+        "arm-none-eabi|https://github.com/xpack-dev-tools/arm-none-eabi-gcc-xpack/releases/download/v15.2.1-1.1/xpack-arm-none-eabi-gcc-15.2.1-1.1-linux-x64.tar.gz|da6a49ad4003944b823c6c93702a8787c922ab34bd7e918ec0eaf6933a9b1ff6" \
+        "riscv-none-elf|https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack/releases/download/v15.2.0-1/xpack-riscv-none-elf-gcc-15.2.0-1-linux-x64.tar.gz|aaaa8060c914851a3e5ee1ba82cc3d6f80972f90638a05c6e823a37557a33758" \
+        "xtensa-lx106-elf|https://micropython.org/resources/xtensa-lx106-elf-standalone.tar.gz|f45f755ea8021c24c9b36cc3d363973927857fe4e6279f32e6968abfac38d1ba" \
+        "xtensa-esp-elf|https://github.com/espressif/crosstool-NG/releases/download/esp-16.1.0_20260609/xtensa-esp-elf-16.1.0_20260609-x86_64-linux-gnu.tar.xz|f708752ebb35cab21f184b2574114ed1187619db0edb8a4ba913c06ca2fa675e" \
     ; do \
-        name="${spec%%:*}"; url="${spec#*:}"; \
+        IFS="|" read -r name url sha <<< "$spec"; \
         dest="/opt/toolchains/${name}"; \
         mkdir -p "$dest"; \
-        # --strip-components=1: every one of these tarballs has a single
-        # versioned top-level directory, and flattening it here is what
-        # keeps the PATH entries below free of version numbers -- so a
-        # version bump is one ARG and no other edit.
-        curl -fsSL "$url" | tar -xz --strip-components=1 -C "$dest" 2>/dev/null \
-            || curl -fsSL "$url" | tar -xJ --strip-components=1 -C "$dest"; \
+        curl -fsSL -o /tmp/tc.tar "$url"; \
+        # **Verified, not merely fetched.** These are four third-party
+        # tarballs pulled over the network into an image every build then
+        # runs compilers out of; "it downloaded" and "it is the artifact
+        # that was pinned" are different claims and only the second is
+        # worth anything. The hashes come from `resources/natmod.toml`,
+        # which held them for the old host-side resolver and is where
+        # they were cross-checked against a fresh sha256sum rather than
+        # copied from a sidecar.
+        echo "$sha  /tmp/tc.tar" | sha256sum -c -; \
+        # --strip-components=1: each of these has a single versioned
+        # top-level directory, and flattening it is what keeps the PATH
+        # entries below free of version numbers, so a bump is one line
+        # here and no other edit.
+        tar -xf /tmp/tc.tar --strip-components=1 -C "$dest"; \
+        rm -f /tmp/tc.tar; \
     done; \
     # The two names dynruntime.mk expects but no upstream ships.
     ln -s /opt/toolchains/riscv-none-elf/bin/riscv-none-elf-gcc \
@@ -105,6 +117,32 @@ RUN set -eux; \
     done; \
     ln -s /opt/toolchains/xtensa-esp-elf/bin/xtensa-esp-elf-gcc \
           /usr/local/bin/xtensa-esp32-elf-gcc
+
+# ── the build's own Python ────────────────────────────────────────────
+#
+# `py/dynruntime.mk` runs `tools/mpy_ld.py`, which does a bare
+# `from elftools.elf... import` with no try/except, and shells out to
+# `ar`. Record 0012 made both **cibuildmp's own dependencies** rather
+# than something a build installs, and `make_command()`'s
+# `PYTHON=<sys.executable>` is how that reaches make: dynruntime.mk
+# assigns `PYTHON` with a plain `=`, so pointing it at cibuildmp's own
+# interpreter wins over the `python3` it would otherwise use.
+#
+# **That mechanism cannot cross into a container**, and this layer is
+# what replaces it: `sys.executable` names a path in the *host's* virtual
+# environment, which does not exist here. So a containerised natmod build
+# passes `PYTHON=python3` and this image has to be the thing that makes
+# that Python sufficient. `ar` comes from `build-essential` above.
+#
+# Its own RUN, deliberately, rather than folded into the apt layer at the
+# top: it is a different concern -- the Python environment mpy_ld.py
+# needs, not a cross toolchain -- and keeping it last means adding or
+# bumping it never invalidates the 3.4GB of toolchains above.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends python3-pyelftools; \
+    rm -rf /var/lib/apt/lists/*; \
+    python3 -c "from elftools.elf.elffile import ELFFile"
 
 # Appended, not prepended, for the same reason windows.Dockerfile's own
 # PATH is: these directories ship generically-named helpers that would

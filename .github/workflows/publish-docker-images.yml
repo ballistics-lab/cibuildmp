@@ -60,6 +60,14 @@ on:
       - "docker/**"
       - ".github/workflows/publish-docker-images.yml"
   workflow_dispatch:
+    inputs:
+      only:
+        description: >
+          Republish just these images -- comma-separated with no spaces,
+          e.g. "natmod" or "windows,qemu". Empty rebuilds all nineteen,
+          which is hours: thirteen of them are emulated.
+        required: false
+        default: ""
 
 concurrency:
   group: publish-docker-images-${{ github.workflow }}
@@ -67,6 +75,27 @@ concurrency:
 
 jobs:
   publish:
+    # The `only` input, evaluated per matrix leg -- a job-level `if` in a
+    # matrix job runs once per combination, so this skips the legs not
+    # asked for instead of guarding each step inside them.
+    #
+    # The need for it showed up twice before it existed: `windows`
+    # (record 0042) and `natmod` (0049) were both pushed by hand rather
+    # than republish nineteen images, thirteen of them emulated. That is
+    # how `natmod` ended up with no `org.opencontainers.image.source`
+    # label, therefore unlinked from the repository, therefore private --
+    # a hand-push is not equivalent to this workflow, and making the
+    # cheap path the correct one is the fix.
+    #
+    # Comma-separated with no spaces, because GitHub's expression language
+    # has no `replace()` and trimming them would take more machinery than
+    # the input is worth. The description says so.
+    if: >-
+      github.event.inputs.only == ''
+      || contains(
+        format(',{0},', github.event.inputs.only),
+        format(',{0},', matrix.image)
+      )
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -25,7 +25,32 @@ SRC = template.c ../src/template_core.c
 # directory makes the glob ambiguous (two .mpy files where it expects
 # one). .obj/ keeps make's own per-arch object cache out of the tree
 # cibuildmp looks in.
-BUILD = .obj/$(ARCH)$(if $(ARCH_FLAGS),+$(ARCH_FLAGS))
+# The trailing /o is load-bearing and is the *third* instance of the bug
+# the paragraph above describes, found the same way as the other two --
+# running the whole matrix in one tree, which record 0049 made the normal
+# thing to do by putting natmod builds in a container.
+#
+# dynruntime.mk forms each object as $(BUILD)/$(src:.c=.o). For a source
+# inside this directory that is arch-scoped as intended. For one *outside*
+# it, the `..` eats the arch component instead:
+#
+#   template.c            -> .obj/x64/template.o          scoped
+#   ../src/template_core.c -> .obj/x64/../src/….o
+#                          =  .obj/src/template_core.o    NOT scoped
+#
+# So the shared core object was built once, by whichever arch ran first,
+# and silently linked into every later one -- `make ARCH=x86` then
+# `ARCH=x64` produced `LinkError: incompatible arch`, and a 32-bit EM_386
+# object sitting in .obj/src/ was the reason. Adding one directory level
+# gives the `..` somewhere to go that is still under $(ARCH):
+#
+#   ../src/template_core.c -> .obj/x64/o/../src/….o
+#                          =  .obj/x64/src/template_core.o  scoped
+#
+# One level covers one `..`, which is the layout this repo documents
+# (natmod/, usermod/ and src/ as siblings). A source two levels up would
+# need two, and would deserve its own comment saying so.
+BUILD = .obj/$(ARCH)$(if $(ARCH_FLAGS),+$(ARCH_FLAGS))/o
 
 include $(MPY_DIR)/py/dynruntime.mk
 
