@@ -76,10 +76,22 @@ runs:
         INCLUDE=$(cibuildmp "${ARGS[@]}")
         echo "include=$INCLUDE" >> "$GITHUB_OUTPUT"
 
+        # Subscripts are pulled into locals rather than written inline as
+        # `entry[\"only\"]`. That escaping is what this step shipped with and
+        # it cannot work: the surrounding `python3 -c '...'` is
+        # single-quoted, so bash passes the backslashes through unchanged
+        # and Python sees `entry[\"only\"]` inside an f-string expression --
+        # "SyntaxError: unexpected character after line continuation
+        # character". Plain double quotes need no escaping inside a
+        # single-quoted shell string at all. Like the `${{ }}` example in
+        # this action's own output description, it survived because nothing
+        # called this action between D20 and build-examples.yml's fan-out.
         echo "$INCLUDE" | python3 -c '
         import json, sys
         entries = json.load(sys.stdin)
         print(f"Resolved {len(entries)} target(s):")
         for entry in entries:
-            print(f"  {entry[\"only\"]:<32} runs-on: {entry[\"os\"]}")
+            identifier = entry["only"]
+            runner = entry["os"]
+            print(f"  {identifier:<34} runs-on: {runner}")
         '
