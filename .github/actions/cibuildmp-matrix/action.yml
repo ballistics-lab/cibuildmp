@@ -23,6 +23,27 @@ inputs:
     description: "File containing the config, defaults to {package-dir}/cibuildmp.toml"
     required: false
     default: ""
+  only:
+    description: >
+      Newline- or comma-separated build identifiers to resolve *instead of*
+      the config's own selection. Each one goes through cibuildmp's own
+      --only, which overrides the config's build/skip selectors and its
+      per-port axis alike, so this reaches targets a cibuildmp.toml does not
+      select -- the opt-in half of a matrix, without a second config file or
+      a second copy of the axis in YAML.
+
+      The point of routing it through the tool rather than writing the
+      entries by hand is the runner. Each entry's `os` comes from
+      UsermodTarget.default_runner, which is arch-aware since records
+      0043/0044 -- an aarch64 or armv7l cell names an arm64 runner and
+      builds natively instead of emulated. Hardcoding {only, os} pairs in a
+      workflow would copy that decision into a second place and let it drift
+      the first time a floor or an arch moves.
+
+      Unknown identifiers are an error from cibuildmp itself, not a silently
+      empty matrix.
+    required: false
+    default: ""
 
 outputs:
   include:
@@ -86,6 +107,7 @@ runs:
         ACTION_PATH: ${{ github.action_path }}
         ACTION_PACKAGE_DIR: ${{ inputs.package-dir }}
         ACTION_CONFIG_FILE: ${{ inputs.config-file }}
+        ACTION_ONLY: ${{ inputs.only }}
       run: |
         set -euo pipefail
 
@@ -106,11 +128,31 @@ runs:
         if config_file := os.environ.get("ACTION_CONFIG_FILE"):
             args += ["--config-file", config_file]
 
-        include = subprocess.run(
-            ["cibuildmp", *args], check=True, capture_output=True, text=True
-        ).stdout.strip()
 
-        entries = json.loads(include)
+        def resolve(extra=()):
+            out = subprocess.run(
+                ["cibuildmp", *args, *extra],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            return json.loads(out.stdout.strip())
+
+
+        # One invocation per identifier, because --only takes exactly one.
+        # Concatenated in the order given rather than merged with the
+        # config's own selection: when `only` is set it *replaces* the
+        # selection, so a caller asking for four opt-in cells gets four
+        # legs, not four plus the defaults it did not ask for.
+        raw = os.environ.get("ACTION_ONLY", "")
+        wanted = [part.strip() for part in raw.replace(",", "\n").split("\n")]
+        wanted = [part for part in wanted if part]
+
+        if wanted:
+            entries = [entry for one in wanted for entry in resolve(["--only", one])]
+        else:
+            entries = resolve()
+        include = json.dumps(entries)
         print(f"Resolved {len(entries)} target(s):")
         for entry in entries:
             print(f"  {entry['only']:<34} runs-on: {entry['os']}")

@@ -183,6 +183,7 @@ jobs:
       contents: read
     outputs:
       include: ${{ steps.matrix.outputs.include }}
+      optin: ${{ steps.optin.outputs.include }}
     steps:
       - uses: actions/checkout@v7
 
@@ -195,6 +196,35 @@ jobs:
           CIBMP_PLATFORM: "usermod"
         with:
           package-dir: examples/template
+
+      # The musllinux column, resolved separately because it is not what
+      # this config selects. Record 0031 proved the *mechanism* on
+      # `musllinux_1_2_x86_64` -- a real musl link, zero GLIBC_ symbols,
+      # the C module and the frozen module both running -- but that was
+      # one cell, built by hand, and the column has had no CI leg since.
+      #
+      # These four rather than all seven: they are exactly the musl cells
+      # with a runner they are native to (`x86_64`/`i686` on amd64,
+      # `aarch64`/`armv7l` on the arm64 runner record 0044 measured).
+      # `ppc64le`, `s390x` and `riscv64` are emulated on every runner
+      # GitHub offers, and Alpine's own community/micropython excludes
+      # the first two outright (`arch="all !ppc64le !s390x"`), so they are
+      # a separate decision about cost rather than more of this one.
+      #
+      # Resolved through the action's own `only` input, not written out as
+      # {only, os} pairs here, so the runner still comes from
+      # UsermodTarget.default_runner -- see that input's own description.
+      - id: optin
+        uses: ./.github/actions/cibuildmp-matrix
+        env:
+          CIBMP_PLATFORM: "usermod"
+        with:
+          package-dir: examples/template
+          only: |
+            unix-musllinux_1_2_x86_64
+            unix-musllinux_1_2_i686
+            unix-musllinux_1_2_aarch64
+            unix-musllinux_1_2_armv7l
 
   build-usermod:
     needs: usermod-matrix
@@ -226,6 +256,48 @@ jobs:
         # No CIBMP_VERSION here -- usermod output has no package.json to
         # version at all (D23: it's a full port binary, not a
         # mip.install()-able .mpy), so the env var would just be unused.
+        uses: ./
+        env:
+          CIBMP_PLATFORM: "usermod"
+        with:
+          package-dir: examples/template
+          only: ${{ matrix.only }}
+
+      - name: List built artifacts
+        run: ls -laR examples/template/mpyhouse
+
+  # ── usermod: the opt-in cells ───────────────────────────────────────
+  #
+  # Same job as above in every respect except which identifiers it runs
+  # and that it is allowed to fail. Split rather than concatenated into
+  # one matrix on purpose: these cells are unproven, and a red leg here
+  # must not be able to hide a regression in the six that are green.
+  #
+  # `continue-on-error: true` is temporary and should come off the moment
+  # the column is proven -- it is the difference between "we know which
+  # of these work" and "these are required", and only the first is true
+  # today. Record 0044 predicts entries will be needed in
+  # `unix_extra_cflags()` here: the whole musllinux column already needs
+  # `-Wno-error=cpp` for musl's own `sys/cdefs.h` deprecation warning
+  # reaching berkeley-db through extmod/modbtree.c, and two of the first
+  # three cells ever built needed something. Finding out which of these
+  # four need what is the entire point of the job.
+  build-usermod-optin:
+    needs: usermod-matrix
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.usermod-matrix.outputs.optin) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-qemu-action@v4
+
+      - name: Build examples/template (usermod, ${{ matrix.only }})
         uses: ./
         env:
           CIBMP_PLATFORM: "usermod"
