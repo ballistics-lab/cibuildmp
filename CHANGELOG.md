@@ -7,8 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **natmod builds in a container, and there is no bare-host path.** It used to
+  resolve a toolchain onto the invoking machine -- an apt probe, a pinned
+  tarball, or the host gcc's own 32-bit multilib -- and run `make` there. One
+  `linux/amd64` image now carries all ten `dynruntime.mk` toolchains under
+  exactly the prefixes it expects. The visible consequence: **`x86` builds on an
+  arm64 runner**, which it could not before, because inside the image the host
+  is amd64 by construction. Record 0050.
+- **The default MicroPython release is `v1.29.0`** (was `v1.28.0`). Its `.mpy`
+  ABI is 6.3, unchanged, so no identifier moves. v1.29.0 also changed
+  `dynruntime.mk`'s `x86` from `-m32` to `CROSS = i686-linux-gnu-`; the image
+  carries both spellings, since `micropython` accepts a list of tags that can
+  span the change.
+- **`pre-build-command` runs inside the build's own container**, the shape
+  cibuildwheel's `before-all` has. It therefore runs unprivileged and cannot
+  install system packages -- a project that needs a tool should fetch it, as
+  `examples/wasm2mpy` now does for `wabt`.
+- **`esp32` is no longer in the default port set.** It is the one port with no
+  Dockerfile and no pinned image, so it is also the one that cannot satisfy the
+  Docker-only rule; its build provisions ESP-IDF onto the host. Still a real
+  identifier, still reachable with `--only`, still built by a config that names
+  it.
+- `qemu` runs in its published image like every other port (record 0032, closed
+  by 0050).
+
 ### Removed
 
+- **`--toolchain`, and the toolchain resolver behind it.** Every question it
+  answered -- is a compiler for this arch here, where is one fetched from, does
+  its prefix match what `dynruntime.mk` hardcodes -- is answered by the natmod
+  image. `resources/natmod.toml`'s `[[toolchain]]` table went with it; those
+  pins live in `docker/natmod.Dockerfile` now, and are sha256-checked at image
+  build, which the table's own hashes had stopped protecting anything.
 - **Matrix generation.** `--print-build-matrix`, `Target.default_runner` /
   `UsermodTarget.default_runner`, natmod's `runs-on` config key and the
   `.github/actions/cibuildmp-matrix` composite action are gone. cibuildwheel
@@ -37,6 +69,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `verify_windows_output()` — reads the COFF `Machine` out of the produced
   `micropython.exe` and rejects a binary that is not the architecture its
   identifier names. `windows` previously checked only that the file existed.
+- **The four native `musllinux` cells are in the default `unix` axis**
+  (`x86_64`, `i686`, `aarch64`, `armv7l`), so a bare `ports = ["unix"]` is nine
+  cells rather than five. They are the musl cells with a runner they are native
+  to; the other three are emulated everywhere and stay opt-in.
+- `windows` joined `examples/template`'s own `ports` and is verified on every
+  push.
+- A `workflow_dispatch` input on `publish-docker-images.yml` to republish one
+  image instead of all nineteen.
 
 ## [0.3.0] - 2026-08-24
 
