@@ -145,6 +145,35 @@ directory level (`.obj/$(ARCH)/o`) so the `..` has somewhere to go that is
 still under the arch. It matters beyond the example: the layout it affects is
 the one this repo tells consumers to use.
 
+## Deleting "old" images from GHCR is mostly a trap
+
+Worth recording because the packages list invites the mistake. Every image
+`publish-docker-images.yml` pushes shows **three versions** in GHCR, one tagged
+`latest` and two untagged, and the untagged pair looks exactly like superseded
+builds. It is not: the tagged digest is an OCI *index*, and those two are its
+children.
+
+    sha256:7caab34…  index, tags=[latest]        <- what the pin names
+      |- sha256:472baba…  linux/amd64            <- the image itself
+      `- sha256:2e394dc…  attestation-manifest   <- provenance/SBOM
+
+GHCR lists every manifest as a "version", so a pin's own contents appear beside
+it as if they were leftovers. Deleting them would leave each pinned index
+pointing at manifests that no longer exist -- every consumer's build failing on
+pull, for all eighteen at once.
+
+The rule that falls out: **an untagged version is only garbage if nothing
+references it**, and on this registry that means checking whether the tagged
+digest is an index and what it points at, not reading the version list. Both
+were checked here through the registry API before anything was deleted.
+
+`natmod` is the one package where an untagged version genuinely was garbage,
+and the reason is instructive: a hand `docker push` produces a bare manifest
+with no index and no attestation, so its superseded digests really do stand
+alone. That is the same property that made the first hand-push land unlinked
+and private -- `docker/build-push-action` does considerably more than move
+layers, and both consequences were discovered the same day.
+
 ## Still open
 
 - The image is 3.91GB, of which 3.38GB is one layer holding four toolchains.
