@@ -189,7 +189,7 @@ manylinux_2_39 = "ghcr.io/ballistics-lab/manylinux_2_39_mipsel@sha256:740276d705
 # what the image contains.
 #
 # Local work still goes through `CIBMP_NATMOD_DOCKER_IMAGE=<local tag>`.
-natmod = "ghcr.io/ballistics-lab/natmod@sha256:c90a97da07b7c93ecec5c48dd1af9b09f74cdf0b80284d2cc78eea7931f194a6"
+natmod = "ghcr.io/ballistics-lab/natmod@sha256:3c3ddfce23137caae88b759acc1c49d52a4d300c9a12032343ef688420a64350"
 
 windows = "ghcr.io/ballistics-lab/windows@sha256:7caab34597a3cb2d9f4a412549d4a806134a17a1411aeb612ff61bbbcc151fcd"
 qemu = "ghcr.io/ballistics-lab/qemu@sha256:d0348b84cc684a45ca6f71e6475b5b1ea9fe73ceb6d242af028562795f944928"

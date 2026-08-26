@@ -53,11 +53,32 @@ extra-make-args = ["APP=zig"]
 # same way cutting it from `action.yml` kept it off every consumer's
 # runner. A pinned release tarball into the module directory needs no
 # privileges at all and pins a version, which the apt package never did.
+#
+# **A `.deb`, unpacked with `dpkg-deb -x` -- which needs no root.** Two
+# attempts got here, and both failures are worth the space because they
+# are about downloaded binaries generally.
+#
+# wabt's own release assets do not work. The newest with an `ubuntu-*`
+# name (1.0.37) links against OpenSSL 1.1, so on this Ubuntu 24.04 image
+# `wasm2c` dies with `error while loading shared libraries:
+# libcrypto.so.1.1` -- an asset name says which CI produced it, not which
+# system can run it. The plain `linux-x64` builds that start at 1.0.39
+# run fine and then fail to *compile*: `wasm_rt_allocate_memory` gained a
+# `page_size` parameter, and this example's `runtime/wasm-rt.h` predates
+# it. Those runtime files are not verbatim upstream (220 lines differ in
+# that header alone), so they cannot simply be replaced.
+#
+# The distro package is the one build whose codegen matches them, which
+# is unsurprising: `sudo apt-get install wabt` is what this line used to
+# say, and it worked. Fetching that same `.deb` and unpacking it in place
+# keeps the version that works while dropping the privilege that a
+# containerised `pre-build-command` does not have.
 pre-build-command = """
 command -v wasm2c >/dev/null && exit 0
-test -x .wabt/bin/wasm2c || {
+test -x .wabt/usr/bin/wasm2c || {
   mkdir -p .wabt
-  curl -fsSL https://github.com/WebAssembly/wabt/releases/download/1.0.37/wabt-1.0.37-ubuntu-20.04.tar.gz \
-    | tar -xz --strip-components=1 -C .wabt
+  curl -fsSL -o .wabt/wabt.deb \\
+    http://archive.ubuntu.com/ubuntu/pool/universe/w/wabt/wabt_1.0.34%2bdsfg2%2b~cs1.0.32-1ubuntu2_amd64.deb
+  dpkg-deb -x .wabt/wabt.deb .wabt
 }
 """

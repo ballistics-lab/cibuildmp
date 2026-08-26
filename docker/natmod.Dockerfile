@@ -135,9 +135,11 @@ RUN set -eux; \
 
 # ── the build's own Python ────────────────────────────────────────────
 #
-# `py/dynruntime.mk` runs `tools/mpy_ld.py`, which does a bare
-# `from elftools.elf... import` with no try/except, and shells out to
-# `ar`. Record 0012 made both **cibuildmp's own dependencies** rather
+# `py/dynruntime.mk` runs `tools/mpy_ld.py`, which needs two things that
+# are not in the standard library: `elftools` (pyelftools) directly, and
+# `ar` -- the **PyPI package**, reached through MicroPython's own
+# `ar_util`, not the binutils binary of the same name. Both are imported
+# bare, with no try/except. Record 0012 made both **cibuildmp's own dependencies** rather
 # than something a build installs, and `make_command()`'s
 # `PYTHON=<sys.executable>` is how that reaches make: dynruntime.mk
 # assigns `PYTHON` with a plain `=`, so pointing it at cibuildmp's own
@@ -155,9 +157,21 @@ RUN set -eux; \
 # bumping it never invalidates the 3.4GB of toolchains above.
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends python3-pyelftools; \
+    apt-get install -y --no-install-recommends python3-pyelftools python3-pip; \
     rm -rf /var/lib/apt/lists/*; \
-    python3 -c "from elftools.elf.elffile import ELFFile"
+    # `ar` is PyPI-only -- no apt package exists -- and
+    # `--break-system-packages` is what PEP 668 requires on a 24.04 base.
+    # Legitimate here in a way it would not be on a developer's machine:
+    # this image *is* the environment, it holds no other Python
+    # application, and a venv would only add a path for `PYTHON=python3`
+    # to miss.
+    python3 -m pip install --break-system-packages --no-cache-dir ar; \
+    # Both of D12's dependencies, asserted rather than assumed. The list
+    # is exhaustive and was read rather than guessed: `mpy_ld.py` imports
+    # `elftools.elf`, `ar_util` and `makeqstrdata`, and `ar_util` imports
+    # `ar` and `elftools.elf` -- the last two are MicroPython's own tools
+    # and live in the checkout, so `elftools` and `ar` are the whole set.
+    python3 -c "from elftools.elf.elffile import ELFFile; import ar"
 
 # Appended, not prepended, for the same reason windows.Dockerfile's own
 # PATH is: these directories ship generically-named helpers that would

@@ -27,7 +27,7 @@ ARCH ?= armv6m
 # into the build's own container, where it runs as the caller's uid and so
 # cannot apt-install anything -- which is what keeps this example's own
 # dependency out of the shared natmod image.
-WASM2C ?= $(if $(shell command -v wasm2c 2>/dev/null),wasm2c,$(CURDIR)/.wabt/bin/wasm2c)
+WASM2C ?= $(if $(shell command -v wasm2c 2>/dev/null),wasm2c,$(CURDIR)/.wabt/usr/bin/wasm2c)
 
 MOD ?= $(APP)
 SRC += runtime/runtime.c        \
