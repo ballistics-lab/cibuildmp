@@ -163,7 +163,7 @@ checked against a real run, not local reasoning):
   `build-usermod-unix` never did, so `dockerrun.run()`'s `docker run
   --pull missing` hit an unauthenticated pull against what GHCR treats as
   a private package by default, even for a package this same repository
-  owns. Fixed by adding the same `docker/login-action@v3` step (`if:
+  owns. Fixed by adding the same `docker/login-action@v4` step (`if:
   github.event_name == 'push'`, matching the env vars it unblocks) plus
   `permissions: packages: read` to `build-usermod-unix`.
 - **A third real bug, this time a genuine link failure inside the

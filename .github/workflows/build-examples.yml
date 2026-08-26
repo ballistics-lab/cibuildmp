@@ -127,7 +127,7 @@ jobs:
 
       # Needed to build a non-amd64 image at all: the `dnf`/`apk` step
       # inside those bases runs foreign binaries.
-      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-qemu-action@v4
 
       - uses: docker/setup-buildx-action@v4
 
@@ -238,7 +238,7 @@ jobs:
       # workflow has to. Without this the build stops early with a
       # message naming the missing binfmt, which is the point of
       # `dockerrun._probe_platform()`.
-      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-qemu-action@v4
 
       - name: Build examples/template (usermod)
         # No CIBMP_VERSION here -- usermod output has no package.json to

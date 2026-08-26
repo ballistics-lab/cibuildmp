@@ -127,7 +127,7 @@ rule, same reasoning: it is a machine-level setting, not a build
 input). On CI that is one step:
 
 ```yaml
-- uses: docker/setup-qemu-action@v3
+- uses: docker/setup-qemu-action@v4
 ```
 
 Locally, once per machine:
@@ -254,18 +254,18 @@ own **M0**–**M5**), each self-provisioning its own toolchain (**D3**) —
 adopted in all three consuming repos and verified on real CI, arch by
 arch, not just `--dry-run`.
 
-| Arch        | Toolchain              | Provisioning         |
-|-------------|-------------------------|-----------------------|
-| `x64`       | host gcc                | none needed           |
-| `x86`       | host gcc (`-m32`)       | apt only[^apt-x86]    |
-| `armv6m`    | `arm-none-eabi-`        | self-downloaded, cached |
-| `armv7m`    | `arm-none-eabi-`        | self-downloaded, cached |
-| `armv7emsp` | `arm-none-eabi-`        | self-downloaded, cached |
-| `armv7emdp` | `arm-none-eabi-`        | self-downloaded, cached |
-| `xtensa`    | `xtensa-lx106-elf-`     | self-downloaded, cached |
-| `xtensawin` | `xtensa-esp32-elf-`     | self-downloaded, cached |
-| `rv32imc`   | `riscv64-unknown-elf-`  | self-downloaded, cached |
-| `rv64imc`   | `riscv64-unknown-elf-`  | self-downloaded, cached |
+| Arch        | Toolchain              | Provisioning            |
+| ----------- | ---------------------- | ----------------------- |
+| `x64`       | host gcc               | none needed             |
+| `x86`       | host gcc (`-m32`)      | apt only[^apt-x86]      |
+| `armv6m`    | `arm-none-eabi-`       | self-downloaded, cached |
+| `armv7m`    | `arm-none-eabi-`       | self-downloaded, cached |
+| `armv7emsp` | `arm-none-eabi-`       | self-downloaded, cached |
+| `armv7emdp` | `arm-none-eabi-`       | self-downloaded, cached |
+| `xtensa`    | `xtensa-lx106-elf-`    | self-downloaded, cached |
+| `xtensawin` | `xtensa-esp32-elf-`    | self-downloaded, cached |
+| `rv32imc`   | `riscv64-unknown-elf-` | self-downloaded, cached |
+| `rv64imc`   | `riscv64-unknown-elf-` | self-downloaded, cached |
 
 [^apt-x86]: `apt install gcc-multilib` — no downloadable tarball exists for this one; **D3**'s own "why not docker for x86" note.
 
@@ -307,40 +307,40 @@ the plan. The composite actions above (`build-usermod-*`) remain the
 supported, verified production path for the ports `action.yml` doesn't
 cover yet.
 
-| Port          | Target                    | Provisioning                    | Status |
-|---------------|----------------------------|-----------------------------------|--------|
-| `unix`        | `manylinux_2_28_x86_64`    | native image[^native-image]       | ✅ |
-| `unix`        | `manylinux_2_28_i686`      | native image[^native-image]       | ⚠️[^unverified-cell] |
-| `unix`        | `manylinux_2_28_aarch64`   | native image[^native-image]       | ⚠️[^unverified-cell] |
-| `unix`        | `manylinux_2_28_ppc64le`   | native image[^native-image]       | ⚠️[^unverified-cell] |
-| `unix`        | `manylinux_2_28_s390x`     | native image[^native-image]       | ⚠️[^unverified-cell] |
-| `unix`        | `manylinux_2_31_armv7l`    | native image[^native-image]       | ⚠️[^unverified-cell] |
-| `unix`        | `manylinux_2_39_riscv64`   | native image[^native-image]       | ⚠️[^unverified-cell] |
-| `unix`        | `musllinux_1_2_*` (7 arches) | native image[^native-image]     | ⚠️[^unverified-cell] |
-| `unix`        | `manylinux_2_39_mipsel`    | cross image[^mipsel-cross]        | ⚠️[^unverified-cell] |
-| `qemu`        | `MPS2_AN385` (Cortex-M3)   | `arm-none-eabi-`[^qemu-shared]     | ✅ |
-| `qemu`        | RISC-V boards               | `riscv64-unknown-elf-`             | ❌[^not-attempted] |
-| `webassembly` | `pyscript` variant          | `emsdk`[^linux-x64-only]           | ✅ |
-| `esp32`       | `ESP32_GENERIC`             | ESP-IDF v5.5.1, self-cloned + installed | ✅ |
-| `esp32`       | other ESP32-family boards   | same ESP-IDF resolver              | ⚠️[^esp32-other] |
-| `windows`     | `x64`                       | `apt install gcc-mingw-w64-x86-64` | ✅ |
-| `windows`     | `x86`                       | `apt install gcc-mingw-w64-i686`   | ✅ |
-| `windows`     | `arm64`                     | `llvm-mingw`[^linux-x64-only]      | ✅ |
-| `rp2`         | any board                   | Pico SDK                          | ❌[^rp2-gap] |
-| `stm32`       | STM32 MCUs                 | —                                  | ❌[^out-of-scope] |
-| `esp8266`     | Espressif ESP8266           | —                                  | ❌[^out-of-scope] |
-| `samd`        | Microchip SAMD21/SAMD51     | —                                  | ❌[^out-of-scope] |
-| `nrf`         | Nordic nRF51/52             | —                                  | ❌[^out-of-scope] |
-| `mimxrt`      | NXP i.MX RT 10xx             | —                                  | ❌[^out-of-scope] |
-| `renesas-ra`  | Renesas RA family            | —                                  | ❌[^out-of-scope] |
-| `cc3200`      | TI CC3200 (Wi-Fi SoC)         | —                                  | ❌[^out-of-scope] |
-| `alif`        | Alif Ensemble MCUs           | —                                  | ❌[^out-of-scope] |
-| `pic16bit`    | Microchip PIC24/dsPIC33       | —                                  | ❌[^out-of-scope] |
-| `powerpc`     | PowerPC (Microwatt/qemu)      | —                                  | ❌[^out-of-scope] |
-| `zephyr`      | Zephyr RTOS (any board)       | —                                  | ❌[^zephyr-gap] |
-| `bare-arm`    | minimal bare-metal reference — not a real target | — | ❌[^out-of-scope] |
-| `minimal`     | minimal reference port — not a real target | —          | ❌[^out-of-scope] |
-| `embed`       | embeddable library, not a flashable target | —          | ❌[^out-of-scope] |
+| Port          | Target                                           | Provisioning                            | Status              |
+| ------------- | ------------------------------------------------ | --------------------------------------- | ------------------- |
+| `unix`        | `manylinux_2_28_x86_64`                          | native image[^native-image]             | ✅                   |
+| `unix`        | `manylinux_2_28_i686`                            | native image[^native-image]             | ⚠️[^unverified-cell] |
+| `unix`        | `manylinux_2_28_aarch64`                         | native image[^native-image]             | ⚠️[^unverified-cell] |
+| `unix`        | `manylinux_2_28_ppc64le`                         | native image[^native-image]             | ⚠️[^unverified-cell] |
+| `unix`        | `manylinux_2_28_s390x`                           | native image[^native-image]             | ⚠️[^unverified-cell] |
+| `unix`        | `manylinux_2_31_armv7l`                          | native image[^native-image]             | ⚠️[^unverified-cell] |
+| `unix`        | `manylinux_2_39_riscv64`                         | native image[^native-image]             | ⚠️[^unverified-cell] |
+| `unix`        | `musllinux_1_2_*` (7 arches)                     | native image[^native-image]             | ⚠️[^unverified-cell] |
+| `unix`        | `manylinux_2_39_mipsel`                          | cross image[^mipsel-cross]              | ⚠️[^unverified-cell] |
+| `qemu`        | `MPS2_AN385` (Cortex-M3)                         | `arm-none-eabi-`[^qemu-shared]          | ✅                   |
+| `qemu`        | RISC-V boards                                    | `riscv64-unknown-elf-`                  | ❌[^not-attempted]   |
+| `webassembly` | `pyscript` variant                               | `emsdk`[^linux-x64-only]                | ✅                   |
+| `esp32`       | `ESP32_GENERIC`                                  | ESP-IDF v5.5.1, self-cloned + installed | ✅                   |
+| `esp32`       | other ESP32-family boards                        | same ESP-IDF resolver                   | ⚠️[^esp32-other]     |
+| `windows`     | `x64`                                            | `apt install gcc-mingw-w64-x86-64`      | ✅                   |
+| `windows`     | `x86`                                            | `apt install gcc-mingw-w64-i686`        | ✅                   |
+| `windows`     | `arm64`                                          | `llvm-mingw`[^linux-x64-only]           | ✅                   |
+| `rp2`         | any board                                        | Pico SDK                                | ❌[^rp2-gap]         |
+| `stm32`       | STM32 MCUs                                       | —                                       | ❌[^out-of-scope]    |
+| `esp8266`     | Espressif ESP8266                                | —                                       | ❌[^out-of-scope]    |
+| `samd`        | Microchip SAMD21/SAMD51                          | —                                       | ❌[^out-of-scope]    |
+| `nrf`         | Nordic nRF51/52                                  | —                                       | ❌[^out-of-scope]    |
+| `mimxrt`      | NXP i.MX RT 10xx                                 | —                                       | ❌[^out-of-scope]    |
+| `renesas-ra`  | Renesas RA family                                | —                                       | ❌[^out-of-scope]    |
+| `cc3200`      | TI CC3200 (Wi-Fi SoC)                            | —                                       | ❌[^out-of-scope]    |
+| `alif`        | Alif Ensemble MCUs                               | —                                       | ❌[^out-of-scope]    |
+| `pic16bit`    | Microchip PIC24/dsPIC33                          | —                                       | ❌[^out-of-scope]    |
+| `powerpc`     | PowerPC (Microwatt/qemu)                         | —                                       | ❌[^out-of-scope]    |
+| `zephyr`      | Zephyr RTOS (any board)                          | —                                       | ❌[^zephyr-gap]      |
+| `bare-arm`    | minimal bare-metal reference — not a real target | —                                       | ❌[^out-of-scope]    |
+| `minimal`     | minimal reference port — not a real target       | —                                       | ❌[^out-of-scope]    |
+| `embed`       | embeddable library, not a flashable target       | —                                       | ❌[^out-of-scope]    |
 
 [^native-image]: Nothing to provision. The image is `ghcr.io/ballistics-lab/<target>`, a thin layer over pypa's own `quay.io/pypa/<target>` (the same images cibuildwheel builds wheels in), published for that target's own architecture and carrying a native compiler. Non-native targets run emulated — see the emulation note above. The target name is a real PEP 600 / PEP 656 platform tag, and the binary is checked against it after every build: both its ELF machine type and, for `manylinux_*`, its actual highest required glibc symbol version.
 
@@ -400,9 +400,9 @@ Not usable on a Windows runner outside MSYS2 -- it shells out to `wget`,
 which plain Git Bash doesn't have (see `build-usermod-windows` below
 for why the Windows actions never call it either).
 
-| Input | Required | Default | Description |
-| --- | --- | --- | --- |
-| `mpy_tag` | yes | -- | MicroPython release tag, e.g. `v1.28.0` |
+| Input     | Required | Default | Description                             |
+| --------- | -------- | ------- | --------------------------------------- |
+| `mpy_tag` | yes      | --      | MicroPython release tag, e.g. `v1.28.0` |
 
 No outputs; exports `MPY_DIR` to `$GITHUB_ENV` as a side effect.
 
@@ -416,12 +416,12 @@ or, as a7p and now bclibc/wasm3's own webassembly/rp2040/windows-adjacent
 jobs use it, any time the caller needs `MPY_DIR` set without dragging in
 `fetch-micropython`'s `wget` dependency.
 
-| Input | Required | Default | Description |
-| --- | --- | --- | --- |
-| `mpy_tag` | yes | -- | MicroPython release tag |
-| `submodules` | no | `''` | Space-separated submodules to `git submodule update --init` (empty = skip) |
-| `pico_sdk_submodules` | no | `'false'` | Also run `git -C lib/pico-sdk submodule update --init` (rp2040 builds) |
-| `path` | no | `'micropython'` | Clone destination, relative to the workspace root -- override when the caller's own repo already has a top-level directory of that name (a7p passes `path: mpy`, since its own MicroPython subtree already lives at `micropython/`) |
+| Input                 | Required | Default         | Description                                                                                                                                                                                                                         |
+| --------------------- | -------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mpy_tag`             | yes      | --              | MicroPython release tag                                                                                                                                                                                                             |
+| `submodules`          | no       | `''`            | Space-separated submodules to `git submodule update --init` (empty = skip)                                                                                                                                                          |
+| `pico_sdk_submodules` | no       | `'false'`       | Also run `git -C lib/pico-sdk submodule update --init` (rp2040 builds)                                                                                                                                                              |
+| `path`                | no       | `'micropython'` | Clone destination, relative to the workspace root -- override when the caller's own repo already has a top-level directory of that name (a7p passes `path: mpy`, since its own MicroPython subtree already lives at `micropython/`) |
 
 No outputs; exports `MPY_DIR` to `$GITHUB_ENV` as a side effect.
 
@@ -435,13 +435,13 @@ then runs `make ARCH=<arch> dist` in the natmod directory.
 Requires: `MPY_DIR` (see above) and the calling repo already checked out,
 submodules included if the natmod Makefile needs any.
 
-| Input | Required | Default | Description |
-| --- | --- | --- | --- |
-| `arch` | yes | -- | `x64`, `x86`, `armv6m`, `armv7m`, `armv7emsp`, `armv7emdp`, `rv32imc`, `rv64imc`, `xtensa`, or `xtensawin` (no `aarch64` -- `dynruntime.mk` has none as of MicroPython ≤ v1.28; build that via a usermod instead) |
-| `natmod_dir` | no | `natmod` | Path to the directory containing `natmod/Makefile`, relative to the workspace root (a7p passes `micropython/natmod`) |
-| `esp_idf_ver` | no | `v5.4` | esp-idf tag to install for the `xtensawin` toolchain |
-| `extra_pip` | no | `''` | Extra space-separated pip packages, alongside `pyelftools`/`ar` (always installed -- `mpy_ld.py` needs them for every ARCH) |
-| `pre_build_command` | no | `''` | Shell command run once inside `natmod_dir`, after `mpy-cross` and before `make dist` (a7p uses `make fetch-nanopb`) |
+| Input               | Required | Default  | Description                                                                                                                                                                                                       |
+| ------------------- | -------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `arch`              | yes      | --       | `x64`, `x86`, `armv6m`, `armv7m`, `armv7emsp`, `armv7emdp`, `rv32imc`, `rv64imc`, `xtensa`, or `xtensawin` (no `aarch64` -- `dynruntime.mk` has none as of MicroPython ≤ v1.28; build that via a usermod instead) |
+| `natmod_dir`        | no       | `natmod` | Path to the directory containing `natmod/Makefile`, relative to the workspace root (a7p passes `micropython/natmod`)                                                                                              |
+| `esp_idf_ver`       | no       | `v5.4`   | esp-idf tag to install for the `xtensawin` toolchain                                                                                                                                                              |
+| `extra_pip`         | no       | `''`     | Extra space-separated pip packages, alongside `pyelftools`/`ar` (always installed -- `mpy_ld.py` needs them for every ARCH)                                                                                       |
+| `pre_build_command` | no       | `''`     | Shell command run once inside `natmod_dir`, after `mpy-cross` and before `make dist` (a7p uses `make fetch-nanopb`)                                                                                               |
 
 No outputs.
 
@@ -468,17 +468,17 @@ not under an emulator; `ubuntu-latest` for the rest, `mipsel` included --
 it stays under `qemu-user-static`, since GitHub has no mips runner) -- a
 composite action can't pick its own runner.
 
-| Input | Required | Default | Description |
-| --- | --- | --- | --- |
-| `arch` | yes | -- | `x64`, `x86`, `aarch64`, `armhf`, or `mipsel` |
-| `user_c_modules` | no | `''` → `$GITHUB_WORKSPACE` | Value for `USER_C_MODULES=` |
-| `frozen_manifest` | no | `''` → `$GITHUB_WORKSPACE/usermod/manifest.py` | Value for `FROZEN_MANIFEST=` |
-| `extra_make_args` | no | `''` | Extra space-separated `VAR=value` pairs appended to the build command (e.g. bclibc's `MP_BCLIBC_PRECISION=double`) |
-| `build_dir` | no | `''` → `$GITHUB_WORKSPACE/usermod/build/<arch>` | Value for `BUILD=`. A bare relative value (no leading `/`, e.g. `build-wasm3`) resolves against `$MPY_DIR/ports/unix` instead, the same way a bare `BUILD=` on the command line always did |
-| `variant` | no | `standard` | Value for `VARIANT=`. A caller building against upstream's own `VARIANT=coverage` recipe (a7p's armhf/mipsel qemu legs used to) overrides this |
+| Input             | Required | Default                                         | Description                                                                                                                                                                                |
+| ----------------- | -------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `arch`            | yes      | --                                              | `x64`, `x86`, `aarch64`, `armhf`, or `mipsel`                                                                                                                                              |
+| `user_c_modules`  | no       | `''` → `$GITHUB_WORKSPACE`                      | Value for `USER_C_MODULES=`                                                                                                                                                                |
+| `frozen_manifest` | no       | `''` → `$GITHUB_WORKSPACE/usermod/manifest.py`  | Value for `FROZEN_MANIFEST=`                                                                                                                                                               |
+| `extra_make_args` | no       | `''`                                            | Extra space-separated `VAR=value` pairs appended to the build command (e.g. bclibc's `MP_BCLIBC_PRECISION=double`)                                                                         |
+| `build_dir`       | no       | `''` → `$GITHUB_WORKSPACE/usermod/build/<arch>` | Value for `BUILD=`. A bare relative value (no leading `/`, e.g. `build-wasm3`) resolves against `$MPY_DIR/ports/unix` instead, the same way a bare `BUILD=` on the command line always did |
+| `variant`         | no       | `standard`                                      | Value for `VARIANT=`. A caller building against upstream's own `VARIANT=coverage` recipe (a7p's armhf/mipsel qemu legs used to) overrides this                                             |
 
-| Output | Description |
-| --- | --- |
+| Output      | Description                                                                                                                      |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | `build_dir` | The `BUILD=` directory actually used (resolved default included), so the caller can find the built binary without recomputing it |
 
 ### `build-usermod-windows`
@@ -509,20 +509,20 @@ and setting up MSYS2 both stay the caller's own job. Requires:
   and that shell wrapper only exists on `PATH` once `setup-msys2` has
   put it there.
 
-| Input | Required | Default | Description |
-| --- | --- | --- | --- |
-| `user_c_modules` | no | `$(pwd)` | Value for `USER_C_MODULES=` |
-| `frozen_manifest` | no | `$(pwd)/usermod/manifest.py` | Value for `FROZEN_MANIFEST=` |
-| `extra_make_args` | no | `''` | Extra space-separated `VAR=value` pairs, e.g. a custom `PROG=` (wasm3 uses `PROG=micropython-wasm3.exe`) |
-| `build_dir` | no | `build-standard` | Value for `BUILD=` -- a bare relative value, resolving against `$MPY_DIR/ports/windows` |
-| `cflags_extra` | no | `''` | Value for `CFLAGS_EXTRA=` on the main build only (not `mpy-cross`), e.g. `-Wno-error` for CLANGARM64 |
-| `variant` | no | `''` | Value for `VARIANT=` on the main build only, omitted from the command line entirely when empty. None of the three current callers ever pass this -- `ports/windows` has no `variants/<name>/` split in any of them, unlike the unix port -- it's here for a future caller whose own fork of the port does define one |
+| Input             | Required | Default                      | Description                                                                                                                                                                                                                                                                                                          |
+| ----------------- | -------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `user_c_modules`  | no       | `$(pwd)`                     | Value for `USER_C_MODULES=`                                                                                                                                                                                                                                                                                          |
+| `frozen_manifest` | no       | `$(pwd)/usermod/manifest.py` | Value for `FROZEN_MANIFEST=`                                                                                                                                                                                                                                                                                         |
+| `extra_make_args` | no       | `''`                         | Extra space-separated `VAR=value` pairs, e.g. a custom `PROG=` (wasm3 uses `PROG=micropython-wasm3.exe`)                                                                                                                                                                                                             |
+| `build_dir`       | no       | `build-standard`             | Value for `BUILD=` -- a bare relative value, resolving against `$MPY_DIR/ports/windows`                                                                                                                                                                                                                              |
+| `cflags_extra`    | no       | `''`                         | Value for `CFLAGS_EXTRA=` on the main build only (not `mpy-cross`), e.g. `-Wno-error` for CLANGARM64                                                                                                                                                                                                                 |
+| `variant`         | no       | `''`                         | Value for `VARIANT=` on the main build only, omitted from the command line entirely when empty. None of the three current callers ever pass this -- `ports/windows` has no `variants/<name>/` split in any of them, unlike the unix port -- it's here for a future caller whose own fork of the port does define one |
 
 Every path input defaults to a `$(pwd)`-relative value, never an absolute
 one, for the same backslash reason `MPY_DIR` has to be POSIX-style.
 
-| Output | Description |
-| --- | --- |
+| Output      | Description                                                |
+| ----------- | ---------------------------------------------------------- |
 | `build_dir` | The `BUILD=` directory actually used (the input, verbatim) |
 
 ### `build-usermod-webassembly`
@@ -547,17 +547,17 @@ artifact real code can import against, not just a test fixture, and
 writes its own combined manifest first and passes that as
 `frozen_manifest`.
 
-| Input | Required | Default | Description |
-| --- | --- | --- | --- |
-| `variant` | no | `pyscript` | Value for `VARIANT=`. `standard`'s `-s ASYNCIFY` is broken against modern emsdk in multiple ways (tracked upstream at [micropython/micropython#19380](https://github.com/micropython/micropython/issues/19380)); `pyscript` is upstream's own recommended workaround, since it doesn't use `ASYNCIFY` at all |
-| `emsdk_ref` | no | `latest` | emsdk install/activate ref. `latest` matches every caller today and upstream's own `tools/ci.sh` (`ci_webassembly_setup`) -- a moving target, since some future emsdk release could break a build with no change on either side of this action. Override to pin once that actually happens |
-| `user_c_modules` | no | `''` → `$GITHUB_WORKSPACE` | Value for `USER_C_MODULES=` |
-| `frozen_manifest` | no | `''` → `$GITHUB_WORKSPACE/usermod/manifest.py` | Value for `FROZEN_MANIFEST=` -- pass a combined manifest (see the note above) unless the module genuinely needs nothing from the variant's own default |
-| `extra_make_args` | no | `''` | Extra space-separated `VAR=value` pairs, e.g. a module's own precision define or a custom `PROG=` |
-| `build_dir` | no | `''` → `$GITHUB_WORKSPACE/usermod/build/wasm` | Value for `BUILD=`. A bare relative value (no leading `/`) resolves against `$MPY_DIR/ports/webassembly` instead, same as a bare `BUILD=` on the command line always did |
+| Input             | Required | Default                                        | Description                                                                                                                                                                                                                                                                                                  |
+| ----------------- | -------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `variant`         | no       | `pyscript`                                     | Value for `VARIANT=`. `standard`'s `-s ASYNCIFY` is broken against modern emsdk in multiple ways (tracked upstream at [micropython/micropython#19380](https://github.com/micropython/micropython/issues/19380)); `pyscript` is upstream's own recommended workaround, since it doesn't use `ASYNCIFY` at all |
+| `emsdk_ref`       | no       | `latest`                                       | emsdk install/activate ref. `latest` matches every caller today and upstream's own `tools/ci.sh` (`ci_webassembly_setup`) -- a moving target, since some future emsdk release could break a build with no change on either side of this action. Override to pin once that actually happens                   |
+| `user_c_modules`  | no       | `''` → `$GITHUB_WORKSPACE`                     | Value for `USER_C_MODULES=`                                                                                                                                                                                                                                                                                  |
+| `frozen_manifest` | no       | `''` → `$GITHUB_WORKSPACE/usermod/manifest.py` | Value for `FROZEN_MANIFEST=` -- pass a combined manifest (see the note above) unless the module genuinely needs nothing from the variant's own default                                                                                                                                                       |
+| `extra_make_args` | no       | `''`                                           | Extra space-separated `VAR=value` pairs, e.g. a module's own precision define or a custom `PROG=`                                                                                                                                                                                                            |
+| `build_dir`       | no       | `''` → `$GITHUB_WORKSPACE/usermod/build/wasm`  | Value for `BUILD=`. A bare relative value (no leading `/`) resolves against `$MPY_DIR/ports/webassembly` instead, same as a bare `BUILD=` on the command line always did                                                                                                                                     |
 
-| Output | Description |
-| --- | --- |
+| Output      | Description                                                                                                                               |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `build_dir` | The `BUILD=` directory actually used (resolved default included), so the caller can find `micropython.mjs`/`.wasm` without recomputing it |
 
 ### `build-usermod-rp2040`
@@ -575,17 +575,17 @@ own top-level submodules, which the release tarball already vendors --
 rather than at pico-sdk's own nested vendored copies, so pico-sdk's
 internal submodule tree is never actually touched by this build.
 
-| Input | Required | Default | Description |
-| --- | --- | --- | --- |
-| `board` | no | `RPI_PICO` | Value for `BOARD=` |
-| `user_c_modules` | no | `''` → `$GITHUB_WORKSPACE/usermod/micropython.cmake` | Value for `USER_C_MODULES=` -- a *file*, unlike `build-usermod-unix`/`build-usermod-webassembly`'s own `user_c_modules`: CMake's `USER_C_MODULES` takes a single `.cmake` entry point, not a directory to glob |
-| `frozen_manifest` | no | `''` → `$GITHUB_WORKSPACE/usermod/manifest.py` | Value for `FROZEN_MANIFEST=` |
-| `extra_make_args` | no | `''` | Extra space-separated `VAR=value` pairs appended to the build command |
-| `extra_cmake_args` | no | `''` | Extra arguments for a direct `cmake -S . -B <build_dir>` reconfigure step run after the port's own first configure. Left empty, the build runs in one `make` invocation. `ports/rp2/Makefile` builds its own cmake arguments with `CMAKE_ARGS +=`, so a define passed straight on the `make` command line replaces the whole accumulated set (including `MICROPY_BOARD`/`USER_C_MODULES`/`MICROPY_FROZEN_MANIFEST`) instead of adding to it -- pass one when the module needs its own CMake define, e.g. `-DMICROPY_C_HEAP_SIZE=131072` |
-| `build_dir` | no | `''` → `$GITHUB_WORKSPACE/usermod/build/rp2040` | Value for `BUILD=`. A bare relative value (no leading `/`) resolves against `$MPY_DIR/ports/rp2` instead, same as a bare `BUILD=` on the command line always did |
+| Input              | Required | Default                                              | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------------ | -------- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `board`            | no       | `RPI_PICO`                                           | Value for `BOARD=`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `user_c_modules`   | no       | `''` → `$GITHUB_WORKSPACE/usermod/micropython.cmake` | Value for `USER_C_MODULES=` -- a *file*, unlike `build-usermod-unix`/`build-usermod-webassembly`'s own `user_c_modules`: CMake's `USER_C_MODULES` takes a single `.cmake` entry point, not a directory to glob                                                                                                                                                                                                                                                                                                                          |
+| `frozen_manifest`  | no       | `''` → `$GITHUB_WORKSPACE/usermod/manifest.py`       | Value for `FROZEN_MANIFEST=`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `extra_make_args`  | no       | `''`                                                 | Extra space-separated `VAR=value` pairs appended to the build command                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `extra_cmake_args` | no       | `''`                                                 | Extra arguments for a direct `cmake -S . -B <build_dir>` reconfigure step run after the port's own first configure. Left empty, the build runs in one `make` invocation. `ports/rp2/Makefile` builds its own cmake arguments with `CMAKE_ARGS +=`, so a define passed straight on the `make` command line replaces the whole accumulated set (including `MICROPY_BOARD`/`USER_C_MODULES`/`MICROPY_FROZEN_MANIFEST`) instead of adding to it -- pass one when the module needs its own CMake define, e.g. `-DMICROPY_C_HEAP_SIZE=131072` |
+| `build_dir`        | no       | `''` → `$GITHUB_WORKSPACE/usermod/build/rp2040`      | Value for `BUILD=`. A bare relative value (no leading `/`) resolves against `$MPY_DIR/ports/rp2` instead, same as a bare `BUILD=` on the command line always did                                                                                                                                                                                                                                                                                                                                                                        |
 
-| Output | Description |
-| --- | --- |
+| Output      | Description                                                                                                                    |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | `build_dir` | The `BUILD=` directory actually used (resolved default included), so the caller can find `firmware.uf2` without recomputing it |
 
 ### `build-usermod-armv7m`
@@ -601,16 +601,16 @@ same split `build-usermod-rp2040` uses for the rp2040py emulator. Install
 
 Requires: `MPY_DIR` and checkout, same as `build-usermod-unix`.
 
-| Input | Required | Default | Description |
-| --- | --- | --- | --- |
-| `board` | no | `MPS2_AN385` | Value for `BOARD=`. The stock target: a Cortex-M3, no FPU |
-| `user_c_modules` | no | `''` → `$GITHUB_WORKSPACE` | Value for `USER_C_MODULES=` |
-| `frozen_manifest` | no | `''` → `$GITHUB_WORKSPACE/usermod/manifest.py` | Value for `FROZEN_MANIFEST=`. `ports/qemu` ships no `boards/manifest.py` of its own, so there's no port default to combine with here, unlike unix/rp2/esp32 |
-| `extra_make_args` | no | `''` | Extra space-separated `VAR=value` pairs appended to the build command, e.g. a module's own precision define |
-| `build_dir` | no | `''` → `$GITHUB_WORKSPACE/usermod/build/armv7m` | Value for `BUILD=`. A bare relative value (no leading `/`) resolves against `$MPY_DIR/ports/qemu` instead, same as a bare `BUILD=` on the command line always did -- pass one to get the port's own `build-$(BOARD)` default |
+| Input             | Required | Default                                         | Description                                                                                                                                                                                                                  |
+| ----------------- | -------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `board`           | no       | `MPS2_AN385`                                    | Value for `BOARD=`. The stock target: a Cortex-M3, no FPU                                                                                                                                                                    |
+| `user_c_modules`  | no       | `''` → `$GITHUB_WORKSPACE`                      | Value for `USER_C_MODULES=`                                                                                                                                                                                                  |
+| `frozen_manifest` | no       | `''` → `$GITHUB_WORKSPACE/usermod/manifest.py`  | Value for `FROZEN_MANIFEST=`. `ports/qemu` ships no `boards/manifest.py` of its own, so there's no port default to combine with here, unlike unix/rp2/esp32                                                                  |
+| `extra_make_args` | no       | `''`                                            | Extra space-separated `VAR=value` pairs appended to the build command, e.g. a module's own precision define                                                                                                                  |
+| `build_dir`       | no       | `''` → `$GITHUB_WORKSPACE/usermod/build/armv7m` | Value for `BUILD=`. A bare relative value (no leading `/`) resolves against `$MPY_DIR/ports/qemu` instead, same as a bare `BUILD=` on the command line always did -- pass one to get the port's own `build-$(BOARD)` default |
 
-| Output | Description |
-| --- | --- |
+| Output      | Description                                                                                                                    |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | `build_dir` | The `BUILD=` directory actually used (resolved default included), so the caller can find `firmware.elf` without recomputing it |
 
 ### `build-usermod-esp32`
@@ -636,17 +636,17 @@ The port's own `build-$(BOARD)` default is always used instead.
 
 Requires: `MPY_DIR` and checkout, same as `build-usermod-unix`.
 
-| Input | Required | Default | Description |
-| --- | --- | --- | --- |
-| `board` | no | `ESP32_GENERIC` | Value for `BOARD=` |
-| `idf_target` | no | `esp32` | Chip family passed to `install.sh` (e.g. `esp32`, `esp32s3`). Deliberately separate from `board`, not derived from it -- more than one board can exist per chip family |
-| `idf_ver` | no | `v5.5.1` | ESP-IDF version tag to clone |
-| `user_c_modules` | no | `''` → `$GITHUB_WORKSPACE/usermod/micropython.cmake` | Value for `USER_C_MODULES=` -- a *file*, like `build-usermod-rp2040`'s own `user_c_modules` |
-| `frozen_manifest` | no | `''` → `$GITHUB_WORKSPACE/usermod/manifest.py` | Value for `FROZEN_MANIFEST=` |
-| `extra_make_args` | no | `''` | Extra space-separated `VAR=value` pairs appended to the build command |
+| Input             | Required | Default                                              | Description                                                                                                                                                            |
+| ----------------- | -------- | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `board`           | no       | `ESP32_GENERIC`                                      | Value for `BOARD=`                                                                                                                                                     |
+| `idf_target`      | no       | `esp32`                                              | Chip family passed to `install.sh` (e.g. `esp32`, `esp32s3`). Deliberately separate from `board`, not derived from it -- more than one board can exist per chip family |
+| `idf_ver`         | no       | `v5.5.1`                                             | ESP-IDF version tag to clone                                                                                                                                           |
+| `user_c_modules`  | no       | `''` → `$GITHUB_WORKSPACE/usermod/micropython.cmake` | Value for `USER_C_MODULES=` -- a *file*, like `build-usermod-rp2040`'s own `user_c_modules`                                                                            |
+| `frozen_manifest` | no       | `''` → `$GITHUB_WORKSPACE/usermod/manifest.py`       | Value for `FROZEN_MANIFEST=`                                                                                                                                           |
+| `extra_make_args` | no       | `''`                                                 | Extra space-separated `VAR=value` pairs appended to the build command                                                                                                  |
 
-| Output | Description |
-| --- | --- |
+| Output      | Description                                                                                                                                                            |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `build_dir` | The port's own default `build-$(BOARD)` directory (relative to `$MPY_DIR/ports/esp32`), so the caller can find `micropython.bin`/`firmware.bin` without recomputing it |
 
 ### Usage example
