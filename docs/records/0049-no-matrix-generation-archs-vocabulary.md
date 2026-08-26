@@ -192,15 +192,27 @@ matrix, `archs: auto` in each job, nothing about hosts inside the tool -- and
 that is the premise this whole record serves. Eleven minutes on a push is a
 real cost and not a hidden one.
 
-It is also worth being clear about what *would* fix it without touching any of
-the above, if the cost ever stops being acceptable: **the workflow fanning out
-on its own.** Deleting matrix generation from the tool and deleting fan-out
-from the workflow were two separate things, and only the first was required.
-cibuildwheel users fan out all the time; they write the matrix themselves,
-which is exactly the distinction. The one refinement that would need is to fan
-out **by image rather than by target** -- `windows`'s three arches share one
-image, so three legs pull the same 2GB three times, which is the mistake this
-record's own perf commit had already made once and corrected.
+**Fanning out is the consumer's job, and that is the point rather than a
+consolation.** Deleting matrix generation from the tool and deleting fan-out
+from the workflow were two separate things and only the first was required;
+cibuildwheel users fan out constantly, they simply write the matrix
+themselves. That division is not an accident of upstream's history, it is the
+correct one: a matrix encodes which runners exist, how many can run at once,
+and what each costs -- facts about somebody's fleet, which a build tool does
+not know and cannot learn. Anything it generated would be a guess frozen into
+data, which is what `default_runner` was.
+
+So a consumer who wants three minutes instead of eleven writes the fan-out,
+and cibuildmp's part is to answer `--print-build-identifiers` honestly. The
+one refinement worth passing on when they do: fan out **by image, not by
+target** -- `windows`'s three arches share one image, so three legs pull the
+same 2GB three times. This record's own perf commit made exactly that mistake
+and corrected it.
+
+`build-examples.yml` is free to do this too, being cibuildmp acting as its own
+consumer. It does not today, deliberately: it doubles as the worked example of
+the shape a consumer should copy, and eleven minutes is an acceptable price for
+that being literally true rather than approximately.
 
 ## Still open
 
