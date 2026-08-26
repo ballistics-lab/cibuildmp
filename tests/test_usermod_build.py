@@ -28,6 +28,24 @@ from cibuildmp.usermod.build import (
 from cibuildmp.usermod.espidf import ResolvedEspIdf
 
 
+def _pe(machine: int, *, pe_offset: int = 0x80) -> bytes:
+    """The smallest byte string `verify_windows_output()` will accept.
+
+    A two-byte `b"MZ"` used to be enough for the windows build tests,
+    because `build_windows()` checked only that the file existed. It
+    checks the COFF `Machine` now, so a stub has to carry a real DOS
+    stub, a real `e_lfanew`, a real `PE\0\0` and a real machine value --
+    which is the point: the stub that used to pass is exactly the shape
+    of output the check exists to reject.
+    """
+    data = bytearray(pe_offset + 6)
+    data[:2] = b"MZ"
+    data[0x3C:0x40] = pe_offset.to_bytes(4, "little")
+    data[pe_offset : pe_offset + 4] = b"PE\0\0"
+    data[pe_offset + 4 : pe_offset + 6] = machine.to_bytes(2, "little")
+    return bytes(data)
+
+
 def fake_elf(target: str = "manylinux_2_28_x86_64") -> bytes:
     """A 20-byte ELF header claiming `target`'s own architecture.
 
@@ -878,7 +896,12 @@ def test_windows_runs_make_inside_the_container(monkeypatch, tmp_path, arch):
 
     build_dir = tmp_path / f"build-{arch}"
     build_dir.mkdir()
-    (build_dir / "micropython.exe").write_bytes(b"MZ")
+    # This arch's own machine value, not a fixed one: build_windows()
+    # verifies the COFF header now, so a stub that is right for x64 and
+    # wrong for the other two would fail two thirds of this parametrize.
+    (build_dir / "micropython.exe").write_bytes(
+        _pe(WINDOWS_ARCH_SETTINGS[arch].machine)
+    )
 
     result = build_windows(
         windows_opts(arch=arch, build_dir=build_dir), tmp_path / "mpy"
@@ -907,7 +930,7 @@ def test_windows_mounts_mpy_dir_and_user_c_modules(monkeypatch, tmp_path):
 
     build_dir = tmp_path / "build-x86_64"
     build_dir.mkdir()
-    (build_dir / "micropython.exe").write_bytes(b"MZ")
+    (build_dir / "micropython.exe").write_bytes(_pe(0x8664))
 
     opts_ = windows_opts(arch="x64", build_dir=build_dir)
     build_windows(opts_, tmp_path / "mpy")
@@ -1067,3 +1090,55 @@ def test_musl_aarch64_carries_both_rules_at_once():
 
 def test_a_cell_needing_nothing_gets_nothing():
     assert build.unix_extra_cflags("manylinux_2_28_x86_64") == ()
+
+
+# ── verify_windows_output() -- the check windows did not have ───────────
+
+
+@pytest.mark.parametrize(
+    ("arch", "machine"), [("x64", 0x8664), ("x86", 0x014C), ("arm64", 0xAA64)]
+)
+def test_each_windows_arch_accepts_its_own_machine(arch, machine, tmp_path):
+    binary = tmp_path / "micropython.exe"
+    binary.write_bytes(_pe(machine))
+
+    build.verify_windows_output(arch, binary)
+
+
+def test_another_arch_machine_is_rejected(tmp_path):
+    # The whole point: `make` and `ld` both succeed when CROSS_COMPILE
+    # names another architecture's toolchain, so the failure this catches
+    # does not look like a failure anywhere else.
+    binary = tmp_path / "micropython.exe"
+    binary.write_bytes(_pe(0x8664))
+
+    with pytest.raises(UsermodBuildError, match="0x8664, expected 0xaa64"):
+        build.verify_windows_output("arm64", binary)
+
+
+def test_an_elf_named_exe_is_rejected(tmp_path):
+    # A `CROSS_COMPILE=` that resolved to the host's own gcc produces
+    # exactly this, and `binary.exists()` -- the only check windows had
+    # before -- passes it.
+    binary = tmp_path / "micropython.exe"
+    binary.write_bytes(b"\x7fELF" + bytes(0x100))
+
+    with pytest.raises(UsermodBuildError, match="not a PE executable at all"):
+        build.verify_windows_output("x64", binary)
+
+
+def test_a_dos_header_pointing_nowhere_is_rejected(tmp_path):
+    binary = tmp_path / "micropython.exe"
+    data = bytearray(_pe(0x8664))
+    data[0x3C:0x40] = (0x7000).to_bytes(4, "little")
+    binary.write_bytes(bytes(data))
+
+    with pytest.raises(UsermodBuildError, match="no PE signature"):
+        build.verify_windows_output("x64", binary)
+
+
+def test_every_windows_arch_declares_a_machine():
+    # A settings entry added without one would default to 0 and reject
+    # every real binary, which is a worse failure than no check at all.
+    for arch, settings in WINDOWS_ARCH_SETTINGS.items():
+        assert settings.machine, arch

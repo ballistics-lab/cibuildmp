@@ -103,6 +103,7 @@ here, not just the one that surfaced it.
 from __future__ import annotations
 
 import os
+import struct
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -1068,6 +1069,13 @@ def build_esp32(
 @dataclass(frozen=True)
 class WindowsArchSettings:
     cross_compile: str
+    # The COFF `Machine` value this arch's `micropython.exe` must carry,
+    # checked by `verify_windows_output()`. `unix`'s own `elf` field is
+    # the same idea for ELF, and exists for the same reason: point a
+    # build at another architecture's toolchain and `make` succeeds,
+    # `ld` succeeds, and the output is a working binary of the wrong
+    # architecture filed under the right identifier.
+    machine: int = 0
     # Clang-specific diagnostics MicroPython's own C wasn't written to
     # satisfy under -Werror -- empty for the GCC-based x64/x86 arches,
     # which need none. All three are load-bearing, not cosmetic, and were
@@ -1119,11 +1127,23 @@ class WindowsArchSettings:
 # of its own that would otherwise shadow the apt GCC these two arches
 # are pinned to. See its own comment -- the prefixes below are what
 # depend on that ordering being right.
+# COFF `Machine` values, from Microsoft's own PE format specification
+# (`IMAGE_FILE_MACHINE_*` in winnt.h). Listed rather than derived: there
+# is no relationship between a `CROSS_COMPILE` prefix and this number
+# that could be computed, and three constants are cheaper to read than a
+# mapping that pretends otherwise.
+_IMAGE_FILE_MACHINE_I386 = 0x014C
+_IMAGE_FILE_MACHINE_AMD64 = 0x8664
+_IMAGE_FILE_MACHINE_ARM64 = 0xAA64
+
 WINDOWS_ARCH_SETTINGS: dict[str, WindowsArchSettings] = {
-    "x64": WindowsArchSettings("x86_64-w64-mingw32-"),
-    "x86": WindowsArchSettings("i686-w64-mingw32-"),
+    "x64": WindowsArchSettings(
+        "x86_64-w64-mingw32-", machine=_IMAGE_FILE_MACHINE_AMD64
+    ),
+    "x86": WindowsArchSettings("i686-w64-mingw32-", machine=_IMAGE_FILE_MACHINE_I386),
     "arm64": WindowsArchSettings(
         "aarch64-w64-mingw32-",
+        machine=_IMAGE_FILE_MACHINE_ARM64,
         extra_cflags=(
             "-Wno-double-promotion -Wno-uninitialized "
             "-Wno-default-const-init-var-unsafe"
@@ -1177,6 +1197,47 @@ def windows_make_command(
         *opts.extra_make_args,
     ]
     return command
+
+
+def verify_windows_output(arch: str, binary: Path) -> None:
+    """The PE header `ld` actually wrote must name the architecture this
+    identifier claims -- `verify_unix_output()`'s counterpart for the
+    `windows` port, and for the identical reason: point a build at
+    another arch's toolchain and `make` succeeds, `ld` succeeds, and the
+    output is a working binary of the wrong architecture filed under the
+    right identifier. Until this existed `build_windows()` checked
+    `binary.exists()` and nothing else, so a `CROSS_COMPILE=` that
+    resolved to the host's own gcc would have produced a Linux ELF named
+    `micropython.exe` and passed.
+
+    PE puts the field three hops in, all of them little-endian
+    regardless of target (unlike ELF, which encodes its own byte order):
+    the DOS stub's `e_lfanew` at `0x3C` points at the `PE\0\0`
+    signature, and the COFF header's 16-bit `Machine` follows it
+    immediately. Read with `struct` rather than a PE library -- six bytes
+    at two offsets, against `pefile` as a new dependency for a project
+    that already declined to shell out to `auditwheel` for the ELF half.
+    """
+    expected = WINDOWS_ARCH_SETTINGS[arch].machine
+    data = binary.read_bytes()
+    if len(data) < 0x40 or data[:2] != b"MZ":
+        raise UsermodBuildError(
+            f"windows/{arch}: {binary} has no DOS header -- it is not a PE "
+            f"executable at all, whatever its name says"
+        )
+    (pe_offset,) = struct.unpack_from("<I", data, 0x3C)
+    if len(data) < pe_offset + 6 or data[pe_offset : pe_offset + 4] != b"PE\0\0":
+        raise UsermodBuildError(
+            f"windows/{arch}: {binary} has a DOS header but no PE signature at "
+            f"the offset it points to ({pe_offset:#x})"
+        )
+    (actual,) = struct.unpack_from("<H", data, pe_offset + 4)
+    if actual != expected:
+        raise UsermodBuildError(
+            f"windows/{arch}: build reported success but {binary.name}'s COFF "
+            f"header encodes machine {actual:#06x}, expected {expected:#06x} "
+            f"-- the binary is not the architecture this identifier names"
+        )
 
 
 def build_windows(
@@ -1290,4 +1351,5 @@ def build_windows(
         raise UsermodBuildError(
             f"windows/{opts.arch}: build reported success but {binary} is missing"
         )
+    verify_windows_output(opts.arch, binary)
     return binary
