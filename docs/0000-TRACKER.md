@@ -64,9 +64,9 @@ later; and cheap-with-strong-evidence beats expensive-and-speculative.
       native to: `x86_64`, `i686`, `armv7l`, and `aarch64` after the
       `-Wno-error=array-bounds` rule moved from per-cell to per-arch (it had
       been derived from one data point and was on the wrong axis; see [0044]'s
-      second addendum). They run in their own `build-usermod-optin` job, which
-      still carries `continue-on-error` -- **taking that off is the next thing
-      here**, now that all four pass. The remaining three (`ppc64le`, `s390x`,
+      second addendum). All four are green and required -- the
+      `build-usermod-optin` job carried `continue-on-error` for exactly one run
+      and no longer does (32961216804). The remaining three (`ppc64le`, `s390x`,
       `riscv64`) are emulated on every runner GitHub offers, and Alpine's own
       `community/micropython` excludes the first two outright, so they belong
       with [0044]'s descope decision rather than here

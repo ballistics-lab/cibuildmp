@@ -500,6 +500,45 @@ it wrong because the reason was "gcc did something odd here". Where the
 mechanism is understood, the axis follows from it; where it is not, the axis is
 a guess until a second cell disagrees.
 
+### Both fixes landed visibly, and `armv7l` is now settled directly
+
+Run [32961216804] is the first with line buffering and probe reporting in it,
+and the same `armv7l` leg that produced the nineteen seconds of silence above
+now reads:
+
+    11:02:36  cibuildmp: 1 usermod target(s) against MicroPython v1.28.0
+    11:02:36    downloaded micropython.tar.xz (104 MiB)
+    11:02:46    mpy-cross: building
+    11:02:50    linux/arm/v7: probing (pulls ghcr.io/...manylinux_2_31_armv7l@sha256:ce049c…)
+    11:03:10    linux/arm/v7: uname -m = armv8l (32-bit kernel)
+    11:03:47  LINK .../build-unix-manylinux_2_31_armv7l/micropython
+    11:03:48  cibuildmp: 1 usermod target(s) built in 57.3s
+
+Each line at the time the thing it describes happened, interleaved with `make`'s
+own output, instead of all of them stamped with the final summary's timestamp.
+The nineteen-second gap is still nineteen seconds — it is a real pull — but it
+now says so.
+
+**`armv8l` settles `armv7l` better than the timing argument did.** A 64-bit
+ARMv8 kernel reports `armv8l` to a 32-bit process; `qemu-arm` reports `armv7l`.
+So the first addendum's inference from build times ("59.5s is too fast to be
+emulated") is now a direct observation: the CPU is executing AArch32 at EL0 and
+the container is native. `default_runner`'s entry is confirmed rather than
+merely un-refuted.
+
+**And `linux32` is closed, in the sense that it is unreachable.** `armv8l` is
+not in `_64BIT_MACHINES`, so `_kernel_is_64bit()` is False and the wrap does
+not fire on `armv7l`; the real `manylinux_2_28_i686` image reports `i686` at
+`linux/386` for the same outcome. Both 32-bit cells take the non-wrapping
+branch, for two different reasons — pypa's i686 images apply the `PER_LINUX32`
+personality themselves, and an arm64 kernel names its own 32-bit personality
+`armv8l`. The wrapping branch stays unexercised, but it is no longer *unknown*:
+no cell cibuildmp declares can reach it. cibuildwheel's code is still right to
+carry it (an arbitrary 32-bit image on a 64-bit kernel does need it); it simply
+has nothing to do in this matrix.
+
+[32961216804]: https://github.com/ballistics-lab/cibuildmp/actions/runs/32961216804
+
 [32960761641]: https://github.com/ballistics-lab/cibuildmp/actions/runs/32960761641
 [0018]: 0018-windows-provisioning-fourth-story.md
 

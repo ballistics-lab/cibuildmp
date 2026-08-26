@@ -268,24 +268,29 @@ jobs:
 
   # ── usermod: the opt-in cells ───────────────────────────────────────
   #
-  # Same job as above in every respect except which identifiers it runs
-  # and that it is allowed to fail. Split rather than concatenated into
-  # one matrix on purpose: these cells are unproven, and a red leg here
-  # must not be able to hide a regression in the six that are green.
+  # Same job as above in every respect except which identifiers it runs.
+  # Split rather than concatenated into one matrix on purpose: these
+  # cells were unproven when the job was added, and a red leg here must
+  # not be able to hide a regression in the six that are green.
   #
-  # `continue-on-error: true` is temporary and should come off the moment
-  # the column is proven -- it is the difference between "we know which
-  # of these work" and "these are required", and only the first is true
-  # today. Record 0044 predicts entries will be needed in
-  # `unix_extra_cflags()` here: the whole musllinux column already needs
-  # `-Wno-error=cpp` for musl's own `sys/cdefs.h` deprecation warning
-  # reaching berkeley-db through extmod/modbtree.c, and two of the first
-  # three cells ever built needed something. Finding out which of these
-  # four need what is the entire point of the job.
+  # **It carried `continue-on-error: true` for exactly one run.** That is
+  # the difference between "we know which of these work" and "these are
+  # required", and the first run (32960761641) answered the first
+  # question: three of four green immediately, and
+  # `musllinux_1_2_aarch64` failing on the same gcc 14 `mbedtls_xor`
+  # false positive `manylinux_2_28_aarch64` already had a suppression
+  # for -- which turned out to be an architecture rule filed as a
+  # per-cell one (record 0044's second addendum). With that moved, all
+  # four pass (32961216804), so the flag is off and these are required
+  # like everything else.
+  #
+  # The three musl cells that are *not* here -- `ppc64le`, `s390x`,
+  # `riscv64` -- are emulated on every runner GitHub offers, and Alpine's
+  # own community/micropython excludes the first two outright. They are a
+  # decision about cost, not more of this one.
   build-usermod-optin:
     needs: usermod-matrix
     runs-on: ${{ matrix.os }}
-    continue-on-error: true
     permissions:
       contents: read
     strategy:
