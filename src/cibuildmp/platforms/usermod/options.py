@@ -24,7 +24,7 @@ Deliberately narrower than `natmod/options.py`'s own `Options` still: no
 `variant` (a real field on three of five ports' `*BuildOptions`, still
 config-surface-less) yet.
 
-`module-dir`/`manifest`/`extra-make-args` are genuinely global-with-
+`user-c-modules`/`manifest`/`extra-make-args` are genuinely global-with-
 per-platform-override now (Phase F): resolved per target through the
 same `cibuildmp.options.Options` cascade `natmod/options.py` uses, not
 eagerly-resolved scalar fields shared by every selected port
@@ -64,13 +64,35 @@ from .targets import (
     usermod_targets,
 )
 
-DEFAULT_MODULE_DIR = "usermod"
+# "." (the project root), not a literal "usermod" subdirectory --
+# record 0051's own sixth/ninth addenda. Broader, not narrower: py.mk's
+# own `$(USER_C_MODULES)/*/micropython.mk` glob finds a module one level
+# below whatever this points at, so "." still finds a real `usermod/`
+# subdirectory exactly the way the old "usermod" default did, but also
+# finds any other top-level directory holding a module, whatever it is
+# named -- the same shape every real consumer this repo has seen
+# (`examples/template`, micropython-bclibc, a7p) already configures by
+# hand, because their own module dir sits beside sibling source (a
+# `src/` this repo's own `examples/template` shares between natmod and
+# usermod) that the narrower default's own bind-mount could not reach.
+DEFAULT_USER_C_MODULES = "."
 
 # Keys shared across every usermod port's own table -- the platform-
 # specific axis key (`archs`/`boards`, from `axis_key(port)`) is added
-# per port in `_port_schema()` below.
+# per port in `_port_schema()` below. `user-c-modules`, not `module-dir`
+# -- natmod's own `module-dir` names the directory `make -C` runs in
+# directly (it must contain that project's own Makefile); this key's
+# value is instead forwarded as `USER_C_MODULES=` into the *MicroPython
+# port's own* Makefile/CMake, a directory that never needs a Makefile of
+# its own. Same underlying purpose ("point at your module's root"),
+# different downstream consumer -- sharing one name with natmod's own
+# key meant `examples/template/cibuildmp.toml` could not promote one
+# shared default without silently overriding natmod's own "natmod"
+# default at the same time (record 0051's sixth addendum). Named for the
+# literal Makefile variable it feeds, the same principle `extra-make-args`
+# already follows.
 USERMOD_PORT_BASE: frozenset[str] = frozenset(
-    {"module-dir", "manifest", "extra-make-args"}
+    {"user-c-modules", "manifest", "extra-make-args"}
 )
 
 
@@ -90,11 +112,63 @@ SCHEMAS: dict[str, frozenset[str]] = {port: _port_schema(port) for port in KNOWN
 __all__ = [
     "UsermodBuildOptions",
     "UsermodOptions",
+    "check_usermod_family_table",
 ]
 
 
 class UsermodConfigError(Exception):
     pass
+
+
+def check_usermod_family_table(
+    raw: Mapping[str, Any], *, error: type[Exception] = UsermodConfigError
+) -> dict[str, Any]:
+    """Parse and validate `[usermod]` -- shared defaults for all five
+    usermod ports at once (record 0051's ninth addendum), sibling to
+    `[natmod]`, not a container over `[unix]`/`[esp32]`/etc. and not a
+    selector: which ports are active is still table presence alone
+    (Phase F), unchanged by this table's own presence or absence.
+
+    Two failure shapes get distinct treatment. The pre-Phase-F shape --
+    `ports = [...]`, or a nested `[usermod.<port>]` sub-table TOML parses
+    as a dict value here -- means this config has not migrated at all,
+    and gets a dedicated, specific message pointing at the real shape,
+    the same courtesy `cli.py`'s own (now-removed) blanket `[usermod]`
+    rejection used to give. Anything else unknown to `USERMOD_PORT_BASE`
+    (a typo, a per-port axis key like `archs` written here instead of in
+    its own port table) falls through to the ordinary `check_keys()`
+    error.
+
+    Exported (not `_`-private) because `cli.py`'s own `active_platforms()`
+    calls this unconditionally, before it is known whether any usermod
+    port is even active -- a config whose *only* usermod content is a
+    stale `[usermod] ports = [...]` selects zero usermod ports under the
+    new presence rule, so nothing would otherwise ever call into this
+    module far enough to catch it, and the config would silently just
+    build natmod alone (record 0048's own bug class). `UsermodOptions.load()`
+    below calls this again for direct callers that bypass `cli.py`
+    entirely (most tests) -- cheap, no I/O, not the "parsing the file
+    twice" `read_config()`'s own `preread` already avoids.
+    """
+    table = dict(raw.get("usermod") or {})
+    if "ports" in table:
+        raise error(
+            "[usermod] ports = [...] no longer exists. Which usermod ports "
+            "are active is table presence now -- write [unix], [windows], "
+            "[qemu], [webassembly], [esp32] directly, sibling to [usermod] "
+            "and [natmod]. [usermod] itself only holds shared defaults for "
+            "every active port now (user-c-modules/manifest/"
+            "extra-make-args), not a port list."
+        )
+    nested = sorted(k for k, v in table.items() if isinstance(v, dict))
+    if nested:
+        raise error(
+            f"[usermod.{nested[0]}] no longer exists -- there is no more "
+            f"nesting under [usermod]. Write [{nested[0]}] as its own "
+            "top-level table, sibling to [usermod] and [natmod]."
+        )
+    check_keys(table, USERMOD_PORT_BASE, where="[usermod]", error=error)
+    return table
 
 
 def _as_list(value: Any, key: str) -> list[str]:
@@ -122,15 +196,15 @@ def _as_list_or_str(value: Any, key: str) -> list[str]:
 class UsermodBuildOptions:
     """Ingredients for one target's build, not yet the port-specific
     `*BuildOptions` `usermod/build.py` wants -- `usermod/orchestrate.py`
-    resolves `manifest`/`module_dir` into real filesystem paths (writing
-    the combined manifest text, picking a build directory) and builds
-    the actual `UnixBuildOptions`/etc. from these, the same split
+    resolves `manifest`/`user_c_modules` into real filesystem paths
+    (writing the combined manifest text, picking a build directory) and
+    builds the actual `UnixBuildOptions`/etc. from these, the same split
     `options.BuildOptions` -> `build.build_target()` already has for
     natmod (nothing here touches the filesystem)."""
 
     target: UsermodTarget
     micropython: str
-    module_dir: str
+    user_c_modules: str
     manifest: str
     extra_make_args: list[str] = field(default_factory=list)
 
@@ -159,7 +233,7 @@ class UsermodOptions:
     # The shared, top-level [[overrides]] list (0051 point 7, merged with
     # natmod's own in Phase G) -- not axis_overrides above (which
     # port/arch a config selects), per-target *option* overrides layered
-    # over module-dir/manifest/extra-make-args, the same "file -> matching
+    # over user-c-modules/manifest/extra-make-args, the same "file -> matching
     # override (each with its own inherit rule) -> environment" shape
     # natmod's own Options.build_options() already has.
     overrides: list[dict[str, Any]] = field(default_factory=list)
@@ -169,7 +243,7 @@ class UsermodOptions:
     # (usermod/cli.py) still needs to union into this after load().
     enable: frozenset[str] = frozenset()
     # The cascade instance backing build_options()'s own per-target
-    # resolution of module-dir/manifest/extra-make-args -- env excluded
+    # resolution of user-c-modules/manifest/extra-make-args -- env excluded
     # here (build_options() checks the environment itself, after
     # overrides, matching the precedence it has always had),
     # platform_tables keyed by port name.
@@ -224,6 +298,8 @@ class UsermodOptions:
         else:
             micropython = str(micropython_value).split() or [DEFAULT_MICROPYTHON]
 
+        family_table = check_usermod_family_table(raw, error=UsermodConfigError)
+
         platform_tables: dict[str, dict[str, Any]] = {}
         axis_overrides: dict[str, list[str]] = {}
         for port in ports:
@@ -237,7 +313,10 @@ class UsermodOptions:
                 axis_overrides[port] = _as_list(port_table[key], f"{port}.{key}")
 
         cascade = OptionCascade(
-            global_table=raw, platform_tables=platform_tables, env={}
+            global_table=raw,
+            family_table=family_table,
+            platform_tables=platform_tables,
+            env={},
         )
 
         overrides = load_overrides(raw, error=UsermodConfigError)
@@ -318,7 +397,7 @@ class UsermodOptions:
         return UsermodBuildOptions(
             target=target,
             micropython=target.tag,
-            module_dir=str(opt("module-dir", DEFAULT_MODULE_DIR)),
+            user_c_modules=str(opt("user-c-modules", DEFAULT_USER_C_MODULES)),
             manifest=str(opt("manifest", "")),
             extra_make_args=_as_list_or_str(opt("extra-make-args"), "extra-make-args"),
         )

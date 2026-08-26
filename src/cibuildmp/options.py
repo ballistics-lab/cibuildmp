@@ -187,18 +187,26 @@ def override_extra_layers(
 class Options:
     """One config's worth of cascade-resolvable option tables.
 
-    `global_table` is the top-level config dict; `platform_tables` maps a
-    platform name to that platform's own sub-dict (e.g. `raw.get("unix")`
-    once Phase F flattens the config tree); `env` is the environment
-    mapping (`os.environ` by default, injectable so tests never touch the
-    real process environment). Neither CLI-supplied values nor
-    `[[overrides]]` matches live here -- both are the caller's own,
-    layered in via `get()`'s own `extra_layers`, so this class stays
-    config-file-and-environment-only, the same split upstream keeps
-    between its own `Options` (file + env) and `argparse` (CLI).
+    `global_table` is the top-level config dict, meaningful to *every*
+    family (natmod included) -- `platform_tables` maps a platform name to
+    that platform's own sub-dict (e.g. `raw.get("unix")` once Phase F
+    flattens the config tree). `family_table` sits between the two: one
+    dict shared by every platform in *one* family and no other (record
+    0051's ninth addendum) -- usermod's own `[usermod]` table
+    (`user-c-modules`/`manifest`/`extra-make-args`, defaults for all five
+    ports at once), empty for natmod, whose one platform already *is* its
+    only family, so it has nothing a separate family tier would add.
+    `env` is the environment mapping (`os.environ` by default, injectable
+    so tests never touch the real process environment). Neither
+    CLI-supplied values nor `[[overrides]]` matches live here -- both are
+    the caller's own, layered in via `get()`'s own `extra_layers`, so
+    this class stays config-file-and-environment-only, the same split
+    upstream keeps between its own `Options` (file + env) and `argparse`
+    (CLI).
     """
 
     global_table: Mapping[str, Any]
+    family_table: Mapping[str, Any] = field(default_factory=dict)
     platform_tables: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     env: Mapping[str, str] = field(default_factory=dict)
 
@@ -211,11 +219,20 @@ class Options:
         env_plat: bool = True,
         extra_layers: Sequence[tuple[Any | None, str]] = (),
     ) -> Any:
-        """`default -> global -> platform -> env -> env(platform) ->
-        extra_layers`, most-specific-wins. `extra_layers` is where a
-        caller threads in CLI-supplied values or matching
+        """`default -> global -> family -> platform -> env ->
+        env(platform) -> extra_layers`, most-specific-wins. `extra_layers`
+        is where a caller threads in CLI-supplied values or matching
         `[[overrides]]` entries (Phase G), each with its own inherit
         rule -- this method does not know about either.
+
+        `family_table` sits strictly between `global` and `platform`:
+        more specific than "every platform's own default" (natmod never
+        sees it -- its own `Options` instance is always constructed with
+        an empty one), less specific than a value written directly in
+        one platform's own table. A caller with no real family tier
+        (natmod, or a direct test construction) passes nothing and gets
+        exactly today's four-layer behaviour -- an empty `Mapping.get()`
+        always contributes `None`, which `resolve_cascade()` skips.
 
         Env var names are `CIBMP_<KEY>` and, when `platform` is given and
         `env_plat` is true, `CIBMP_<KEY>_<PLATFORM>` too -- upstream's own
@@ -225,6 +242,7 @@ class Options:
         layers: list[tuple[Any | None, str]] = [
             (default, InheritRule.NONE),
             (self.global_table.get(name), InheritRule.NONE),
+            (self.family_table.get(name), InheritRule.NONE),
         ]
         if platform is not None:
             layers.append(

@@ -1,6 +1,6 @@
 # 0051 — one selector for both modes, and an identifier that names what a build is compatible with
 
-Status: In progress — Shape points 1/2/3/5/7/8 implemented 2026-08-26; 4/6 target architecture decided and phased (see third addendum), Phases E, F, G and H of it landed the same day (fourth/fifth/seventh addenda); a `module-dir`/`user-c-modules` key split decided but not yet implemented (sixth addendum). Phase I (README/docs consolidation) is what remains.
+Status: Implemented — Shape points 1-8 and 4/6's target architecture (phased E-I) landed 2026-08-26 (fourth/fifth/seventh/eighth addenda); the sixth addendum's own `module-dir`/`user-c-modules` key split landed the same day too, together with a real third cascade tier (`default → global → family → platform → env → CLI`) and `[usermod]`'s own return as a non-selector family-defaults table (ninth addendum). Four independently-scoped follow-ons surfaced while finishing this record -- `[publish]`/`extra-files` split per family, vanilla/no-module usermod builds, a formalized `build-platforms.toml`, and a cross-family `FAMILY_SCHEMA` collision guard -- are explicitly out of this record's own remaining scope; see the ninth addendum's own closing section.
 
 Rewritten twice the same day it was written, before anything was built on it.
 The first draft framed this as "usermod cannot build two MicroPython versions",
@@ -1136,7 +1136,235 @@ Landed the same day as Phases E–H, closing this record out.
   undocumented — recorded here so the next person who wonders the same
   thing finds the answer instead of re-deriving it.
 
-Every point in this record (1/2/3/4/5/6/7/8) is now implemented. Nothing
-about it is still open; the module-dir/user-c-modules key split (sixth
-addendum) is a separate, independently-decided item, not part of this
-record's own remaining scope.
+Points 1/2/3/5/7/8 and phases E-I of points 4/6 are implemented. **This
+record is not fully closed** -- the sixth addendum's own module-dir/
+user-c-modules key split is decided but still not implemented, and a
+same-day follow-on design discussion added to that same open item
+(default becomes `"."`, `[publish]` splits into per-family `extra-files`
+keys, a possible `FAMILY_SCHEMA` registry). An earlier draft of this
+addendum claimed the record was fully closed and waved the sixth
+addendum's own open item away as "separate, independently-decided" --
+that was wrong, caught directly by the user rather than by this session's
+own review, and is corrected here rather than silently edited away.
+
+---
+
+## Addendum, 2026-08-26 — the sixth addendum's rename landed, and a real
+## third cascade tier came with it
+
+Landed the same day as everything above, closing this record's own last
+open item -- for real this time (see the eighth addendum's own
+self-correction just above).
+
+### `module-dir` → `user-c-modules`, and the default changes too
+
+Usermod's own key renamed to `user-c-modules` -- the literal Makefile
+variable it feeds -- exactly as the sixth addendum decided; natmod's own
+`module-dir` is untouched. `UsermodOptions`/`UsermodBuildOptions`'s own
+`module_dir` field renamed to `user_c_modules` throughout (`options.py`,
+`orchestrate.py`); the *resolved* value `orchestrate.py`'s own
+`_port_build_options()` computes from it (after `portinfo.
+resolve_user_c_modules()` runs) kept a distinct local name
+(`resolved_user_c_modules`) specifically so the raw config value and the
+value actually passed as `USER_C_MODULES=` are never conflated in the
+same function.
+
+The default changes too, from `"usermod"` to `"."` -- a second, smaller
+decision made the same day, once the user pointed out that `"usermod"`
+was never an argued default: it was a literal name-collision with the
+`[usermod]` table that existed before Phase F removed it (`[usermod]
+module-dir = "usermod"` read naturally; once `[usermod]` stopped being a
+mode-table, the string lost its own reason to exist). `"."` is strictly
+broader, not narrower -- `py.mk`'s own `$(USER_C_MODULES)/*/micropython.mk`
+glob still finds a real `usermod/` subdirectory the same way, and also
+finds any other top-level module directory, whatever it's named, which
+is what `examples/template`'s own layout (and micropython-bclibc's, and
+a7p's) already needs by hand today. `examples/template/cibuildmp.toml`'s
+three repeated `module-dir = "."` lines -- the exact awkwardness the
+sixth addendum opened with -- are simply deleted now; the tool's own
+default already does what they used to force.
+
+### A real question, asked and answered directly: why isn't `micropython`
+### foldable into `build`/`skip`?
+
+A side discussion this session that is worth recording because it
+surfaced a genuine gap in this project's own self-knowledge, not just in
+the record. Challenged on why `micropython = "v1.29.0"` still exists as
+its own key when `build`/`skip` already glob over identifiers: the first
+answer given ("the identifier space isn't knowable without a checkout")
+was wrong, and the user caught it directly by pointing at
+`resources/natmod.toml`'s own `[mpy-abi]` table -- a hand-transcribed
+tag→ABI mapping already used by `abi_for_tag()` to resolve identifiers
+with **no checkout at all**, exactly the `build-platforms.toml` shape
+cibuildwheel itself keeps. `--print-build-identifiers`/`--dry-run`
+already prove this: they emit real identifiers with zero network access.
+
+The corrected answer, arrived at together: cibuildwheel's own version
+catalog is a fact about the *ecosystem* (which CPython interpreters
+exist, already built, ready to install) -- cibuildmp compiles MicroPython
+itself from source for every build, and *which* upstream tag to compile
+against is a fact about the *consuming project*, not the ecosystem, so
+there is nothing shared to pre-curate the way cibuildwheel's own list is.
+Even granting a full tag catalog, `natmod` still needs a tie-break (many
+tags share one ABI; something has to pick the actual commit to compile),
+and `usermod` -- whose identifier really does lead with the literal tag
+-- would turn an unbounded `build`/`skip` glob into an unbounded set of
+real git-fetch-and-compile jobs, a cost profile cibuildwheel's own
+already-built-interpreter model never has to reckon with. `micropython`
+stays its own explicit, consumer-declared key for that reason, not
+because the space is unknown. Formalizing `[mpy-abi]` as an explicitly
+named, documented `build-platforms.toml`-equivalent (rather than an
+internal implementation detail nobody had connected to this question
+until asked directly) is flagged as a real follow-on, not started.
+
+### `[usermod]` comes back -- not as a mode, as a real cascade tier
+
+The bigger decision. The sixth addendum's own original plan was narrower
+than what actually landed: promote `user-c-modules` to the existing
+"global" cascade tier (the same one `[natmod]` reads its own defaults
+from), relying on the fact that natmod's own schema never reads a key by
+that name to make the promotion safe. Presented as an option, the user
+rejected it directly: *"Мені не подобається, треба щоб все ж був
+каскад"* ("I don't like it, there needs to actually be a cascade
+[tier]") -- followed, once a lighter code-only alternative (a
+`FAMILY_SCHEMA` registry plus a collision-guard test, no new TOML
+concept) was offered as the cheaper option, by an explicit preference for
+the heavier one anyway: *"Ну тобто я кажу що мене влаштовує ще один
+каскад і оновлення структури конфігу бо це легше документувати і
+менюйнтейнити без колізій"* ("I'm saying I'm fine with one more cascade
+[tier] and updating the config structure, because it's easier to
+document and maintain without collisions"). The reasoning that decided
+it, from the user directly: relying on "these two schemas just happen
+not to collide" is real, standing technical debt -- true today with two
+families, silently harder to keep true by inspection alone once a third
+(zephyr, [0022]) exists, and genuinely difficult to document honestly
+("global" implying "every platform's own default" when a key is really
+only ever meaningful to one family is, in the user's own words, *"херня
+яку важко документувати"* -- something that's a pain to document
+truthfully).
+
+**The chosen shape:** `[usermod]` returns as a top-level table, sibling
+to `[natmod]`, but is not the pre-Phase-F `[usermod]` -- no `ports =
+[...]`, no nested `[usermod.<port>]` sub-tables, not a selector at all.
+It holds shared defaults for whichever usermod ports are active this
+invocation, and it sits as a real, distinct layer in the cascade:
+
+```
+default → global → family → platform → env → CLI
+```
+
+`cibuildmp/options.py`'s own `Options` dataclass gained one new field,
+`family_table: Mapping[str, Any] = field(default_factory=dict)`, and
+`.get()` gained one new line in its own layer list
+(`(self.family_table.get(name), InheritRule.NONE)`, between global and
+platform). Backward-compatible by construction: an `Options` instance
+built with no `family_table` argument (natmod's own, and every existing
+direct test construction) reads `{}.get(name)` → `None`, which
+`resolve_cascade()` already skips -- today's four-layer behaviour,
+unchanged, verified directly (`tests/test_options_cascade.py`'s own
+`test_options_get_no_family_table_is_fine`).
+
+`usermod/options.py` gained `check_usermod_family_table(raw, *, error)`:
+parses `raw.get("usermod")`, and validates it in two tiers. A key
+genuinely unknown to `USERMOD_PORT_BASE` (a typo, or a per-port axis key
+like `archs` written here instead of in its own port table) falls
+through to the ordinary `check_keys()` error. The two pre-Phase-F shapes
+-- a lingering `ports = [...]`, or a nested `[usermod.<port>]` sub-table
+(TOML parses this as a dict value inside the `usermod` table) -- get
+dedicated, specific messages naming the real migration, the same
+courtesy `cli.py`'s own blanket rejection used to give before this
+addendum, since a generic "unknown key" error would be a worse
+experience for the single most likely real leftover from an unmigrated
+config. `UsermodOptions.load()` threads the parsed table into
+`OptionCascade(..., family_table=usermod_table, ...)` and calls this
+validator itself, independent of `cli.py` -- direct callers (most tests)
+still get full validation.
+
+**Where this gets validated, and why it cannot wait for a platform to be
+active.** A config whose only usermod content is a stale `[usermod]
+ports = [...]`, with no `[unix]`/`[esp32]`/etc. table present at all,
+selects **zero** usermod ports under Phase F's own presence rule --
+nothing would ever call `UsermodOptions.load()` far enough to see the
+stale key, and the config would silently just build natmod alone
+(record 0048's own bug class, reappearing in a new shape). So validation
+has to run unconditionally, before `active_platforms()` decides which
+platforms are active, not deferred to whichever family ends up loaded.
+
+### The dispatch-genericity regression, caught and fixed within the same
+### pass
+
+The first working version of this wired `cli.py`'s own `active_platforms()`
+directly to `usermod.options.check_usermod_family_table` -- a real,
+immediate regression against Phase H's own central invariant
+(`cli.py` must never name `natmod`/`usermod` directly, so a third family
+costs zero `cli.py` changes), caught by re-reading `platforms/__init__.py`'s
+own module docstring rather than by the user this time. Fixed by adding
+a third function to the `PlatformModule` Protocol,
+`validate_family_table(raw, *, error) -> None`: `usermod`'s own
+implementation wraps `check_usermod_family_table()`; `natmod`'s own is a
+genuine no-op (one platform is already its only family -- `[natmod]`'s
+own keys are validated exactly where they always have been, inside
+`resolve_options()`). `active_platforms()` now reads:
+
+```python
+for family in dict.fromkeys(PLATFORM_FAMILY.values()):
+    family.validate_family_table(raw, error=ConfigError)
+```
+
+`dict.fromkeys()` dedupes the five usermod entries in `PLATFORM_FAMILY`
+down to one call, in first-appearance order. `error` is always
+`ConfigError` (natmod's own) regardless of which family is validating --
+deliberately not each family's native exception class, so `main()`'s
+existing `except ConfigError` around `active_platforms()` does not need
+widening for a failure that happens before any family has actually been
+dispatched to. A future family with its own family-level table (zephyr,
+should it ever want one) costs one new module implementing this same
+function -- zero `cli.py` changes, the actual property this whole
+redesign has been protecting since Phase H's own dispatch correction.
+
+### What is still explicitly deferred, not silently dropped
+
+- **`[publish]`/`extra-files`, split per family.** Discussed the same
+  day: `natmod.extra-files` replacing the shared `[publish]` table
+  outright (natmod's own `[publish] extra-files` moves to being a
+  natmod-scoped option instead of its own top-level table), plus a new,
+  not-yet-designed `usermod.extra-files` for a real but currently
+  unaddressed want (a consumer's own extra file shipped alongside a
+  usermod firmware build, the same way natmod's own facade.py ships
+  alongside a `.mpy`). Not started -- flagged for the next record.
+- **Vanilla/stock firmware builds with no module attached.** The
+  eighth addendum's own "untested and unsupported by design" finding is
+  no longer the final word -- the user lifted that non-goal directly
+  (*"non-goal знімаю"*) and settled the shape it should take: an
+  extension of the usermod family (the build mechanism is identical,
+  module present or not), not a new platform family, since a genuinely
+  new family should mean a genuinely different build mechanism the way
+  natmod and usermod actually are different, not usermod-minus-two-keys
+  wearing a new name. The sharpest open question inside that: an absent
+  module must be an **explicit** opt-in (something like `no-module =
+  true`), not merely "the directory doesn't exist" going undetected,
+  since today a typo'd `user-c-modules` path would silently produce a
+  vanilla build with no error at all -- precisely the silent-failure
+  shape this whole project exists to refuse. Not started, no config
+  surface yet.
+- **`build-platforms.toml`, formalized.** `resources/natmod.toml`'s own
+  `[mpy-abi]` table already *is* most of this, discovered mid-discussion
+  above -- what is missing is naming it, documenting the reasoning (why
+  cibuildmp maintains this rather than querying GitHub's own tag API --
+  ecosystem-shared vs. consumer-declared, argued above), and deciding
+  whether usermod's own tag-based identifiers want an equivalent surface.
+  Not started.
+- **`FAMILY_SCHEMA` as a formal, generalized registry.** Superseded by
+  the real cascade tier this addendum actually built -- `family_table`
+  makes the union-of-known-keys registry idea moot for *resolution*, but
+  the underlying collision question (can two families' own family-level
+  schemas share a key name safely) still has no cross-family guard test
+  the way `OVERRIDE_UNION_KEYS >= USERMOD_PORT_BASE` guards the override
+  surface. Worth one when a second family actually grows a family table
+  (zephyr, whenever that lands), not before.
+
+Every point in this record, including the sixth addendum's own rename,
+is now implemented. What remains -- the four items above -- are new,
+independently-scoped follow-on work surfaced by finishing this record,
+not part of its own original scope. They get the next unused record
+number when picked up, not folded back into this one.

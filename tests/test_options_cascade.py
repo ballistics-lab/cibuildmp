@@ -175,3 +175,45 @@ def test_options_get_extra_layers_come_last_and_can_append():
 def test_options_get_no_platform_table_for_this_platform_is_fine():
     options = Options(global_table={"archs": ["x64"]}, platform_tables={})
     assert options.get("archs", platform="unix") == ["x64"]
+
+
+# ── family_table (record 0051's ninth addendum) ──────────────────────────
+
+
+def test_options_get_family_beats_global():
+    options = Options(
+        global_table={"user-c-modules": "global"},
+        family_table={"user-c-modules": "family"},
+    )
+    assert options.get("user-c-modules") == "family"
+
+
+def test_options_get_platform_beats_family():
+    options = Options(
+        global_table={},
+        family_table={"user-c-modules": "family"},
+        platform_tables={"unix": {"user-c-modules": "unix-only"}},
+    )
+    assert options.get("user-c-modules", platform="unix") == "unix-only"
+    # A platform with no override of its own still falls through to the
+    # family layer, not straight past it to global.
+    assert options.get("user-c-modules", platform="webassembly") == "family"
+
+
+def test_options_get_no_family_table_is_fine():
+    # The default -- an Options instance with no family_table at all
+    # (natmod's own; a direct construction like every test above this
+    # point) behaves exactly as it did before this layer existed. An
+    # empty Mapping.get() always contributes None, which resolve_cascade()
+    # skips outright.
+    options = Options(global_table={"archs": ["x64"]})
+    assert options.get("archs", platform="natmod") == ["x64"]
+
+
+def test_options_get_env_beats_family():
+    options = Options(
+        global_table={},
+        family_table={"user-c-modules": "family"},
+        env={"CIBMP_USER_C_MODULES": "from-env"},
+    )
+    assert options.get("user-c-modules") == "from-env"

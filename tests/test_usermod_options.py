@@ -92,7 +92,7 @@ def test_an_unknown_key_on_axisless_port_is_rejected(tmp_path):
     # unknown to webassembly's own schema, the same as any other typo.
     # (Before Phase F, any non-empty table on an axisless port was
     # rejected outright, since a per-port table could only ever mean an
-    # axis override; now it can also carry module-dir/manifest/
+    # axis override; now it can also carry user-c-modules/manifest/
     # extra-make-args, so only a key genuinely unknown to the schema is
     # an error.)
     write_config(
@@ -125,24 +125,30 @@ def test_axis_table_qemu_boards_selects_riscv(tmp_path):
     ]
 
 
-def test_module_dir_and_manifest_default(tmp_path):
+def test_user_c_modules_and_manifest_default(tmp_path):
+    # "." (the project root), not "usermod" -- record 0051's ninth
+    # addendum: the old default was a leftover of the [usermod] table
+    # name that used to exist pre-Phase-F, not an argued choice, and "."
+    # is the broader glob (py.mk's own USER_C_MODULES/*/micropython.mk
+    # still finds a real usermod/ subdirectory just as well).
     write_config(tmp_path, "[unix]\n")
     options = UsermodOptions.load(tmp_path)
     build_options = options.build_options(options.targets()[0])
 
-    assert build_options.module_dir == "usermod"
+    assert build_options.user_c_modules == "."
     assert build_options.manifest == ""
 
 
-def test_module_dir_and_manifest_overridable_globally(tmp_path):
+def test_user_c_modules_and_manifest_overridable_globally(tmp_path):
     # A global (bare top-level) value is every active port's own default
     # -- the cascade's whole point (Phase F): natmod has no `manifest`
     # key at all, so this is unambiguous even in a config that also has
-    # [natmod].
+    # [natmod]. Still true after the ninth addendum's own [usermod]
+    # family tier -- global stays the least-specific layer, not replaced.
     write_config(
         tmp_path,
         """
-        module-dir = "mymod"
+        user-c-modules = "mymod"
         manifest = "extra_manifest.py"
         [unix]
         """,
@@ -150,29 +156,68 @@ def test_module_dir_and_manifest_overridable_globally(tmp_path):
     options = UsermodOptions.load(tmp_path)
     build_options = options.build_options(options.targets()[0])
 
-    assert build_options.module_dir == "mymod"
+    assert build_options.user_c_modules == "mymod"
     assert build_options.manifest == "extra_manifest.py"
 
 
-def test_module_dir_overridable_per_port(tmp_path):
+def test_user_c_modules_overridable_per_port(tmp_path):
     # The direct test for Phase F's own cascade wiring: a value only
     # [unix] sets does not leak into [webassembly], which falls back to
-    # the global default -- previously impossible, since module-dir was
+    # the global default -- previously impossible, since this key was
     # one shared scalar across every selected port unconditionally.
     write_config(
         tmp_path,
         """
-        module-dir = "shared"
+        user-c-modules = "shared"
         [unix]
-        module-dir = "unix-only"
+        user-c-modules = "unix-only"
         [webassembly]
         """,
     )
     options = UsermodOptions.load(tmp_path)
-    by_port = {t.port: options.build_options(t).module_dir for t in options.targets()}
+    by_port = {
+        t.port: options.build_options(t).user_c_modules for t in options.targets()
+    }
 
     assert by_port["unix"] == "unix-only"
     assert by_port["webassembly"] == "shared"
+
+
+def test_usermod_family_table_beats_global_but_platform_beats_family(tmp_path):
+    # The direct test for the ninth addendum's own new cascade tier:
+    # [usermod] sits strictly between the bare top level and each
+    # port's own table. [webassembly] has no override of its own, so it
+    # falls through to [usermod]'s value, not the (less specific) global
+    # one; [unix] overrides both.
+    write_config(
+        tmp_path,
+        """
+        user-c-modules = "global-default"
+        [usermod]
+        user-c-modules = "family-default"
+        [unix]
+        user-c-modules = "unix-only"
+        [webassembly]
+        """,
+    )
+    options = UsermodOptions.load(tmp_path)
+    by_port = {
+        t.port: options.build_options(t).user_c_modules for t in options.targets()
+    }
+
+    assert by_port["unix"] == "unix-only"
+    assert by_port["webassembly"] == "family-default"
+
+
+def test_empty_usermod_family_table_is_not_an_error(tmp_path):
+    # [usermod] with nothing in it (or nothing at all) is legal -- it is
+    # not a selector any more (Phase F), so its own presence or absence
+    # never changes which ports are active, only their shared defaults.
+    write_config(tmp_path, "[usermod]\n[unix]\n")
+    options = UsermodOptions.load(tmp_path)
+    build_options = options.build_options(options.targets()[0])
+
+    assert build_options.user_c_modules == "."
 
 
 def test_a_key_valid_for_a_different_platform_is_rejected(tmp_path):
@@ -241,12 +286,12 @@ def test_micropython_list_keeps_every_entry(tmp_path):
     assert options.micropython == ["v1.24.0", "v1.21.0"]
 
 
-def test_build_options_carries_module_dir_and_manifest(tmp_path):
+def test_build_options_carries_user_c_modules_and_manifest(tmp_path):
     write_config(
         tmp_path,
         """
         [unix]
-        module-dir = "mymod"
+        user-c-modules = "mymod"
         manifest = "extra.py"
         """,
     )
@@ -258,7 +303,7 @@ def test_build_options_carries_module_dir_and_manifest(tmp_path):
         build_options.identifier == f"{DEFAULT_MICROPYTHON}-unix-manylinux_2_28_x86_64"
     )
     assert build_options.port == "unix"
-    assert build_options.module_dir == "mymod"
+    assert build_options.user_c_modules == "mymod"
     assert build_options.manifest == "extra.py"
 
 

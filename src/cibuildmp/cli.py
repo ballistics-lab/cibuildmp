@@ -185,43 +185,31 @@ def _parse_platform_names(value: str) -> list[str]:
     return names
 
 
-def _reject_legacy_usermod_table(raw: dict) -> None:
-    """`[usermod]` (and therefore `[usermod.<port>]`, which always nests
-    under it in TOML) no longer exists, as of Phase F -- every port is its
-    own top-level table now, sibling to `[natmod]`, and `ports = [...]` is
-    gone in favour of table presence. A lingering `[usermod]` is loud and
-    specific, not folded into a generic "unknown key" error -- this is the
-    one real breaking change point 6 (record 0051) always was, and every
-    existing usermod config needs to migrate, not guess why it broke.
-    """
-    if "usermod" in raw:
-        raise ConfigError(
-            "[usermod] no longer exists. Every usermod port is its own "
-            "top-level table now, sibling to [natmod]: [unix], [windows], "
-            "[qemu], [webassembly], [esp32]. There is no more `ports = "
-            "[...]` list -- writing a platform's own table (even an empty "
-            "one) is what selects it, the same rule [natmod]'s own "
-            "presence already followed. See "
-            "docs/records/0051-usermod-identifiers-have-no-version-axis.md's "
-            "Phase F note for the exact migration."
-        )
-
-
 # Top-level tables that are not platforms and never were -- `[publish]`
-# (natmod's own extra-files) -- so `_reject_unknown_tables()` below does
-# not mistake a legitimate non-platform table for a typo'd platform name.
-_NON_PLATFORM_TABLES: frozenset[str] = frozenset({"publish"})
+# (natmod's own extra-files) and `[usermod]` (record 0051's ninth
+# addendum: shared defaults for every active usermod port, sibling to
+# `[natmod]`, brought back after Phase F removed it -- not the same
+# table, see `usermod.options.check_usermod_family_table()`'s own
+# docstring for exactly what changed) -- so `_reject_unknown_tables()`
+# below does not mistake either for a typo'd platform name.
+_NON_PLATFORM_TABLES: frozenset[str] = frozenset({"publish", "usermod"})
 
 
 def _reject_unknown_tables(raw: dict) -> None:
     """A top-level table whose name is neither a known platform nor a
-    known non-platform table (`[publish]`) is almost certainly a typo --
-    `[stm32]` for a port that does not exist, `[usermdo]` for `[usermod]`
-    (itself rejected separately, see `_reject_legacy_usermod_table()`).
-    Presence-based platform selection has no other place to catch this:
-    unlike the old `ports = [...]` list (validated against `KNOWN_PORTS`
-    by `usermod_targets()`), an unrecognised table name is otherwise
-    simply never selected, silently, rather than reported.
+    known non-platform table (`[publish]`, `[usermod]`) is almost
+    certainly a typo -- `[stm32]` for a port that does not exist,
+    `[usermdo]` for `[usermod]`. `[usermod]`'s own *content* is validated
+    separately and unconditionally by `usermod.options.
+    check_usermod_family_table()` (called from `active_platforms()`
+    below), since a stale `[usermod] ports = [...]` needs to be caught
+    even when no usermod platform table ends up active -- this function
+    only clears its *name* from the unknown-top-level-table check.
+    Presence-based platform selection has no other place to catch a
+    genuinely unrecognised table: unlike the old `ports = [...]` list
+    (validated against `KNOWN_PORTS` by `usermod_targets()`), an
+    unrecognised table name is otherwise simply never selected, silently,
+    rather than reported.
     """
     unknown = sorted(
         key
@@ -258,7 +246,15 @@ def active_platforms(raw: dict, explicit: list[str] | None) -> list[str]:
     OS-bound like cibuildwheel's own, so nothing forces one platform per
     invocation.
     """
-    _reject_legacy_usermod_table(raw)
+    # Every registered family validates its own family-level table
+    # (`platforms/__init__.py`'s own `PlatformModule.validate_family_table()`
+    # docstring has the full reasoning) -- unconditionally, before any
+    # platform is known to be active, so a stale family table naming a
+    # port that no longer selects anything is still caught. `dict.fromkeys`
+    # dedupes the five usermod entries down to one call, in first-appearance
+    # order; this function never names a family directly.
+    for family in dict.fromkeys(PLATFORM_FAMILY.values()):
+        family.validate_family_table(raw, error=ConfigError)
     _reject_unknown_tables(raw)
     if explicit is not None:
         return explicit

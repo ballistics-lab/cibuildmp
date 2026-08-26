@@ -93,8 +93,15 @@ def _port_build_options(
     port = target.port
     identifier = target.identifier
 
-    module_root = (package_dir / build_options.module_dir).resolve()
-    user_c_modules = portinfo.resolve_user_c_modules(port, module_root.as_posix())
+    # `build_options.user_c_modules` is the raw, unresolved value from
+    # config (record 0051's ninth addendum -- was `module_dir`, renamed
+    # to match the literal TOML key now that it no longer collides with
+    # natmod's own). `resolve_user_c_modules()` below turns it into the
+    # actual `USER_C_MODULES=` value each port's own build wants --
+    # unchanged for Make ports, `/micropython.cmake` appended for CMake
+    # ports -- kept under its own name so the two are never conflated.
+    module_root = (package_dir / build_options.user_c_modules).resolve()
+    resolved_user_c_modules = portinfo.resolve_user_c_modules(port, module_root.as_posix())
 
     module_manifest = (
         (package_dir / build_options.manifest).resolve().as_posix()
@@ -118,7 +125,7 @@ def _port_build_options(
             # itself stays one field on the target, so only the name of
             # the parameter it feeds changes here.
             target=target.arch,
-            user_c_modules=user_c_modules,
+            user_c_modules=resolved_user_c_modules,
             frozen_manifest=frozen_manifest,
             build_dir=_resolved_build_dir(mpy_dir, port, identifier),
             extra_make_args=extra_make_args,
@@ -126,7 +133,7 @@ def _port_build_options(
     if port == "windows":
         return WindowsBuildOptions(
             arch=target.arch,
-            user_c_modules=user_c_modules,
+            user_c_modules=resolved_user_c_modules,
             frozen_manifest=frozen_manifest,
             build_dir=_resolved_build_dir(mpy_dir, port, identifier),
             extra_make_args=extra_make_args,
@@ -140,7 +147,7 @@ def _port_build_options(
         # back into QemuBuildOptions' own default board instead of
         # overriding it with an empty string.
         return QemuBuildOptions(
-            user_c_modules=user_c_modules,
+            user_c_modules=resolved_user_c_modules,
             frozen_manifest=frozen_manifest,
             build_dir=_resolved_build_dir(mpy_dir, port, identifier),
             board=target.arch or "MPS2_AN385",
@@ -148,14 +155,14 @@ def _port_build_options(
         )
     if port == "webassembly":
         return WebassemblyBuildOptions(
-            user_c_modules=user_c_modules,
+            user_c_modules=resolved_user_c_modules,
             frozen_manifest=frozen_manifest,
             build_dir=_resolved_build_dir(mpy_dir, port, identifier),
             extra_make_args=extra_make_args,
         )
     if port == "esp32":
         return Esp32BuildOptions(
-            user_c_modules=user_c_modules,
+            user_c_modules=resolved_user_c_modules,
             frozen_manifest=frozen_manifest,
             board=target.arch,
             extra_make_args=extra_make_args,

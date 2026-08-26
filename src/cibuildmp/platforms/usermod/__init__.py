@@ -38,7 +38,7 @@ from ...sources import SourceError
 from ...stepsummary import write_step_summary
 from . import orchestrate
 from .build import UsermodBuildError
-from .options import UsermodConfigError, UsermodOptions
+from .options import UsermodConfigError, UsermodOptions, check_usermod_family_table
 from .targets import (
     ARCH_KEYWORDS,
     UnknownAxisError,
@@ -52,6 +52,19 @@ from .targets import (
 def _plan_line(index: int, total: int, target: UsermodTarget) -> str:
     counter = f"[{index:>{len(str(total))}}/{total}]"
     return f"{counter} {target.identifier}"
+
+
+def validate_family_table(raw: dict[str, Any], *, error: type[Exception] = UsermodConfigError) -> None:
+    """Part of the `PlatformModule` contract (`platforms/__init__.py`'s
+    own docstring has the full reasoning) -- validates `[usermod]`
+    unconditionally, before it is known whether any usermod port ends up
+    active this invocation, so a stale `[usermod] ports = [...]` is
+    caught even when nothing else would ever load usermod's own config
+    far enough to see it. Thin wrapper: `check_usermod_family_table()`
+    does the real work, and is also called again, independently, by
+    `UsermodOptions.load()` itself for callers that bypass `cli.py`
+    entirely (most tests)."""
+    check_usermod_family_table(raw, error=error)
 
 
 def resolve_options(

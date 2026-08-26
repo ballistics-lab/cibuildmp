@@ -53,17 +53,39 @@ def test_explicit_wins_outright_over_table_presence():
     assert active_platforms({}, ["unix", "qemu"]) == ["unix", "qemu"]
 
 
-def test_legacy_usermod_table_is_rejected():
-    with pytest.raises(ConfigError, match=r"\[usermod\] no longer exists"):
+def test_legacy_usermod_ports_key_is_rejected():
+    # [usermod] itself is legal again (record 0051's ninth addendum --
+    # shared defaults, sibling to [natmod], not a selector), but the old
+    # `ports = [...]` selector it used to carry is still gone -- this is
+    # the one thing inside it that remains a loud, specific error.
+    with pytest.raises(ConfigError, match=r"\[usermod\] ports = \[\.\.\.\] no longer exists"):
         active_platforms({"usermod": {"ports": ["unix"]}}, None)
 
 
-def test_legacy_usermod_table_is_rejected_even_with_explicit_platform():
+def test_legacy_usermod_ports_key_is_rejected_even_with_explicit_platform():
     # The config itself is broken regardless of what --platform says --
     # this is not a "which platform" question, it is "this config still
     # uses the old shape".
-    with pytest.raises(ConfigError, match=r"\[usermod\] no longer exists"):
-        active_platforms({"usermod": {}}, ["natmod"])
+    with pytest.raises(ConfigError, match=r"\[usermod\] ports = \[\.\.\.\] no longer exists"):
+        active_platforms({"usermod": {"ports": ["unix"]}}, ["natmod"])
+
+
+def test_legacy_nested_usermod_port_table_is_rejected():
+    # [usermod.unix] (TOML nesting) parses as usermod={"unix": {...}} --
+    # the other pre-Phase-F shape, also still gone.
+    with pytest.raises(ConfigError, match=r"\[usermod\.unix\] no longer exists"):
+        active_platforms({"usermod": {"unix": {}}}, None)
+
+
+def test_empty_usermod_table_is_legal_and_not_a_selector():
+    # The ninth addendum's own headline change: [usermod] with nothing
+    # (or only shared defaults) in it is not an error, and its presence
+    # or absence never selects a port -- table presence of [unix]/
+    # [esp32]/etc. still does that alone, unchanged from Phase F.
+    assert active_platforms({"usermod": {}}, None) == ["natmod"]
+    assert active_platforms({"usermod": {"user-c-modules": "."}, "unix": {}}, None) == [
+        "unix"
+    ]
 
 
 def test_unknown_top_level_table_is_rejected():

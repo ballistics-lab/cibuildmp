@@ -184,6 +184,17 @@ def build_all(options: Options, targets: list[Target]) -> int:
     return 0
 
 
+def validate_family_table(raw: dict[str, Any], *, error: type[Exception] = ConfigError) -> None:
+    """No-op -- part of the `PlatformModule` contract (`platforms/__init__.py`'s
+    own docstring has the full reasoning), satisfied trivially here:
+    natmod's one platform already *is* its only family, so there is no
+    separate family-level table (no `[natmod-family]` alongside
+    `[natmod]`) for a stale/misplaced key to hide in. `[natmod]`'s own
+    keys are validated where they always have been, inside
+    `resolve_options()` below."""
+    return
+
+
 def resolve_options(
     args: Any,
     package_dir: Path,

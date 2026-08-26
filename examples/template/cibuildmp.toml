@@ -21,6 +21,16 @@
 # narrow which of these platforms *that job* wants, not to disambiguate
 # a mode.
 #
+# No [usermod] table here, deliberately, in keeping with this file's own
+# "no override that isn't needed" discipline: user-c-modules defaults to
+# "." (record 0051's ninth addendum) -- the whole project root, which is
+# exactly what every port below already wants (src/template_core.c is a
+# sibling of usermod/, not a descendant of it, so USER_C_MODULES has to
+# reach one level above usermod/ to see it at all). [usermod]'s own
+# mechanism -- shared defaults for every active port at once, sibling to
+# [natmod] -- is covered directly by tests/test_cli_multi_platform.py's
+# own test_usermod_family_table_now_works_as_shared_defaults, not here.
+#
 # version is deliberately not set here -- CI sets CIBMP_VERSION so every
 # push exercises D14's packaging step (extra-files + package.json) too,
 # without a version number ever needing to live in this repo's own git
@@ -39,11 +49,11 @@
 micropython = "v1.29.0"
 # Genuinely shared across every active usermod port below -- natmod's
 # own schema has no `manifest` key at all, so this is harmless to it.
-# module-dir is deliberately *not* promoted up here alongside it, even
-# though [unix]/[webassembly]/[windows] all want the same value: the top
-# level is every platform's own default, natmod included, and natmod
-# wants its own "natmod" default, not ".". See the per-platform tables
-# below.
+# Still written at the bare top level, not [usermod] -- record 0051's
+# sixth addendum decided the module-dir/user-c-modules key split
+# specifically to make *that* key promotable; whether manifest itself
+# should move to [usermod] too was deliberately left open the same day,
+# so this stays exactly where it always was until that's decided.
 manifest = "usermod/manifest.py"
 
 [natmod]
@@ -87,22 +97,21 @@ extra-files = ["src/facade.py"]
 # webassembly is named explicitly too since it has no per-build axis of
 # its own (usermod/targets.py's own _PORT_AXES) to separately opt into.
 #
-# module-dir = "." on each port table below (not cibuildmp's own
-# "usermod" default), matching micropython-bclibc's/a7p/micropython's own
-# USER_C_MODULES choice -- points USER_C_MODULES at this whole project
-# root, not usermod/ alone, which both satisfies py.mk's own
-# `$(USER_C_MODULES)/*/micropython.mk` glob (usermod/ is that one
-# required subdirectory level) and, unlike cibuildmp's own default, gives
-# the build container's own bind mount (dockerrun.py only mounts
-# USER_C_MODULES itself) visibility into src/ too -- required for
-# usermod/micropython.mk's own SRC_USERMOD entry pointing at
-# src/template_core.c, a sibling of usermod/, not a descendant of it.
+# No user-c-modules override on any port table below (record 0051's
+# ninth addendum) -- its own default is now "." (the whole project
+# root), exactly what every port here needs: it satisfies py.mk's own
+# `$(USER_C_MODULES)/*/micropython.mk` glob (usermod/ is the one
+# required subdirectory level below it) and, unlike the old "usermod"
+# default, gives the build container's own bind mount (dockerrun.py
+# only mounts USER_C_MODULES itself) visibility into src/ too --
+# required for usermod/micropython.mk's own SRC_USERMOD entry pointing
+# at src/template_core.c, a sibling of usermod/, not a descendant of it.
+# micropython-bclibc's and a7p/micropython's own real configs already
+# make the identical choice by hand today; the tool's own default now
+# matches it instead of requiring three repeated overrides to reach it.
 
 [unix]
-module-dir = "."
 
 [webassembly]
-module-dir = "."
 
 [windows]
-module-dir = "."

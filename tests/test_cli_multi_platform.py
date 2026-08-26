@@ -309,11 +309,24 @@ def test_platform_usermod_is_no_longer_a_valid_name(tmp_path, capsys):
 # ── the flattened config tree ────────────────────────────────────────────
 
 
-def test_legacy_usermod_table_is_a_clear_error(tmp_path, capsys):
+def test_legacy_usermod_ports_key_is_a_clear_error(tmp_path, capsys):
     write(tmp_path, '[usermod]\nports = ["unix"]\n')
 
     assert main([str(tmp_path)]) == 2
-    assert "[usermod] no longer exists" in capsys.readouterr().err
+    assert "[usermod] ports = [...] no longer exists" in capsys.readouterr().err
+
+
+def test_usermod_family_table_now_works_as_shared_defaults(tmp_path, capsys):
+    # Record 0051's ninth addendum: [usermod] is legal again, as shared
+    # defaults for every active port, not a selector -- [unix] is still
+    # what actually selects unix.
+    make_module_dir(tmp_path)
+    write(tmp_path, '[usermod]\nuser-c-modules = "."\n[unix]\n')
+
+    assert main([str(tmp_path), "--print-build-identifiers"]) == 0
+    assert capsys.readouterr().out.split() == [
+        f"{DEFAULT_MICROPYTHON}-unix-{value}" for value in _default_build_unix_cells()
+    ]
 
 
 def test_unknown_top_level_table_is_an_error(tmp_path, capsys):

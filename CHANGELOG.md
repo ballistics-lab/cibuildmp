@@ -96,6 +96,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `PLATFORM_FAMILY: dict[str, PlatformModule]`, never by name, so adding a
   future platform family (zephyr, record 0022) costs one new module plus
   registry entries, not a `cli.py` change. Record 0051 (Phase H).
+- **usermod's `module-dir` is renamed `user-c-modules`, its default
+  changes to `"."`, and `[usermod]` returns as a real cascade tier.**
+  `module-dir` collided in name with natmod's own key of the same name
+  while meaning something different downstream (`make -C` target vs.
+  `USER_C_MODULES=` forwarded into the port's own build) -- renamed to
+  the literal Makefile variable it feeds; natmod's own `module-dir` is
+  untouched. The default changes from `"usermod"` to `"."` -- broader,
+  not narrower, and what every real consumer already configured by hand.
+  `[usermod]` -- gone since Phase F removed it as a mode/selector table
+  -- is legal again, but not as that: a sixth top-level table, sibling to
+  `[natmod]`, holding shared defaults for every active usermod port at
+  once, one real layer in the cascade
+  (`default → global → family → platform → env → CLI`, a new
+  `family_table` field on `cibuildmp.options.Options`). The old
+  `ports = [...]` selector and nested `[usermod.<port>]` sub-tables stay
+  loud, specific errors. **Breaking**: any config still writing
+  `module-dir` under a usermod port table needs to rename it. Record 0051
+  (ninth addendum).
 - **natmod builds in a container, and there is no bare-host path.** It used to
   resolve a toolchain onto the invoking machine -- an apt probe, a pinned
   tarball, or the host gcc's own 32-bit multilib -- and run `make` there. One

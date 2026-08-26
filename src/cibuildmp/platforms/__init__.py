@@ -42,10 +42,31 @@ class PlatformModule(Protocol):
     """Documentation only, not enforced through isinstance/runtime checks
     -- the same PEP 544 module-as-Protocol shape cibuildwheel's own
     `platforms/__init__.py` uses. Every family module exposes exactly
-    these two functions. `ports` is always the subset of that family's own
-    platform names active this invocation -- for `natmod`, always and only
-    `["natmod"]`, kept as a real parameter rather than a special case so
-    `cli.py`'s own dispatch loop never has to know natmod is different.
+    these three functions. `ports` is always the subset of that family's
+    own platform names active this invocation -- for `natmod`, always and
+    only `["natmod"]`, kept as a real parameter rather than a special case
+    so `cli.py`'s own dispatch loop never has to know natmod is different.
+
+    `validate_family_table()` is the third function, added when usermod
+    gained a real family-level config tier (`[usermod]`, record 0051's
+    ninth addendum -- shared defaults for every port in the family, sibling
+    to `[natmod]`, not a selector). It exists specifically so `cli.py`
+    never has to name `usermod` to call its own validation: every
+    registered family gets called once, unconditionally, from
+    `active_platforms()`'s own preamble, *before* it is known which
+    platforms end up active this invocation -- a stale family table naming
+    a port that no longer selects anything (the old `[usermod] ports =
+    [...]`) must still be caught even when nothing else would ever load
+    that family's own config far enough to see it (record 0048's own bug
+    class: a misplaced/stale key silently doing nothing). `natmod`'s own
+    implementation is a no-op -- its one platform already *is* its only
+    family, so `[natmod]`'s own validation already happens inside
+    `resolve_options()`, with nothing extra for a separate family tier to
+    check. `error` is always the caller's `ConfigError` (natmod's own,
+    the class every other `active_platforms()`-time failure already
+    raises) -- not each family's native exception class, so `main()`'s
+    existing `except ConfigError` catch does not need widening for a
+    failure that happens before any family has been dispatched to.
 
     Exception handling is deliberately *not* part of this contract: each
     family module fully owns catching, printing and returning 2 for its
@@ -72,6 +93,8 @@ class PlatformModule(Protocol):
     def run(
         self, args: Any, package_dir: Any, config_file: Any, preread: Any, *, ports: list[str]
     ) -> int: ...
+
+    def validate_family_table(self, raw: dict, *, error: type[Exception]) -> None: ...
 
 
 # Every name --platform accepts, mapped to the module that actually
