@@ -37,7 +37,6 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### In progress / Proposed
 
-- [ ] [0008] distribution of the tool itself deferred | both actions install from their own checkout; PyPI name `cibuildmp` never reserved, still open
 - [ ] [0022] zephyr as a third usermod selector axis (epic) | phase outline M6-M9b mostly landed (boards.py, manifests, five of six build drivers, CLI wiring); zephyr itself and `rp2`'s own build driver not started
 - [ ] [0028] full container-per-port migration plan (epic) | steps 1-3 substantially landed, `PORT_IMAGES` populated for 8 images via [0033]; `esp32.Dockerfile` still explicitly not started, no Docker path for that port at all
 - [ ] [0031] unix usermod builds are glibc-only; no musllinux equivalent yet | manylinux half done (per-arch Docker images); musl toolchain + identifier axis + glibc-floor checker designed, not built
@@ -69,6 +68,7 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 - [x] [0011] one repository — cibuildmp absorbed `micropython-native-ci` | `v0.3.0` continues `v0.2.0`'s version line
 - [x] [0010] pinned data lives in `resources/`, not in Python | `resources/natmod.toml`, cross-checked at import
 - [x] [0009] one job looping over targets is the default; fan-out is opt-in | revisited for usermod by [0020]
+- [x] [0008] distribution of the tool itself deferred | both actions install from their own checkout, as designed; reserving the PyPI name is a named nice-to-have, not committed work
 - [x] [0007] usermod vendors mpbuild's board database, not a dependency | `usermod/boards.py`, MIT header + provenance kept
 - [x] [0006] no test runners in phase 1 (natmod) | usermod's own [0021] narrows this, doesn't overturn it
 - [x] [0005] one identifier namespace, one override mechanism | `[[overrides]]` collapses three shapes into one

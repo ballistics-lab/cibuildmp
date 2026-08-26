@@ -1,6 +1,6 @@
 # 0008. Distribution of the tool itself is deferred
 
-- Status: Accepted; PyPI name reservation still open
+- Status: Accepted / Implemented (both actions install from their own checkout, per design); reserving the PyPI name is a nice-to-have named in the text, not committed follow-up work
 - Related: [0011]
 
 <!-- migrated verbatim from docs/BACKLOG.md lines 140-149 -->

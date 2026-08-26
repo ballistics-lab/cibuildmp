@@ -16,14 +16,15 @@ is a decision history, so keep them current with *what is true today* rather tha
 to them.
 
 **What is currently being worked on is not listed here — read the tracker.** Its
-"In progress / Proposed" section is the only maintained answer: right now that's [0008]
-(the `cibuildmp` PyPI name was never reserved), [0022] (zephyr, plus the unstarted `rp2`
-usermod build driver), [0028] (`esp32.Dockerfile` still not started — no Docker path for
-that port at all), [0031] (the musllinux half of the unix libc axis), [0032] (`windows`/
-`qemu` never wired to `ensure_image()`, despite [0030]'s Docker-only mandate), [0038]
-(two open M5 cleanup items), and [0040] (the usermod test-runner axis, not scheduled).
-"Implemented" below it is everything already landed. A summary duplicated into this file
-would go stale within a session or two — don't add one here.
+"In progress / Proposed" section is the only maintained answer: right now that's [0022]
+(zephyr, plus the unstarted `rp2` usermod build driver), [0028] (`esp32.Dockerfile` still
+not started — no Docker path for that port at all), [0031] (the musllinux half of the unix
+libc axis), [0032] (`windows`/`qemu` never wired to `ensure_image()`, despite [0030]'s
+Docker-only mandate), [0038] (two open M5 cleanup items), and [0040] (the usermod
+test-runner axis, not scheduled). "Implemented" below it is everything already landed —
+including [0008], whose only unfinished aside (reserving the PyPI name) was never
+committed follow-up work, just a "worth doing" note in the decision's own text. A summary
+duplicated into this file would go stale within a session or two — don't add one here.
 
 From there, drill down rather than infer:
 
