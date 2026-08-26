@@ -56,7 +56,7 @@ def make_module_dir(package_dir: Path, name: str = "usermod") -> None:
 def test_build_one_unix_writes_into_output_dir_identifier(tmp_path, monkeypatch):
     package_dir = tmp_path / "pkg"
     make_module_dir(package_dir)
-    write_config(package_dir, '[usermod]\nports = ["unix"]\n')
+    write_config(package_dir, "[unix]\n")
     options = UsermodOptions.load(package_dir)
     options.output_dir = tmp_path / "mpyhouse"
 
@@ -90,7 +90,7 @@ def test_build_one_qemu_uses_default_board_not_empty_string(tmp_path, monkeypatc
     # "MPS2_AN385" default with an empty string.
     package_dir = tmp_path / "pkg"
     make_module_dir(package_dir)
-    write_config(package_dir, '[usermod]\nports = ["qemu"]\n')
+    write_config(package_dir, "[qemu]\n")
     options = UsermodOptions.load(package_dir)
     options.output_dir = tmp_path / "mpyhouse"
 
@@ -122,8 +122,7 @@ def test_build_one_writes_combined_manifest_when_present(tmp_path, monkeypatch):
     write_config(
         package_dir,
         """
-        [usermod]
-        ports = ["unix"]
+        [unix]
         manifest = "extra_manifest.py"
         """,
     )
@@ -162,10 +161,7 @@ def test_build_one_esp32_passes_board_through(tmp_path, monkeypatch):
     write_config(
         package_dir,
         """
-        [usermod]
-        ports = ["esp32"]
-
-        [usermod.esp32]
+        [esp32]
         boards = ["ESP32_GENERIC_S3"]
         """,
     )
@@ -201,7 +197,7 @@ def test_build_one_esp32_passes_board_through(tmp_path, monkeypatch):
 def test_build_fetches_micropython_and_skips_the_host_mpy_cross(tmp_path, monkeypatch):
     package_dir = tmp_path / "pkg"
     make_module_dir(package_dir)
-    write_config(package_dir, '[usermod]\nports = ["unix"]\n')
+    write_config(package_dir, "[unix]\n")
     options = UsermodOptions.load(package_dir)
     options.output_dir = tmp_path / "mpyhouse"
 
@@ -259,7 +255,7 @@ def test_build_groups_by_tag_and_fetches_once_per_group(tmp_path, monkeypatch):
     # not once per target in it (mirrors natmod's own cli.build()).
     package_dir = tmp_path / "pkg"
     make_module_dir(package_dir)
-    write_config(package_dir, '[usermod]\nports = ["unix"]\n')
+    write_config(package_dir, "[unix]\n")
     options = UsermodOptions.load(package_dir)
     options.output_dir = tmp_path / "mpyhouse"
 
@@ -305,7 +301,9 @@ def test_build_groups_by_tag_and_fetches_once_per_group(tmp_path, monkeypatch):
         "v1.29.0-unix-manylinux_2_28_x86_64",
     }
     output_dirs = {r.output.parent for r in results}
-    assert len(output_dirs) == 2  # two distinct directories, not one overwriting the other
+    assert (
+        len(output_dirs) == 2
+    )  # two distinct directories, not one overwriting the other
 
 
 def test_build_one_resolves_relative_output_dir_against_package_dir(
@@ -319,7 +317,7 @@ def test_build_one_resolves_relative_output_dir_against_package_dir(
     # the bug (Path("x") / "/abs" == "/abs" regardless of the left side).
     package_dir = tmp_path / "pkg"
     make_module_dir(package_dir)
-    write_config(package_dir, '[usermod]\nports = ["unix"]\n')
+    write_config(package_dir, "[unix]\n")
     options = UsermodOptions.load(package_dir)
     options.output_dir = Path("mpyhouse")  # relative, the real default
 
@@ -350,7 +348,7 @@ def test_build_one_preserves_executable_bit(tmp_path, monkeypatch):
     # build's output IS meant to be run.
     package_dir = tmp_path / "pkg"
     make_module_dir(package_dir)
-    write_config(package_dir, '[usermod]\nports = ["unix"]\n')
+    write_config(package_dir, "[unix]\n")
     options = UsermodOptions.load(package_dir)
     options.output_dir = tmp_path / "mpyhouse"
 

@@ -67,27 +67,6 @@ _PORT_AXES: dict[str, tuple[str | None, tuple[str, ...]]] = {
 
 KNOWN_PORTS: tuple[str, ...] = tuple(_PORT_AXES)
 
-# Ports a bare `[usermod]` with no `ports` key does *not* select.
-#
-# `esp32` is temporarily out. It is the one port with no Docker path at
-# all ([0028]) -- no `esp32.Dockerfile`, no pinned image -- so it is also
-# the one port that cannot satisfy the Docker-only rule D30 states and
-# every other port now follows. Its build provisions ESP-IDF onto the
-# host instead (clone + tool install, D19), which is precisely the
-# bare-host mutation the rest of this module stopped doing.
-#
-# Out of the *default*, not out of `KNOWN_PORTS`: `esp32-ESP32_GENERIC`
-# is still a real identifier, `--only` still reaches it, and a config
-# that names it in `ports` still builds it. What changes is that a
-# config which says nothing no longer gets it, so the ESP-IDF path stops
-# being something every default invocation drags along. [0028] is where
-# it comes back, with an image.
-_NON_DEFAULT_PORTS: frozenset[str] = frozenset({"esp32"})
-
-DEFAULT_PORTS: tuple[str, ...] = tuple(
-    p for p in KNOWN_PORTS if p not in _NON_DEFAULT_PORTS
-)
-
 # ── opt-in groups (0051 point 8, upstream's own EnableGroup) ────────────
 #
 # `ppc64le`/`s390x`/`riscv64` (both libcs) are native to no runner GitHub

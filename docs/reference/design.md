@@ -97,15 +97,18 @@ The floor is *inside* the identifier here, unlike cibuildwheel's own
 `cp313-manylinux_x86_64`, because cibuildmp curates exactly one floor per
 architecture and offers no knob to choose another.
 
-Still open, though the target shape is now decided and phased (see [0051]'s
-own third addendum): `--platform` still means the build mode
-(`natmod`/`usermod`), not the port the way upstream's own `--platform` names
-an OS — that move, and the config tree it implies (`[unix]`/`[esp32]`
-instead of `[usermod.unix]`), has not landed yet. What has landed is the
-foundation for it: `cibuildmp/options.py`'s cascade-based option resolution
-(`default → global → platform table → environment → CLI`, matching
-upstream's own `Options.get()` exactly), standalone and not yet wired to
-either mode's real config loading.
+Landed as of [0051]'s Phase F (see that record's own fourth addendum):
+`--platform` names one or more of six platforms (`natmod`, `unix`,
+`windows`, `qemu`, `webassembly`, `esp32`) rather than a build mode, the way
+upstream's own `--platform` names an OS, and the config tree matches —
+`[unix]`/`[esp32]` sibling to `[natmod]`, not `[usermod.unix]` nested under
+a `[usermod]` that no longer exists. `cibuildmp/options.py`'s cascade-based
+option resolution (`default → global → platform table → environment → CLI`,
+matching upstream's own `Options.get()`) is wired into both `natmod/options.py`
+and `usermod/options.py` now, for the base four layers — `[[overrides]]`/
+`inherit` still stay outside it, [0051]'s own "Phase G" work. Still open:
+that Phase G (one shared `[[overrides]]`, `inherit`, `Target.port`) and
+Phase H (unifying `cli.py`'s dispatch loop).
 
 [0043]: ../records/0043-unix-adopts-cibuildwheel-native-image-model.md
 [0044]: ../records/0044-unix-native-images-landed.md
@@ -164,30 +167,40 @@ screaming-snake-cased: `CIBMP_BUILD`, `CIBMP_SKIP`, `CIBMP_MICROPYTHON`,
 file → `[[overrides]]` matching the identifier → environment → CLI flags.
 
 **Where a key goes is part of the schema, and getting it wrong is an
-error** ([0048]). The keys above the first table header — `micropython`,
-`output-dir`, `build`, `skip`, `version`, `mpy-abi`,
-`micropython-submodules`, `enable` — are invocation-wide and are read
-**only** from the top level, in both build modes. Writing one inside `[natmod]` or
-`[usermod]` fails with a message naming where it belongs; so does any key
-a mode table does not read at all (a typo, or an `arch-flags` inside
+error** ([0048], generalised into a cascade by [0051]'s own Phase F). The
+keys above the first table header — `micropython`, `output-dir`, `build`,
+`skip`, `version`, `mpy-abi`, `micropython-submodules`, `enable` — are
+invocation-wide and are read **only** from the top level, across every
+platform. Writing one inside `[natmod]` or a usermod port's own table
+fails with a message naming where it belongs; so does any key that table's
+own schema does not read at all (a typo, or an `arch-flags` inside
 `[[overrides]]`). Until [0048] every one of those was silently ignored,
 which meant a misplaced `skip` produced a successful build of something
-you had asked not to build. `archs`/`arch-flags` remain the one deliberate
-exception: natmod reads them from the top level *or* `[natmod]`, and both
-work, so neither is silent.
+you had asked not to build; the check itself moved from a fixed
+per-table-shape partition to a per-platform-schema one under [0051]'s own
+cascade, but the guarantee is the same. `archs`/`arch-flags` remain the one
+deliberate exception: natmod reads them from the top level *or* `[natmod]`,
+and both work, so neither is silent — under the cascade this is simply the
+general case (global default, platform-specific override), not a
+special-cased pair of keys.
 
 [0048]: ../records/0048-build-skip-live-in-opposite-tables.md
 
-Usermod's own `[usermod]` / `[usermod.<port>]` config shape is documented in
-[0023] rather than transcribed here — it is a genuinely different shape
-(no ABI axis, per-port sub-tables), not a variant of the table above. As of
-[0051] point 7 it also has its own `[[usermod.overrides]]` — nested under
-`[usermod]`, not sharing natmod's top-level `[[overrides]]`, since the two
-modes' override tables take different keys (natmod:
-`module-dir`/`make-target`/`extra-make-args`/`pre-build-command`; usermod:
-`module-dir`/`manifest`/`extra-make-args`) and a config carrying both
-`[natmod]` and `[usermod]` tables would otherwise need one shared list
-whose keys mean different things depending which mode reads it.
+Usermod's own per-port config shape is documented in [0023] rather than
+transcribed here — it is a genuinely different shape (no ABI axis, a
+per-port arch/board axis instead), not a variant of the table above. As of
+[0051]'s Phase F, every usermod port is its own top-level table —
+`[unix]`, `[windows]`, `[qemu]`, `[webassembly]`, `[esp32]` — sibling to
+`[natmod]`; there is no more `[usermod]` umbrella and no more
+`ports = [...]` list (a port's own table presence is what selects it, the
+same rule `[natmod]`'s presence has always followed). It also has its own
+top-level `[[usermod-overrides]]` (renamed from the old nested
+`[[usermod.overrides]]` when `[usermod]` itself was flattened away) — still
+not sharing natmod's own `[[overrides]]`, since the two accept different
+keys (natmod: `module-dir`/`make-target`/`extra-make-args`/
+`pre-build-command`; usermod: `module-dir`/`manifest`/`extra-make-args`)
+and merging them safely needs the runtime per-platform key validation
+[0051]'s own "Phase G" adds.
 
 **Opt-in groups** ([0051] point 8, upstream's own `EnableGroup`): `enable`
 (config key, top-level, space-separated string or list; `--enable`,
@@ -201,8 +214,8 @@ cannot be worked around by naming it in `build` — only `enable` reaches it.
 This is also what finally answers the six emulated-everywhere `unix`
 cells' own "in the axis or not" question: they are in `default_axis_values
 ("unix")` now (equal to `all_axis_values("unix")` in full), and it is the
-group, not axis membership, that still keeps a plain `ports = ["unix"]`
-config at nine cells by default.
+group, not axis membership, that still keeps a plain `[unix]` config at
+nine cells by default.
 
 <!-- migrated verbatim from docs/BACKLOG.md lines 519-546 (Toolchain map) -->
 

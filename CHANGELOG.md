@@ -26,8 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `parse_selector()`, previously hand-duplicated between the two modes,
   now live once in `cibuildmp/selector.py`, which also gained brace
   expansion (`cp{36,37}-*`-style globs), matching upstream. Record 0051
-  (partial -- moving `--platform` to mean the port is still open; see
-  below for the rest of the record, landed the same day).
+  (partial -- moving `--platform` to mean the port landed later the same
+  day; see below).
 - **usermod gained its own `[[usermod.overrides]]`, and both modes gained
   opt-in groups (`--enable`/`enable`).** `[[usermod.overrides]]` layers
   `module-dir`/`manifest`/`extra-make-args` per target
@@ -47,6 +47,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   behaviour change: `--archs all` alone no longer reaches those three
   archs, matching upstream's own precedent (`CIBW_ARCHS=all` does not
   alone build `pypy` either). Record 0051.
+- **`--platform` names a platform, not a build mode, and `[usermod]` is
+  gone.** `[usermod.<port>]` becomes `[<port>]` -- `[unix]`, `[windows]`,
+  `[qemu]`, `[webassembly]`, `[esp32]` -- a top-level table sibling to
+  `[natmod]`, exactly like `[natmod]`'s own shape; `ports = [...]` no
+  longer exists as a concept, a port's own table presence is what selects
+  it. **Breaking**: any config still using `[usermod]` now fails loudly,
+  naming the exact migration, with no deprecation window (`examples/template`,
+  this repo's own included, migrated in the same commit); the old
+  single-mode spelling `--platform usermod` is rejected the same way any
+  other unknown platform name is (`--platform natmod` still works, since
+  `natmod` is a real platform name now). The headline new capability:
+  **more than one platform can build in a single invocation**, with no
+  `--platform` needed at all -- unlike cibuildwheel's own platforms
+  (bound to host OS), cibuildmp's six are just Docker images on one host,
+  so nothing forces one platform per invocation. `--platform`/
+  `CIBMP_PLATFORM` becomes an optional, comma- or space-separated filter
+  over the six platform names instead. `module-dir`/`manifest`/
+  `extra-make-args` (natmod also `make-target`/`pre-build-command`) are
+  genuinely shared-with-per-platform-override now, resolved through
+  `cibuildmp/options.py`'s cascade; `[[usermod.overrides]]` is renamed to
+  a top-level `[[usermod-overrides]]` (still not merged with natmod's own
+  `[[overrides]]` -- that unification is record 0051's own next phase).
+  Record 0051 (Phase F).
 - **natmod builds in a container, and there is no bare-host path.** It used to
   resolve a toolchain onto the invoking machine -- an apt probe, a pinned
   tarball, or the host gcc's own 32-bit multilib -- and run `make` there. One

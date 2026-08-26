@@ -107,25 +107,25 @@ extra-make-args = ["MP_BCLIBC_PRECISION=single"]
 # Sketched here so the intended shape is on record, but NOT parsed by
 # cibuildmp today. Do not rely on any of it. See docs/BACKLOG.md.
 #
-# usermod (D7) — firmware, not a distributable artifact, and a different
-# pipeline: driven by mpbuild (github.com/mattytrentini/mpbuild) for the
-# ports it covers. Identifiers take the MicroPython release tag in the first
-# slot rather than an .mpy ABI, since a firmware image's identity *is* its
-# MicroPython version: v1.28.0-usermod-esp32_ESP32_GENERIC
+# usermod is fully implemented (unlike this section's own name for it
+# implies) -- see examples/template/cibuildmp.toml for a real, live
+# config. This project's own cibuildmp.toml just doesn't build a usermod
+# module itself. Every active usermod port gets its own top-level table,
+# sibling to [natmod] above (Phase F, record 0051 points 4/6):
 #
-#     [usermod.unix]
+#     [unix]
 #     archs = ["x64", "x86", "aarch64", "armhf", "mipsel"]
 #
-#     [usermod.webassembly]
+#     [webassembly]
 #     variant = "pyscript"     # standard's ASYNCIFY is broken on modern emsdk
 #
-#     [usermod.rp2040]
-#     boards = ["RPI_PICO"]
-#
-#     [usermod.esp32]
+#     [esp32]
 #     boards = ["ESP32_GENERIC"]
 #     idf-target = "esp32"     # chip family, deliberately separate from board
 #     idf-ver = "v5.5.1"
+#
+# ("rp2040" was never a real port -- targets.py's own KNOWN_PORTS has no
+# such name; esp32 above is the closest board-axis port that exists.)
 #
 # tests (D6) — deferred outright. The axis is an explicit runner
 # (native / qemu-user / qemu-system / node / rp2040py / mpremote / none),

@@ -1,6 +1,6 @@
-"""usermod's own half of the CLI dispatch. `cli.py`'s `main()` calls
-into `run()` once build mode is resolved to `"usermod"` (`cli.py`'s own
-`detect_mode()`), mirroring the natmod flow --dry-run/--only/
+"""usermod's own half of the CLI dispatch. `cli.py`'s `main()` calls into
+`run()` for every usermod port active this invocation (`cli.py`'s own
+`active_platforms()`), mirroring the natmod flow --dry-run/--only/
 --print-build-identifiers/--allow-empty/build --
 but driven by `UsermodOptions`/`orchestrate.build()` instead of
 `options.Options`/`build.build_target()`. Kept in its own module rather
@@ -56,9 +56,13 @@ def run(
     package_dir: Path,
     config_file: Path | None,
     preread: tuple[Path | None, dict[str, Any]],
+    *,
+    ports: list[str],
 ) -> int:
     try:
-        options = UsermodOptions.load(package_dir, config_file, preread=preread)
+        options = UsermodOptions.load(
+            package_dir, config_file, preread=preread, ports=ports
+        )
         if args.enable:
             options.enable = options.enable | frozenset(args.enable)
         if args.archs is not None:

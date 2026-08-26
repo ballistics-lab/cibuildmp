@@ -4,11 +4,7 @@ import pytest
 
 from cibuildmp.natmod.options import DEFAULT_MICROPYTHON
 from cibuildmp.usermod.options import UsermodConfigError, UsermodOptions
-from cibuildmp.usermod.targets import (
-    DEFAULT_PORTS,
-    KNOWN_PORTS,
-    default_axis_values,
-)
+from cibuildmp.usermod.targets import KNOWN_PORTS, default_axis_values
 
 
 def write_config(tmp_path: Path, text: str) -> Path:
@@ -19,9 +15,9 @@ def write_config(tmp_path: Path, text: str) -> Path:
 
 def _default_build_unix_cells() -> list[str]:
     # What a bare `build = "*"` actually selects for unix: the full axis
-    # minus the emulated-everywhere group (0051 point 8) -- `neither
-    # default_axis_values("unix") (now the full fifteen) nor
-    # GROUPS on their own answer this, only both together do.
+    # minus the emulated-everywhere group (0051 point 8) -- neither
+    # default_axis_values("unix") (now the full fifteen) nor GROUPS on
+    # their own answer this, only both together do.
     return [
         v
         for v in default_axis_values("unix")
@@ -29,29 +25,28 @@ def _default_build_unix_cells() -> list[str]:
     ]
 
 
-def test_no_usermod_table_defaults_to_every_port_with_a_docker_path(tmp_path):
-    # Every known port except `esp32`, which has no Dockerfile and no
-    # pinned image at all ([0028]) and provisions ESP-IDF onto the host
-    # instead. A config that says nothing should not drag that along.
-    write_config(tmp_path, "[usermod]\n")
+def test_every_present_port_table_is_active(tmp_path):
+    # Phase F (record 0051 points 4/6): there is no more `ports = [...]`
+    # list, or a curated "default ports" set -- table presence alone
+    # selects a port, exactly the rule [natmod]'s own presence has always
+    # followed. `esp32` stays out unless its own table is written, same
+    # as before, but now for the same reason every other port does.
+    write_config(tmp_path, "[unix]\n[windows]\n[qemu]\n[webassembly]\n")
     options = UsermodOptions.load(tmp_path)
 
-    assert options.ports == list(DEFAULT_PORTS)
+    assert options.ports == ["unix", "windows", "qemu", "webassembly"]
     assert "esp32" not in options.ports
     assert "esp32" in KNOWN_PORTS
-    assert options.module_dir == "usermod"
-    assert options.manifest == ""
 
 
-def test_ports_list_selects_a_subset(tmp_path):
-    write_config(tmp_path, '[usermod]\nports = ["unix", "esp32"]\n')
+def test_a_subset_of_port_tables_selects_only_those(tmp_path):
+    write_config(tmp_path, "[unix]\n[esp32]\n")
     options = UsermodOptions.load(tmp_path)
 
     # Derived rather than spelled out: what this test is about is that
-    # `ports` selects a subset of *ports*, in order. Restating the unix
-    # default axis here would make it a second owner of that list, and
-    # every change to the axis would land as a failure in a test that has
-    # no opinion about it. `test_usermod_targets.py` owns the list.
+    # table presence selects a subset of *ports*, in KNOWN_PORTS order.
+    # Restating the unix default axis here would make it a second owner
+    # of that list. `test_usermod_targets.py` owns the list.
     identifiers = [t.identifier for t in options.targets()]
     assert identifiers == [
         f"{DEFAULT_MICROPYTHON}-unix-{value}" for value in _default_build_unix_cells()
@@ -62,10 +57,7 @@ def test_per_port_axis_override(tmp_path):
     write_config(
         tmp_path,
         """
-        [usermod]
-        ports = ["unix"]
-
-        [usermod.unix]
+        [unix]
         archs = ["manylinux_2_28_aarch64"]
         """,
     )
@@ -81,10 +73,7 @@ def test_multiple_boards_same_port(tmp_path):
     write_config(
         tmp_path,
         """
-        [usermod]
-        ports = ["esp32"]
-
-        [usermod.esp32]
+        [esp32]
         boards = ["ESP32_GENERIC", "ESP32_GENERIC_S3"]
         """,
     )
@@ -97,18 +86,25 @@ def test_multiple_boards_same_port(tmp_path):
     ]
 
 
-def test_axis_table_on_axisless_port_rejected(tmp_path):
+def test_an_unknown_key_on_axisless_port_is_rejected(tmp_path):
+    # `variant` is real (three of five ports' *BuildOptions have a fixed
+    # one) but has no config surface at all yet -- so it is simply
+    # unknown to webassembly's own schema, the same as any other typo.
+    # (Before Phase F, any non-empty table on an axisless port was
+    # rejected outright, since a per-port table could only ever mean an
+    # axis override; now it can also carry module-dir/manifest/
+    # extra-make-args, so only a key genuinely unknown to the schema is
+    # an error.)
     write_config(
         tmp_path,
         """
-        [usermod]
-        ports = ["webassembly"]
-
-        [usermod.webassembly]
+        [webassembly]
         variant = ["pyscript"]
         """,
     )
-    with pytest.raises(UsermodConfigError, match="no configurable axis"):
+    with pytest.raises(
+        UsermodConfigError, match=r"\[webassembly\]: unknown key `variant`"
+    ):
         UsermodOptions.load(tmp_path)
 
 
@@ -116,10 +112,7 @@ def test_axis_table_qemu_boards_selects_riscv(tmp_path):
     write_config(
         tmp_path,
         """
-        [usermod]
-        ports = ["qemu"]
-
-        [usermod.qemu]
+        [qemu]
         boards = ["VIRT_RV32", "VIRT_RV64"]
         """,
     )
@@ -132,29 +125,95 @@ def test_axis_table_qemu_boards_selects_riscv(tmp_path):
     ]
 
 
-def test_module_dir_and_manifest_overridable(tmp_path):
+def test_module_dir_and_manifest_default(tmp_path):
+    write_config(tmp_path, "[unix]\n")
+    options = UsermodOptions.load(tmp_path)
+    build_options = options.build_options(options.targets()[0])
+
+    assert build_options.module_dir == "usermod"
+    assert build_options.manifest == ""
+
+
+def test_module_dir_and_manifest_overridable_globally(tmp_path):
+    # A global (bare top-level) value is every active port's own default
+    # -- the cascade's whole point (Phase F): natmod has no `manifest`
+    # key at all, so this is unambiguous even in a config that also has
+    # [natmod].
     write_config(
         tmp_path,
         """
-        [usermod]
         module-dir = "mymod"
         manifest = "extra_manifest.py"
+        [unix]
         """,
     )
     options = UsermodOptions.load(tmp_path)
+    build_options = options.build_options(options.targets()[0])
 
-    assert options.module_dir == "mymod"
-    assert options.manifest == "extra_manifest.py"
+    assert build_options.module_dir == "mymod"
+    assert build_options.manifest == "extra_manifest.py"
+
+
+def test_module_dir_overridable_per_port(tmp_path):
+    # The direct test for Phase F's own cascade wiring: a value only
+    # [unix] sets does not leak into [webassembly], which falls back to
+    # the global default -- previously impossible, since module-dir was
+    # one shared scalar across every selected port unconditionally.
+    write_config(
+        tmp_path,
+        """
+        module-dir = "shared"
+        [unix]
+        module-dir = "unix-only"
+        [webassembly]
+        """,
+    )
+    options = UsermodOptions.load(tmp_path)
+    by_port = {t.port: options.build_options(t).module_dir for t in options.targets()}
+
+    assert by_port["unix"] == "unix-only"
+    assert by_port["webassembly"] == "shared"
+
+
+def test_a_key_valid_for_a_different_platform_is_rejected(tmp_path):
+    # `make-target` is natmod-only. Written inside [webassembly] it must
+    # still be a loud, specific error -- this is the regression test for
+    # the two-tier validation split the cascade needs: per-platform-table
+    # validation checks only that platform's own schema, never the union
+    # of every platform's, or a misplaced key would silently readmit
+    # record 0048's own bug under the cascade.
+    write_config(
+        tmp_path,
+        """
+        [unix]
+        archs = ["manylinux_2_28_x86_64"]
+        [webassembly]
+        make-target = "x"
+        """,
+    )
+    with pytest.raises(
+        UsermodConfigError, match=r"\[webassembly\]: unknown key `make-target`"
+    ):
+        UsermodOptions.load(tmp_path)
+
+
+def test_ports_key_inside_a_port_table_is_rejected(tmp_path):
+    # There is no more `ports = [...]` concept at all -- a config that
+    # still writes one (a plausible post-migration typo) gets the same
+    # loud "unknown key" error any other typo does.
+    write_config(tmp_path, '[unix]\nports = ["windows"]\n')
+
+    with pytest.raises(UsermodConfigError, match=r"\[unix\]: unknown key `ports`"):
+        UsermodOptions.load(tmp_path)
 
 
 def test_build_skip_selectors(tmp_path):
     write_config(
         tmp_path,
         """
-        [usermod]
-        ports = ["unix"]
         build = "*-manylinux_2_28_x86_64 *-manylinux_2_28_i686"
         skip = "*-manylinux_2_28_i686"
+        [unix]
         """,
     )
     options = UsermodOptions.load(tmp_path)
@@ -164,7 +223,7 @@ def test_build_skip_selectors(tmp_path):
 
 
 def test_micropython_shared_top_level_key(tmp_path):
-    write_config(tmp_path, 'micropython = "v1.24.0"\n\n[usermod]\n')
+    write_config(tmp_path, 'micropython = "v1.24.0"\n')
     options = UsermodOptions.load(tmp_path)
 
     assert options.micropython == ["v1.24.0"]
@@ -176,7 +235,7 @@ def test_micropython_list_keeps_every_entry(tmp_path):
     # identifier carried no version, so two releases' output landed in
     # the same directory under the same filename). Now the identifier
     # carries the tag, so nothing needs truncating.
-    write_config(tmp_path, 'micropython = ["v1.24.0", "v1.21.0"]\n\n[usermod]\n')
+    write_config(tmp_path, 'micropython = ["v1.24.0", "v1.21.0"]\n')
     options = UsermodOptions.load(tmp_path)
 
     assert options.micropython == ["v1.24.0", "v1.21.0"]
@@ -186,8 +245,7 @@ def test_build_options_carries_module_dir_and_manifest(tmp_path):
     write_config(
         tmp_path,
         """
-        [usermod]
-        ports = ["unix"]
+        [unix]
         module-dir = "mymod"
         manifest = "extra.py"
         """,
@@ -196,7 +254,9 @@ def test_build_options_carries_module_dir_and_manifest(tmp_path):
     target = options.targets()[0]
     build_options = options.build_options(target)
 
-    assert build_options.identifier == f"{DEFAULT_MICROPYTHON}-unix-manylinux_2_28_x86_64"
+    assert (
+        build_options.identifier == f"{DEFAULT_MICROPYTHON}-unix-manylinux_2_28_x86_64"
+    )
     assert build_options.port == "unix"
     assert build_options.module_dir == "mymod"
     assert build_options.manifest == "extra.py"
@@ -206,8 +266,7 @@ def test_extra_make_args_shared_across_targets(tmp_path):
     write_config(
         tmp_path,
         """
-        [usermod]
-        ports = ["unix"]
+        [unix]
         extra-make-args = ["DEBUG=1"]
         """,
     )
@@ -217,20 +276,17 @@ def test_extra_make_args_shared_across_targets(tmp_path):
     assert build_options.extra_make_args == ["DEBUG=1"]
 
 
-# ── record 0048: where build/skip live, and typos in mode tables ────────
+# ── record 0048: where build/skip live, and typos in platform tables ────
 
 
 def test_skip_is_read_from_the_top_level(tmp_path):
-    # The canonical placement in both modes as of 0048. natmod already
-    # read it here; usermod read it from `[usermod]` and from nowhere
-    # else, so the same key meant the same thing and was read from
-    # opposite places with no diagnostic either way.
+    # The canonical, and now the only, placement -- there is no more
+    # `[usermod]` for a deprecated nested spelling to live in.
     write_config(
         tmp_path,
         """
         skip = "*-manylinux_2_28_i686"
-        [usermod]
-        ports = ["unix"]
+        [unix]
         """,
     )
     identifiers = [t.identifier for t in UsermodOptions.load(tmp_path).targets()]
@@ -239,50 +295,13 @@ def test_skip_is_read_from_the_top_level(tmp_path):
     assert any(i.endswith("manylinux_2_28_x86_64") for i in identifiers)
 
 
-def test_the_old_usermod_placement_still_works_and_says_so(tmp_path, capsys):
-    # Kept working rather than broken: it was the documented placement
-    # for every usermod config written so far. Reported so it does not
-    # stay the documented one by inertia.
-    write_config(
-        tmp_path,
-        """
-        [usermod]
-        ports = ["unix"]
-        skip = "*-manylinux_2_28_i686"
-        """,
-    )
-    identifiers = [t.identifier for t in UsermodOptions.load(tmp_path).targets()]
-    captured = capsys.readouterr()
+def test_a_generic_key_inside_a_port_table_names_where_it_goes(tmp_path):
+    # `skip` (and every other GENERIC_KEYS member) applies to the whole
+    # invocation, not to one platform -- the same "read from the top
+    # level" diagnostic natmod's own [natmod] table gives, now shared.
+    write_config(tmp_path, '[unix]\nskip = "*-manylinux_2_28_i686"\n')
 
-    assert not any(i.endswith("manylinux_2_28_i686") for i in identifiers)
-    assert "deprecated" in captured.err
-    # stdout carries --print-build-identifiers / --print-build-matrix
-    # output, and cibuildmp-matrix's own action does json.loads() on it.
-    # A warning there would corrupt a matrix rather than merely clutter.
-    assert captured.out == ""
-
-
-def test_the_top_level_wins_when_both_are_written(tmp_path, capsys):
-    write_config(
-        tmp_path,
-        """
-        skip = "*-manylinux_2_28_x86_64"
-        [usermod]
-        ports = ["unix"]
-        skip = "*-manylinux_2_28_i686"
-        """,
-    )
-    identifiers = [t.identifier for t in UsermodOptions.load(tmp_path).targets()]
-
-    assert not any(i.endswith("manylinux_2_28_x86_64") for i in identifiers)
-    assert any(i.endswith("manylinux_2_28_i686") for i in identifiers)
-    assert "deprecated" in capsys.readouterr().err
-
-
-def test_an_unknown_key_in_the_usermod_table_is_an_error(tmp_path):
-    write_config(tmp_path, '[usermod]\nports = ["unix"]\nmodule-dr = "."\n')
-
-    with pytest.raises(UsermodConfigError, match="unknown key `module-dr`"):
+    with pytest.raises(UsermodConfigError, match="read from the top level"):
         UsermodOptions.load(tmp_path)
 
 
@@ -292,24 +311,20 @@ def test_an_unknown_key_in_a_port_table_is_an_error(tmp_path):
     write_config(
         tmp_path,
         """
-        [usermod]
-        ports = ["unix"]
-        [usermod.unix]
+        [unix]
         arch = ["manylinux_2_28_x86_64"]
         """,
     )
 
-    with pytest.raises(UsermodConfigError, match=r"\[usermod\.unix\]: unknown key"):
+    with pytest.raises(UsermodConfigError, match=r"\[unix\]: unknown key"):
         UsermodOptions.load(tmp_path)
 
 
-def test_a_port_sub_table_is_not_an_unknown_key_in_usermod(tmp_path):
+def test_a_port_table_with_a_valid_axis_key_is_accepted(tmp_path):
     write_config(
         tmp_path,
         """
-        [usermod]
-        ports = ["unix"]
-        [usermod.unix]
+        [unix]
         archs = ["manylinux_2_28_x86_64"]
         """,
     )
@@ -324,11 +339,11 @@ def test_shared_top_level_keys_honour_the_environment_in_usermod_mode(
     tmp_path, monkeypatch
 ):
     # This module's docstring claimed micropython/output-dir were read
-    # "the same env-aware way options.py's own opt() does" while the code
-    # consulted no environment at all, so CIBMP_MICROPYTHON silently did
-    # nothing in usermod mode and worked in natmod mode. Same defect as
-    # the one 0048 is named for, one layer up.
-    write_config(tmp_path, 'micropython = "v1.21.0"\n[usermod]\nports = ["unix"]\n')
+    # "the same env-aware way natmod/options.py's own opt() does" while
+    # the code consulted no environment at all, so CIBMP_MICROPYTHON
+    # silently did nothing in usermod mode and worked in natmod mode.
+    # Same defect as the one 0048 is named for, one layer up.
+    write_config(tmp_path, 'micropython = "v1.21.0"\n[unix]\n')
     monkeypatch.setenv("CIBMP_MICROPYTHON", "v1.28.0")
     monkeypatch.setenv("CIBMP_OUTPUT_DIR", "elsewhere")
     options = UsermodOptions.load(tmp_path)
@@ -337,18 +352,17 @@ def test_shared_top_level_keys_honour_the_environment_in_usermod_mode(
     assert options.output_dir == Path("elsewhere")
 
 
-# ── record 0051 point 7: [[usermod.overrides]] ───────────────────────────
+# ── record 0051 point 7: [[usermod-overrides]] ───────────────────────────
 
 
 def test_usermod_overrides_beat_the_file(tmp_path):
     write_config(
         tmp_path,
         """
-        [usermod]
-        ports = ["unix"]
+        [unix]
         extra-make-args = ["COMMON=1"]
 
-        [[usermod.overrides]]
+        [[usermod-overrides]]
         select = "*-manylinux_2_28_x86_64"
         extra-make-args = ["FROM=override"]
         """,
@@ -364,7 +378,7 @@ def test_usermod_overrides_beat_the_file(tmp_path):
 def test_usermod_override_without_select_is_an_error(tmp_path):
     write_config(
         tmp_path,
-        '[usermod]\nports = ["unix"]\n[[usermod.overrides]]\nmanifest = "x.py"\n',
+        '[unix]\n\n[[usermod-overrides]]\nmanifest = "x.py"\n',
     )
     options = UsermodOptions.load(tmp_path)
     with pytest.raises(UsermodConfigError, match="select"):
@@ -375,9 +389,9 @@ def test_usermod_environment_beats_override(tmp_path):
     write_config(
         tmp_path,
         """
-        [usermod]
-        ports = ["unix"]
-        [[usermod.overrides]]
+        [unix]
+
+        [[usermod-overrides]]
         select = "*"
         extra-make-args = ["FROM=override"]
         """,
@@ -395,10 +409,10 @@ def test_usermod_override_beats_the_file_for_manifest(tmp_path):
     write_config(
         tmp_path,
         """
-        [usermod]
-        ports = ["unix"]
+        [unix]
         manifest = "default.py"
-        [[usermod.overrides]]
+
+        [[usermod-overrides]]
         select = "*"
         manifest = "special.py"
         """,
@@ -411,15 +425,15 @@ def test_an_unknown_key_in_usermod_overrides_is_an_error(tmp_path):
     write_config(
         tmp_path,
         """
-        [usermod]
-        ports = ["unix"]
-        [[usermod.overrides]]
+        [unix]
+
+        [[usermod-overrides]]
         select = "*"
         arch-flags = "zba"
         """,
     )
     with pytest.raises(
-        UsermodConfigError, match=r"\[\[usermod\.overrides\]\]: unknown key"
+        UsermodConfigError, match=r"\[\[usermod-overrides\]\]: unknown key"
     ):
         UsermodOptions.load(tmp_path)
 
@@ -428,9 +442,7 @@ def test_an_unknown_key_in_usermod_overrides_is_an_error(tmp_path):
 
 
 def test_enable_reaches_the_emulated_everywhere_cells(tmp_path):
-    write_config(
-        tmp_path, 'enable = "unix-emulated-everywhere"\n[usermod]\nports = ["unix"]\n'
-    )
+    write_config(tmp_path, 'enable = "unix-emulated-everywhere"\n[unix]\n')
     options = UsermodOptions.load(tmp_path)
     identifiers = [t.identifier for t in options.targets()]
     for arch in ("ppc64le", "s390x", "riscv64"):
@@ -438,7 +450,7 @@ def test_enable_reaches_the_emulated_everywhere_cells(tmp_path):
 
 
 def test_without_enable_the_emulated_everywhere_cells_stay_out(tmp_path):
-    write_config(tmp_path, '[usermod]\nports = ["unix"]\n')
+    write_config(tmp_path, "[unix]\n")
     options = UsermodOptions.load(tmp_path)
     identifiers = [t.identifier for t in options.targets()]
     for arch in ("ppc64le", "s390x", "riscv64"):
@@ -446,7 +458,7 @@ def test_without_enable_the_emulated_everywhere_cells_stay_out(tmp_path):
 
 
 def test_unknown_enable_group_is_an_error(tmp_path):
-    write_config(tmp_path, 'enable = "bogus"\n[usermod]\nports = ["unix"]\n')
+    write_config(tmp_path, 'enable = "bogus"\n[unix]\n')
     options = UsermodOptions.load(tmp_path)
     with pytest.raises(UsermodConfigError, match="unknown group.*bogus"):
         options.targets()

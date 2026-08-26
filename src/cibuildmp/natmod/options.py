@@ -1,7 +1,8 @@
 """Config loading and option resolution.
 
 Precedence, lowest to highest:
-    defaults -> config file -> matching [[overrides]] -> environment -> CLI
+    defaults -> global config -> platform config -> matching [[overrides]]
+    -> environment -> CLI
 
 Config lives in cibuildmp.toml at the package root, with the same tree
 accepted under [tool.cibuildmp] in pyproject.toml for the rare MicroPython
@@ -18,6 +19,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..options import Options as OptionCascade
+from ..options import suggest
 from ..selector import matches, parse_selector, select
 from .targets import (
     NATMOD_ARCHS,
@@ -40,36 +43,30 @@ class ConfigError(Exception):
     pass
 
 
-# ── where a key is allowed to live ────────────────────────────────────
+# ── option schemas (Phase F, record 0051 points 4/6) ───────────────────
 #
-# Record 0048: `build`/`skip` were read from the **top level** by natmod
-# and from **`[usermod]`** by usermod, and the wrong placement produced
-# no error, no warning and no diagnostic -- just a target you asked to
-# skip getting built. It cost a real test: `test_only_overrides_skip`
-# wrote its `skip` inside `[natmod]`, where nothing read it, and asserted
-# for years that `--only` overrode a selector that was never applied.
+# Record 0048 fixed "a key placed in the wrong table is silently ignored"
+# by giving every key exactly one correct location and erroring on every
+# other (`TOP_LEVEL_ONLY_KEYS`, `NATMOD_TABLE_KEYS`, `check_table_keys()`).
+# That does not generalise to six platforms sharing option keys, so this
+# phase replaces the partition with a cascade
+# (`default -> global -> platform -> env`, `cibuildmp/options.py`): every
+# platform-schema key is valid at the global level (that platform's own
+# default) *and* inside that platform's own table (its override) -- there
+# is no more "wrong table" for a key that belongs to some schema. What
+# stays an error is a key that belongs to *no* schema at all (a typo), and
+# a key that belongs to a *different* platform's schema, written inside a
+# table that is not that platform's -- `check_keys()` below, replacing
+# `check_table_keys()`.
 #
-# Top level is canonical for both modes now. The argument is what these
-# keys *do*: `build`/`skip` filter identifiers, and an identifier names
-# one whole invocation's worth of work rather than anything mode-specific
-# -- the same reason `micropython` and `output-dir` were already
-# top-level in both. cibuildwheel, which has no modes to split over, puts
-# its own equivalents in exactly the same place (`CIBW_BUILD`/`CIBW_SKIP`
-# under `[tool.cibuildwheel]`).
-#
-# `archs`/`arch-flags` stay deliberately dual-read for natmod (top level
-# *or* `[natmod]`) and are not listed here. That predates 0048 and is not
-# the trap: both placements work, so neither is silent.
-#
-# `enable` (**0051** point 8, upstream's own `EnableGroup`) is listed
-# here even though only usermod defines any groups today -- natmod's own
-# `Options` has no `enable` field at all, since a config surface with
-# nothing to gate would be speculative. Listing the key is enough on its
-# own: it means a misplaced `enable` inside `[natmod]` or `[usermod]`
-# gets the same "read from the top level" error every other key here
-# gets, for free, rather than an "unknown key" that would be actively
-# misleading once natmod does define a group.
-TOP_LEVEL_ONLY_KEYS: frozenset[str] = frozenset(
+# `enable` stays generic (top-level/global only, no per-platform meaning
+# -- an invocation-wide identifier filter) even though only usermod
+# defines any groups today, for the same reason it was in
+# `TOP_LEVEL_ONLY_KEYS` before: a config surface with nothing to gate
+# would be speculative, but listing the key means a misplaced `enable`
+# inside `[natmod]` still gets a clear error instead of silently doing
+# nothing.
+GENERIC_KEYS: frozenset[str] = frozenset(
     {
         "micropython",
         "output-dir",
@@ -82,9 +79,10 @@ TOP_LEVEL_ONLY_KEYS: frozenset[str] = frozenset(
     }
 )
 
-# Keys `[natmod]` itself may carry: the two dual-read axis keys plus the
-# five per-target ones `build_options()`'s own `opt()` layers over.
-NATMOD_TABLE_KEYS: frozenset[str] = frozenset(
+# Keys `[natmod]` itself, or the top level as natmod's own default, may
+# carry: the two dual-read axis keys plus the four per-target ones
+# `build_options()`'s own `opt()` layers over.
+NATMOD_SCHEMA: frozenset[str] = frozenset(
     {
         "archs",
         "arch-flags",
@@ -95,12 +93,11 @@ NATMOD_TABLE_KEYS: frozenset[str] = frozenset(
     }
 )
 
-# `[[overrides]]` layers over `[natmod]` through the same per-target
-# `opt()`, so it takes the same five keys plus its own `select`. Notably
-# *not* `arch-flags`: that one is resolved by the global `opt()` against
-# the top level and `[natmod]`, never per target, so an `arch-flags` in
-# an override table would be silently ignored -- exactly the shape 0048
-# is about.
+# `[[overrides]]` layers over natmod's own per-target `opt()`, so it takes
+# the same four keys plus its own `select`. Notably *not* `arch-flags`:
+# that one is resolved once for the whole config, never per target, so an
+# `arch-flags` in an override table would be silently ignored -- exactly
+# the shape 0048 is about.
 OVERRIDE_TABLE_KEYS: frozenset[str] = frozenset(
     {
         "select",
@@ -112,46 +109,40 @@ OVERRIDE_TABLE_KEYS: frozenset[str] = frozenset(
 )
 
 
-def check_table_keys(
+def check_keys(
     table: Mapping[str, Any],
+    known: frozenset[str],
     *,
     where: str,
-    known: frozenset[str],
     error: type[Exception] = ConfigError,
-    allowed_extra: frozenset[str] = frozenset(),
 ) -> None:
-    """Reject a key that this table does not read.
+    """Reject a key this table does not read -- the cascade-era
+    replacement for record 0048's own `check_table_keys()`. Shared with
+    `usermod/options.py`, which passes its own per-port schema and
+    `UsermodConfigError`.
 
-    The half of record 0048 that matters most, and the cheapest: a key in
-    the wrong table was previously indistinguishable from a key that was
-    honoured, so a typo (`module-dr`) and a misplacement (`skip` under
-    `[natmod]`) both produced a successful build of the wrong thing. An
-    unknown key here is an error rather than a warning for that reason --
-    a config that fails loudly is strictly better than a build that
-    silently ignored what it was told.
-
-    A key that belongs at the top level gets its own message naming where
-    it should go, because "unknown key 'skip'" would be actively
-    misleading about a key the tool very much knows.
-
-    `allowed_extra` is for keys a table tolerates without this function
-    knowing their meaning -- `[usermod]`'s own per-port sub-tables, and
-    its deprecated `build`/`skip`, which are diagnosed separately.
+    A key that belongs to `GENERIC_KEYS` (read from the top level, for
+    every platform, always) gets its own message naming where it should
+    go, because "unknown key 'skip'" would be actively misleading about a
+    key the tool very much knows. Anything else unknown to `known` is a
+    genuine typo, with a `difflib`-suggested close match when one exists
+    (the same library upstream's own `_validate_global_option()` uses).
     """
     for key in table:
-        if key in known or key in allowed_extra:
+        if key in known:
             continue
-        if key in TOP_LEVEL_ONLY_KEYS:
+        if key in GENERIC_KEYS:
             raise error(
                 f"{where}: `{key}` is read from the top level of the config, "
                 f"not from {where} -- move it above the {where} line. It "
-                f"applies to the whole invocation rather than to one build "
-                f"mode, so there is only one place it can mean anything."
+                f"applies to the whole invocation rather than to one "
+                f"platform, so there is only one place it can mean anything."
             )
-        raise error(
-            f"{where}: unknown key `{key}`. Known keys here: "
-            f"{', '.join(sorted(known))}."
-        )
+        msg = f"{where}: unknown key `{key}`. Known keys here: {', '.join(sorted(known))}."
+        hint = suggest(key, known)
+        if hint:
+            msg += f" Perhaps you meant `{hint}`?"
+        raise error(msg)
 
 
 def _as_list(value: Any, key: str) -> list[str]:
@@ -222,9 +213,14 @@ class Options:
     mpy_abi: str | list[str] | None
     arch_flags: list[str]
     version: str
-    natmod: dict[str, Any]
     overrides: list[dict[str, Any]]
     publish: dict[str, Any]
+    # The cascade instance backing build_options()'s own per-target
+    # resolution of module-dir/make-target/extra-make-args/
+    # pre-build-command -- env excluded here (build_options() checks the
+    # environment itself, after overrides, matching the precedence it has
+    # always had), platform_tables={"natmod": <the [natmod] table>}.
+    _cascade_file: OptionCascade = field(repr=False, compare=False)
 
     # ── Loading ───────────────────────────────────────────────────────────
 
@@ -237,29 +233,36 @@ class Options:
         preread: tuple[Path | None, dict[str, Any]] | None = None,
     ) -> Options:
         """`preread`, when given, is `(config_path, raw)` the caller
-        already got from `read_config()` -- `cli.py`'s own mode-detection
-        peek has to read the file once to decide natmod vs usermod
-        (usermod/options.py's `UsermodOptions.load()` takes the same
-        parameter, for the same reason), so this avoids reading and
-        parsing the same TOML file a second time on the natmod path.
+        already got from `read_config()` -- `cli.py`'s own platform-
+        detection peek has to read the file once to decide which
+        platforms are active (usermod/options.py's `UsermodOptions.load()`
+        takes the same parameter, for the same reason), so this avoids
+        reading and parsing the same TOML file a second time on the
+        natmod path.
         """
         environ: Mapping[str, str] = os.environ if env is None else env
         config_path, raw = (
             preread if preread is not None else read_config(package_dir, config_file)
         )
 
-        natmod = dict(raw.get("natmod") or {})
+        natmod_table = dict(raw.get("natmod") or {})
         overrides = list(raw.get("overrides") or [])
         if not isinstance(overrides, list):
             raise ConfigError("[[overrides]] must be an array of tables")
         publish = dict(raw.get("publish") or {})
 
-        check_table_keys(natmod, where="[natmod]", known=NATMOD_TABLE_KEYS)
+        check_keys(natmod_table, NATMOD_SCHEMA, where="[natmod]")
         for override in overrides:
             if isinstance(override, dict):
-                check_table_keys(
-                    override, where="[[overrides]]", known=OVERRIDE_TABLE_KEYS
-                )
+                check_keys(override, OVERRIDE_TABLE_KEYS, where="[[overrides]]")
+
+        platform_tables = {"natmod": natmod_table}
+        cascade_env = OptionCascade(
+            global_table=raw, platform_tables=platform_tables, env=environ
+        )
+        cascade_file = OptionCascade(
+            global_table=raw, platform_tables=platform_tables, env={}
+        )
 
         def opt(key: str, default: Any = None) -> Any:
             # Environment beats the file for every global option. Keys are
@@ -270,8 +273,18 @@ class Options:
                 return env_value
             return raw.get(key, default)
 
-        archs_value = opt("archs") or natmod.get("archs") or list(NATMOD_ARCHS)
-        arch_flags_value = opt("arch-flags") or natmod.get("arch-flags") or []
+        # `archs`/`arch-flags` go through the real cascade now rather than
+        # the old `opt(key) or natmod.get(key) or default` chain -- same
+        # dual-read guarantee (both placements work), but platform now
+        # beats global (matching upstream's own more-specific-wins rule,
+        # and every other cascade-resolved key in this file) rather than
+        # the old, incidental "top level beats [natmod]" order. Also
+        # gains a `CIBMP_ARCHS_NATMOD`-style per-platform env override for
+        # free.
+        archs_value = cascade_env.get(
+            "archs", platform="natmod", default=list(NATMOD_ARCHS)
+        )
+        arch_flags_value = cascade_env.get("arch-flags", platform="natmod", default=[])
 
         return cls(
             package_dir=package_dir,
@@ -289,9 +302,9 @@ class Options:
             mpy_abi=_parse_mpy_abi(opt("mpy-abi")),
             arch_flags=_as_list(arch_flags_value, "arch-flags"),
             version=str(opt("version", "")),
-            natmod=natmod,
             overrides=overrides,
             publish=publish,
+            _cascade_file=cascade_file,
         )
 
     # ── Resolution ────────────────────────────────────────────────────────
@@ -375,10 +388,25 @@ class Options:
     def build_options(
         self, target: Target, env: Mapping[str, str] | None = None
     ) -> BuildOptions:
-        """Resolve per-target options: file -> overrides -> environment."""
+        """Resolve per-target options: file (global -> [natmod]) ->
+        overrides -> environment."""
         environ: Mapping[str, str] = os.environ if env is None else env
 
-        layers: list[dict[str, Any]] = [self.natmod]
+        base = {
+            "module-dir": self._cascade_file.get(
+                "module-dir", platform="natmod", default=DEFAULT_MODULE_DIR
+            ),
+            "make-target": self._cascade_file.get(
+                "make-target", platform="natmod", default=DEFAULT_MAKE_TARGET
+            ),
+            "extra-make-args": self._cascade_file.get(
+                "extra-make-args", platform="natmod", default=[]
+            ),
+            "pre-build-command": self._cascade_file.get(
+                "pre-build-command", platform="natmod", default=""
+            ),
+        }
+        layers: list[dict[str, Any]] = [base]
         for override in self.overrides:
             selector = override.get("select")
             if selector is None:
@@ -390,7 +418,7 @@ class Options:
             env_value = environ.get("CIBMP_" + key.replace("-", "_").upper())
             if env_value is not None:
                 return env_value
-            # Later layers win: a matching override beats [natmod].
+            # Later layers win: a matching override beats the file.
             for layer in reversed(layers):
                 if key in layer:
                     return layer[key]
@@ -424,10 +452,11 @@ def read_config(
     package_dir: Path, config_file: Path | None
 ) -> tuple[Path | None, dict[str, Any]]:
     """The raw parsed `cibuildmp.toml`/`[tool.cibuildmp]` tree, before any
-    mode-specific interpretation. Public (not `Options.load()`-internal)
-    so `cli.py` can peek at which top-level tables (`natmod`/`usermod`)
-    are present to auto-detect build mode, and so `usermod/options.py`
-    can read the same file without a second, differently-shaped parser.
+    platform-specific interpretation. Public (not `Options.load()`-internal)
+    so `cli.py` can peek at which top-level platform tables (`natmod`,
+    `unix`, ...) are present to determine which platforms are active, and
+    so `usermod/options.py` can read the same file without a second,
+    differently-shaped parser.
     """
     if config_file is not None:
         if not config_file.is_file():

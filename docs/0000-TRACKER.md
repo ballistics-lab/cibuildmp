@@ -67,7 +67,8 @@ consuming repos", which is the only thing that answers whether this is
 cibuildwheel for MicroPython or infrastructure that resembles it. Its blast
 radius grew this session rather than shrinking: every `unix` identifier renamed
 ([0044]), `--toolchain` and `--print-build-matrix` deleted ([0049]/[0050]),
-natmod now requiring Docker -- and [0051] queues one more rename ahead of it.
+natmod now requiring Docker, and [0051]'s Phase F flattening the config tree
+out from under every existing usermod config in the same session.
 
 That ordering is deliberate and is the argument for the list below: finish
 changing the identifiers *before* asking three repos to migrate onto them.
@@ -81,8 +82,8 @@ later; and cheap-with-strong-evidence beats expensive-and-speculative.
 
 - [ ] [0051] one selector for both modes, and an identifier that names what a
       build is compatible with | **points 1/2/3/5/7/8 landed 2026-08-26;
-      4/6's target architecture is now decided and phased (E–I), Phase E
-      landed the same day.** natmod's `mpy-abi` can now state the ABI axis
+      4/6's target architecture is now decided and phased (E–I), Phases E
+      and F landed the same day.** natmod's `mpy-abi` can now state the ABI axis
       directly (list) as well as derive it from tags (string, unchanged);
       usermod's `micropython` is a real list and its identifier leads with
       the tag (`v1.29.0-unix-manylinux_2_28_x86_64`), so two releases no
@@ -111,11 +112,25 @@ later; and cheap-with-strong-evidence beats expensive-and-speculative.
       -- and generalizing that turned into adopting upstream's own cascade
       option-resolution model wholesale, written up as its own addendum to
       [0048]. Phased as E (cascade mechanism, standalone, landed) through I
-      (docs consolidation) in the record's own third addendum. Still goes
-      **before** [0038] rather than after -- the identifier shape is now
-      settled, so telling the three consuming repos to migrate once is
-      still the right order, and F onward will move the config tree again,
-      so better to land that before they touch it at all
+      (docs consolidation) in the record's own third addendum. **Phase F
+      (flatten the config tree) also landed 2026-08-26**, in the same
+      session: `[usermod]` no longer exists, every usermod port is its own
+      top-level table (`[unix]`, `[windows]`, `[qemu]`, `[webassembly]`,
+      `[esp32]`) sibling to `[natmod]`, `ports = [...]` is gone (table
+      presence selects a platform), and -- confirmed live against
+      `examples/template/cibuildmp.toml`, not just designed -- one
+      invocation can now build natmod and several usermod ports together
+      with no `--platform` at all, `--platform` itself narrowing to a
+      comma-separated subset of six names rather than choosing a mode. See
+      the record's own fourth addendum for the full account, including the
+      one genuinely new diagnostic Phase F had to add
+      (`_reject_unknown_tables()`, since presence-based selection has no
+      equivalent to `ports = [...]`'s own "unknown port" check). Phase G
+      ([[overrides]] unification, `inherit`, `Target.port`) is next. Still
+      goes **before** [0038] rather than after -- the identifier shape is
+      now settled and the config tree has now already moved once this
+      session, so telling the three consuming repos to migrate once, after
+      G/H/I land too, is still the right order
 - [ ] [0050] natmod's image needs one more publish, and CI has never been
       green on it | **start here, and it is nearly done.** The image gained
       `gcc-i686-linux-gnu` after v1.29.0 changed `dynruntime.mk`'s `x86` from

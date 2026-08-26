@@ -4,22 +4,22 @@
 # doesn't override archs/skip: every target cibuildmp claims to support
 # should build here, or the claim is wrong.
 #
-# Both [natmod] and [usermod] live in this one file, natmod/, usermod/
-# and src/ as siblings under this same directory -- the real downstream
-# layout (see micropython-bclibc's and a7p/micropython's own
-# cibuildmp.toml), not a separate example directory per mode, and not two
-# independent module implementations either -- natmod/template.c and
-# usermod/template/template.c both wrap the exact same
-# src/template_core.c (see that file's own header comment), and
+# [natmod] and every active usermod port's own table live in this one
+# file, natmod/, usermod/ and src/ as siblings under this same directory
+# -- the real downstream layout (see micropython-bclibc's and
+# a7p/micropython's own cibuildmp.toml), not a separate example directory
+# per platform, and not two independent module implementations either --
+# natmod/template.c and usermod/template/template.c both wrap the exact
+# same src/template_core.c (see that file's own header comment), and
 # src/facade.py is the shared Python-level API layer on top: copied
 # alongside template.mpy on the natmod side ([publish] extra-files
 # below), frozen into the firmware image on the usermod side
-# (usermod/manifest.py). Both tables present means detect_mode() can no
-# longer infer which one a bare `cibuildmp examples/template` means, so
-# build-examples.yml sets CIBMP_PLATFORM explicitly for each -- the same
-# generic env-override every cibuildmp.toml key already has (options.py's
-# own opt()), not a dedicated action.yml input, matching cibuildwheel's
-# own CIBW_BUILD shape.
+# (usermod/manifest.py). Every table present here (Phase F, record 0051
+# points 4/6: natmod is a platform among six now, not a separate mode)
+# builds in one invocation with no --platform needed at all --
+# build-examples.yml still sets CIBMP_PLATFORM on some jobs, but only to
+# narrow which of these platforms *that job* wants, not to disambiguate
+# a mode.
 #
 # version is deliberately not set here -- CI sets CIBMP_VERSION so every
 # push exercises D14's packaging step (extra-files + package.json) too,
@@ -37,6 +37,14 @@
 # tests/test_targets.py instead.
 
 micropython = "v1.29.0"
+# Genuinely shared across every active usermod port below -- natmod's
+# own schema has no `manifest` key at all, so this is harmless to it.
+# module-dir is deliberately *not* promoted up here alongside it, even
+# though [unix]/[webassembly]/[windows] all want the same value: the top
+# level is every platform's own default, natmod included, and natmod
+# wants its own "natmod" default, not ".". See the per-platform tables
+# below.
+manifest = "usermod/manifest.py"
 
 [natmod]
 archs = [
@@ -79,17 +87,22 @@ extra-files = ["src/facade.py"]
 # webassembly is named explicitly too since it has no per-build axis of
 # its own (usermod/targets.py's own _PORT_AXES) to separately opt into.
 #
-# module-dir = "." (not cibuildmp's own "usermod" default), matching
-# micropython-bclibc's/a7p/micropython's own USER_C_MODULES choice --
-# points USER_C_MODULES at this whole project root, not usermod/ alone,
-# which both satisfies py.mk's own `$(USER_C_MODULES)/*/micropython.mk`
-# glob (usermod/ is that one required subdirectory level) and, unlike
-# cibuildmp's own default, gives the build container's own bind mount
-# (dockerrun.py only mounts USER_C_MODULES itself) visibility into src/
-# too -- required for usermod/micropython.mk's own SRC_USERMOD entry
-# pointing at src/template_core.c, a sibling of usermod/, not a
-# descendant of it.
-[usermod]
+# module-dir = "." on each port table below (not cibuildmp's own
+# "usermod" default), matching micropython-bclibc's/a7p/micropython's own
+# USER_C_MODULES choice -- points USER_C_MODULES at this whole project
+# root, not usermod/ alone, which both satisfies py.mk's own
+# `$(USER_C_MODULES)/*/micropython.mk` glob (usermod/ is that one
+# required subdirectory level) and, unlike cibuildmp's own default, gives
+# the build container's own bind mount (dockerrun.py only mounts
+# USER_C_MODULES itself) visibility into src/ too -- required for
+# usermod/micropython.mk's own SRC_USERMOD entry pointing at
+# src/template_core.c, a sibling of usermod/, not a descendant of it.
+
+[unix]
 module-dir = "."
-ports = ["unix", "webassembly", "windows"]
-manifest = "usermod/manifest.py"
+
+[webassembly]
+module-dir = "."
+
+[windows]
+module-dir = "."

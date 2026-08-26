@@ -1,6 +1,6 @@
 # 0051 — one selector for both modes, and an identifier that names what a build is compatible with
 
-Status: In progress — Shape points 1/2/3/5/7/8 implemented 2026-08-26; 4/6 target architecture decided and phased (see third addendum), Phase E of it landed the same day
+Status: In progress — Shape points 1/2/3/5/7/8 implemented 2026-08-26; 4/6 target architecture decided and phased (see third addendum), Phases E and F of it landed the same day (fourth addendum)
 
 Rewritten twice the same day it was written, before anything was built on it.
 The first draft framed this as "usermod cannot build two MicroPython versions",
@@ -540,11 +540,13 @@ discipline this record's own first two passes used (A/B/C, then points 7/8):
   **Not yet wired to any real config loading** — `natmod/options.py`/
   `usermod/options.py` are untouched and behave exactly as before this
   addendum; nothing a real build depends on can regress from this phase.
-- **Phase F (not started)** — flatten the config tree: every
+- **Phase F (landed 2026-08-26)** — flatten the config tree: every
   `[usermod.<port>]` becomes `[<port>]`; `ports = [...]` deleted, replaced
   by table presence; `detect_mode()` replaced by `active_platforms()`.
   Breaking — this repo's own `cibuildmp.toml`, `examples/template`, and
-  every test fixture using the old shape migrate in the same commit.
+  every test fixture using the old shape migrated in the same commit. See
+  the fourth addendum below for what actually landed and where it diverged
+  from this phase's own original scoping.
 - **Phase G (not started)** — one shared `[[overrides]]` with runtime
   per-platform key validation, `inherit`, and `Target.port`.
 - **Phase H (not started)** — unify CLI dispatch: `natmod_cli.run`/
@@ -574,3 +576,133 @@ same way this record's own points 1/2/3/5 and 7/8 passes did.
 [0045]: 0045-only-is-a-filter-not-a-forced-identifier.md
 [0048]: 0048-build-skip-live-in-opposite-tables.md
 [0049]: 0049-no-matrix-generation-archs-vocabulary.md
+
+---
+
+## Addendum, 2026-08-26 — Phase F landed: the flattened tree, and one
+## real invocation building natmod and usermod ports together
+
+Landed the same day as Phase E, in the same session. `natmod/options.py`
+and `usermod/options.py` are both wired onto `cibuildmp/options.py`'s
+cascade now — the "not yet wired" caveat in Phase E's own description
+above no longer holds.
+
+**The config tree, live.** `[usermod]` no longer exists at all — every
+usermod port table (`[unix]`, `[windows]`, `[qemu]`, `[webassembly]`,
+`[esp32]`) sits at the top level, sibling to `[natmod]`, exactly as the
+target architecture above described. `cli.py`'s `detect_mode()` is gone,
+replaced by `active_platforms(raw, explicit) -> list[str]`: every platform
+table `raw` actually has, in a fixed order (`natmod` first), or `["natmod"]`
+when none are present — the zero-config case, byte-for-byte unchanged. A
+lingering `[usermod]` table is a loud, specific `ConfigError` naming the
+exact migration, not a silent no-op or a generic "unknown key" — this was
+always going to be the one real breaking change point 6 promised, and there
+is no deprecation window, matching the plan's own framing.
+
+**More than one platform, one invocation, confirmed live** — not just
+designed:
+
+```
+$ cibuildmp examples/template --dry-run
+cibuildmp: 10 target(s) against MicroPython v1.29.0
+  [ 1/10] mpy6.3-natmod-x86            make -C natmod ARCH=x86 dist
+  ...
+cibuildmp: 13 usermod target(s) against MicroPython v1.29.0
+  [ 1/13] v1.29.0-unix-manylinux_2_28_x86_64
+  ...
+  [13/13] v1.29.0-webassembly
+```
+
+One `cibuildmp` call, no `--platform`, natmod and three usermod ports all
+resolved and printed. `--print-build-identifiers --json` against the same
+config emits exactly one JSON array spanning all four platforms — the
+detail that actually needed engineering, not just table-presence resolution:
+`cli.py`'s own dispatch is still two functions (`natmod_cli.run`/
+`usermod_cli.run`, Phase H's own job to unify), so a new `_run_multi_platform()`
+bridges them for the `>1` active case — sequential dispatch with a merged
+`--print-build-identifiers` document (naive sequential dispatch would emit
+two separate JSON arrays under `--json`, which is exactly what
+`cibuildmp-matrix`'s own `json.loads()`, [0048], would choke on) and
+`--only` narrowed to whichever single side actually names that identifier.
+A `--only` value matching neither side is the one acknowledged rough edge
+(each side reports its own "not known" separately) — Phase H's real unified
+loop removes it by construction, not worth building throwaway merge logic
+for a gap that phase closes for free.
+
+**`--platform` is a filter over six names now**, comma- or
+whitespace-separated, no longer `choices=["natmod","usermod"]`. The old
+single-mode spelling `--platform usermod` is rejected the same way any
+other unknown name is (`usermod` was never a platform); `--platform natmod`
+still works, since it is a real platform name today.
+
+**The cascade wiring, done, bounded exactly as planned:** `Options.get()`
+resolves `module-dir`/`make-target`/`extra-make-args`/`pre-build-command`
+(natmod) and `module-dir`/`manifest`/`extra-make-args` (every usermod port)
+through `default → global → platform → env`, but *not* `[[overrides]]` or
+`inherit` — those stay [0048]'s own addendum's "Phase G" promise, layered
+in afterward through the exact same `opt()`-closure override loop both
+`build_options()` methods already had, untouched. One real, load-bearing
+consequence worth recording precisely: `module-dir` cannot be promoted to
+the bare top level in a config that has *both* `[natmod]` and usermod
+ports wanting a different value — natmod's own module-dir default
+("natmod") and a usermod port's ("usermod", or a project's own override)
+are genuinely different values, and the top level is every platform's own
+default, natmod included. `examples/template/cibuildmp.toml` hit this for
+real: `module-dir = "."` had to move into each of `[unix]`/`[webassembly]`/
+`[windows]` individually rather than being promoted alongside `manifest`
+(which natmod's own schema does not read at all, so it *is* safely global).
+This is the practical shape of the "every location is a real layer" cascade
+argument [0048]'s own addendum made in the abstract.
+
+**Record 0048's own guarantee, re-verified under the cascade.** A key valid
+for one platform's schema, written inside a *different* platform's own
+table (e.g. `make-target`, natmod-only, inside `[webassembly]`), is still a
+loud, specific `UsermodConfigError` — validated per-platform-table against
+only that platform's own schema, never the union of every platform's,
+which is what keeps a misplaced key from silently becoming "just another
+platform's default" the way a careless cascade implementation could allow.
+`TOP_LEVEL_ONLY_KEYS`/`NATMOD_TABLE_KEYS`/`USERMOD_TABLE_KEYS`/
+`check_table_keys()` are retired; `GENERIC_KEYS`/`NATMOD_SCHEMA`/
+`SCHEMAS`(usermod, keyed by port) plus a shared `check_keys()` (natmod's
+own module, imported by usermod's) replace them, still naming the "read
+from the top level" case specially and now also suggesting a close match
+via `difflib` (`cibuildmp.options.suggest()`) the way upstream's own
+`_validate_global_option()` does — a real, if small, upgrade over the
+message record 0048 originally shipped.
+
+**A second, related diagnostic Phase F had to add, not inherited from
+0048:** presence-based platform selection has no equivalent to the old
+`ports = [...]` list's own `KNOWN_PORTS` validation, so a typo'd table name
+(`[stm32]`) was, on the first working version of this phase, simply never
+selected — silently, not an error. `cli.py`'s own
+`_reject_unknown_tables()` closes this: any top-level table whose name is
+neither a known platform nor `[publish]` (the one legitimate non-platform
+table) is a loud error naming what exists. Found by writing the test for
+exactly the case the old `ports = ["stm32"]` config used to catch
+(`unknown usermod port`) and confirming presence-based selection quietly
+dropped it — the same "verify a diagnostic still fires after changing its
+mechanism" discipline [0048]'s own resolution used for `archs`/
+`arch-flags`'s dual-read.
+
+**What did not change:** `DEFAULT_PORTS`/`_NON_DEFAULT_PORTS` (esp32's old
+opt-out-by-default within a bare `[usermod]`) are deleted as dead code —
+table-presence selection subsumes them without a special case, `esp32`
+included: it now needs its own `[esp32]` table exactly as much as every
+other port does. `[[usermod.overrides]]` is renamed to a top-level
+`[[usermod-overrides]]` (forced only by `[usermod]`'s disappearance) but
+deliberately *not* merged with natmod's own `[[overrides]]` yet — Phase G's
+own job, argued for explicitly in the second addendum above ("What changed
+since the last plan") and still true after seeing Phase F built: the merge
+needs runtime per-matched-identifier key validation that only has a real
+meaning once `natmod.targets.Target` has a `.port` property to resolve
+against, which Phase G is what adds.
+
+Verified: full test suite green (`tests/test_cli_multi_platform.py`,
+renamed from `test_cli_usermod_mode.py` and substantially rewritten;
+`tests/test_active_platforms.py`, new; `tests/test_usermod_options.py`,
+`tests/test_usermod_orchestrate.py`, fixtures flattened), `ruff`/`pyright`
+clean, and the live smoke tests quoted above run against the real,
+migrated `examples/template/cibuildmp.toml` — not just synthetic
+`tmp_path` fixtures.
+
+Phase G (one shared `[[overrides]]`, `inherit`, `Target.port`) is next.

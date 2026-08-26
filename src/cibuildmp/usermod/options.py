@@ -1,27 +1,29 @@
-"""Usermod config loading: the `[usermod]` table (and its per-port
-`[usermod.<port>]` sub-tables), read the same way `options.py` reads
-`[natmod]` -- D5's own "config is scoped by build mode, the way
-cibuildwheel scopes by platform" -- but genuinely a separate tree, not a
-second copy-paste of `Options`: usermod's own axes (which ports, which
-per-port arch/board) don't fit natmod's single flat `archs` list at all.
+"""Usermod config loading: every port's own top-level table (`[unix]`,
+`[windows]`, `[qemu]`, `[webassembly]`, `[esp32]`), sibling to `[natmod]`,
+read the same cascade way `natmod/options.py` reads `[natmod]` (Phase F,
+record 0051 points 4/6) -- but genuinely a separate tree, not a second
+copy-paste of `Options`: usermod's own axes (which ports, which per-port
+arch/board) don't fit natmod's single flat `archs` list at all.
 
-Deliberately narrower than `Options` for now, not an oversight:
-- `[[usermod.overrides]]` (**0051** point 7) is its own, nested array --
-  not a share of natmod's top-level `[[overrides]]`, since the two modes'
-  override tables accept different keys and a config with both `[natmod]`
-  and `[usermod]` tables would otherwise need one shared list whose keys
-  mean different things depending which mode reads it. Narrower than
-  natmod's own: no `variant` (a real field on three of five ports'
-  `*BuildOptions`, still config-surface-less) yet.
-- `CIBMP_*` environment overrides exist for `module-dir`/`manifest`/
-  `extra-make-args` at `build_options()`'s own per-target resolution
-  (mirroring natmod's `file -> override -> environment` cascade), and for
-  `micropython`/`output-dir`/`enable`, genuinely shared with natmod, at
-  `load()`'s own top-level `opt()`. `ports`/`build`/`skip` still have
-  none at `load()` -- `ports` because axis selection has no per-target
-  meaning to layer an env override onto, `build`/`skip` because they are
-  already top-level-shared keys read through `options.py`'s own `opt()`
-  (record 0048).
+`[usermod]` itself no longer exists as a concept -- every port table
+used to nest under it (`[usermod.<port>]`) and carry a `ports = [...]`
+list; now table presence alone selects a port, exactly the rule
+`[natmod]`'s own presence has always followed. `cli.py`'s
+`_reject_legacy_usermod_table()` is what turns a lingering `[usermod]`
+into a loud, specific error before this module ever sees the config.
+
+Deliberately narrower than `natmod/options.py`'s own `Options` still:
+- `[[usermod-overrides]]` is its own top-level array, not yet merged with
+  natmod's own `[[overrides]]` -- that merge, plus `inherit`, is Phase
+  G's own deliverable (record 0051's third addendum).
+- No `variant` (a real field on three of five ports' `*BuildOptions`,
+  still config-surface-less) yet.
+
+`module-dir`/`manifest`/`extra-make-args` are genuinely global-with-
+per-platform-override now (Phase F): resolved per target through the
+same `cibuildmp.options.Options` cascade `natmod/options.py` uses, not
+eagerly-resolved scalar fields shared by every selected port
+unconditionally the way they were before this phase.
 
 No `version`/`package.json` here at all: usermod output is a full port
 binary meant to be flashed or run directly, not a `.mpy` `mip.install()`
@@ -33,7 +35,6 @@ from __future__ import annotations
 
 import os
 import shlex
-import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -42,12 +43,12 @@ from typing import Any
 from ..natmod.options import (
     DEFAULT_MICROPYTHON,
     DEFAULT_OUTPUT_DIR,
-    check_table_keys,
+    check_keys,
     read_config,
 )
+from ..options import Options as OptionCascade
 from ..selector import matches, parse_selector, select
 from .targets import (
-    DEFAULT_PORTS,
     GROUPS,
     KNOWN_PORTS,
     UsermodTarget,
@@ -57,37 +58,36 @@ from .targets import (
 
 DEFAULT_MODULE_DIR = "usermod"
 
-# Keys `[usermod]` itself may carry. `build`/`skip` are **not** here: as
-# of record 0048 they are top-level in both modes, and their presence in
-# this table is diagnosed on its own (see `load()`), not as an unknown
-# key -- the tool knows exactly what they mean, just not here.
-USERMOD_TABLE_KEYS: frozenset[str] = frozenset(
-    {
-        "ports",
-        "module-dir",
-        "manifest",
-        "extra-make-args",
-        "overrides",
-    }
+# Keys shared across every usermod port's own table -- the platform-
+# specific axis key (`archs`/`boards`, from `axis_key(port)`) is added
+# per port in `_port_schema()` below.
+USERMOD_PORT_BASE: frozenset[str] = frozenset(
+    {"module-dir", "manifest", "extra-make-args"}
 )
 
-# Accepted in `[usermod]` but reported: the placement record 0048 is
-# retiring. Kept working rather than removed outright because it was the
-# documented one for every usermod config written so far, even though a
-# sweep of the configs in reach found none actually using it.
-DEPRECATED_USERMOD_TABLE_KEYS: frozenset[str] = frozenset({"build", "skip"})
 
-# `[[usermod.overrides]]` (**0051** point 7) -- usermod's own, nested
-# under `[usermod]` rather than sharing natmod's top-level
-# `[[overrides]]`, because the two modes' override tables accept
-# different keys and a config with both `[natmod]` and `[usermod]`
-# tables (a real shape -- see examples/template/cibuildmp.toml) would
-# otherwise need one shared list whose keys mean different things
-# depending which mode reads it. `variant` (a real field on
+def _port_schema(port: str) -> frozenset[str]:
+    key = axis_key(port)
+    return USERMOD_PORT_BASE | ({key} if key else frozenset())
+
+
+# port name -> that port's own option-key schema, for `check_keys()`'s
+# per-platform-table validation. A key valid for a *different* port's
+# table (e.g. `make-target`, natmod-only) is still a loud, specific error
+# -- validating against `SCHEMAS[port]` alone, never the union, is what
+# keeps record 0048's original guarantee (misplaced key is never silent)
+# under the cascade.
+SCHEMAS: dict[str, frozenset[str]] = {port: _port_schema(port) for port in KNOWN_PORTS}
+
+# `[[usermod-overrides]]` -- top-level (Phase F flattened this out of
+# `[usermod]`), still its own array rather than sharing natmod's
+# `[[overrides]]`: the two accept different keys, and unifying them with
+# real per-platform runtime validation is Phase G's own job (record
+# 0051's third addendum), not this one's. `variant` (a real field on
 # UnixBuildOptions/WebassemblyBuildOptions/WindowsBuildOptions, fixed
-# today, no config surface at all) is deliberately not here yet --
-# wiring it needs orchestrate._port_build_options() to pass it through
-# per port, its own smaller follow-up.
+# today, no config surface at all) is deliberately not here yet -- wiring
+# it needs orchestrate._port_build_options() to pass it through per port,
+# its own smaller follow-up.
 USERMOD_OVERRIDE_TABLE_KEYS: frozenset[str] = frozenset(
     {"select", "module-dir", "manifest", "extra-make-args"}
 )
@@ -100,46 +100,6 @@ __all__ = [
 
 class UsermodConfigError(Exception):
     pass
-
-
-def _selector(
-    raw: Mapping[str, Any], usermod: Mapping[str, Any], key: str, default: str
-) -> Any:
-    """`build`/`skip`, from the top level, with the old `[usermod]`
-    placement still honoured and reported.
-
-    Record 0048: this key used to be read *only* from `[usermod]` here
-    and *only* from the top level in natmod mode, so the same key meant
-    the same thing and was read from opposite places, and putting it in
-    the other one produced no diagnostic at all. Top level is canonical
-    now, in both modes.
-
-    The old placement keeps working rather than breaking, but it says so:
-    every usermod config written so far was told to use it. When both are
-    present the top level wins, because that is the one this tool will
-    still read next year.
-    """
-    env_value = os.environ.get("CIBMP_" + key.upper())
-    if env_value is not None:
-        return env_value
-    if key in usermod:
-        # stderr, not stdout: `--print-build-identifiers` and
-        # `--print-build-identifiers --json` write machine-readable
-        # output there, and callers parse it. A
-        # warning on stdout would not merely be noise, it would corrupt a
-        # matrix -- caught by a test asserting the exact stdout of a
-        # --print-build-identifiers run.
-        print(
-            f"cibuildmp: warning: `{key}` in [usermod] is deprecated -- it is "
-            f"read from the top level of the config now, the same place "
-            f"natmod already read it from (record 0048). Move it above the "
-            f"[usermod] line."
-            + ("  The top-level value is the one being used." if key in raw else ""),
-            file=sys.stderr,
-        )
-        if key not in raw:
-            return usermod[key]
-    return raw.get(key, default)
 
 
 def _as_list(value: Any, key: str) -> list[str]:
@@ -190,31 +150,35 @@ class UsermodBuildOptions:
 
 @dataclass
 class UsermodOptions:
-    """The whole `[usermod]` config, before it is narrowed to a single
-    target."""
+    """Every active usermod port's config, before it is narrowed to a
+    single target."""
 
     package_dir: Path
     config_path: Path | None
     micropython: list[str]
     output_dir: Path
     ports: list[str]
-    module_dir: str
-    manifest: str
     build: list[str]
     skip: list[str]
-    extra_make_args: list[str]
     axis_overrides: dict[str, list[str]]
-    # [[usermod.overrides]] tables (0051 point 7) -- not axis_overrides
-    # above (which port/arch a config selects), per-target *option*
-    # overrides layered over module-dir/manifest/extra-make-args, the
-    # same "file -> matching [[overrides]] -> environment" shape
-    # natmod's own Options.build_options() already has.
+    # [[usermod-overrides]] tables (0051 point 7, flattened in Phase F) --
+    # not axis_overrides above (which port/arch a config selects),
+    # per-target *option* overrides layered over
+    # module-dir/manifest/extra-make-args, the same "file -> matching
+    # [[overrides]] -> environment" shape natmod's own
+    # Options.build_options() already has.
     overrides: list[dict[str, Any]] = field(default_factory=list)
     # Names in GROUPS (0051 point 8) that build = "*" should reach anyway
     # -- e.g. enable = ["unix-emulated-everywhere"]. Validated against
     # GROUPS.keys() in targets(), not at load() time, since CLI --enable
     # (usermod/cli.py) still needs to union into this after load().
     enable: frozenset[str] = frozenset()
+    # The cascade instance backing build_options()'s own per-target
+    # resolution of module-dir/manifest/extra-make-args -- env excluded
+    # here (build_options() checks the environment itself, after
+    # overrides, matching the precedence it has always had),
+    # platform_tables keyed by port name.
+    _cascade: OptionCascade = field(default=None, repr=False, compare=False)  # type: ignore[assignment]
 
     @classmethod
     def load(
@@ -222,40 +186,31 @@ class UsermodOptions:
         package_dir: Path,
         config_file: Path | None = None,
         preread: tuple[Path | None, dict[str, Any]] | None = None,
+        ports: list[str] | None = None,
     ) -> UsermodOptions:
         """`preread`, when given, is `(config_path, raw)` the caller
-        already got from `read_config()` -- `cli.py`'s own mode-detection
-        peek has to read the file once to decide natmod vs usermod, so
-        this avoids reading and parsing the same TOML file a second
-        time."""
+        already got from `read_config()` -- `cli.py`'s own platform-
+        detection peek has to read the file once to decide which
+        platforms are active, so this avoids reading and parsing the
+        same TOML file a second time.
+
+        `ports`, when given, is the list of usermod ports `cli.py`'s own
+        `active_platforms()` already resolved for this invocation (every
+        `[<port>]` table present, or an explicit `--platform` filter).
+        When `None` -- a direct caller bypassing `cli.py`, as most tests
+        do -- it is derived the same way, straight from table presence.
+        """
         if preread is None:
             config_path, raw = read_config(package_dir, config_file)
         else:
             config_path, raw = preread
 
-        usermod = dict(raw.get("usermod") or {})
-
-        check_table_keys(
-            usermod,
-            where="[usermod]",
-            known=USERMOD_TABLE_KEYS,
-            error=UsermodConfigError,
-            # Per-port sub-tables are validated below, once `ports` is
-            # known; `build`/`skip` are diagnosed as a placement further
-            # down. Neither is an unknown key.
-            allowed_extra=frozenset(KNOWN_PORTS) | DEPRECATED_USERMOD_TABLE_KEYS,
-        )
+        if ports is None:
+            ports = [p for p in KNOWN_PORTS if p in raw]
 
         # Environment beats the file for the two genuinely shared
-        # top-level keys, the same way `options.py`'s own `opt()` does.
-        # This module's docstring has claimed as much since it was
-        # written; the code read `raw` directly and consulted no
-        # environment at all, so `CIBMP_MICROPYTHON` and
-        # `CIBMP_OUTPUT_DIR` silently did nothing in usermod mode while
-        # working in natmod mode. Found by the record 0048 audit, which
-        # went looking for exactly this shape -- a key that looks
-        # honoured and is not -- and is the same defect as the one that
-        # record is named for, one layer up.
+        # top-level keys, the same way `natmod/options.py`'s own `opt()`
+        # does.
         def opt(key: str, default: Any = None) -> Any:
             env_value = os.environ.get("CIBMP_" + key.replace("-", "_").upper())
             if env_value is not None:
@@ -263,61 +218,42 @@ class UsermodOptions:
             return raw.get(key, default)
 
         # micropython is a genuinely shared top-level key, and a real list
-        # now (**0051**): usermod's identifier gained a leading tag slot
+        # (**0051**): usermod's identifier gained a leading tag slot
         # specifically so more than one release can be selected in one
-        # invocation without one overwriting another's output. Before
-        # this record it was silently truncated to its first entry --
-        # the only thing standing between a two-tag config and a
-        # collision, since nothing distinguished the two releases'
-        # outputs. Accepts the same shapes natmod's own list-valued
-        # options do: a TOML list, or a string (file or environment)
-        # split on whitespace.
+        # invocation without one overwriting another's output. Accepts
+        # the same shapes natmod's own list-valued options do: a TOML
+        # list, or a string (file or environment) split on whitespace.
         micropython_value = opt("micropython", DEFAULT_MICROPYTHON)
         if isinstance(micropython_value, list):
             micropython = [str(v) for v in micropython_value] or [DEFAULT_MICROPYTHON]
         else:
             micropython = str(micropython_value).split() or [DEFAULT_MICROPYTHON]
 
-        ports_value = usermod.get("ports")
-        ports = (
-            _as_list(ports_value, "ports")
-            if ports_value is not None
-            else list(DEFAULT_PORTS)
-        )
-
+        platform_tables: dict[str, dict[str, Any]] = {}
         axis_overrides: dict[str, list[str]] = {}
         for port in ports:
-            port_table = usermod.get(port)
-            if not isinstance(port_table, dict):
-                continue
-            key = axis_key(port)
-            if key is None:
-                if port_table:
-                    raise UsermodConfigError(
-                        f"[usermod.{port}]: this port has no configurable axis "
-                        f"yet, but the table is not empty"
-                    )
-                continue
-            check_table_keys(
-                port_table,
-                where=f"[usermod.{port}]",
-                known=frozenset({key}),
-                error=UsermodConfigError,
+            port_table = dict(raw.get(port) or {})
+            check_keys(
+                port_table, SCHEMAS[port], where=f"[{port}]", error=UsermodConfigError
             )
-            if key in port_table:
-                axis_overrides[port] = _as_list(
-                    port_table[key], f"usermod.{port}.{key}"
-                )
+            platform_tables[port] = port_table
+            key = axis_key(port)
+            if key is not None and key in port_table:
+                axis_overrides[port] = _as_list(port_table[key], f"{port}.{key}")
 
-        overrides = list(usermod.get("overrides") or [])
+        cascade = OptionCascade(
+            global_table=raw, platform_tables=platform_tables, env={}
+        )
+
+        overrides = list(raw.get("usermod-overrides") or [])
         if not isinstance(overrides, list):
-            raise UsermodConfigError("[usermod] overrides must be an array of tables")
+            raise UsermodConfigError("[[usermod-overrides]] must be an array of tables")
         for override in overrides:
             if isinstance(override, dict):
-                check_table_keys(
+                check_keys(
                     override,
-                    where="[[usermod.overrides]]",
-                    known=USERMOD_OVERRIDE_TABLE_KEYS,
+                    USERMOD_OVERRIDE_TABLE_KEYS,
+                    where="[[usermod-overrides]]",
                     error=UsermodConfigError,
                 )
 
@@ -327,16 +263,12 @@ class UsermodOptions:
             micropython=micropython,
             output_dir=Path(str(opt("output-dir", DEFAULT_OUTPUT_DIR))),
             ports=ports,
-            module_dir=str(usermod.get("module-dir", DEFAULT_MODULE_DIR)),
-            manifest=str(usermod.get("manifest", "")),
-            build=parse_selector(_selector(raw, usermod, "build", "*")),
-            skip=parse_selector(_selector(raw, usermod, "skip", "")),
-            extra_make_args=_as_list(
-                usermod.get("extra-make-args"), "usermod.extra-make-args"
-            ),
+            build=parse_selector(opt("build", "*")),
+            skip=parse_selector(opt("skip", "")),
             axis_overrides=axis_overrides,
             overrides=overrides,
             enable=frozenset(parse_selector(opt("enable"))),
+            _cascade=cascade,
         )
 
     def targets(self) -> list[UsermodTarget]:
@@ -347,28 +279,34 @@ class UsermodOptions:
                 f"{', '.join(sorted(GROUPS))}"
             )
         all_targets = usermod_targets(self.micropython, self.ports, self.axis_overrides)
-        return select(all_targets, self.build, self.skip, enable=self.enable, groups=GROUPS)
+        return select(
+            all_targets, self.build, self.skip, enable=self.enable, groups=GROUPS
+        )
 
     def build_options(
         self, target: UsermodTarget, env: Mapping[str, str] | None = None
     ) -> UsermodBuildOptions:
-        """Resolve per-target options: file -> matching
-        [[usermod.overrides]] -> environment -- the same shape natmod's
-        own Options.build_options() already has (0051 point 7)."""
+        """Resolve per-target options: file (global -> that target's own
+        port table) -> matching [[usermod-overrides]] -> environment --
+        the same shape natmod's own Options.build_options() already has
+        (0051 point 7)."""
         environ: Mapping[str, str] = os.environ if env is None else env
 
-        layers: list[dict[str, Any]] = [
-            {
-                "module-dir": self.module_dir,
-                "manifest": self.manifest,
-                "extra-make-args": list(self.extra_make_args),
-            }
-        ]
+        base = {
+            "module-dir": self._cascade.get(
+                "module-dir", platform=target.port, default=DEFAULT_MODULE_DIR
+            ),
+            "manifest": self._cascade.get("manifest", platform=target.port, default=""),
+            "extra-make-args": self._cascade.get(
+                "extra-make-args", platform=target.port, default=[]
+            ),
+        }
+        layers: list[dict[str, Any]] = [base]
         for override in self.overrides:
             selector = override.get("select")
             if selector is None:
                 raise UsermodConfigError(
-                    "every [[usermod.overrides]] table needs a `select` key"
+                    "every [[usermod-overrides]] table needs a `select` key"
                 )
             if matches(target.identifier, parse_selector(selector)):
                 layers.append(override)

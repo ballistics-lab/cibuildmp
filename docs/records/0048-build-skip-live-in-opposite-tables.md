@@ -217,4 +217,14 @@ mechanism) landed standalone and unit-tested; `natmod/options.py`/
 resolution describes until [0051]'s later phases migrate them. See that
 record's own addendum for the full phased plan.
 
+**Wired, 2026-08-26 (the same day, [0051]'s own Phase F):** both modules
+now resolve `module-dir`/`extra-make-args`/etc. through `Options.get()`,
+bounded to the plain `default → global → platform → env` layers — not
+`[[overrides]]`/`inherit`, which stay [0051]'s own "Phase G" ([0051]'s
+fourth addendum has the full account). `check_table_keys()` itself is
+retired in favour of `check_known_keys()` plus a small per-module
+`check_keys()` wrapper that still gives the "this belongs at the top
+level" message this record's own resolution introduced, now also with a
+`difflib`-suggested close match for a genuine typo.
+
 [0051]: 0051-usermod-identifiers-have-no-version-axis.md

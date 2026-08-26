@@ -1,6 +1,6 @@
 import json
 
-from cibuildmp.cli import detect_mode, main
+from cibuildmp.cli import main
 from cibuildmp.natmod.options import DEFAULT_MICROPYTHON
 from cibuildmp.usermod.targets import default_axis_values
 
@@ -21,34 +21,6 @@ def _default_build_unix_cells():
     ]
 
 
-# ── detect_mode() unit cases ─────────────────────────────────────────────
-
-
-def test_detect_mode_no_tables_defaults_natmod():
-    assert detect_mode({}, None) == "natmod"
-
-
-def test_detect_mode_natmod_table_only():
-    assert detect_mode({"natmod": {}}, None) == "natmod"
-
-
-def test_detect_mode_usermod_table_only():
-    assert detect_mode({"usermod": {}}, None) == "usermod"
-
-
-def test_detect_mode_both_tables_ambiguous_without_explicit():
-    assert detect_mode({"natmod": {}, "usermod": {}}, None) is None
-
-
-def test_detect_mode_explicit_platform_always_wins():
-    assert detect_mode({"natmod": {}}, "usermod") == "usermod"
-    assert detect_mode({"usermod": {}}, "natmod") == "natmod"
-    assert detect_mode({"natmod": {}, "usermod": {}}, "usermod") == "usermod"
-
-
-# ── main() dispatch, end to end ──────────────────────────────────────────
-
-
 def make_module_dir(package_dir, name="usermod"):
     mod = package_dir / name / "mymod"
     mod.mkdir(parents=True)
@@ -65,11 +37,11 @@ def test_no_config_still_defaults_to_natmod(tmp_path, capsys):
     assert not any(i.startswith("unix") for i in identifiers)
 
 
-def test_usermod_table_dispatches_to_usermod_cli(tmp_path, capsys):
+def test_a_port_table_dispatches_to_usermod_cli(tmp_path, capsys):
     make_module_dir(tmp_path)
-    write(tmp_path, '[usermod]\nports = ["unix"]\n')
+    write(tmp_path, "[unix]\n")
 
-    # This test is about dispatch -- a `[usermod]` table reaching the
+    # This test is about dispatch -- a `[unix]` table reaching the
     # usermod CLI at all -- not about which unix cells the default axis
     # holds, so it derives them. See test_usermod_targets.py for the one
     # place that asserts the list itself.
@@ -81,7 +53,7 @@ def test_usermod_table_dispatches_to_usermod_cli(tmp_path, capsys):
 
 def test_usermod_print_build_identifiers_json(tmp_path, capsys):
     make_module_dir(tmp_path)
-    write(tmp_path, '[usermod]\nports = ["esp32"]\n')
+    write(tmp_path, "[esp32]\n")
 
     assert main([str(tmp_path), "--print-build-identifiers", "--json"]) == 0
     assert json.loads(capsys.readouterr().out) == [
@@ -91,7 +63,7 @@ def test_usermod_print_build_identifiers_json(tmp_path, capsys):
 
 def test_usermod_dry_run_lists_every_target(tmp_path, capsys):
     make_module_dir(tmp_path)
-    write(tmp_path, '[usermod]\nports = ["webassembly"]\n')
+    write(tmp_path, "[webassembly]\n")
 
     assert main([str(tmp_path), "--dry-run"]) == 0
     out = capsys.readouterr().out
@@ -103,7 +75,7 @@ def test_usermod_dry_run_lists_every_target(tmp_path, capsys):
 
 def test_usermod_only_selects_one_target(tmp_path, capsys):
     make_module_dir(tmp_path)
-    write(tmp_path, '[usermod]\nports = ["unix"]\n')
+    write(tmp_path, "[unix]\n")
 
     assert (
         main(
@@ -123,7 +95,7 @@ def test_usermod_only_selects_one_target(tmp_path, capsys):
 
 def test_usermod_only_unknown_identifier_is_an_error(tmp_path, capsys):
     make_module_dir(tmp_path)
-    write(tmp_path, '[usermod]\nports = ["unix"]\n')
+    write(tmp_path, "[unix]\n")
 
     # `unix-riscv64` is the bare-arch spelling records 0043/0044 retired;
     # the real identifier is `unix-manylinux_2_39_riscv64`. The error now
@@ -142,7 +114,7 @@ def test_usermod_only_reaches_a_target_the_config_does_not_select(tmp_path, caps
     # this one thing". cibuildwheel takes its own `--only` choices from
     # `read_all_configs()` for the same reason.
     make_module_dir(tmp_path)
-    write(tmp_path, '[usermod]\nports = ["unix"]\n')
+    write(tmp_path, "[unix]\n")
 
     assert (
         main(
@@ -169,7 +141,7 @@ def test_usermod_only_overrides_skip(tmp_path, capsys):
     make_module_dir(tmp_path)
     write(
         tmp_path,
-        '[usermod]\nports = ["unix"]\nskip = "*-manylinux_2_28_x86_64"\n',
+        'skip = "*-manylinux_2_28_x86_64"\n[unix]\n',
     )
 
     assert (
@@ -194,7 +166,7 @@ def test_usermod_only_reaches_a_port_the_config_does_not_list(tmp_path, capsys):
     # here, so naming a webassembly identifier works from a unix-only
     # config.
     make_module_dir(tmp_path)
-    write(tmp_path, '[usermod]\nports = ["unix"]\n')
+    write(tmp_path, "[unix]\n")
 
     assert (
         main(
@@ -210,15 +182,78 @@ def test_usermod_only_reaches_a_port_the_config_does_not_list(tmp_path, capsys):
     assert capsys.readouterr().out.split() == [f"{DEFAULT_MICROPYTHON}-webassembly"]
 
 
-def test_both_tables_without_platform_is_an_error(tmp_path, capsys):
-    write(tmp_path, "[natmod]\n[usermod]\n")
+# ── the headline new capability: >1 platform, one invocation ────────────
 
-    assert main([str(tmp_path), "--print-build-identifiers"]) == 2
-    assert "both [natmod] and [usermod]" in capsys.readouterr().err
+
+def test_both_tables_without_platform_builds_both(tmp_path, capsys):
+    write(tmp_path, '[natmod]\narchs = ["x64"]\n[unix]\n')
+
+    assert main([str(tmp_path), "--print-build-identifiers"]) == 0
+    identifiers = capsys.readouterr().out.split()
+    assert "mpy6.3-natmod-x64" in identifiers
+    assert any(i.startswith(f"{DEFAULT_MICROPYTHON}-unix-") for i in identifiers)
+
+
+def test_both_tables_print_build_identifiers_json_is_one_array(tmp_path, capsys):
+    write(tmp_path, '[natmod]\narchs = ["x64"]\n[unix]\n')
+
+    assert main([str(tmp_path), "--print-build-identifiers", "--json"]) == 0
+    identifiers = json.loads(capsys.readouterr().out)
+    assert "mpy6.3-natmod-x64" in identifiers
+    assert any(i.startswith(f"{DEFAULT_MICROPYTHON}-unix-") for i in identifiers)
+
+
+def test_both_tables_dry_run_lists_both(tmp_path, capsys):
+    write(tmp_path, '[natmod]\narchs = ["x64"]\n[unix]\n')
+
+    assert main([str(tmp_path), "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert "mpy6.3-natmod-x64" in out
+    assert "unix" in out
+
+
+def test_both_tables_combined_exit_code_is_the_worse_of_the_two(tmp_path, capsys):
+    # skip="*-unix-*" matches every unix identifier (they all carry
+    # "-unix-") and no natmod one ("mpy6.3-natmod-x64"), so unix selects
+    # zero targets while natmod still builds fine. No --allow-empty, so
+    # the combined exit code must still be 2.
+    write(tmp_path, 'skip = "*-unix-*"\n[natmod]\narchs = ["x64"]\n[unix]\n')
+
+    assert main([str(tmp_path), "--dry-run"]) == 2
+
+
+def test_only_with_both_tables_narrows_to_the_matching_side(tmp_path, capsys):
+    write(tmp_path, '[natmod]\narchs = ["x64"]\n[unix]\n')
+
+    assert (
+        main(
+            [
+                str(tmp_path),
+                "--only",
+                "mpy6.3-natmod-x64",
+                "--print-build-identifiers",
+            ]
+        )
+        == 0
+    )
+    assert capsys.readouterr().out.split() == ["mpy6.3-natmod-x64"]
+
+
+def test_three_platforms_at_once(tmp_path, capsys):
+    write(tmp_path, '[natmod]\narchs = ["x64"]\n[unix]\n[esp32]\n')
+
+    assert main([str(tmp_path), "--print-build-identifiers", "--json"]) == 0
+    identifiers = json.loads(capsys.readouterr().out)
+    assert "mpy6.3-natmod-x64" in identifiers
+    assert any(i.startswith(f"{DEFAULT_MICROPYTHON}-unix-") for i in identifiers)
+    assert f"{DEFAULT_MICROPYTHON}-esp32-ESP32_GENERIC" in identifiers
+
+
+# ── --platform, now a filter over six names rather than a mode select ───
 
 
 def test_both_tables_explicit_platform_natmod(tmp_path, capsys):
-    write(tmp_path, '[natmod]\narchs = ["x64"]\n[usermod]\n')
+    write(tmp_path, '[natmod]\narchs = ["x64"]\n[unix]\n')
 
     assert (
         main([str(tmp_path), "--platform", "natmod", "--print-build-identifiers"]) == 0
@@ -226,13 +261,11 @@ def test_both_tables_explicit_platform_natmod(tmp_path, capsys):
     assert capsys.readouterr().out.split() == ["mpy6.3-natmod-x64"]
 
 
-def test_both_tables_explicit_platform_usermod(tmp_path, capsys):
+def test_both_tables_explicit_platform_qemu(tmp_path, capsys):
     make_module_dir(tmp_path)
-    write(tmp_path, '[natmod]\n[usermod]\nports = ["qemu"]\n')
+    write(tmp_path, "[natmod]\n[qemu]\n")
 
-    assert (
-        main([str(tmp_path), "--platform", "usermod", "--print-build-identifiers"]) == 0
-    )
+    assert main([str(tmp_path), "--platform", "qemu", "--print-build-identifiers"]) == 0
     assert capsys.readouterr().out.split() == [f"{DEFAULT_MICROPYTHON}-qemu"]
 
 
@@ -241,7 +274,7 @@ def test_both_tables_platform_env_var(tmp_path, capsys, monkeypatch):
     # env-override every cibuildmp.toml key already has, matching
     # cibuildwheel's own CIBW_BUILD shape.
     monkeypatch.setenv("CIBMP_PLATFORM", "natmod")
-    write(tmp_path, '[natmod]\narchs = ["x64"]\n[usermod]\n')
+    write(tmp_path, '[natmod]\narchs = ["x64"]\n[unix]\n')
 
     assert main([str(tmp_path), "--print-build-identifiers"]) == 0
     assert capsys.readouterr().out.split() == ["mpy6.3-natmod-x64"]
@@ -250,31 +283,48 @@ def test_both_tables_platform_env_var(tmp_path, capsys, monkeypatch):
 def test_platform_flag_wins_over_env_var(tmp_path, capsys, monkeypatch):
     monkeypatch.setenv("CIBMP_PLATFORM", "natmod")
     make_module_dir(tmp_path)
-    write(tmp_path, '[natmod]\n[usermod]\nports = ["qemu"]\n')
+    write(tmp_path, "[natmod]\n[qemu]\n")
 
-    assert (
-        main([str(tmp_path), "--platform", "usermod", "--print-build-identifiers"]) == 0
-    )
+    assert main([str(tmp_path), "--platform", "qemu", "--print-build-identifiers"]) == 0
     assert capsys.readouterr().out.split() == [f"{DEFAULT_MICROPYTHON}-qemu"]
 
 
 def test_platform_env_var_bad_value_is_an_error(tmp_path, capsys, monkeypatch):
-    monkeypatch.setenv("CIBMP_PLATFORM", "windows")
+    monkeypatch.setenv("CIBMP_PLATFORM", "bogus")
     write(tmp_path, "[natmod]\n")
 
     assert main([str(tmp_path), "--print-build-identifiers"]) == 2
-    assert "CIBMP_PLATFORM" in capsys.readouterr().err
+    assert "unknown platform(s) bogus" in capsys.readouterr().err
 
 
-def test_usermod_bad_port_is_an_error(tmp_path, capsys):
-    write(tmp_path, '[usermod]\nports = ["stm32"]\n')
+def test_platform_usermod_is_no_longer_a_valid_name(tmp_path, capsys):
+    # `usermod` was the old mode name, never a platform -- rejected now,
+    # the same as any other unknown name.
+    write(tmp_path, "[natmod]\n")
+
+    assert main([str(tmp_path), "--platform", "usermod"]) == 2
+    assert "unknown platform(s) usermod" in capsys.readouterr().err
+
+
+# ── the flattened config tree ────────────────────────────────────────────
+
+
+def test_legacy_usermod_table_is_a_clear_error(tmp_path, capsys):
+    write(tmp_path, '[usermod]\nports = ["unix"]\n')
 
     assert main([str(tmp_path)]) == 2
-    assert "unknown usermod port" in capsys.readouterr().err
+    assert "[usermod] no longer exists" in capsys.readouterr().err
+
+
+def test_unknown_top_level_table_is_an_error(tmp_path, capsys):
+    write(tmp_path, "[stm32]\n")
+
+    assert main([str(tmp_path)]) == 2
+    assert "unknown table(s) at the top level: [stm32]" in capsys.readouterr().err
 
 
 def test_usermod_no_targets_needs_allow_empty(tmp_path, capsys):
-    write(tmp_path, '[usermod]\nports = ["unix"]\nskip = "*"\n')
+    write(tmp_path, 'skip = "*"\n[unix]\n')
 
     assert main([str(tmp_path)]) == 2
     err = capsys.readouterr().err
@@ -287,7 +337,7 @@ def test_usermod_no_targets_needs_allow_empty(tmp_path, capsys):
 
 
 def test_enable_flag_reaches_the_emulated_everywhere_cells(tmp_path, capsys):
-    write(tmp_path, '[usermod]\nports = ["unix"]\n')
+    write(tmp_path, "[unix]\n")
 
     assert (
         main(
@@ -306,7 +356,7 @@ def test_enable_flag_reaches_the_emulated_everywhere_cells(tmp_path, capsys):
 
 
 def test_enable_flag_without_it_still_excludes_them(tmp_path, capsys):
-    write(tmp_path, '[usermod]\nports = ["unix"]\n')
+    write(tmp_path, "[unix]\n")
 
     assert main([str(tmp_path), "--print-build-identifiers"]) == 0
     identifiers = capsys.readouterr().out.split()
@@ -314,19 +364,15 @@ def test_enable_flag_without_it_still_excludes_them(tmp_path, capsys):
         assert not any(i.endswith(f"_{arch}") for i in identifiers), arch
 
 
-def test_archs_all_alone_does_not_reach_the_emulated_everywhere_group(
-    tmp_path, capsys
-):
+def test_archs_all_alone_does_not_reach_the_emulated_everywhere_group(tmp_path, capsys):
     # The one narrow, deliberate behaviour change 0051 point 8 makes:
     # --archs all resolves the axis to all fifteen cells, but the group
     # filter still applies on top -- matching upstream's own precedent
     # (CIBW_ARCHS=all does not alone build pypy; CIBW_ENABLE=pypy is
     # still required).
-    write(tmp_path, '[usermod]\nports = ["unix"]\n')
+    write(tmp_path, "[unix]\n")
 
-    assert (
-        main([str(tmp_path), "--archs", "all", "--print-build-identifiers"]) == 0
-    )
+    assert main([str(tmp_path), "--archs", "all", "--print-build-identifiers"]) == 0
     identifiers = capsys.readouterr().out.split()
     assert len(identifiers) == 9
     for arch in ("ppc64le", "s390x", "riscv64"):
@@ -334,7 +380,7 @@ def test_archs_all_alone_does_not_reach_the_emulated_everywhere_group(
 
 
 def test_archs_all_with_enable_reaches_every_cell(tmp_path, capsys):
-    write(tmp_path, '[usermod]\nports = ["unix"]\n')
+    write(tmp_path, "[unix]\n")
 
     assert (
         main(
@@ -353,7 +399,7 @@ def test_archs_all_with_enable_reaches_every_cell(tmp_path, capsys):
 
 
 def test_unknown_enable_group_is_an_error(tmp_path, capsys):
-    write(tmp_path, '[usermod]\nports = ["unix"]\n')
+    write(tmp_path, "[unix]\n")
 
     assert main([str(tmp_path), "--enable", "bogus"]) == 2
     assert "unknown group" in capsys.readouterr().err

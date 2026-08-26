@@ -24,10 +24,13 @@ name: Build examples
 #               above it -- copied alongside template.mpy on the natmod
 #               side ([publish] extra-files), frozen into the firmware
 #               image on the usermod side (usermod/manifest.py). Built
-#               twice, `CIBMP_PLATFORM=natmod` then `=usermod` (the
-#               config now has both tables, so detect_mode() cannot infer
-#               which one alone) -- natmod's own five bare-host arches
-#               below, usermod's own five real unix arches
+#               twice, `CIBMP_PLATFORM=natmod` then
+#               `=unix,webassembly,windows` -- separate jobs for CI
+#               layout reasons (this workflow's own matrix/scheduling
+#               shape below), not because one invocation can't span both
+#               (it can, as of Phase F -- record 0051 points 4/6) --
+#               natmod's own five bare-host arches below, usermod's own
+#               five real unix arches
 #               (x64/x86/aarch64/armhf/mipsel, D20/D24) plus webassembly
 #               (D26/D30's Docker-only path) in build-usermod, which is
 #               what actually proves action.yml's own apt prerequisites
@@ -80,13 +83,14 @@ jobs:
       - name: Build examples/template (natmod)
         uses: ./
         env:
-          # examples/template/cibuildmp.toml now has both [natmod] and
-          # [usermod] (natmod/, usermod/ and src/ as siblings, the real
-          # downstream layout -- see that file's own header comment), so
-          # detect_mode() can no longer infer which table this invocation
-          # means. CIBMP_PLATFORM, not a dedicated action.yml input --
-          # the same generic env-override every cibuildmp.toml key
-          # already has, matching cibuildwheel's own CIBW_BUILD shape.
+          # examples/template/cibuildmp.toml has [natmod] and three
+          # usermod port tables (natmod/, usermod/ and src/ as siblings,
+          # the real downstream layout -- see that file's own header
+          # comment); one invocation could build all four now (Phase F),
+          # but this job wants only natmod, so CIBMP_PLATFORM narrows it
+          # -- the same generic env-override every cibuildmp.toml key
+          # already has, not a dedicated action.yml input, matching
+          # cibuildwheel's own CIBW_BUILD shape.
           CIBMP_PLATFORM: "natmod"
           # Exercises D14's packaging step (extra-files + package.json) on
           # every push -- no real release tag needed for that, this repo
@@ -208,7 +212,7 @@ jobs:
       - name: Build examples/template (usermod, native to ${{ matrix.os }})
         uses: ./
         env:
-          CIBMP_PLATFORM: "usermod"
+          CIBMP_PLATFORM: "unix,webassembly,windows"
         with:
           package-dir: examples/template
           archs: auto
@@ -267,7 +271,7 @@ jobs:
       - name: Build ${{ matrix.only }} -- ${{ matrix.direction }}
         uses: ./
         env:
-          CIBMP_PLATFORM: "usermod"
+          CIBMP_PLATFORM: "unix,webassembly,windows"
         with:
           package-dir: examples/template
           only: ${{ matrix.only }}
