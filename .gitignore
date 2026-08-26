@@ -29,3 +29,10 @@ mpyhouse/
 
 # Claude Code session scratch (agent worktrees, local state)
 .claude/
+
+# Build scratch inside the examples. `.wabt/` is what wasm2mpy's own
+# pre-build-command unpacks a wabt .deb into (record 0050 moved that step
+# into the container, where it cannot apt-install); `.mpy_ld_cache-*` is
+# mpy_ld.py's own per-arch cache.
+examples/*/.wabt/
+examples/*/.mpy_ld_cache-*/
