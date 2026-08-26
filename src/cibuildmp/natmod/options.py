@@ -60,6 +60,15 @@ class ConfigError(Exception):
 # `archs`/`arch-flags` stay deliberately dual-read for natmod (top level
 # *or* `[natmod]`) and are not listed here. That predates 0048 and is not
 # the trap: both placements work, so neither is silent.
+#
+# `enable` (**0051** point 8, upstream's own `EnableGroup`) is listed
+# here even though only usermod defines any groups today -- natmod's own
+# `Options` has no `enable` field at all, since a config surface with
+# nothing to gate would be speculative. Listing the key is enough on its
+# own: it means a misplaced `enable` inside `[natmod]` or `[usermod]`
+# gets the same "read from the top level" error every other key here
+# gets, for free, rather than an "unknown key" that would be actively
+# misleading once natmod does define a group.
 TOP_LEVEL_ONLY_KEYS: frozenset[str] = frozenset(
     {
         "micropython",
@@ -69,6 +78,7 @@ TOP_LEVEL_ONLY_KEYS: frozenset[str] = frozenset(
         "version",
         "mpy-abi",
         "micropython-submodules",
+        "enable",
     }
 )
 

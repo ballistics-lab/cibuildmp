@@ -17,6 +17,18 @@ def write_config(tmp_path: Path, text: str) -> Path:
     return path
 
 
+def _default_build_unix_cells() -> list[str]:
+    # What a bare `build = "*"` actually selects for unix: the full axis
+    # minus the emulated-everywhere group (0051 point 8) -- `neither
+    # default_axis_values("unix") (now the full fifteen) nor
+    # GROUPS on their own answer this, only both together do.
+    return [
+        v
+        for v in default_axis_values("unix")
+        if not v.endswith(("_ppc64le", "_s390x", "_riscv64"))
+    ]
+
+
 def test_no_usermod_table_defaults_to_every_port_with_a_docker_path(tmp_path):
     # Every known port except `esp32`, which has no Dockerfile and no
     # pinned image at all ([0028]) and provisions ESP-IDF onto the host
@@ -42,7 +54,7 @@ def test_ports_list_selects_a_subset(tmp_path):
     # no opinion about it. `test_usermod_targets.py` owns the list.
     identifiers = [t.identifier for t in options.targets()]
     assert identifiers == [
-        f"{DEFAULT_MICROPYTHON}-unix-{value}" for value in default_axis_values("unix")
+        f"{DEFAULT_MICROPYTHON}-unix-{value}" for value in _default_build_unix_cells()
     ] + [f"{DEFAULT_MICROPYTHON}-esp32-ESP32_GENERIC"]
 
 
@@ -323,3 +335,118 @@ def test_shared_top_level_keys_honour_the_environment_in_usermod_mode(
 
     assert options.micropython == ["v1.28.0"]
     assert options.output_dir == Path("elsewhere")
+
+
+# ── record 0051 point 7: [[usermod.overrides]] ───────────────────────────
+
+
+def test_usermod_overrides_beat_the_file(tmp_path):
+    write_config(
+        tmp_path,
+        """
+        [usermod]
+        ports = ["unix"]
+        extra-make-args = ["COMMON=1"]
+
+        [[usermod.overrides]]
+        select = "*-manylinux_2_28_x86_64"
+        extra-make-args = ["FROM=override"]
+        """,
+    )
+    options = UsermodOptions.load(tmp_path)
+    resolved = {
+        t.arch: options.build_options(t).extra_make_args for t in options.targets()
+    }
+    assert resolved["manylinux_2_28_x86_64"] == ["FROM=override"]
+    assert resolved["manylinux_2_28_i686"] == ["COMMON=1"]
+
+
+def test_usermod_override_without_select_is_an_error(tmp_path):
+    write_config(
+        tmp_path,
+        '[usermod]\nports = ["unix"]\n[[usermod.overrides]]\nmanifest = "x.py"\n',
+    )
+    options = UsermodOptions.load(tmp_path)
+    with pytest.raises(UsermodConfigError, match="select"):
+        options.build_options(options.targets()[0])
+
+
+def test_usermod_environment_beats_override(tmp_path):
+    write_config(
+        tmp_path,
+        """
+        [usermod]
+        ports = ["unix"]
+        [[usermod.overrides]]
+        select = "*"
+        extra-make-args = ["FROM=override"]
+        """,
+    )
+    options = UsermodOptions.load(tmp_path)
+    target = options.targets()[0]
+    env = {"CIBMP_EXTRA_MAKE_ARGS": "FROM=env A=1"}
+    assert options.build_options(target, env=env).extra_make_args == [
+        "FROM=env",
+        "A=1",
+    ]
+
+
+def test_usermod_override_beats_the_file_for_manifest(tmp_path):
+    write_config(
+        tmp_path,
+        """
+        [usermod]
+        ports = ["unix"]
+        manifest = "default.py"
+        [[usermod.overrides]]
+        select = "*"
+        manifest = "special.py"
+        """,
+    )
+    options = UsermodOptions.load(tmp_path)
+    assert options.build_options(options.targets()[0]).manifest == "special.py"
+
+
+def test_an_unknown_key_in_usermod_overrides_is_an_error(tmp_path):
+    write_config(
+        tmp_path,
+        """
+        [usermod]
+        ports = ["unix"]
+        [[usermod.overrides]]
+        select = "*"
+        arch-flags = "zba"
+        """,
+    )
+    with pytest.raises(
+        UsermodConfigError, match=r"\[\[usermod\.overrides\]\]: unknown key"
+    ):
+        UsermodOptions.load(tmp_path)
+
+
+# ── record 0051 point 8: enable / GROUPS ──────────────────────────────────
+
+
+def test_enable_reaches_the_emulated_everywhere_cells(tmp_path):
+    write_config(
+        tmp_path, 'enable = "unix-emulated-everywhere"\n[usermod]\nports = ["unix"]\n'
+    )
+    options = UsermodOptions.load(tmp_path)
+    identifiers = [t.identifier for t in options.targets()]
+    for arch in ("ppc64le", "s390x", "riscv64"):
+        assert any(i.endswith(f"_{arch}") for i in identifiers), arch
+
+
+def test_without_enable_the_emulated_everywhere_cells_stay_out(tmp_path):
+    write_config(tmp_path, '[usermod]\nports = ["unix"]\n')
+    options = UsermodOptions.load(tmp_path)
+    identifiers = [t.identifier for t in options.targets()]
+    for arch in ("ppc64le", "s390x", "riscv64"):
+        assert not any(i.endswith(f"_{arch}") for i in identifiers), arch
+
+
+def test_unknown_enable_group_is_an_error(tmp_path):
+    write_config(tmp_path, 'enable = "bogus"\n[usermod]\nports = ["unix"]\n')
+    options = UsermodOptions.load(tmp_path)
+    with pytest.raises(UsermodConfigError, match="unknown group.*bogus"):
+        options.targets()

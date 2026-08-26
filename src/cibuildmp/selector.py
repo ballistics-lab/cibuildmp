@@ -77,13 +77,38 @@ def matches(identifier: str, patterns: list[str]) -> bool:
     )
 
 
-def select(targets: list[T], build: str | list[str], skip: str | list[str]) -> list[T]:
-    """Apply build/skip globs, skip last -- same order as cibuildwheel."""
+def select(
+    targets: list[T],
+    build: str | list[str],
+    skip: str | list[str],
+    *,
+    enable: frozenset[str] = frozenset(),
+    groups: dict[str, list[str]] | None = None,
+) -> list[T]:
+    """Apply build/skip globs, skip last -- same order as cibuildwheel.
+
+    `groups`/`enable` (**0051** point 8, upstream's own `EnableGroup`): a
+    group is a named set of glob patterns a mode supplies as data -- this
+    module knows nothing about what a group means, the same "mechanism
+    shared, data per-mode" split the rest of this file already holds to.
+    A target matching an unenabled group's patterns is dropped *before*
+    build/skip is even checked, so `build = "*"` alone can never reach
+    it -- matching upstream's own `BuildSelector.__call__`, which checks
+    `EnableGroup` membership first and lets it outrank `build`/`skip`.
+    Callers that pass no `groups` (every one before this record) get
+    identical behaviour to before it.
+    """
     build_patterns = parse_selector(build) or ["*"]
     skip_patterns = parse_selector(skip)
-    return [
-        t
-        for t in targets
-        if matches(t.identifier, build_patterns)
-        and not matches(t.identifier, skip_patterns)
-    ]
+    result = []
+    for t in targets:
+        if groups and any(
+            name not in enable and matches(t.identifier, patterns)
+            for name, patterns in groups.items()
+        ):
+            continue
+        if matches(t.identifier, build_patterns) and not matches(
+            t.identifier, skip_patterns
+        ):
+            result.append(t)
+    return result

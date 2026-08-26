@@ -80,24 +80,35 @@ are *missing*; work that unblocks verification beats work that gets verified
 later; and cheap-with-strong-evidence beats expensive-and-speculative.
 
 - [ ] [0051] one selector for both modes, and an identifier that names what a
-      build is compatible with | **the axis/identifier half landed
-      2026-08-26; the `--platform`-becomes-port half did not.** natmod's
-      `mpy-abi` can now state the ABI axis directly (list) as well as derive
-      it from tags (string, unchanged); usermod's `micropython` is a real
-      list and its identifier leads with the tag
+      build is compatible with | **five of six shape points landed
+      2026-08-26; only `--platform`-becomes-port (and `--archs` with it)
+      did not.** natmod's `mpy-abi` can now state the ABI axis directly
+      (list) as well as derive it from tags (string, unchanged); usermod's
+      `micropython` is a real list and its identifier leads with the tag
       (`v1.29.0-unix-manylinux_2_28_x86_64`), so two releases no longer
       overwrite each other's output. `select()`/`matches()`/`parse_selector()`
       moved to one `cibuildmp/selector.py`, which also gained brace
-      expansion. **Still open**, per the record's own addendum: `--archs`
-      still means what it did (point 4), `--platform` still means the build
-      mode rather than the port -- no `platforms/` tree, config still
-      `[usermod.unix]` not `[unix]` (points 6/7) -- and the six
-      emulated-everywhere `unix` cells are still absent from the default
-      axis rather than an `EnableGroup`-style opt-in (point 8). Deferred
-      deliberately: those are a separable epic, not required to close the
-      two live bugs this closed. Still goes **before** [0038] rather than
-      after -- the identifier shape is now settled, so telling the three
-      consuming repos to migrate once is still the right order
+      expansion and, in a same-day second pass, `enable`/`groups`
+      (upstream's own `EnableGroup`) -- the six emulated-everywhere `unix`
+      cells (`ppc64le`/`s390x`/`riscv64`, both libcs) stopped being absent
+      from the default axis and became an opt-in group instead
+      (`--enable unix-emulated-everywhere`/`enable = [...]`), closing this
+      row's own musllinux-adjacent question from [0044] below. usermod also
+      gained its own `[[usermod.overrides]]` (nested, not shared with
+      natmod's top-level one -- the two modes' override tables take
+      different keys). **Still open**, per the record's own addenda:
+      `--platform` still means the build mode rather than the port -- no
+      `platforms/` tree, config still `[usermod.unix]` not `[unix]` (point
+      6) -- and `--archs` still means what it did (point 4, which the
+      record argues dissolves once point 6 lands rather than being fixed
+      independently). Deferred deliberately: moving `--platform` changes
+      the invocation model itself (one usermod run currently builds several
+      ports at once, e.g. `examples/template`'s own `ports = ["unix",
+      "webassembly", "windows"]`), with knock-on `action.yml`/CI changes --
+      a separable epic, not required to close the two live bugs the first
+      pass fixed. Still goes **before** [0038] rather than after -- the
+      identifier shape is now settled, so telling the three consuming repos
+      to migrate once is still the right order
 - [ ] [0050] natmod's image needs one more publish, and CI has never been
       green on it | **start here, and it is nearly done.** The image gained
       `gcc-i686-linux-gnu` after v1.29.0 changed `dynruntime.mk`'s `x86` from
@@ -129,10 +140,15 @@ later; and cheap-with-strong-evidence beats expensive-and-speculative.
       `ca-certificates`) -> toolchains -> the rest would make that free. Also
       worth deciding whether `xtensa-lx106` (ESP8266, crosstool-NG 4.8.5)
       earns its share of a 3.91GB image
-- [ ] [0044] the six emulated-everywhere cells: build them or descope | a
-      **decision**, not work. `ppc64le`, `s390x`, `riscv64` in both columns are
-      native to no runner GitHub offers, have never been built, and Alpine's
-      own `community/micropython` excludes the first two outright. Nine of
+- [ ] [0044] the six emulated-everywhere cells: build them or descope | the
+      **decision** landed 2026-08-26, via [0051] point 8: neither, they are
+      an opt-in `EnableGroup`-style group now
+      (`--enable unix-emulated-everywhere`), reachable without editing a
+      config's own `archs`, still absent from a bare `build = "*"`. The
+      **work** this row was also about is still open, unchanged by that:
+      `ppc64le`, `s390x`, `riscv64` in both columns are native to no runner
+      GitHub offers, have never been built, and Alpine's own
+      `community/micropython` excludes the first two outright. Nine of
       fifteen cells are in the default axis and green; this is the whole
       remainder. [0031] is the same question for its own three cells and is
       answered by the same sentence

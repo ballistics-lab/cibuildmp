@@ -1,6 +1,6 @@
 # 0051 — one selector for both modes, and an identifier that names what a build is compatible with
 
-Status: In progress — Shape points 1/2/3/5 implemented 2026-08-26; 4/6/7/8 still open (see addendum)
+Status: In progress — Shape points 1/2/3/5/7/8 implemented 2026-08-26; 4/6 still open (see addenda)
 
 Rewritten twice the same day it was written, before anything was built on it.
 The first draft framed this as "usermod cannot build two MicroPython versions",
@@ -368,18 +368,17 @@ and `requires_python` (that is point 8, tracked separately below) --
 `selector.py` today is exactly `parse_selector`/`matches`/`select`, nothing
 about groups or a compatibility constraint.
 
-**Points 4, 6, 7, 8 — deliberately not attempted in this pass.**
+**Points 4 and 6 — deliberately not attempted in this pass; points 7 and 8
+landed in a second pass the same day (see the addendum below).**
 `--archs` keeps its current usermod meaning (a real but narrower shape than
 upstream's, per point 4); `--platform` still means the build mode, not the
-port (point 6); usermod still has no `[[overrides]]` (point 7); the six
-emulated-everywhere `unix` cells are still absent from the default axis
-rather than an opt-in group (point 8). None of this is a regression --
-deferring them left existing behavior unchanged, only without their
-improvements -- and the reasoning for the split (real, separable epic;
-disruptive part done once while the three consuming repos are still
-unmigrated) is recorded in the session that did this work rather than here.
-Whoever picks these up next should re-read this record's own "Shape"
-section 4/6/7/8 rather than start from the addendum.
+port (point 6). None of this is a regression -- deferring them left
+existing behavior unchanged, only without their improvements -- and the
+reasoning for the split (real, separable epic; disruptive part done once
+while the three consuming repos are still unmigrated) is recorded in the
+session that did this work rather than here. Whoever picks these up next
+should re-read this record's own "Shape" section 4/6 rather than start from
+an addendum.
 
 Verified: full test suite green (323 tests, three new/expanded files --
 `tests/test_selector.py` is new); live `--print-build-identifiers` against
@@ -387,6 +386,69 @@ Verified: full test suite green (323 tests, three new/expanded files --
 `micropython = ["v1.28.0", "v1.29.0"]` (usermod), both producing distinct,
 correctly-shaped identifiers; `--only` resolving against the full matrix
 post-refactor in both modes.
+
+## Addendum, 2026-08-26 (second pass) — Shape points 7/8 landed
+
+Point 6 (`--platform` becomes the port) turned out to be a bigger and
+more consequential change than a rename once looked at closely: today one
+usermod invocation builds several ports at once
+(`examples/template/cibuildmp.toml`'s real config is
+`ports = ["unix", "webassembly", "windows"]` in one `[usermod]` table, one
+CI job) — making `--platform` mean one port the way upstream's own
+`--platform` means one OS would mean one invocation builds one port,
+splitting that job into several. This record's own "Shape" section does
+not resolve that, so it stayed out, and point 4 (`--archs` losing its
+usermod meaning) stays with it, since the record's own text says the
+"second axis looks heterogeneous" problem "exists only because usermod
+bundles five platforms" — it dissolves once point 6 lands, not before.
+Points 7 and 8 were independent of that and got done instead.
+
+**Point 7 (`[[usermod.overrides]]`).** A design decision the record left
+open, resolved here: usermod's overrides are their **own** nested
+`[[usermod.overrides]]` array (`USERMOD_OVERRIDE_TABLE_KEYS` in
+`usermod/options.py`: `select`/`module-dir`/`manifest`/`extra-make-args`),
+not a share of natmod's top-level `[[overrides]]`. Reason: the two modes'
+override tables accept different keys, and a config with both `[natmod]`
+and `[usermod]` tables (the real `examples/template` shape) would
+otherwise need one shared list whose keys mean different things depending
+which mode reads it. `UsermodOptions.build_options()` now layers
+`file -> matching override -> environment`, the exact shape
+`natmod/options.py`'s own `build_options()` already had. `variant` (a real
+field on `UnixBuildOptions`/`WebassemblyBuildOptions`/`WindowsBuildOptions`,
+still hardcoded, still no config surface) stayed out, on purpose — wiring
+it needs `orchestrate._port_build_options()` to pass it through per port,
+its own smaller follow-up.
+
+**Point 8 (opt-in groups, upstream's own `EnableGroup`).** `cibuildmp
+.selector.select()` gained `enable`/`groups` parameters, backward
+compatible (natmod's existing calls pass neither and are unaffected). A
+target matching an unenabled group's glob patterns is dropped before
+`build`/`skip` is even checked, matching upstream's own
+`BuildSelector.__call__` order. The concrete target was the tracker's own
+`[0044]` row ("the six emulated-everywhere cells: build them or
+descope"): `usermod.targets.GROUPS["unix-emulated-everywhere"]` covers
+`ppc64le`/`s390x`/`riscv64`, both libcs. Doing this properly meant the six
+cells stopped being absent from `unix`'s own axis at all
+(`default_axis_values("unix")` is now `all_axis_values("unix")` in full;
+`_UNIX_DEFAULT_TARGETS` is deleted) — what still keeps a bare
+`build = "*"` at nine cells is the group, not axis membership, exactly as
+the record's own text specifies. One narrow, deliberate, and
+called-out-rather-than-hidden behaviour change: `--archs all` now resolves
+the axis to all fifteen cells but the group filter still applies on top,
+so it alone no longer reaches the six without `--enable
+unix-emulated-everywhere` too — matching upstream precedent
+(`CIBW_ARCHS=all` does not alone build `pypy`) and unlikely to break
+anything real, since the tracker's own words are that nothing has ever
+built these six cells. `enable` is a genuinely shared top-level config key
+(`TOP_LEVEL_ONLY_KEYS` in `natmod/options.py`) even though only usermod
+defines any groups today; natmod's own `Options` gained no `enable` field,
+since a config surface with nothing to gate would be speculative.
+
+Verified: full test suite green (341 tests); `ruff`/`pyright` clean on
+every touched file; live `--print-build-identifiers`/`CIBMP_ENABLE`/
+`--enable`/`--archs all` combinations against `examples/template` and a
+scratch copy carrying a `[[usermod.overrides]]` table, matching every case
+this addendum describes.
 
 [0005]: 0005-one-identifier-namespace.md
 [0013]: 0013-micropython-list-dedup-by-abi.md

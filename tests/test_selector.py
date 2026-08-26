@@ -87,3 +87,45 @@ def test_select_generic_over_any_identifier_bearing_type():
 @pytest.mark.parametrize("value", ["", None])
 def test_matches_empty_pattern_list_matches_nothing(value):
     assert not matches("anything", parse_selector(value))
+
+
+# ── groups / enable (0051 point 8) ───────────────────────────────────────
+
+_GROUPS = {"exotic": ["*-riscv64", "*-s390x"]}
+
+
+def test_select_excludes_an_unenabled_group_even_though_build_matches():
+    targets = [_Fake(i) for i in ("v1-unix-x86_64", "v1-unix-riscv64")]
+    assert [t.identifier for t in select(targets, "*", "", groups=_GROUPS)] == [
+        "v1-unix-x86_64"
+    ]
+
+
+def test_select_reaches_the_group_once_enabled():
+    targets = [_Fake(i) for i in ("v1-unix-x86_64", "v1-unix-riscv64")]
+    result = select(
+        targets, "*", "", enable=frozenset({"exotic"}), groups=_GROUPS
+    )
+    assert [t.identifier for t in result] == ["v1-unix-x86_64", "v1-unix-riscv64"]
+
+
+def test_select_group_filter_outranks_build_and_skip():
+    # A group exclusion cannot be worked around by naming the target in
+    # build -- it is checked first, same as upstream's own EnableGroup.
+    targets = [_Fake("v1-unix-riscv64")]
+    assert select(targets, "*-riscv64", "", groups=_GROUPS) == []
+
+
+def test_select_with_no_groups_argument_is_unaffected_by_group_shaped_identifiers():
+    # Callers that pass nothing (every one before 0051 point 8) see no
+    # behaviour change at all, even for an identifier that would match a
+    # group pattern if groups were supplied.
+    targets = [_Fake("v1-unix-riscv64")]
+    assert [t.identifier for t in select(targets, "*", "")] == ["v1-unix-riscv64"]
+
+
+def test_select_enabling_an_unrelated_group_does_not_reach_a_different_one():
+    targets = [_Fake(i) for i in ("v1-unix-riscv64", "v1-esp32-generic")]
+    groups = {"exotic": ["*-riscv64"], "other": ["*-esp32-*"]}
+    result = select(targets, "*", "", enable=frozenset({"exotic"}), groups=groups)
+    assert [t.identifier for t in result] == ["v1-unix-riscv64"]

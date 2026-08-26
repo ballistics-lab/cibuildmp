@@ -161,8 +161,8 @@ file → `[[overrides]]` matching the identifier → environment → CLI flags.
 **Where a key goes is part of the schema, and getting it wrong is an
 error** ([0048]). The keys above the first table header — `micropython`,
 `output-dir`, `build`, `skip`, `version`, `mpy-abi`,
-`micropython-submodules` — are invocation-wide and are read **only** from
-the top level, in both build modes. Writing one inside `[natmod]` or
+`micropython-submodules`, `enable` — are invocation-wide and are read
+**only** from the top level, in both build modes. Writing one inside `[natmod]` or
 `[usermod]` fails with a message naming where it belongs; so does any key
 a mode table does not read at all (a typo, or an `arch-flags` inside
 `[[overrides]]`). Until [0048] every one of those was silently ignored,
@@ -175,7 +175,29 @@ work, so neither is silent.
 
 Usermod's own `[usermod]` / `[usermod.<port>]` config shape is documented in
 [0023] rather than transcribed here — it is a genuinely different shape
-(no ABI axis, per-port sub-tables), not a variant of the table above.
+(no ABI axis, per-port sub-tables), not a variant of the table above. As of
+[0051] point 7 it also has its own `[[usermod.overrides]]` — nested under
+`[usermod]`, not sharing natmod's top-level `[[overrides]]`, since the two
+modes' override tables take different keys (natmod:
+`module-dir`/`make-target`/`extra-make-args`/`pre-build-command`; usermod:
+`module-dir`/`manifest`/`extra-make-args`) and a config carrying both
+`[natmod]` and `[usermod]` tables would otherwise need one shared list
+whose keys mean different things depending which mode reads it.
+
+**Opt-in groups** ([0051] point 8, upstream's own `EnableGroup`): `enable`
+(config key, top-level, space-separated string or list; `--enable`,
+repeatable, on the CLI) names groups a bare `build = "*"` should reach
+anyway. Only usermod defines any today —
+`usermod.targets.GROUPS["unix-emulated-everywhere"]` covers
+`ppc64le`/`s390x`/`riscv64`, both libcs, glob-matched rather than
+enumerated. A target matching an unenabled group is excluded before
+`build`/`skip` is even checked (`cibuildmp.selector.select()`), so it
+cannot be worked around by naming it in `build` — only `enable` reaches it.
+This is also what finally answers the six emulated-everywhere `unix`
+cells' own "in the axis or not" question: they are in `default_axis_values
+("unix")` now (equal to `all_axis_values("unix")` in full), and it is the
+group, not axis membership, that still keeps a plain `ports = ["unix"]`
+config at nine cells by default.
 
 <!-- migrated verbatim from docs/BACKLOG.md lines 519-546 (Toolchain map) -->
 

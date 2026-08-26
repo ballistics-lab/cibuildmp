@@ -10,6 +10,17 @@ def write(tmp_path, text):
     return str(tmp_path)
 
 
+def _default_build_unix_cells():
+    # Same derivation as test_usermod_options.py's own helper: what
+    # build = "*" actually selects, the full axis minus the
+    # emulated-everywhere group (0051 point 8).
+    return [
+        v
+        for v in default_axis_values("unix")
+        if not v.endswith(("_ppc64le", "_s390x", "_riscv64"))
+    ]
+
+
 # ── detect_mode() unit cases ─────────────────────────────────────────────
 
 
@@ -64,7 +75,7 @@ def test_usermod_table_dispatches_to_usermod_cli(tmp_path, capsys):
     # place that asserts the list itself.
     assert main([str(tmp_path), "--print-build-identifiers"]) == 0
     assert capsys.readouterr().out.split() == [
-        f"{DEFAULT_MICROPYTHON}-unix-{value}" for value in default_axis_values("unix")
+        f"{DEFAULT_MICROPYTHON}-unix-{value}" for value in _default_build_unix_cells()
     ]
 
 
@@ -270,3 +281,79 @@ def test_usermod_no_targets_needs_allow_empty(tmp_path, capsys):
     assert "no targets selected" in err
 
     assert main([str(tmp_path), "--allow-empty"]) == 0
+
+
+# ── record 0051 point 8: --enable ────────────────────────────────────────
+
+
+def test_enable_flag_reaches_the_emulated_everywhere_cells(tmp_path, capsys):
+    write(tmp_path, '[usermod]\nports = ["unix"]\n')
+
+    assert (
+        main(
+            [
+                str(tmp_path),
+                "--enable",
+                "unix-emulated-everywhere",
+                "--print-build-identifiers",
+            ]
+        )
+        == 0
+    )
+    identifiers = capsys.readouterr().out.split()
+    for arch in ("ppc64le", "s390x", "riscv64"):
+        assert any(i.endswith(f"_{arch}") for i in identifiers), arch
+
+
+def test_enable_flag_without_it_still_excludes_them(tmp_path, capsys):
+    write(tmp_path, '[usermod]\nports = ["unix"]\n')
+
+    assert main([str(tmp_path), "--print-build-identifiers"]) == 0
+    identifiers = capsys.readouterr().out.split()
+    for arch in ("ppc64le", "s390x", "riscv64"):
+        assert not any(i.endswith(f"_{arch}") for i in identifiers), arch
+
+
+def test_archs_all_alone_does_not_reach_the_emulated_everywhere_group(
+    tmp_path, capsys
+):
+    # The one narrow, deliberate behaviour change 0051 point 8 makes:
+    # --archs all resolves the axis to all fifteen cells, but the group
+    # filter still applies on top -- matching upstream's own precedent
+    # (CIBW_ARCHS=all does not alone build pypy; CIBW_ENABLE=pypy is
+    # still required).
+    write(tmp_path, '[usermod]\nports = ["unix"]\n')
+
+    assert (
+        main([str(tmp_path), "--archs", "all", "--print-build-identifiers"]) == 0
+    )
+    identifiers = capsys.readouterr().out.split()
+    assert len(identifiers) == 9
+    for arch in ("ppc64le", "s390x", "riscv64"):
+        assert not any(i.endswith(f"_{arch}") for i in identifiers), arch
+
+
+def test_archs_all_with_enable_reaches_every_cell(tmp_path, capsys):
+    write(tmp_path, '[usermod]\nports = ["unix"]\n')
+
+    assert (
+        main(
+            [
+                str(tmp_path),
+                "--archs",
+                "all",
+                "--enable",
+                "unix-emulated-everywhere",
+                "--print-build-identifiers",
+            ]
+        )
+        == 0
+    )
+    assert len(capsys.readouterr().out.split()) == 15
+
+
+def test_unknown_enable_group_is_an_error(tmp_path, capsys):
+    write(tmp_path, '[usermod]\nports = ["unix"]\n')
+
+    assert main([str(tmp_path), "--enable", "bogus"]) == 2
+    assert "unknown group" in capsys.readouterr().err

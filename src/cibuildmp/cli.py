@@ -83,6 +83,17 @@ def build_parser() -> argparse.ArgumentParser:
         "build here.",
     )
     parser.add_argument(
+        "--enable",
+        action="append",
+        default=[],
+        metavar="GROUP",
+        help="Reach an opt-in group build/skip alone would not -- a target "
+        "belonging to an unenabled group is excluded before build/skip is "
+        "even checked. Repeatable. Only usermod defines any groups today "
+        "(unix-emulated-everywhere: ppc64le/s390x/riscv64, both libcs). "
+        "Matches upstream's own --enable/CIBW_ENABLE shape.",
+    )
+    parser.add_argument(
         "--clean-cache",
         action="store_true",
         help="Delete cibuildmp's cache (MicroPython checkouts, mpy-cross builds "

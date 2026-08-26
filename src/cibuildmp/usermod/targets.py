@@ -46,60 +46,19 @@ from .build import WINDOWS_ARCH_SETTINGS
 # everything actually proven" rule `unix`'s own default below already
 # follows.
 #
-# `unix`'s own default is a deliberate subset of what it can build, not
-# `unix_targets()` in full -- **record 0043**, which took that matrix from
-# five cells to fifteen (seven architectures under pypa's own names x
-# manylinux/musllinux, plus `manylinux_2_39_mipsel`). Defaulting to all fifteen
-# would silently turn every existing consumer's single `[usermod] ports =
-# ["unix"]` line into fifteen emulated container builds.
-#
-# The five manylinux entries are the *previous* default translated
-# one-for-one into the new names and floors -- `x64`->`manylinux_2_28_x86_64`,
-# `x86`->`manylinux_2_28_i686`, `aarch64`->`manylinux_2_28_aarch64`,
-# `armhf`->`manylinux_2_31_armv7l` (armv7l's lowest floor upstream
-# publishes), `mipsel`->`manylinux_2_39_mipsel`.
-#
-# **The four musllinux entries were added on 2026-08-26, when the rule
-# above started requiring them.** They are exactly the musl cells with a
-# runner they are native to, and all four are green and required in CI
-# (run 32961216804) -- so by "default = everything actually proven" they
-# qualified, and leaving them out would have meant the rule said one
-# thing and the list another.
-#
-# The argument for holding them back was cost, and it did not survive
-# being stated: the default CI layout is one job looping over every
-# target (**D9**), where nothing is native to anything and `aarch64`/
-# `armv7l` are emulated regardless of which libc column they are in. The
-# default already carried two such cells before this change. Adding two
-# more of the same shape is a quantitative difference in an already-known
-# cost, not a new kind of cost -- and the *right* fix for it is 0045's
-# `auto`/`native` vocabulary, which makes "which cells does a bare
-# `ports = ["unix"]` mean" a question about the host rather than a
-# hardcoded list. Until that exists, the rule as written wins.
-#
-# Still not defaulted to, and for the original reason: `ppc64le`,
-# `s390x`, `riscv64` (both columns) are emulated on every runner GitHub
-# offers, have never been built, and Alpine's own `community/micropython`
-# excludes the first two outright. They stay selectable via
-# `[usermod.unix] archs = [...]` or `--only`.
-#
-# Ordered the way `dockerrun.unix_targets()` orders the full matrix --
-# by architecture, both libcs together, `mipsel` last -- so there is one
-# ordering rule in the codebase rather than two.
-_UNIX_DEFAULT_TARGETS: tuple[str, ...] = (
-    "manylinux_2_28_x86_64",
-    "musllinux_1_2_x86_64",
-    "manylinux_2_28_i686",
-    "musllinux_1_2_i686",
-    "manylinux_2_28_aarch64",
-    "musllinux_1_2_aarch64",
-    "manylinux_2_31_armv7l",
-    "musllinux_1_2_armv7l",
-    "manylinux_2_39_mipsel",
-)
-
+# `unix`'s own default used to be a hardcoded nine-cell subset of the
+# fifteen `unix_targets()` declares (`_UNIX_DEFAULT_TARGETS`, deleted in
+# **0051** point 8). As of that record, `default_axis_values("unix")`
+# below is the *full* fifteen -- the axis itself no longer holds any cell
+# out. What still keeps `build = "*"` at nine cells by default is
+# `GROUPS["unix-emulated-everywhere"]` further down: a target matching an
+# unenabled group is dropped before `build`/`skip` is even checked
+# (`cibuildmp.selector.select()`), so nothing observable changes for a
+# bare `ports = ["unix"]` config -- only the mechanism keeping the other
+# six out changed, from "not in the axis" to "in the axis, ungrouped-in".
+# See the `GROUPS` table below for which six and why.
 _PORT_AXES: dict[str, tuple[str | None, tuple[str, ...]]] = {
-    "unix": ("archs", _UNIX_DEFAULT_TARGETS),
+    "unix": ("archs", ()),  # default is derived -- see default_axis_values()
     "windows": ("archs", tuple(WINDOWS_ARCH_SETTINGS)),
     "qemu": ("boards", ("",)),
     "webassembly": (None, ("",)),
@@ -128,6 +87,28 @@ _NON_DEFAULT_PORTS: frozenset[str] = frozenset({"esp32"})
 DEFAULT_PORTS: tuple[str, ...] = tuple(
     p for p in KNOWN_PORTS if p not in _NON_DEFAULT_PORTS
 )
+
+# ── opt-in groups (0051 point 8, upstream's own EnableGroup) ────────────
+#
+# `ppc64le`/`s390x`/`riscv64` (both libcs) are native to no runner GitHub
+# offers and have never been built, here or by hand -- tracker [0044]'s
+# own "the six emulated-everywhere cells: build them or descope" is what
+# this answers. They stopped being absent from `unix`'s own axis (see
+# `_PORT_AXES` above); this is what still keeps a bare `build = "*"` from
+# reaching them -- `cibuildmp.selector.select()` drops a target matching
+# an unenabled group's patterns before `build`/`skip` is even checked, so
+# `enable = ["unix-emulated-everywhere"]` (config) or
+# `--enable unix-emulated-everywhere` (CLI, repeatable) is what's needed
+# now, in place of a `[usermod.unix] archs = [...]` naming them by hand.
+#
+# Glob-based, not an enumerated floor list, so a new floor added to
+# `pinned_docker_images.toml` for one of these arches is covered without
+# an edit here.
+GROUPS: dict[str, list[str]] = {
+    "unix-emulated-everywhere": [
+        f"*-unix-*_{arch}" for arch in ("ppc64le", "s390x", "riscv64")
+    ],
+}
 
 # ── the auto/native/all vocabulary ────────────────────────────────────
 #
@@ -331,16 +312,20 @@ def axis_key(port: str) -> str | None:
 
 
 def all_axis_values(port: str) -> tuple[str, ...]:
-    """Every axis value that *exists* for this port, not the subset it
-    defaults to -- cibuildmp's own `read_all_configs()` (**0045**).
+    """Every axis value that *exists* for this port -- cibuildmp's own
+    `read_all_configs()` (**0045**).
 
-    The two differ for exactly one port today, and only since [0044]:
-    `unix` declares fifteen cells and defaults to five, so
-    `default_axis_values("unix")` is deliberately not the answer to "what
-    can be named". Every other port defaults to everything it has.
+    Equal to `default_axis_values(port)` for every port, `unix` included
+    as of **0051** point 8 (previously the one exception: `unix` declared
+    fifteen cells and defaulted to nine, so the two functions disagreed).
+    Kept as a separate name because the two questions are conceptually
+    different -- "what can `--only` name" versus "what does a bare
+    `build = '*'` build" -- even though the answer is the same list now
+    that a `GROUPS` entry, not axis membership, is what still holds six
+    `unix` cells out of the second one.
 
-    `unix`'s full list comes from the pin table rather than from a
-    literal here, for the same reason `UNIX_RUNNABLE_ARCHS` is derived:
+    `unix`'s list comes from the pin table rather than from a literal
+    here, for the same reason `UNIX_RUNNABLE_ARCHS` is derived:
     `resources/pinned_docker_images.toml`'s own `[image.<arch>]` keys are
     the matrix, and a second hand-maintained copy would only be a place
     for the two to drift. That does mean this one function reads a
@@ -357,6 +342,10 @@ def all_axis_values(port: str) -> tuple[str, ...]:
 
 
 def default_axis_values(port: str) -> tuple[str, ...]:
+    if port == "unix":
+        from ..dockerrun import unix_targets
+
+        return unix_targets()
     try:
         return _PORT_AXES[port][1]
     except KeyError:
@@ -419,8 +408,8 @@ def usermod_targets(
     targets = []
     for tag in tags:
         for port in ports:
-            key, defaults = _PORT_AXES[port]
-            values = axis_overrides.get(port) or list(defaults)
+            key = _PORT_AXES[port][0]
+            values = axis_overrides.get(port) or list(default_axis_values(port))
             # One place for keyword expansion, so `[usermod.<port>] archs
             # = ["auto"]` and `--archs auto` mean the same thing without
             # either caller knowing the vocabulary exists (record 0049).

@@ -17,6 +17,11 @@ Not wired here, deliberately, same as `usermod/options.py`'s and
 work is spread across runners now that cibuildmp generates no matrix and
 picks no host: `auto`/`native`/`all` beside explicit names, applied to
 every selected port with an `archs` axis.
+
+`--enable` is also wired here (record 0051 point 8): unioned into
+`options.enable` before `options.targets()` resolves, the same
+post-load-mutation shape `--archs` already has. natmod's own `run()`
+never reads it -- no groups exist there yet.
 """
 
 from __future__ import annotations
@@ -54,6 +59,8 @@ def run(
 ) -> int:
     try:
         options = UsermodOptions.load(package_dir, config_file, preread=preread)
+        if args.enable:
+            options.enable = options.enable | frozenset(args.enable)
         if args.archs is not None:
             values = [a.strip() for a in args.archs.split(",") if a.strip()]
             keywords = [v for v in values if v in ARCH_KEYWORDS]

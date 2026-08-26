@@ -26,8 +26,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `parse_selector()`, previously hand-duplicated between the two modes,
   now live once in `cibuildmp/selector.py`, which also gained brace
   expansion (`cp{36,37}-*`-style globs), matching upstream. Record 0051
-  (partial -- moving `--platform` to mean the port, and opt-in groups
-  replacing default-axis omission, are still open).
+  (partial -- moving `--platform` to mean the port is still open; see
+  below for the rest of the record, landed the same day).
+- **usermod gained its own `[[usermod.overrides]]`, and both modes gained
+  opt-in groups (`--enable`/`enable`).** `[[usermod.overrides]]` layers
+  `module-dir`/`manifest`/`extra-make-args` per target
+  (`file -> matching override -> environment`), nested under `[usermod]`
+  rather than shared with natmod's own top-level `[[overrides]]`, since
+  the two modes' override tables take different keys. Opt-in groups
+  (upstream's own `EnableGroup`): a target matching an unenabled group is
+  excluded before `build`/`skip` is even checked, and `--enable
+  <name>`/`enable = [...]` is what reaches it -- naming it in `build`
+  alone cannot. The concrete first group,
+  `unix-emulated-everywhere` (`ppc64le`/`s390x`/`riscv64`, both libcs),
+  answers this file's own "stay opt-in" line above properly: those three
+  cells are in the `unix` axis now (`default_axis_values("unix")` is the
+  full fifteen), not held out of it, and it is the group -- reachable
+  without editing a config's own `archs` -- that keeps a bare `build =
+  "*"` at nine cells by default, same as before. One narrow, deliberate
+  behaviour change: `--archs all` alone no longer reaches those three
+  archs, matching upstream's own precedent (`CIBW_ARCHS=all` does not
+  alone build `pypy` either). Record 0051.
 - **natmod builds in a container, and there is no bare-host path.** It used to
   resolve a toolchain onto the invoking machine -- an apt probe, a pinned
   tarball, or the host gcc's own 32-bit multilib -- and run `make` there. One

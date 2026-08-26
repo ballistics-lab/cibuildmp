@@ -1,6 +1,9 @@
+import fnmatch
+
 import pytest
 
 from cibuildmp.usermod.targets import (
+    GROUPS,
     KNOWN_PORTS,
     UnknownAxisError,
     UnknownPortError,
@@ -56,40 +59,30 @@ def test_axis_key_unknown_port_rejected():
         axis_key("stm32")
 
 
-def test_default_axis_values_unix_is_everything_proven_and_nothing_else():
-    # The rule is "default = everything actually proven", not "everything
-    # buildable": record 0043 took this matrix from five cells to
-    # fifteen and the default did not grow with it, because defaulting to
-    # all fifteen turns one `ports = ["unix"]` line into fifteen mostly
-    # emulated container builds.
-    #
-    # The five manylinux entries are the pre-0043 default translated
-    # one-for-one. The four musl entries joined on 2026-08-26, when they
-    # went green and required in CI -- exactly the musl cells with a
-    # runner they are native to. Holding them out at that point would
-    # have meant the rule said one thing and this tuple another.
-    assert default_axis_values("unix") == (
-        "manylinux_2_28_x86_64",
-        "musllinux_1_2_x86_64",
-        "manylinux_2_28_i686",
-        "musllinux_1_2_i686",
-        "manylinux_2_28_aarch64",
-        "musllinux_1_2_aarch64",
-        "manylinux_2_31_armv7l",
-        "musllinux_1_2_armv7l",
-        "manylinux_2_39_mipsel",
-    )
+def test_default_axis_values_unix_is_now_the_full_axis():
+    # 0051 point 8: the six emulated-everywhere cells stopped being held
+    # out of the axis itself (they used to be absent from a hardcoded
+    # nine-cell default, pre-0051) -- default_axis_values("unix") is
+    # exactly all_axis_values("unix") now. What still keeps a bare
+    # `build = "*"` at nine cells is GROUPS, checked inside select(), not
+    # axis membership -- test_usermod_options.py covers that end to end.
+    assert default_axis_values("unix") == all_axis_values("unix")
+    assert len(default_axis_values("unix")) == 15
 
 
-def test_the_emulated_everywhere_cells_are_still_not_defaulted():
-    # `ppc64le`, `s390x` and `riscv64` -- both columns -- are emulated on
-    # every runner GitHub offers and have never been built. The rule that
-    # let musl in is the same rule that keeps these out, so assert the
-    # other half of it explicitly rather than trusting the tuple above to
-    # stay short by accident.
-    defaults = set(default_axis_values("unix"))
-    for arch in ("ppc64le", "s390x", "riscv64"):
-        assert not any(d.endswith(f"_{arch}") for d in defaults), arch
+def test_the_emulated_everywhere_group_covers_exactly_those_six_cells():
+    # ppc64le/s390x/riscv64, both libcs -- emulated on every runner
+    # GitHub offers, never built here or by hand (tracker [0044]). The
+    # glob patterns in GROUPS are what select() checks against enable;
+    # prove they match exactly this set and nothing else.
+    targets = usermod_targets(["v1.29.0"], ["unix"], {})
+    identifiers = [t.identifier for t in targets]
+    patterns = GROUPS["unix-emulated-everywhere"]
+    covered = {i for i in identifiers if any(fnmatch.fnmatch(i, p) for p in patterns)}
+    assert covered == {
+        i for i in identifiers if i.endswith(("_ppc64le", "_s390x", "_riscv64"))
+    }
+    assert len(covered) == 6
 
 
 def test_default_axis_values_windows_includes_all_three():
@@ -101,6 +94,9 @@ def test_default_axis_values_esp32_is_generic_only():
 
 
 def test_usermod_targets_uses_defaults_when_no_override():
+    # usermod_targets() itself applies no group filtering (that's
+    # select()'s job -- 0051 point 8), so a bare call here returns the
+    # full fifteen-cell axis, not the nine build="*" trims to.
     targets = usermod_targets(["v1.28.0"], ["unix"], {})
     assert [t.identifier for t in targets] == [
         "v1.28.0-unix-manylinux_2_28_x86_64",
@@ -109,8 +105,14 @@ def test_usermod_targets_uses_defaults_when_no_override():
         "v1.28.0-unix-musllinux_1_2_i686",
         "v1.28.0-unix-manylinux_2_28_aarch64",
         "v1.28.0-unix-musllinux_1_2_aarch64",
+        "v1.28.0-unix-manylinux_2_28_ppc64le",
+        "v1.28.0-unix-musllinux_1_2_ppc64le",
+        "v1.28.0-unix-manylinux_2_28_s390x",
+        "v1.28.0-unix-musllinux_1_2_s390x",
         "v1.28.0-unix-manylinux_2_31_armv7l",
         "v1.28.0-unix-musllinux_1_2_armv7l",
+        "v1.28.0-unix-manylinux_2_39_riscv64",
+        "v1.28.0-unix-musllinux_1_2_riscv64",
         "v1.28.0-unix-manylinux_2_39_mipsel",
     ]
 
