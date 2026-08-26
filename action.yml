@@ -89,7 +89,14 @@ runs:
       uses: actions/cache@v6 # v4.3.0
       with:
         path: /var/cache/apt/archives/*.deb
-        key: v2-apt-archives-${{ runner.os }}-${{ hashFiles('action.yml') }}
+        # `runner.arch` is in the key, not just `runner.os`: both an
+        # `ubuntu-latest` and an `ubuntu-24.04-arm` runner report
+        # `runner.os == 'Linux'`, so without it the two share one cache and
+        # an arm64 job restores amd64 `.deb` files it can never install.
+        # Harmless-looking and invisible -- the restore "succeeds", the
+        # packages are simply wrong. Only reachable since records
+        # 0043/0044 started asking for arm64 runners at all.
+        key: v2-apt-archives-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('action.yml') }}
 
     - name: Install cibuildmp's own apt prerequisites
       # Slimmed live, D33: every package this used to install beyond
@@ -132,17 +139,42 @@ runs:
       shell: bash
       run: |
         set -eu
-        sudo dpkg --add-architecture i386
-        sudo sed -i '/^Types: deb$/a Architectures: amd64,i386' /etc/apt/sources.list.d/ubuntu.sources
+
+        # The i386 half is guarded on the *host* being amd64, and that
+        # guard is the fix for a real failure: the first time this action
+        # ran on `ubuntu-24.04-arm` (records 0043/0044 made `unix`'s
+        # aarch64/armv7l targets ask for an arm64 runner), apt died with
+        #
+        #   E: Failed to fetch http://ports.ubuntu.com/ubuntu-ports/dists/
+        #      noble/main/binary-amd64/Packages  404  Not Found
+        #
+        # An arm64 runner's sources point at ports.ubuntu.com, which
+        # carries no amd64 or i386 indices at all, so forcing
+        # `Architectures: amd64,i386` into them guarantees a 404 -- and
+        # `set -eu` plus apt's exit 100 takes the whole job with it.
+        #
+        # Everything in this block exists for **natmod's own `x86` arch**
+        # (`gcc -m32`, D25's own second real bug) and for nothing else. A
+        # 32-bit x86 cross-build is not a thing an arm64 host does, and
+        # usermod needs none of it on any host: it is Docker-only (D30),
+        # so its toolchains live inside per-target images. Skipping this
+        # where it cannot apply is therefore not a workaround -- it is the
+        # same "host architecture is not a constant" correction 0043 made
+        # everywhere else, applied to the one place that still assumed it.
+        HOST_ARCH=$(dpkg --print-architecture)
+        if [ "$HOST_ARCH" = "amd64" ]; then
+          sudo dpkg --add-architecture i386
+          sudo sed -i '/^Types: deb$/a Architectures: amd64,i386' /etc/apt/sources.list.d/ubuntu.sources
+        else
+          echo "host is $HOST_ARCH, not amd64 -- skipping the i386/multilib setup"
+        fi
+
         sudo apt-get update
-        sudo apt-get install -y --no-install-recommends \
-          build-essential \
-          git \
-          ca-certificates \
-          curl \
-          python3 \
-          gcc-13-multilib \
-          linux-libc-dev:i386
+        packages=(build-essential git ca-certificates curl python3)
+        if [ "$HOST_ARCH" = "amd64" ]; then
+          packages+=(gcc-13-multilib linux-libc-dev:i386)
+        fi
+        sudo apt-get install -y --no-install-recommends "${packages[@]}"
 
     - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
 
