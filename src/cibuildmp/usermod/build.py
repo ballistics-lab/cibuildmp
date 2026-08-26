@@ -368,36 +368,59 @@ def _unix_dir(mpy_dir: Path) -> Path:
 # one -- a worse trade than one narrow suppression in a vendored header.
 _MUSL_CFLAGS: tuple[str, ...] = ("-Wno-error=cpp",)
 
-# Per-tag one-offs, for cells where the *compiler* rather than the libc
-# is what objects.
+# Per-architecture rules, for cells where the *compiler backend* rather
+# than the libc is what objects.
 #
-# `manylinux_2_28_aarch64` -- `-Wno-error=array-bounds`. Confirmed on a
-# real emulated build: `lib/mbedtls/library/ctr_drbg.c` trips
-# `-Werror=array-bounds=` in `common.h`'s own `mbedtls_xor` ("array
-# subscript 48 is outside array bounds of unsigned char[48]"), a gcc 14
-# false positive on a loop bounded by exactly that size. Worth noting
-# precisely because it is *not* a floor problem: `manylinux_2_28_x86_64`
-# is the same AlmaLinux 8 base and the same gcc 14.2.1, and builds
-# clean -- gcc's own bounds analysis differs by target, so this cannot be
-# a column-wide rule and has to stay per cell.
+# `aarch64` -- `-Wno-error=array-bounds`. `lib/mbedtls/library/ctr_drbg.c`
+# trips `-Werror=array-bounds=` inside `common.h`'s own `mbedtls_xor`
+# ("array subscript 48 is outside array bounds of `unsigned char[48]`",
+# `common.h:235`), a gcc 14 false positive on a loop bounded by exactly
+# that size: `ctr_drbg_update_internal` XORs two
+# `MBEDTLS_CTR_DRBG_SEEDLEN` buffers and gcc reports the one-past-the-end
+# index it proved unreachable.
 #
-# Empty entries are not listed. A cell missing from here has not been
-# proven clean -- it has usually not been built at all yet (record 0044
-# is explicit about which were), so expect this table to grow as the
-# remaining cells get their first real run.
-UNIX_TARGET_CFLAGS: dict[str, tuple[str, ...]] = {
-    "manylinux_2_28_aarch64": ("-Wno-error=array-bounds",),
+# **This started life as a per-tag entry for `manylinux_2_28_aarch64`
+# alone, and the second aarch64 cell ever built moved it here.** The
+# original note reasoned that "gcc's own bounds analysis differs by
+# target, so this cannot be a column-wide rule and has to stay per cell",
+# which was the right conclusion from one data point and the wrong axis.
+# `musllinux_1_2_aarch64`'s first CI run (32960761641) failed with the
+# byte-identical diagnostic from an Alpine base and a different libc
+# entirely, while `x86_64`, `i686` and `armv7l` build clean on *both*
+# columns. Two aarch64 cells, two failures; seven non-aarch64 cells, none.
+# The varying thing is the backend, so the key is the architecture --
+# which also means `musllinux_1_2_aarch64` needed no new entry at all,
+# and neither will any future aarch64 floor.
+_ARCH_CFLAGS: dict[str, tuple[str, ...]] = {
+    "aarch64": ("-Wno-error=array-bounds",),
 }
+
+# Genuine per-tag one-offs: a cell whose problem is neither its libc nor
+# its architecture. Empty today, and that is the honest state rather than
+# a gap -- every suppression found so far has generalised to one of the
+# two axes above. Kept because the `windows` port's own `arm64` needs
+# three Clang-specific flags that no other target does (D18), so the
+# shape is known to be reachable.
+#
+# A cell missing from all three tables has not been proven clean; it has
+# usually not been built at all (record 0044 is explicit about which
+# were), so expect these to grow as the remaining cells get a first run.
+UNIX_TARGET_CFLAGS: dict[str, tuple[str, ...]] = {}
 
 
 def unix_extra_cflags(target: str) -> tuple[str, ...]:
-    """Every `CFLAGS_EXTRA` flag this cell needs: the libc-wide rules plus
-    any per-tag one-off. Empty for a cell that needs none."""
+    """Every `CFLAGS_EXTRA` flag this cell needs: the libc-wide rule, the
+    per-architecture one, and any per-tag one-off. Empty for a cell that
+    needs none."""
     from . import dockerrun
 
-    floor, _arch = dockerrun.split_tag(target)
+    floor, arch = dockerrun.split_tag(target)
     libc_flags = _MUSL_CFLAGS if floor.startswith("musllinux") else ()
-    return (*libc_flags, *UNIX_TARGET_CFLAGS.get(target, ()))
+    return (
+        *libc_flags,
+        *_ARCH_CFLAGS.get(arch, ()),
+        *UNIX_TARGET_CFLAGS.get(target, ()),
+    )
 
 
 def unix_arch_settings(target: str) -> UnixArchSettings:

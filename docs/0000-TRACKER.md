@@ -52,17 +52,24 @@ later; and cheap-with-strong-evidence beats expensive-and-speculative.
       1041s emulated, ~12x) and **`armv7l` on an arm64 runner is native too**
       (59.5s, faster than the native `aarch64` build), so `default_runner`'s
       bet stands. What remains is the ten opt-in cells, or an explicit
-      decision to descope them. One known gap left alongside:
+      decision to descope them -- the four musl cells with a native runner are
+      green now (see [0031]), so what is left under "opt-in" is exactly the six
+      emulated-everywhere cells. One known gap left alongside:
       `verify_unix_output`/`verify_unix_floor` exist for `unix` only -- the
       other four ports check `binary.exists()` and nothing else, so a
       `windows` build with an empty `CROSS_COMPILE=` would produce a Linux ELF
       named `micropython.exe` and pass
-- [ ] [0031] the musllinux column | mechanism proven end to end on
-      `musllinux_1_2_x86_64` (real musl link, zero `GLIBC_` symbols, C module
-      and frozen module both running); the other six cells are part of [0044]'s
-      opt-in set above. Alpine's own `community/micropython` excludes `ppc64le`
-      and `s390x`, which is the best available hint about where to expect
-      trouble
+- [ ] [0031] the musllinux column | **four of seven cells green on CI** as of
+      2026-08-26 (run 32960761641) -- every musl cell that has a runner it is
+      native to: `x86_64`, `i686`, `armv7l`, and `aarch64` after the
+      `-Wno-error=array-bounds` rule moved from per-cell to per-arch (it had
+      been derived from one data point and was on the wrong axis; see [0044]'s
+      second addendum). They run in their own `build-usermod-optin` job, which
+      still carries `continue-on-error` -- **taking that off is the next thing
+      here**, now that all four pass. The remaining three (`ppc64le`, `s390x`,
+      `riscv64`) are emulated on every runner GitHub offers, and Alpine's own
+      `community/micropython` excludes the first two outright, so they belong
+      with [0044]'s descope decision rather than here
 - [ ] [0048] `build`/`skip` live in opposite tables in the two modes | cheap, and
       a *silent* wrong build. Placed here rather than lower because it makes
       selector tests untrustworthy until fixed -- it already cost one that

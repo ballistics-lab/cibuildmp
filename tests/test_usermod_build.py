@@ -1025,3 +1025,45 @@ def test_unix_docker_image_mounts_mpy_dir_and_user_c_modules(monkeypatch, tmp_pa
 # test_unix_no_image_registered_is_a_clear_error (above) already covers
 # "no CIBMP_UNIX_<TARGET>_DOCKER_IMAGE, no pinned digest" for every
 # target -- unix has no bare-host fallback left to fall back to (D30).
+
+
+# ── unix_extra_cflags() -- three axes, and which one each rule is on ────
+
+
+def test_the_musl_rule_covers_the_whole_musllinux_column():
+    # `-Wno-error=cpp` is a property of the libc: musl's own
+    # `sys/cdefs.h` is a bare `#warning`, reached through berkeley-db's
+    # `db.h` from extmod/modbtree.c. glibc has no such header warning, so
+    # no manylinux cell may carry it.
+    for target in dockerrun.unix_targets():
+        floor, _arch = dockerrun.split_tag(target)
+        flags = build.unix_extra_cflags(target)
+        assert ("-Wno-error=cpp" in flags) == floor.startswith("musllinux"), target
+
+
+def test_the_array_bounds_rule_is_per_architecture_not_per_cell():
+    # Both aarch64 cells trip gcc 14's `-Werror=array-bounds=` false
+    # positive in mbedtls's own `mbedtls_xor`, from two different bases
+    # and two different libcs -- AlmaLinux 8/glibc and Alpine/musl. It
+    # started as a per-tag entry for `manylinux_2_28_aarch64` alone, on
+    # the reasoning that bounds analysis differs by target; the second
+    # aarch64 cell ever built (run 32960761641) showed the axis was the
+    # architecture. Every non-aarch64 cell built so far is clean.
+    for target in dockerrun.unix_targets():
+        _floor, arch = dockerrun.split_tag(target)
+        flags = build.unix_extra_cflags(target)
+        assert ("-Wno-error=array-bounds" in flags) == (arch == "aarch64"), target
+
+
+def test_musl_aarch64_carries_both_rules_at_once():
+    # The cell that proved the two axes are independent: it needs the
+    # libc rule *and* the architecture rule, and neither table knows
+    # about the other.
+    assert build.unix_extra_cflags("musllinux_1_2_aarch64") == (
+        "-Wno-error=cpp",
+        "-Wno-error=array-bounds",
+    )
+
+
+def test_a_cell_needing_nothing_gets_nothing():
+    assert build.unix_extra_cflags("manylinux_2_28_x86_64") == ()

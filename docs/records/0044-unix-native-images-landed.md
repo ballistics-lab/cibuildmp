@@ -456,5 +456,52 @@ behave — it simply has nothing left to do here. `armv7l` was not probed;
 the printed line settles it on its next CI run without anyone having to reason
 about it.
 
+## Addendum, 2026-08-26 (second) — the musllinux column, and one rule that was on the wrong axis
+
+Four of the seven musl cells have a runner they are native to, and all four now
+have a CI leg (run [32960761641]): `x86_64`/`i686` on amd64, `aarch64`/`armv7l`
+on the arm64 runner. `ppc64le`, `s390x` and `riscv64` are emulated on every
+runner GitHub offers and stay a separate decision about cost. Three of the four
+went green on the first attempt, which is a better rate than the "expect that
+table to grow" above predicted — and the one failure was worth more than the
+three passes.
+
+**`musllinux_1_2_aarch64` failed with a diagnostic this record already
+contains.** Byte for byte the `manylinux_2_28_aarch64` one: `mbedtls_xor` at
+`lib/mbedtls/library/common.h:235`, inlined from `ctr_drbg_update_internal`,
+"array subscript 48 is outside array bounds of `unsigned char[48]`". Different
+base image (Alpine 3.22, not AlmaLinux 8), different libc, same failure.
+
+That kills the reasoning attached to the original entry. It read:
+
+> gcc's own bounds analysis differs by target, so this cannot be a column-wide
+> rule and has to stay per cell.
+
+The first half is true and the conclusion does not follow from it. *Target* was
+being used to mean *cell* when what varies is the **backend** — and the backend
+is the architecture, not the (arch, libc) pair. The evidence is now two aarch64
+cells failing and seven non-aarch64 cells clean across both columns, so
+`-Wno-error=array-bounds` moved from `UNIX_TARGET_CFLAGS["manylinux_2_28_aarch64"]`
+to a new `_ARCH_CFLAGS["aarch64"]`. `musllinux_1_2_aarch64` then needs no entry
+of its own, and neither will any future aarch64 floor.
+
+`unix_extra_cflags()` is three layers now — libc, architecture, per-tag — and
+`UNIX_TARGET_CFLAGS` is empty, which is the honest state rather than a gap:
+every suppression found so far has generalised to one of the two general axes.
+It stays because `windows`/`arm64` has three Clang-specific flags no other
+target needs ([0018]), so a genuine one-off is known to be reachable.
+
+Worth naming as a pattern rather than a one-off correction, since this record
+made the same mistake twice in different clothes: a rule derived from a single
+cell will pick whichever axis that cell happens to sit on. The musl
+`-Wno-error=cpp` rule got its axis right first time only because the *reason*
+was known (musl's `sys/cdefs.h` is a bare `#warning`); the array-bounds rule got
+it wrong because the reason was "gcc did something odd here". Where the
+mechanism is understood, the axis follows from it; where it is not, the axis is
+a guess until a second cell disagrees.
+
+[32960761641]: https://github.com/ballistics-lab/cibuildmp/actions/runs/32960761641
+[0018]: 0018-windows-provisioning-fourth-story.md
+
 [32958683512]: https://github.com/ballistics-lab/cibuildmp/actions/runs/32958683512
 [32959019090]: https://github.com/ballistics-lab/cibuildmp/actions/runs/32959019090
