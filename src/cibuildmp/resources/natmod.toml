@@ -56,7 +56,7 @@ zcmp = 2   # 1 << 1
 #
 # This is the compatibility axis, and deliberately not the release tag: a
 # native .mpy loads into any runtime where both numbers match, and ABI 6.3
-# alone spans v1.23.0 through v1.29.0-preview. Pinning a matrix to a release
+# alone spans v1.23.0 through v1.29.0. Pinning a matrix to a release
 # tag would claim far narrower compatibility than the artifact has.
 #
 # A tag missing here is not an error -- see `latest` below.
@@ -84,3 +84,5 @@ latest = "6.3"     # assumed for any tag not listed; the built .mpy's own
 "v1.28.0-preview" = "6.3"
 "v1.28.0" = "6.3"
 "v1.29.0-preview" = "6.3"
+"v1.29.0" = "6.3"          # released 2026-08-24; read from py/persistentcode.h
+                          # at that tag, not inferred from the preview

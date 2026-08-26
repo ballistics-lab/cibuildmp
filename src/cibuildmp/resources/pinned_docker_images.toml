@@ -170,16 +170,26 @@ manylinux_2_39 = "ghcr.io/ballistics-lab/manylinux_2_39_mipsel@sha256:740276d705
 # own header gives.
 #
 # **Pushed by hand, not by `publish-docker-images.yml`** -- the second
-# time that has happened, after `windows` (record 0042), and worth the
-# same note: the workflow row exists and is correct, it simply has not
-# run yet. The digest below is the image all ten `dynruntime.mk` arches
-# were verified against locally before it was pushed (record 0049), and
-# `docker buildx build --platform linux/amd64 --push` is what produced
-# it, so the platform is stated rather than inherited from whichever
-# machine did the push.
+# time, after `windows` (record 0042). Worth the same note plus one the
+# first push earned: a hand-push carries no
+# `org.opencontainers.image.source` label, so GHCR created the package
+# unlinked from the repository and therefore **private**, and an
+# anonymous pull of this digest failed until the visibility was flipped
+# in the settings UI (there is no API for it -- publish-docker-images.yml
+# says so at length). `publish-docker-images.yml` grew an `only:` input
+# so that republishing one image is cheap enough that the hand path stops
+# being the tempting one.
+#
+# The digest is the image all ten `dynruntime.mk` arches were verified
+# against locally (record 0050), built with `--platform linux/amd64` so
+# the platform is stated rather than inherited from whichever machine
+# pushed. It is the *second* digest for this image: the first was built
+# before the tarball sha256 checks moved into the Dockerfile, which
+# changed the layer and therefore the digest without changing a byte of
+# what the image contains.
 #
 # Local work still goes through `CIBMP_NATMOD_DOCKER_IMAGE=<local tag>`.
-natmod = "ghcr.io/ballistics-lab/natmod@sha256:f83c1e0c994a3ff948db70c01e7dbeb07d5963e94671edba96a6a7cb34da18db"
+natmod = "ghcr.io/ballistics-lab/natmod@sha256:2389c6fad1fa32a8b1612a9a2329176d41ab52ad3fa0ab6f890e23330281b571"
 
 windows = "ghcr.io/ballistics-lab/windows@sha256:7caab34597a3cb2d9f4a412549d4a806134a17a1411aeb612ff61bbbcc151fcd"
 qemu = "ghcr.io/ballistics-lab/qemu@sha256:d0348b84cc684a45ca6f71e6475b5b1ea9fe73ceb6d242af028562795f944928"

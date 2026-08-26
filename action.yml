@@ -114,6 +114,19 @@ runs:
         # 0043/0044 started asking for arm64 runners at all.
         key: v2-apt-archives-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('action.yml') }}
 
+    # **The i386/multilib half is gone** (record 0050). Everything the
+    # `HOST_ARCH` branch here did existed for natmod's own `x86` arch --
+    # `gcc -m32`, D25's own second real bug -- and natmod builds in a
+    # container now, where the host is `linux/amd64` by construction and
+    # multilib is correct without asking. That branch was also the last
+    # place in this action that treated an arm64 runner as a special
+    # case, and it is why `x86` could not be built on one at all.
+    #
+    # What is left is for the *host*, which now only launches containers
+    # and does one thing itself: `sources.build_mpy_cross()` still
+    # compiles mpy-cross outside Docker for natmod, which is why
+    # `build-essential` stays. When that moves into the image too --
+    # 0050's own last open item -- this step can go entirely.
     - name: Install cibuildmp's own apt prerequisites
       # Slimmed live, D33: every package this used to install beyond
       # what's left below (mingw-w64 x64/x86, aarch64/armhf/mipsel-
@@ -134,63 +147,24 @@ runs:
       # knob exactly for this -- a7p's own real config already uses it
       # the same way for its nanopb fetch).
       #
-      # i386 (`dpkg --add-architecture i386` + `linux-libc-dev:i386`)
-      # stays, unlike arm64 -- a real, live-caught regression the first
-      # time this was cut too, not something the trivial "does `gcc -m32`
-      # compile an empty main()" check that justified removing it had
-      # actually exercised: natmod's own x86 arch needs it for real, not
-      # just `gcc-13-multilib` itself. `template.c` (`py/dynruntime.h`'s
-      # own include chain) pulls in `<asm/errno.h>`, which
-      # `/usr/include/asm/errno.h` (amd64's own copy) does not satisfy
-      # under `-m32` -- only `linux-libc-dev:i386`'s own
-      # `/usr/include/i386-linux-gnu/asm/errno.h` does, and that package
-      # is i386-arch, needing the foreign architecture registered the
-      # same way the root `Dockerfile`'s own now-deleted comment already
-      # documented (i386 needs no `ports.ubuntu.com` stanza of its own
-      # unlike arm64 -- it stays on the default archive.ubuntu.com/
-      # security.ubuntu.com mirrors, just needs adding to the existing
-      # stanza's own `Architectures:` line). Confirmed live before
-      # re-adding, not assumed back: a real `#include <asm/errno.h>`
-      # compiled under `gcc -m32` fails without this, succeeds with it.
+      # **The i386/multilib story that lived here is gone entirely**
+      # (record 0050), and it is worth one line rather than none, because
+      # it was hard-won: natmod's `x86` really did need
+      # `linux-libc-dev:i386`, not just `gcc-13-multilib` --
+      # `py/dynruntime.h`'s include chain pulls `<asm/errno.h>`, and
+      # amd64's own copy does not satisfy it under `-m32`. It also cost a
+      # live failure on `ubuntu-24.04-arm`, where forcing
+      # `Architectures: amd64,i386` into sources pointing at
+      # ports.ubuntu.com guarantees a 404 for indices that do not exist
+      # there. All of it is the image's problem now, where the host is
+      # amd64 by construction -- see docker/natmod.Dockerfile.
       shell: bash
       run: |
         set -eu
 
-        # The i386 half is guarded on the *host* being amd64, and that
-        # guard is the fix for a real failure: the first time this action
-        # ran on `ubuntu-24.04-arm` (records 0043/0044 made `unix`'s
-        # aarch64/armv7l targets ask for an arm64 runner), apt died with
-        #
-        #   E: Failed to fetch http://ports.ubuntu.com/ubuntu-ports/dists/
-        #      noble/main/binary-amd64/Packages  404  Not Found
-        #
-        # An arm64 runner's sources point at ports.ubuntu.com, which
-        # carries no amd64 or i386 indices at all, so forcing
-        # `Architectures: amd64,i386` into them guarantees a 404 -- and
-        # `set -eu` plus apt's exit 100 takes the whole job with it.
-        #
-        # Everything in this block exists for **natmod's own `x86` arch**
-        # (`gcc -m32`, D25's own second real bug) and for nothing else. A
-        # 32-bit x86 cross-build is not a thing an arm64 host does, and
-        # usermod needs none of it on any host: it is Docker-only (D30),
-        # so its toolchains live inside per-target images. Skipping this
-        # where it cannot apply is therefore not a workaround -- it is the
-        # same "host architecture is not a constant" correction 0043 made
-        # everywhere else, applied to the one place that still assumed it.
-        HOST_ARCH=$(dpkg --print-architecture)
-        if [ "$HOST_ARCH" = "amd64" ]; then
-          sudo dpkg --add-architecture i386
-          sudo sed -i '/^Types: deb$/a Architectures: amd64,i386' /etc/apt/sources.list.d/ubuntu.sources
-        else
-          echo "host is $HOST_ARCH, not amd64 -- skipping the i386/multilib setup"
-        fi
-
         sudo apt-get update
-        packages=(build-essential git ca-certificates curl python3)
-        if [ "$HOST_ARCH" = "amd64" ]; then
-          packages+=(gcc-13-multilib linux-libc-dev:i386)
-        fi
-        sudo apt-get install -y --no-install-recommends "${packages[@]}"
+        sudo apt-get install -y --no-install-recommends \
+          build-essential git ca-certificates curl python3
 
     - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
 
