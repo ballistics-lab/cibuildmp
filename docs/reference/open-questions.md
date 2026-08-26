@@ -96,11 +96,20 @@ the same way [docs/0000-TRACKER.md](../0000-TRACKER.md) folds resolved
 - **The musllinux half of D31.** An Alpine-based `unix-musllinux-<arch>`
   Dockerfile per arch, plus the identifier axis to name it, is designed but
   not built — see [0031].
+- **Whether a non-native build should be attempted at all when emulation is absent.**
+  [0043] adopts cibuildwheel's stance (the user provides QEMU/binfmt; cibuildwheel does
+  not probe or install it), but leaves open whether cibuildmp should still detect its
+  absence in order to *fail legibly* — today an amd64 image on an arm64 host produces
+  `exec format error` from inside `make`, which names nothing about architecture.
+- **Whether emulated `unix` builds are fast enough to be the default.** A wheel build is
+  cheap enough that cibuildwheel can shrug at emulation; a MicroPython port build may not
+  be. Flagged in [0043]; wants a real measurement before the default is fixed.
 - **A real glibc-floor checker for `unix` (the `auditwheel`-equivalent PEP
   600/656 work).** Designed, not built — see [0031]'s own closing section.
 
 [0018]: ../records/0018-windows-provisioning-fourth-story.md
 [0042]: ../records/0042-windows-docker-wiring-and-resolver-removal.md
+[0043]: ../records/0043-unix-adopts-cibuildwheel-native-image-model.md
 [0019]: ../records/0019-esp-idf-provisioning-heaviest.md
 [0031]: ../records/0031-unix-musllinux-libc-axis.md
 [0033]: ../records/0033-cibuildmp-never-builds-docker-image-itself.md

@@ -86,7 +86,7 @@ runs:
     # prefix exists purely to mint a fresh, never-reserved key -- bump it
     # again (v3-, v4-, ...) if this one ever ends up in the same state.
     - name: Cache apt archives
-      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      uses: actions/cache@v6 # v4.3.0
       with:
         path: /var/cache/apt/archives/*.deb
         key: v2-apt-archives-${{ runner.os }}-${{ hashFiles('action.yml') }}

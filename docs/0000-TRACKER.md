@@ -39,6 +39,7 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 - [ ] [0022] zephyr as a third usermod selector axis (epic) | phase outline M6-M9b mostly landed (boards.py, manifests, five of six build drivers, CLI wiring); zephyr itself and `rp2`'s own build driver not started
 - [ ] [0028] full container-per-port migration plan (epic) | steps 1-3 substantially landed, `PORT_IMAGES` populated for 8 images via [0033]; `esp32.Dockerfile` still explicitly not started, no Docker path for that port at all
+- [ ] [0043] `unix` adopts cibuildwheel's model in full: native per-target images, PEP 600/656, full arch x libc matrix (epic) | plan only, nothing built; unblocks [0031] rather than superseding it, and answers the arm64-host question by removing host arch from the design entirely
 - [ ] [0031] unix usermod builds are glibc-only; no musllinux equivalent yet | manylinux half done (per-arch Docker images); musl toolchain + identifier axis + glibc-floor checker designed, not built
 - [ ] [0032] unix usermod defaults to Docker via `ensure_image()`; webassembly wired next | end-to-end proof green for unix+webassembly on real CI; superseded in part by [0033]; `windows` wired by [0042], leaving `qemu` as the one port whose `PORT_IMAGES` entry is still dead code
 - [ ] [0038] M5 — adopt cibuildmp in the three consuming repos | repos migrated and repinned; archiving the old `micropython-native-ci` repo and reducing `build-natmod` to a `cibuildmp --only` wrapper still open
@@ -138,3 +139,4 @@ record is added.
 [0040]: records/0040-usermod-tests-deferred.md
 [0041]: records/0041-docs-restructure.md
 [0042]: records/0042-windows-docker-wiring-and-resolver-removal.md
+[0043]: records/0043-unix-adopts-cibuildwheel-native-image-model.md
