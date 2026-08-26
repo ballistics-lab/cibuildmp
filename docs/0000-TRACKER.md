@@ -37,21 +37,79 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### In progress / Proposed
 
-- [ ] [0045] `--only` is a filter, not a forced identifier -- selector parity with cibuildwheel | `--only` half landed and verified live in both modes (resolves against the full matrix, overrides `archs`/`build`/`skip`, names what exists on error); the `--archs`/`auto`/`all` vocabulary for usermod is still design only
-- [ ] [0048] `build`/`skip` live in opposite tables in the two modes, and a misplaced one is silent | natmod reads them top-level, usermod from `[usermod]`; `archs` accepts both for natmod, which makes the trap look like a rule. Cost a vacuously-passing test that was the only coverage of `--only` vs `skip`
-- [ ] [0046] nothing notices when a pin goes stale, except container images | `bin/update_docker.py` covers both image tables (and found the pypa bases nine days stale on first run); the toolchain tarballs, emsdk build hash, llvm-mingw, the mipsel apt libc pin, and the MicroPython/ESP-IDF tags have no checker at all
-- [ ] [0047] run output should look exactly like cibuildwheel's | mostly a missing mechanism, not styling: no log folding at all (`::group::`/`##[group]`/`travis_fold`), no colour or `✓`/`✕`; the Actions job summary ([0029]) already has parity
-- [ ] [0022] zephyr as a third usermod selector axis (epic) | phase outline M6-M9b mostly landed (boards.py, manifests, five of six build drivers, CLI wiring); zephyr itself and `rp2`'s own build driver not started
-- [ ] [0028] full container-per-port migration plan (epic) | steps 1-3 substantially landed, `PORT_IMAGES` populated for 8 images via [0033]; `esp32.Dockerfile` still explicitly not started, no Docker path for that port at all
-- [ ] [0043] `unix` adopts cibuildwheel's model in full: native per-target images, PEP 600/656, full arch x libc matrix (epic) | implemented by [0044] -- read that record for what actually landed and what is still unverified; this one stays as the design argument
-- [ ] [0044] landing [0043]: pypa-based native images, full 15-cell matrix, pins moved to `resources/` | code/tests/tooling landed, `manylinux_2_28_x86_64` verified live end to end; **no image published yet** (every `[image.*]` cell empty), most cells and both workflows unverified
-- [ ] [0031] unix usermod builds are glibc-only; no musllinux equivalent yet | musllinux column now declared and Dockerfile-backed by [0044] (Alpine base per arch, identifier axis threaded through), and the glibc-floor checker is built and verified -- nothing in that column has been built or run yet
-- [ ] [0032] unix usermod defaults to Docker via `ensure_image()`; webassembly wired next | end-to-end proof green for unix+webassembly on real CI; superseded in part by [0033]; `windows` wired by [0042], leaving `qemu` as the one port whose `PORT_IMAGES` entry is still dead code
-- [ ] [0038] M5 — adopt cibuildmp in the three consuming repos | repos migrated and repinned; archiving the old `micropython-native-ci` repo and reducing `build-natmod` to a `cibuildmp --only` wrapper still open
-- [ ] [0040] usermod test-runner axis (native/qemu-user/qemu-system/node/rp2040py/mpremote/none) | not scheduled ([0006] holds); four of seven runners already proven by `mp-usermod.yml`, not yet owned by cibuildmp
+**Listed in execution order, and that order is the plan** -- not by record
+number, not by age. Each row's note says what is true *now*, so the top row is
+where the next session starts. The ordering argument, once, so it can be
+disagreed with rather than guessed at: things that are *broken* beat things that
+are *missing*; work that unblocks verification beats work that gets verified
+later; and cheap-with-strong-evidence beats expensive-and-speculative.
+
+- [ ] [0044] finish the `unix` matrix | **start here.** Six default targets, four
+      green: `manylinux_2_28_x86_64`, `manylinux_2_28_i686` and
+      `manylinux_2_39_mipsel` on CI from published pins, plus `webassembly`;
+      `manylinux_2_28_aarch64` green locally (1041s emulated) but not yet on CI.
+      Both arm64 legs were failing in `action.yml`'s apt step (an amd64-host
+      assumption, fixed in 435ae82) and have not been re-run since -- **that
+      re-run is the first thing to look at**, and it also settles whether
+      `armv7l` on an arm64 runner is native or still emulated (see
+      `default_runner`'s own docstring). After that: the ten opt-in cells, or an
+      explicit decision to descope them. Two known gaps to close alongside:
+      the `linux32` wrap is still unexercised (probed live -- `uname -m` inside
+      a `linux/386` container on an amd64 host already reports `i686`, so
+      `_kernel_is_64bit()` is False and the wrap never fires), and
+      `verify_unix_output`/`verify_unix_floor` exist for `unix` only -- the
+      other four ports check `binary.exists()` and nothing else, so a
+      `windows` build with an empty `CROSS_COMPILE=` would produce a Linux ELF
+      named `micropython.exe` and pass
+- [ ] [0031] the musllinux column | mechanism proven end to end on
+      `musllinux_1_2_x86_64` (real musl link, zero `GLIBC_` symbols, C module
+      and frozen module both running); the other six cells are part of [0044]'s
+      opt-in set above. Alpine's own `community/micropython` excludes `ppc64le`
+      and `s390x`, which is the best available hint about where to expect
+      trouble
+- [ ] [0048] `build`/`skip` live in opposite tables in the two modes | cheap, and
+      a *silent* wrong build. Placed here rather than lower because it makes
+      selector tests untrustworthy until fixed -- it already cost one that
+      passed vacuously -- so it wants doing before more selector work
+- [ ] [0032] wire `qemu` to `ensure_image()` | the last port with a published,
+      pinned image and no caller. Small. Worth doing after [0044]'s output
+      verification is extended, so the new path is checked from day one rather
+      than added to the unchecked pile
+- [ ] [0045] `--only` is a filter, not a forced identifier | the `--only` half is
+      **done** and verified live in both modes; what remains is `--archs` plus
+      the `auto`/`all`/`native` vocabulary. Deliberately after the cells above:
+      `all` cannot be defined sensibly while a third of the matrix has never
+      been built, and the `auto` default question needs per-cell emulation
+      measurements rather than the one figure [0044] has
+- [ ] [0038] M5 -- adopt cibuildmp in the three consuming repos | the only item
+      with external blast radius: [0044] renamed every `unix` identifier and
+      those repos name identifiers in their own workflows. *Checking* the scope
+      of the breakage is cheap and worth doing early; fixing it belongs after
+      the rows above, since telling three repos to migrate onto identifiers that
+      are still moving is worse than telling them once. Archiving
+      `micropython-native-ci` and reducing `build-natmod` to a wrapper are the
+      original, still-open items
+- [ ] [0046] nothing notices when a pin goes stale, except container images |
+      independent of everything above, no urgency. `bin/update_docker.py` covers
+      both image tables; emsdk is the cheapest thing left (its own
+      `emscripten-releases-tags.json` maps version to build hash) and
+      `xtensa-lx106` the only genuinely hard one, having no version at all
+- [ ] [0047] run output should look exactly like cibuildwheel's | nothing depends
+      on it, which is why it is here and not higher. Worth more since the
+      usermod job fanned out -- six logs instead of one -- and it is mostly a
+      missing mechanism (log folding) rather than styling
+- [ ] [0028] full container-per-port migration plan (epic) | `esp32.Dockerfile`
+      still not started; that port has no Docker path at all. Genuinely large
+- [ ] [0022] zephyr as a third usermod selector axis (epic) | phase outline
+      M6-M9b mostly landed; zephyr itself and `rp2`'s own build driver not
+      started
+- [ ] [0040] usermod test-runner axis | not scheduled ([0006] holds); four of
+      seven runners already proven by `mp-usermod.yml`, not yet owned by
+      cibuildmp
 
 ### Implemented
 
+- [x] [0043] `unix` adopts cibuildwheel's model in full: native per-target images, PEP 600/656, full arch x libc matrix (epic) | the *decision* shipped -- implemented by [0044], whose row above carries the work that remains. Kept here as the design argument, which is still where the reasoning lives
 - [x] [0042] `windows` wired to `ensure_image()`; `emsdk.py`/`llvmmingw.py` deleted | all three arches verified live, including an anonymous pull of the published digest; that image was pushed by hand rather than by `publish-docker-images.yml` — see the record
 - [x] [0041] documentation restructure — this scheme | supersedes the monolithic `docs/BACKLOG.md`
 - [x] [0033] cibuildmp never builds a Docker image itself, only pulls a published one | separate `docker/` + `publish-docker-images.yml`; `ensure_image()`'s local-build fallback removed

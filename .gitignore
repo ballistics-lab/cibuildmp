@@ -26,3 +26,6 @@ htmlcov/
 
 # cibuildmp's own outputs and caches
 mpyhouse/
+
+# Claude Code session scratch (agent worktrees, local state)
+.claude/
