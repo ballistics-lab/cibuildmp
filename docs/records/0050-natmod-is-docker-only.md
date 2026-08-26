@@ -174,6 +174,36 @@ alone. That is the same property that made the first hand-push land unlinked
 and private -- `docker/build-push-action` does considerably more than move
 layers, and both consequences were discovered the same day.
 
+## Two process failures, both worth naming
+
+Neither is about natmod, and both cost more than any technical mistake in this
+record.
+
+**A path-scoped `git add` split code from its tests.** `DEFAULT_MICROPYTHON`
+went to `v1.29.0` in one commit while the two tests asserting the old value
+stayed behind, because the commit used `git add -A -- src examples docker`. The
+scoping was deliberate once -- an unrelated untracked file was in the tree and
+should not be swept in -- and then repeated out of habit into commits where it
+only did harm.
+
+**A green local `pytest` proved nothing, because the working tree was dirty.**
+The fix for those two tests existed on disk and was reported as "301 passed"
+three times, while the *committed* tree failed its own suite. `Tests` had been
+red for three consecutive commits and went unnoticed, because the only workflow
+being watched was `Build examples` -- the one that was interesting.
+
+The rules that follow, in the order they would have caught it:
+
+- Watch every workflow a push triggers, not the interesting one. A red `Tests`
+  is a red repository whatever else is green.
+- When the tree is dirty, `pytest` describes the tree, not the commit.
+  `git stash && pytest` is the check that matches what CI will run -- and it is
+  what confirmed the breakage here, after the fact.
+- Scope `git add` by path only for a reason that still applies, and re-check
+  `git status` after committing rather than assuming it is empty.
+
+It was found by the user asking why two test files were sitting unstaged.
+
 ## Still open
 
 - The image is 3.91GB, of which 3.38GB is one layer holding four toolchains.
