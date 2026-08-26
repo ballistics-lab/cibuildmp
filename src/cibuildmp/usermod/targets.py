@@ -20,7 +20,6 @@ from __future__ import annotations
 import platform
 from dataclasses import dataclass
 
-from ..natmod.targets import matches, parse_selector
 from .build import WINDOWS_ARCH_SETTINGS
 
 # port -> (config axis key, every axis value this project can currently
@@ -370,25 +369,43 @@ def default_axis_values(port: str) -> tuple[str, ...]:
 class UsermodTarget:
     port: str
     arch: str = ""
+    # The MicroPython release this target is built against -- the
+    # compatibility axis usermod was entirely missing before 0051 (a
+    # second release's build silently overwrote the first's, since
+    # nothing distinguished them: not the identifier, not the output
+    # filename, not the directory). Leads the identifier, unconditionally,
+    # the same position natmod's own `mpy6.3-` slot holds -- see D51's own
+    # "not conditional" argument: a component that only appears once more
+    # than one tag is selected makes a glob like `build = "*-v1.29.0"`
+    # match in some configs and nothing in others.
+    #
+    # Defaults empty only for targets built by hand -- most existing
+    # tests, which are not about versioning. Every target
+    # `usermod_targets()`/`all_usermod_targets()` produce always has a
+    # real one: `micropython` always defaults to a non-empty list.
+    tag: str = ""
 
     @property
     def identifier(self) -> str:
-        return f"{self.port}-{self.arch}" if self.arch else self.port
+        base = f"{self.port}-{self.arch}" if self.arch else self.port
+        return f"{self.tag}-{base}" if self.tag else base
 
     def __str__(self) -> str:
         return self.identifier
 
 
 def usermod_targets(
-    ports: list[str], axis_overrides: dict[str, list[str]]
+    tags: list[str], ports: list[str], axis_overrides: dict[str, list[str]]
 ) -> list[UsermodTarget]:
-    """One `UsermodTarget` per (port, axis value).
+    """One `UsermodTarget` per (tag, port, axis value) (**0051**) -- the
+    MicroPython release is the leading axis, matching natmod's own
+    per-ABI grouping (`natmod_targets()`/`cli.build()`'s tag_groups()).
 
     Axis values come from `axis_overrides[port]` when given, this port's
     own `default_axis_values()` otherwise -- the same "config overrides
     the built-in default list" shape `natmod_targets()`'s own `archs`
-    parameter already has. Preserves `ports`' own order, then each port's
-    axis-value order.
+    parameter already has. Preserves `tags`' own order, then `ports`' own
+    order, then each port's axis-value order.
 
     `auto`/`native`/`all` are expanded here, so every caller gets the
     vocabulary for free and none of them has to know it exists.
@@ -400,58 +417,51 @@ def usermod_targets(
             f"{', '.join(KNOWN_PORTS)}"
         )
     targets = []
-    for port in ports:
-        key, defaults = _PORT_AXES[port]
-        values = axis_overrides.get(port) or list(defaults)
-        # One place for keyword expansion, so `[usermod.<port>] archs =
-        # ["auto"]` and `--archs auto` mean the same thing without either
-        # caller knowing the vocabulary exists (record 0049).
-        values = parse_axis_values(port, values)
-        # `[]` is a legitimate outcome, not a misconfiguration: `auto` on
-        # a host this port's image is not native to selects nothing here,
-        # and the port is simply skipped. Only a *populated* axis on a
-        # port that has none is the error this guard was written for.
-        if key is None and values not in ([""], []):
-            raise UnknownAxisError(
-                f"usermod/{port} has no configurable axis yet -- remove "
-                f"[usermod.{port}] from the config"
-            )
-        for value in values:
-            targets.append(UsermodTarget(port=port, arch=value))
+    for tag in tags:
+        for port in ports:
+            key, defaults = _PORT_AXES[port]
+            values = axis_overrides.get(port) or list(defaults)
+            # One place for keyword expansion, so `[usermod.<port>] archs
+            # = ["auto"]` and `--archs auto` mean the same thing without
+            # either caller knowing the vocabulary exists (record 0049).
+            values = parse_axis_values(port, values)
+            # `[]` is a legitimate outcome, not a misconfiguration: `auto`
+            # on a host this port's image is not native to selects
+            # nothing here, and the port is simply skipped. Only a
+            # *populated* axis on a port that has none is the error this
+            # guard was written for.
+            if key is None and values not in ([""], []):
+                raise UnknownAxisError(
+                    f"usermod/{port} has no configurable axis yet -- "
+                    f"remove [usermod.{port}] from the config"
+                )
+            for value in values:
+                targets.append(UsermodTarget(port=port, arch=value, tag=tag))
     return targets
 
 
-def all_usermod_targets() -> list[UsermodTarget]:
-    """Every identifier this project can name, across every known port --
-    what `--only` resolves against (**0045**).
+def all_usermod_targets(tags: list[str]) -> list[UsermodTarget]:
+    """Every identifier this project can name, across every known port and
+    every configured tag -- what `--only` resolves against (**0045**).
 
-    Deliberately independent of any config: not the ports it selects, not
-    its axis overrides, not its `build`/`skip`. Upstream's `--only` takes
-    its `choices` from `read_all_configs()` for the same reason -- "force
-    exactly this one build" should not be answerable with "your config
-    does not select that".
+    Independent of ports/axis-overrides/build/skip, same as before 0051:
+    "force exactly this one build" should not be answerable with "your
+    config does not select that". `tags` stays, though -- the same reason
+    natmod's own `all_targets()` keeps `tag_groups()`: which releases
+    exist is a config statement, not a filter over a fixed set, since an
+    identifier's leading slot genuinely depends on `micropython`.
     """
     return [
-        UsermodTarget(port=port, arch=value)
+        UsermodTarget(port=port, arch=value, tag=tag)
+        for tag in tags
         for port in KNOWN_PORTS
         for value in all_axis_values(port)
     ]
 
 
-def select(
-    targets: list[UsermodTarget], build: str | list[str], skip: str | list[str]
-) -> list[UsermodTarget]:
-    """Apply build/skip globs, skip last -- same shape `targets.select()`
-    already has for natmod, kept as its own copy rather than a shared
-    generic: `targets.select()`'s own signature is typed `list[Target]`,
-    and reusing it here for `UsermodTarget` would only typecheck via a
-    reworked, more general signature there, for four lines of logic that
-    are just as clear duplicated."""
-    build_patterns = parse_selector(build) or ["*"]
-    skip_patterns = parse_selector(skip)
-    return [
-        t
-        for t in targets
-        if matches(t.identifier, build_patterns)
-        and not matches(t.identifier, skip_patterns)
-    ]
+# select() moved to cibuildmp.selector in 0051: it was duplicated here
+# rather than shared, typed list[Target] there vs list[UsermodTarget]
+# here, and that duplication is exactly the shape record 0048's drift
+# (build/skip read from opposite config tables) came from. The shared
+# version is generic (a Protocol, not a concrete Target type), so both
+# modes now import the one copy.

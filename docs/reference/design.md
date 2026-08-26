@@ -49,6 +49,13 @@ mpy6.3-natmod-x64
   releases. The release tag is *what you build against* and stays a config
   key; the ABI is *where the result runs* and is derived from the checked-out
   source (and cross-checked against the built file's own header).
+
+  Two ways to state which ABIs to build, as of [0051]: `micropython = [tags]`
+  derives the ABI forward from each tag (the original shape, still the
+  default); `mpy-abi = [abis]` states the axis directly and resolves each ABI
+  backward to its own newest known tag. A bare `mpy-abi = "6.3"` string keeps
+  its older, narrower meaning — an override forcing that ABI onto every
+  listed tag, rather than the axis itself.
 - **`natmod`** — the build mode, i.e. the "platform" slot.
 - **arch** — one of `dynruntime.mk`'s ten `ARCH` values.
 - **`+0x..`** (optional, `rv32imc` only) — `arch_flags`, present only when
@@ -69,30 +76,35 @@ Glob-friendly in both directions: `mpy6.3-*`, `*-armv7em*`, `*-x64` — though
 an exact-arch pattern with no trailing `*` (`skip = "*-rv32imc"`) will not
 match a `+0x..`-suffixed variant; `*-rv32imc*` does.
 
-Usermod identifiers, when that phase lands, take the same shape with the
-MicroPython release tag in the first slot, since a firmware image's identity
-*is* its MicroPython version: `v1.28.0-usermod-esp32_ESP32_GENERIC` for a
-board-based port. `unix`/`windows`/`webassembly` have no board, only a
-`VARIANT=` (see [0039](../records/0039-usermod-composite-actions-status.md)),
-so theirs is `v1.28.0-usermod-unix_standard` — same shape, the last slot
-names whichever axis that port actually selects on. (In practice, usermod's
-shipped identifier scheme ended up simpler than this — see [0023]; no ABI
-axis, no `package.json`.)
-
 **What is actually true today**, since this is a living document rather than
-a decision record: a usermod identifier is `{port}` or `{port}-{axis value}`
-([0023]), and for `unix` that axis value is a **PEP 600 / PEP 656 platform
-tag** — `unix-manylinux_2_28_x86_64`, `unix-musllinux_1_2_aarch64`,
-`unix-manylinux_2_39_mipsel`. Records [0043]/[0044] put the libc floor and
-pypa's own architecture spelling into the name deliberately, so the
-identifier states a compatibility claim the build then verifies against the
-finished ELF, rather than labelling one. The floor is *inside* the
-identifier here, unlike cibuildwheel's own `cp313-manylinux_x86_64`, because
-cibuildmp curates exactly one floor per architecture and offers no knob to
-choose another.
+a decision record: a usermod identifier is `{tag}-{port}` or
+`{tag}-{port}-{axis value}` ([0023], leading tag added by [0051]) — the
+MicroPython release always leads, the same slot natmod's own `mpy6.3-`
+occupies, so both modes read left to right the same way:
+`v1.29.0-unix-manylinux_2_28_x86_64`, `v1.29.0-webassembly`,
+`v1.29.0-esp32-ESP32_GENERIC`, `v1.29.0-qemu`. `micropython` is a real list
+([0051] closed the truncation-to-first-entry this used to have), so more
+than one release can be selected in one invocation without one overwriting
+another's output — the tag makes every build's output directory and filename
+unique too, not only the identifier.
+
+For `unix`, the axis value is a **PEP 600 / PEP 656 platform tag** —
+`manylinux_2_28_x86_64`, `musllinux_1_2_aarch64`, `manylinux_2_39_mipsel`.
+Records [0043]/[0044] put the libc floor and pypa's own architecture spelling
+into the name deliberately, so the identifier states a compatibility claim
+the build then verifies against the finished ELF, rather than labelling one.
+The floor is *inside* the identifier here, unlike cibuildwheel's own
+`cp313-manylinux_x86_64`, because cibuildmp curates exactly one floor per
+architecture and offers no knob to choose another.
+
+Still open, per [0051]'s own "Shape" section: `--platform` still means the
+build mode (`natmod`/`usermod`), not the port the way upstream's own
+`--platform` names an OS — that move, and the config tree it implies
+(`[unix]`/`[esp32]` instead of `[usermod.unix]`), has not landed.
 
 [0043]: ../records/0043-unix-adopts-cibuildwheel-native-image-model.md
 [0044]: ../records/0044-unix-native-images-landed.md
+[0051]: ../records/0051-usermod-identifiers-have-no-version-axis.md
 
 <!-- migrated verbatim from docs/BACKLOG.md lines 477-518 (Config schema) -->
 
@@ -102,7 +114,15 @@ choose another.
 # cibuildmp.toml — repo root
 
 micropython = "v1.28.0"       # release tag(s) to build against -- also
-                              # accepts a list (D13): ["v1.22.0", "v1.28.0"]
+                              # accepts a list (D13): ["v1.22.0", "v1.28.0"].
+                              # For usermod, this list is the leading axis:
+                              # every listed tag builds, output kept apart
+                              # by identifier ([0051])
+# mpy-abi = ["6.3", "6.2"]    # natmod only: states the .mpy ABI axis
+                              # directly instead of deriving it from tags
+                              # ([0051]); a bare string keeps its older,
+                              # narrower meaning -- force this ABI onto
+                              # every listed tag
 output-dir = "mpyhouse"       # output-dir/<identifier>/ per target (D14)
 build = "*"                   # glob(s) over identifiers, space-separated
 skip = ""

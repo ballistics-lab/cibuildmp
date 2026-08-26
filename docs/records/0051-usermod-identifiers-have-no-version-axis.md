@@ -1,6 +1,6 @@
 # 0051 — one selector for both modes, and an identifier that names what a build is compatible with
 
-Status: Accepted (design; not implemented)
+Status: In progress — Shape points 1/2/3/5 implemented 2026-08-26; 4/6/7/8 still open (see addendum)
 
 Rewritten twice the same day it was written, before anything was built on it.
 The first draft framed this as "usermod cannot build two MicroPython versions",
@@ -322,6 +322,71 @@ The truncation should not be silent. A config naming two tags and getting one
 build, with nothing said, is [0048]'s class exactly -- the config states one
 thing and the tool does another -- and one line on stderr costs nothing while
 this waits.
+
+## Addendum, 2026-08-26 — Shape points 1/2/3/5 landed
+
+Implemented against the exact code this record read, not re-derived from
+memory: `natmod/targets.py`, `natmod/options.py`, `usermod/targets.py`,
+`usermod/options.py`, `usermod/orchestrate.py`.
+
+**Point 1 (natmod's `mpy-abi` axis).** `mpy-abi` is now dual-shape rather
+than replaced: a bare string keeps its pre-existing, narrower meaning
+(override -- force this ABI onto every `micropython` tag). A **list**
+states the axis directly, each ABI resolved to its own newest known tag by
+reading `resources/natmod.toml`'s `[mpy-abi]` table backwards
+(`newest_tag_for_abi()`/`resolve_abi_selector()`, `natmod/targets.py`). This
+distinction was not settled by the record's own "Shape" section --
+`micropython`/`mpy-abi`'s exact interaction when both name an axis was left
+implicit -- so it is written down here: with `mpy-abi` as a list,
+`micropython` is not consulted for axis purposes at all, only the ABI list
+is. A version-sort key for "newest tag" was hand-rolled
+(`_tag_sort_key()`) rather than adding a `packaging` dependency, matching
+D12's reasoning for this project's two existing runtime dependencies.
+
+**Points 2/3 (usermod's leading tag, unconditional).** `UsermodTarget`
+gained `tag: str = ""`; `identifier` prepends it unconditionally when set
+(`f"{tag}-{port}[-{arch}]"`), matching natmod's `mpy{abi}-` slot exactly, as
+argued ("not conditional on how many tags are selected"). `UsermodOptions
+.micropython` is `list[str]`, the truncation-to-first-entry deleted.
+`usermod_targets()`/`all_usermod_targets()` both gained a leading `tags`
+parameter and now product over `(tag, port, axis value)`.
+`orchestrate.build()` groups targets by `.tag` and fetches/builds each
+group's own checkout once, mirroring natmod's `cli.build()` `dict.fromkeys()`
+idiom exactly -- previously it fetched once for the whole run, which was
+only correct because there was never more than one tag. Output
+directory/filename needed no code change, as the record's own "cost"
+section predicted: both already key off `target.identifier`.
+
+**Point 5 (shared selector, partial).** `parse_selector()`/`matches()`/
+`select()` moved to a new `cibuildmp/selector.py`, generic over a
+`Protocol` (`.identifier: str`) rather than a concrete `Target` type, so
+both `natmod.targets.Target` and `usermod.targets.UsermodTarget` share one
+implementation. `matches()` also gained brace expansion (hand-rolled, not
+`bracex`, same dependency reasoning as the tag-sort key above), closing the
+one concrete upstream-parity gap the record named. **Not done**: `EnableGroup`
+and `requires_python` (that is point 8, tracked separately below) --
+`selector.py` today is exactly `parse_selector`/`matches`/`select`, nothing
+about groups or a compatibility constraint.
+
+**Points 4, 6, 7, 8 — deliberately not attempted in this pass.**
+`--archs` keeps its current usermod meaning (a real but narrower shape than
+upstream's, per point 4); `--platform` still means the build mode, not the
+port (point 6); usermod still has no `[[overrides]]` (point 7); the six
+emulated-everywhere `unix` cells are still absent from the default axis
+rather than an opt-in group (point 8). None of this is a regression --
+deferring them left existing behavior unchanged, only without their
+improvements -- and the reasoning for the split (real, separable epic;
+disruptive part done once while the three consuming repos are still
+unmigrated) is recorded in the session that did this work rather than here.
+Whoever picks these up next should re-read this record's own "Shape"
+section 4/6/7/8 rather than start from the addendum.
+
+Verified: full test suite green (323 tests, three new/expanded files --
+`tests/test_selector.py` is new); live `--print-build-identifiers` against
+`examples/template` for `mpy-abi = ["6.3", "6.2"]` (natmod) and
+`micropython = ["v1.28.0", "v1.29.0"]` (usermod), both producing distinct,
+correctly-shaped identifiers; `--only` resolving against the full matrix
+post-refactor in both modes.
 
 [0005]: 0005-one-identifier-namespace.md
 [0013]: 0013-micropython-list-dedup-by-abi.md

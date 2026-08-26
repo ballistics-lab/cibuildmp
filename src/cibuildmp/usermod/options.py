@@ -38,13 +38,12 @@ from ..natmod.options import (
     check_table_keys,
     read_config,
 )
-from ..natmod.targets import parse_selector
+from ..selector import parse_selector, select
 from .targets import (
     DEFAULT_PORTS,
     KNOWN_PORTS,
     UsermodTarget,
     axis_key,
-    select,
     usermod_targets,
 )
 
@@ -159,7 +158,7 @@ class UsermodOptions:
 
     package_dir: Path
     config_path: Path | None
-    micropython: str
+    micropython: list[str]
     output_dir: Path
     ports: list[str]
     module_dir: str
@@ -215,17 +214,21 @@ class UsermodOptions:
                 return env_value
             return raw.get(key, default)
 
-        # micropython is a genuinely shared top-level key (D13: natmod's
-        # own tag_groups() lets it be a list, for spanning an ABI
-        # boundary -- a concept usermod has no equivalent of). Take the
-        # first entry when it is one, same "whichever came first" rule
-        # tag_groups() itself already uses, rather than str()-ing a
-        # Python list into nonsense.
+        # micropython is a genuinely shared top-level key, and a real list
+        # now (**0051**): usermod's identifier gained a leading tag slot
+        # specifically so more than one release can be selected in one
+        # invocation without one overwriting another's output. Before
+        # this record it was silently truncated to its first entry --
+        # the only thing standing between a two-tag config and a
+        # collision, since nothing distinguished the two releases'
+        # outputs. Accepts the same shapes natmod's own list-valued
+        # options do: a TOML list, or a string (file or environment)
+        # split on whitespace.
         micropython_value = opt("micropython", DEFAULT_MICROPYTHON)
         if isinstance(micropython_value, list):
-            micropython_value = (
-                micropython_value[0] if micropython_value else DEFAULT_MICROPYTHON
-            )
+            micropython = [str(v) for v in micropython_value] or [DEFAULT_MICROPYTHON]
+        else:
+            micropython = str(micropython_value).split() or [DEFAULT_MICROPYTHON]
 
         ports_value = usermod.get("ports")
         ports = (
@@ -261,7 +264,7 @@ class UsermodOptions:
         return cls(
             package_dir=package_dir,
             config_path=config_path,
-            micropython=str(micropython_value),
+            micropython=micropython,
             output_dir=Path(str(opt("output-dir", DEFAULT_OUTPUT_DIR))),
             ports=ports,
             module_dir=str(usermod.get("module-dir", DEFAULT_MODULE_DIR)),
@@ -275,13 +278,13 @@ class UsermodOptions:
         )
 
     def targets(self) -> list[UsermodTarget]:
-        all_targets = usermod_targets(self.ports, self.axis_overrides)
+        all_targets = usermod_targets(self.micropython, self.ports, self.axis_overrides)
         return select(all_targets, self.build, self.skip)
 
     def build_options(self, target: UsermodTarget) -> UsermodBuildOptions:
         return UsermodBuildOptions(
             target=target,
-            micropython=self.micropython,
+            micropython=target.tag,
             module_dir=self.module_dir,
             manifest=self.manifest,
             extra_make_args=list(self.extra_make_args),

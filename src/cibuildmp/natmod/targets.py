@@ -8,7 +8,6 @@ must not need a MicroPython checkout.
 
 from __future__ import annotations
 
-import fnmatch
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -67,6 +66,10 @@ MPY_ABI: dict[str, str] = _ABI_TABLE
 #
 # For natmod this is genuinely one value: every one of the ten arches is a
 class UnknownArchError(ValueError):
+    pass
+
+
+class UnknownAbiError(ValueError):
     pass
 
 
@@ -134,6 +137,53 @@ def resolve_micropython_tags(
         if abi not in seen:
             seen[abi] = tag
     return [(tag, abi) for abi, tag in seen.items()]
+
+
+def _tag_sort_key(tag: str) -> tuple[tuple[int, ...], int, str]:
+    """Order MicroPython tags newest-last, without a `packaging` dependency
+    (this project has exactly two runtime deps -- pyelftools, ar -- and
+    vendors rather than depends elsewhere, e.g. usermod/boards.py). Tags
+    look like "v1.22.0", "v1.22.0-preview", "v1.29.0": strip the leading
+    "v", split the dotted release from an optional "-suffix", and sort a
+    prerelease below its own release (0 before 1) rather than lexically
+    ("-preview" would otherwise sort *above* the bare release, since "-"
+    is ASCII-lower than nothing at all, which happens to be right here
+    but is the wrong reason).
+    """
+    body = tag.removeprefix("v")
+    release, _, suffix = body.partition("-")
+    parts = tuple(int(p) for p in release.split("."))
+    return (parts, 0 if suffix else 1, suffix)
+
+
+def newest_tag_for_abi(abi: str) -> str | None:
+    """The newest MicroPython tag known to produce `.mpy` ABI `abi`,
+    reading MPY_ABI (tag -> abi) backwards. None if no known tag maps to
+    it -- MPY_ABI only records tags this project has actually checked, not
+    every tag that will ever exist for a given ABI."""
+    candidates = [tag for tag, a in MPY_ABI.items() if a == abi]
+    if not candidates:
+        return None
+    return max(candidates, key=_tag_sort_key)
+
+
+def resolve_abi_selector(abis: list[str]) -> list[tuple[str, str]]:
+    """One (tag, abi) pair per entry in `abis` -- the axis stated directly,
+    the direction resolve_micropython_tags() cannot run since MPY_ABI only
+    maps tag -> abi (0051). Order follows `abis`, matching
+    resolve_micropython_tags()'s own "order follows the input" contract.
+    """
+    result = []
+    for abi in abis:
+        tag = newest_tag_for_abi(abi)
+        if tag is None:
+            known = sorted(set(MPY_ABI.values()) | {LATEST_KNOWN_ABI})
+            raise UnknownAbiError(
+                f"unknown .mpy ABI {abi!r} -- no known MicroPython tag "
+                f"produces it. Known ABIs: {', '.join(known)}"
+            )
+        result.append((tag, abi))
+    return result
 
 
 @dataclass(frozen=True)
@@ -208,31 +258,7 @@ def natmod_targets(
     return targets
 
 
-# ── Selectors ─────────────────────────────────────────────────────────────
-
-
-def parse_selector(value: str | list[str] | None) -> list[str]:
-    """Accept either a space-separated string or a list of globs."""
-    if value is None:
-        return []
-    if isinstance(value, str):
-        return value.split()
-    return [str(v) for v in value]
-
-
-def matches(identifier: str, patterns: list[str]) -> bool:
-    return any(fnmatch.fnmatch(identifier, p) for p in patterns)
-
-
-def select(
-    targets: list[Target], build: str | list[str], skip: str | list[str]
-) -> list[Target]:
-    """Apply build/skip globs, skip last -- same order as cibuildwheel."""
-    build_patterns = parse_selector(build) or ["*"]
-    skip_patterns = parse_selector(skip)
-    return [
-        t
-        for t in targets
-        if matches(t.identifier, build_patterns)
-        and not matches(t.identifier, skip_patterns)
-    ]
+# Selector mechanism (parse_selector/matches/select) moved to
+# cibuildmp.selector in 0051 -- it was hand-duplicated in
+# usermod/targets.py, which is exactly the shape record 0048's drift
+# came from. Import from there instead of from here.

@@ -223,13 +223,25 @@ def test_build_fetches_micropython_and_skips_the_host_mpy_cross(tmp_path, monkey
     )
 
     def fake_run(cmd, **kwargs):
-        build_dir = mpy_dir / "ports" / "unix" / "build-unix-manylinux_2_28_x86_64"
+        build_dir = (
+            mpy_dir
+            / "ports"
+            / "unix"
+            / f"build-{DEFAULT_MICROPYTHON}-unix-manylinux_2_28_x86_64"
+        )
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
 
     monkeypatch.setattr(build_module.subprocess, "run", fake_run)
 
-    results = build(options, [UsermodTarget(port="unix", arch="manylinux_2_28_x86_64")])
+    results = build(
+        options,
+        [
+            UsermodTarget(
+                port="unix", arch="manylinux_2_28_x86_64", tag=DEFAULT_MICROPYTHON
+            )
+        ],
+    )
 
     # No host mpy-cross for a `unix` target: record 0044 gave it
     # `container_mpy_cross()`, because a host-built one cannot run inside
@@ -237,7 +249,63 @@ def test_build_fetches_micropython_and_skips_the_host_mpy_cross(tmp_path, monkey
     # still reaches the host copy.
     assert calls == [("fetch", DEFAULT_MICROPYTHON)]
     assert len(results) == 1
-    assert results[0].identifier == "unix-manylinux_2_28_x86_64"
+    assert results[0].identifier == f"{DEFAULT_MICROPYTHON}-unix-manylinux_2_28_x86_64"
+
+
+def test_build_groups_by_tag_and_fetches_once_per_group(tmp_path, monkeypatch):
+    # The regression 0051's usermod half exists to fix: two tags of the
+    # same port/arch must produce two distinct output directories in one
+    # run, not one overwriting the other -- and each tag is fetched once,
+    # not once per target in it (mirrors natmod's own cli.build()).
+    package_dir = tmp_path / "pkg"
+    make_module_dir(package_dir)
+    write_config(package_dir, '[usermod]\nports = ["unix"]\n')
+    options = UsermodOptions.load(package_dir)
+    options.output_dir = tmp_path / "mpyhouse"
+
+    calls = []
+
+    import cibuildmp.usermod.orchestrate as orchestrate_module
+
+    def fake_fetch(tag, **k):
+        calls.append(("fetch", tag))
+        mpy_dir = tmp_path / f"mpy-{tag}"
+        (mpy_dir / "ports" / "unix").mkdir(parents=True, exist_ok=True)
+        return mpy_dir
+
+    monkeypatch.setattr(orchestrate_module.sources, "fetch_micropython", fake_fetch)
+    monkeypatch.setattr(
+        orchestrate_module.sources,
+        "build_mpy_cross",
+        lambda d, **k: calls.append(("mpy-cross", d)),
+    )
+
+    def fake_run(cmd, **kwargs):
+        # unix_make_command() always carries its own `BUILD=<build_dir>`
+        # entry -- read it back rather than hardcoding one, since this
+        # test runs the same command shape against two different
+        # mpy_dirs (one per tag).
+        build_arg = next(a for a in cmd if a.startswith("BUILD="))
+        build_dir = Path(build_arg.removeprefix("BUILD="))
+        build_dir.mkdir(parents=True, exist_ok=True)
+        (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
+
+    monkeypatch.setattr(build_module.subprocess, "run", fake_run)
+
+    targets = [
+        UsermodTarget(port="unix", arch="manylinux_2_28_x86_64", tag="v1.28.0"),
+        UsermodTarget(port="unix", arch="manylinux_2_28_x86_64", tag="v1.29.0"),
+    ]
+    results = build(options, targets)
+
+    assert calls == [("fetch", "v1.28.0"), ("fetch", "v1.29.0")]
+    identifiers = {r.identifier for r in results}
+    assert identifiers == {
+        "v1.28.0-unix-manylinux_2_28_x86_64",
+        "v1.29.0-unix-manylinux_2_28_x86_64",
+    }
+    output_dirs = {r.output.parent for r in results}
+    assert len(output_dirs) == 2  # two distinct directories, not one overwriting the other
 
 
 def test_build_one_resolves_relative_output_dir_against_package_dir(

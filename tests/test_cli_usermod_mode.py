@@ -1,6 +1,7 @@
 import json
 
 from cibuildmp.cli import detect_mode, main
+from cibuildmp.natmod.options import DEFAULT_MICROPYTHON
 from cibuildmp.usermod.targets import default_axis_values
 
 
@@ -63,7 +64,7 @@ def test_usermod_table_dispatches_to_usermod_cli(tmp_path, capsys):
     # place that asserts the list itself.
     assert main([str(tmp_path), "--print-build-identifiers"]) == 0
     assert capsys.readouterr().out.split() == [
-        f"unix-{value}" for value in default_axis_values("unix")
+        f"{DEFAULT_MICROPYTHON}-unix-{value}" for value in default_axis_values("unix")
     ]
 
 
@@ -72,7 +73,9 @@ def test_usermod_print_build_identifiers_json(tmp_path, capsys):
     write(tmp_path, '[usermod]\nports = ["esp32"]\n')
 
     assert main([str(tmp_path), "--print-build-identifiers", "--json"]) == 0
-    assert json.loads(capsys.readouterr().out) == ["esp32-ESP32_GENERIC"]
+    assert json.loads(capsys.readouterr().out) == [
+        f"{DEFAULT_MICROPYTHON}-esp32-ESP32_GENERIC"
+    ]
 
 
 def test_usermod_dry_run_lists_every_target(tmp_path, capsys):
@@ -96,13 +99,15 @@ def test_usermod_only_selects_one_target(tmp_path, capsys):
             [
                 str(tmp_path),
                 "--only",
-                "unix-manylinux_2_28_i686",
+                f"{DEFAULT_MICROPYTHON}-unix-manylinux_2_28_i686",
                 "--print-build-identifiers",
             ]
         )
         == 0
     )
-    assert capsys.readouterr().out.split() == ["unix-manylinux_2_28_i686"]
+    assert capsys.readouterr().out.split() == [
+        f"{DEFAULT_MICROPYTHON}-unix-manylinux_2_28_i686"
+    ]
 
 
 def test_usermod_only_unknown_identifier_is_an_error(tmp_path, capsys):
@@ -116,7 +121,7 @@ def test_usermod_only_unknown_identifier_is_an_error(tmp_path, capsys):
     assert main([str(tmp_path), "--only", "unix-riscv64"]) == 2
     err = capsys.readouterr().err
     assert "is not a known usermod identifier" in err
-    assert "unix-manylinux_2_39_riscv64" in err
+    assert f"{DEFAULT_MICROPYTHON}-unix-manylinux_2_39_riscv64" in err
 
 
 def test_usermod_only_reaches_a_target_the_config_does_not_select(tmp_path, capsys):
@@ -133,13 +138,15 @@ def test_usermod_only_reaches_a_target_the_config_does_not_select(tmp_path, caps
             [
                 str(tmp_path),
                 "--only",
-                "unix-musllinux_1_2_ppc64le",
+                f"{DEFAULT_MICROPYTHON}-unix-musllinux_1_2_ppc64le",
                 "--print-build-identifiers",
             ]
         )
         == 0
     )
-    assert capsys.readouterr().out.split() == ["unix-musllinux_1_2_ppc64le"]
+    assert capsys.readouterr().out.split() == [
+        f"{DEFAULT_MICROPYTHON}-unix-musllinux_1_2_ppc64le"
+    ]
 
 
 def test_usermod_only_overrides_skip(tmp_path, capsys):
@@ -151,7 +158,7 @@ def test_usermod_only_overrides_skip(tmp_path, capsys):
     make_module_dir(tmp_path)
     write(
         tmp_path,
-        '[usermod]\nports = ["unix"]\nskip = "unix-manylinux_2_28_x86_64"\n',
+        '[usermod]\nports = ["unix"]\nskip = "*-manylinux_2_28_x86_64"\n',
     )
 
     assert (
@@ -159,13 +166,15 @@ def test_usermod_only_overrides_skip(tmp_path, capsys):
             [
                 str(tmp_path),
                 "--only",
-                "unix-manylinux_2_28_x86_64",
+                f"{DEFAULT_MICROPYTHON}-unix-manylinux_2_28_x86_64",
                 "--print-build-identifiers",
             ]
         )
         == 0
     )
-    assert capsys.readouterr().out.split() == ["unix-manylinux_2_28_x86_64"]
+    assert capsys.readouterr().out.split() == [
+        f"{DEFAULT_MICROPYTHON}-unix-manylinux_2_28_x86_64"
+    ]
 
 
 def test_usermod_only_reaches_a_port_the_config_does_not_list(tmp_path, capsys):
@@ -177,9 +186,17 @@ def test_usermod_only_reaches_a_port_the_config_does_not_list(tmp_path, capsys):
     write(tmp_path, '[usermod]\nports = ["unix"]\n')
 
     assert (
-        main([str(tmp_path), "--only", "webassembly", "--print-build-identifiers"]) == 0
+        main(
+            [
+                str(tmp_path),
+                "--only",
+                f"{DEFAULT_MICROPYTHON}-webassembly",
+                "--print-build-identifiers",
+            ]
+        )
+        == 0
     )
-    assert capsys.readouterr().out.split() == ["webassembly"]
+    assert capsys.readouterr().out.split() == [f"{DEFAULT_MICROPYTHON}-webassembly"]
 
 
 def test_both_tables_without_platform_is_an_error(tmp_path, capsys):
@@ -205,7 +222,7 @@ def test_both_tables_explicit_platform_usermod(tmp_path, capsys):
     assert (
         main([str(tmp_path), "--platform", "usermod", "--print-build-identifiers"]) == 0
     )
-    assert capsys.readouterr().out.split() == ["qemu"]
+    assert capsys.readouterr().out.split() == [f"{DEFAULT_MICROPYTHON}-qemu"]
 
 
 def test_both_tables_platform_env_var(tmp_path, capsys, monkeypatch):
@@ -227,7 +244,7 @@ def test_platform_flag_wins_over_env_var(tmp_path, capsys, monkeypatch):
     assert (
         main([str(tmp_path), "--platform", "usermod", "--print-build-identifiers"]) == 0
     )
-    assert capsys.readouterr().out.split() == ["qemu"]
+    assert capsys.readouterr().out.split() == [f"{DEFAULT_MICROPYTHON}-qemu"]
 
 
 def test_platform_env_var_bad_value_is_an_error(tmp_path, capsys, monkeypatch):

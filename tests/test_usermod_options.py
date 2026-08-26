@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from cibuildmp.natmod.options import DEFAULT_MICROPYTHON
 from cibuildmp.usermod.options import UsermodConfigError, UsermodOptions
 from cibuildmp.usermod.targets import (
     DEFAULT_PORTS,
@@ -40,9 +41,9 @@ def test_ports_list_selects_a_subset(tmp_path):
     # every change to the axis would land as a failure in a test that has
     # no opinion about it. `test_usermod_targets.py` owns the list.
     identifiers = [t.identifier for t in options.targets()]
-    assert identifiers == [f"unix-{value}" for value in default_axis_values("unix")] + [
-        "esp32-ESP32_GENERIC"
-    ]
+    assert identifiers == [
+        f"{DEFAULT_MICROPYTHON}-unix-{value}" for value in default_axis_values("unix")
+    ] + [f"{DEFAULT_MICROPYTHON}-esp32-ESP32_GENERIC"]
 
 
 def test_per_port_axis_override(tmp_path):
@@ -59,7 +60,7 @@ def test_per_port_axis_override(tmp_path):
     options = UsermodOptions.load(tmp_path)
 
     identifiers = [t.identifier for t in options.targets()]
-    assert identifiers == ["unix-manylinux_2_28_aarch64"]
+    assert identifiers == [f"{DEFAULT_MICROPYTHON}-unix-manylinux_2_28_aarch64"]
 
 
 def test_multiple_boards_same_port(tmp_path):
@@ -78,7 +79,10 @@ def test_multiple_boards_same_port(tmp_path):
     options = UsermodOptions.load(tmp_path)
 
     identifiers = [t.identifier for t in options.targets()]
-    assert identifiers == ["esp32-ESP32_GENERIC", "esp32-ESP32_GENERIC_S3"]
+    assert identifiers == [
+        f"{DEFAULT_MICROPYTHON}-esp32-ESP32_GENERIC",
+        f"{DEFAULT_MICROPYTHON}-esp32-ESP32_GENERIC_S3",
+    ]
 
 
 def test_axis_table_on_axisless_port_rejected(tmp_path):
@@ -110,7 +114,10 @@ def test_axis_table_qemu_boards_selects_riscv(tmp_path):
     options = UsermodOptions.load(tmp_path)
 
     identifiers = [t.identifier for t in options.targets()]
-    assert identifiers == ["qemu-VIRT_RV32", "qemu-VIRT_RV64"]
+    assert identifiers == [
+        f"{DEFAULT_MICROPYTHON}-qemu-VIRT_RV32",
+        f"{DEFAULT_MICROPYTHON}-qemu-VIRT_RV64",
+    ]
 
 
 def test_module_dir_and_manifest_overridable(tmp_path):
@@ -134,30 +141,33 @@ def test_build_skip_selectors(tmp_path):
         """
         [usermod]
         ports = ["unix"]
-        build = "unix-manylinux_2_28_x86_64 unix-manylinux_2_28_i686"
-        skip = "unix-manylinux_2_28_i686"
+        build = "*-manylinux_2_28_x86_64 *-manylinux_2_28_i686"
+        skip = "*-manylinux_2_28_i686"
         """,
     )
     options = UsermodOptions.load(tmp_path)
 
     identifiers = [t.identifier for t in options.targets()]
-    assert identifiers == ["unix-manylinux_2_28_x86_64"]
+    assert identifiers == [f"{DEFAULT_MICROPYTHON}-unix-manylinux_2_28_x86_64"]
 
 
 def test_micropython_shared_top_level_key(tmp_path):
     write_config(tmp_path, 'micropython = "v1.24.0"\n\n[usermod]\n')
     options = UsermodOptions.load(tmp_path)
 
-    assert options.micropython == "v1.24.0"
+    assert options.micropython == ["v1.24.0"]
 
 
-def test_micropython_list_takes_first_entry(tmp_path):
-    # natmod's own D13 lets this be a list; usermod has no ABI axis to
-    # span, so it must not str()-stringify the raw list into nonsense.
+def test_micropython_list_keeps_every_entry(tmp_path):
+    # Before 0051 this was silently truncated to the first entry, the
+    # only thing standing between a two-tag config and a collision (the
+    # identifier carried no version, so two releases' output landed in
+    # the same directory under the same filename). Now the identifier
+    # carries the tag, so nothing needs truncating.
     write_config(tmp_path, 'micropython = ["v1.24.0", "v1.21.0"]\n\n[usermod]\n')
     options = UsermodOptions.load(tmp_path)
 
-    assert options.micropython == "v1.24.0"
+    assert options.micropython == ["v1.24.0", "v1.21.0"]
 
 
 def test_build_options_carries_module_dir_and_manifest(tmp_path):
@@ -174,7 +184,7 @@ def test_build_options_carries_module_dir_and_manifest(tmp_path):
     target = options.targets()[0]
     build_options = options.build_options(target)
 
-    assert build_options.identifier == "unix-manylinux_2_28_x86_64"
+    assert build_options.identifier == f"{DEFAULT_MICROPYTHON}-unix-manylinux_2_28_x86_64"
     assert build_options.port == "unix"
     assert build_options.module_dir == "mymod"
     assert build_options.manifest == "extra.py"
@@ -206,15 +216,15 @@ def test_skip_is_read_from_the_top_level(tmp_path):
     write_config(
         tmp_path,
         """
-        skip = "unix-manylinux_2_28_i686"
+        skip = "*-manylinux_2_28_i686"
         [usermod]
         ports = ["unix"]
         """,
     )
     identifiers = [t.identifier for t in UsermodOptions.load(tmp_path).targets()]
 
-    assert "unix-manylinux_2_28_i686" not in identifiers
-    assert "unix-manylinux_2_28_x86_64" in identifiers
+    assert not any(i.endswith("manylinux_2_28_i686") for i in identifiers)
+    assert any(i.endswith("manylinux_2_28_x86_64") for i in identifiers)
 
 
 def test_the_old_usermod_placement_still_works_and_says_so(tmp_path, capsys):
@@ -226,13 +236,13 @@ def test_the_old_usermod_placement_still_works_and_says_so(tmp_path, capsys):
         """
         [usermod]
         ports = ["unix"]
-        skip = "unix-manylinux_2_28_i686"
+        skip = "*-manylinux_2_28_i686"
         """,
     )
     identifiers = [t.identifier for t in UsermodOptions.load(tmp_path).targets()]
     captured = capsys.readouterr()
 
-    assert "unix-manylinux_2_28_i686" not in identifiers
+    assert not any(i.endswith("manylinux_2_28_i686") for i in identifiers)
     assert "deprecated" in captured.err
     # stdout carries --print-build-identifiers / --print-build-matrix
     # output, and cibuildmp-matrix's own action does json.loads() on it.
@@ -244,16 +254,16 @@ def test_the_top_level_wins_when_both_are_written(tmp_path, capsys):
     write_config(
         tmp_path,
         """
-        skip = "unix-manylinux_2_28_x86_64"
+        skip = "*-manylinux_2_28_x86_64"
         [usermod]
         ports = ["unix"]
-        skip = "unix-manylinux_2_28_i686"
+        skip = "*-manylinux_2_28_i686"
         """,
     )
     identifiers = [t.identifier for t in UsermodOptions.load(tmp_path).targets()]
 
-    assert "unix-manylinux_2_28_x86_64" not in identifiers
-    assert "unix-manylinux_2_28_i686" in identifiers
+    assert not any(i.endswith("manylinux_2_28_x86_64") for i in identifiers)
+    assert any(i.endswith("manylinux_2_28_i686") for i in identifiers)
     assert "deprecated" in capsys.readouterr().err
 
 
@@ -293,7 +303,9 @@ def test_a_port_sub_table_is_not_an_unknown_key_in_usermod(tmp_path):
     )
     options = UsermodOptions.load(tmp_path)
 
-    assert [t.identifier for t in options.targets()] == ["unix-manylinux_2_28_x86_64"]
+    assert [t.identifier for t in options.targets()] == [
+        f"{DEFAULT_MICROPYTHON}-unix-manylinux_2_28_x86_64"
+    ]
 
 
 def test_shared_top_level_keys_honour_the_environment_in_usermod_mode(
@@ -309,5 +321,5 @@ def test_shared_top_level_keys_honour_the_environment_in_usermod_mode(
     monkeypatch.setenv("CIBMP_OUTPUT_DIR", "elsewhere")
     options = UsermodOptions.load(tmp_path)
 
-    assert options.micropython == "v1.28.0"
+    assert options.micropython == ["v1.28.0"]
     assert options.output_dir == Path("elsewhere")

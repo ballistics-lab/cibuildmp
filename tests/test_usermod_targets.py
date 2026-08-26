@@ -33,6 +33,16 @@ def test_identifier_includes_axis_when_present():
     )
 
 
+def test_identifier_leads_with_the_tag_when_present():
+    # 0051: the compatibility axis usermod was missing entirely -- leads
+    # the identifier, the same position natmod's own `mpy6.3-` slot holds.
+    assert (
+        UsermodTarget(port="unix", arch="manylinux_2_28_x86_64", tag="v1.29.0").identifier
+        == "v1.29.0-unix-manylinux_2_28_x86_64"
+    )
+    assert UsermodTarget(port="qemu", tag="v1.29.0").identifier == "v1.29.0-qemu"
+
+
 def test_axis_key_names():
     assert axis_key("unix") == "archs"
     assert axis_key("windows") == "archs"
@@ -91,18 +101,25 @@ def test_default_axis_values_esp32_is_generic_only():
 
 
 def test_usermod_targets_uses_defaults_when_no_override():
-    targets = usermod_targets(["unix"], {})
+    targets = usermod_targets(["v1.28.0"], ["unix"], {})
     assert [t.identifier for t in targets] == [
-        "unix-manylinux_2_28_x86_64",
-        "unix-musllinux_1_2_x86_64",
-        "unix-manylinux_2_28_i686",
-        "unix-musllinux_1_2_i686",
-        "unix-manylinux_2_28_aarch64",
-        "unix-musllinux_1_2_aarch64",
-        "unix-manylinux_2_31_armv7l",
-        "unix-musllinux_1_2_armv7l",
-        "unix-manylinux_2_39_mipsel",
+        "v1.28.0-unix-manylinux_2_28_x86_64",
+        "v1.28.0-unix-musllinux_1_2_x86_64",
+        "v1.28.0-unix-manylinux_2_28_i686",
+        "v1.28.0-unix-musllinux_1_2_i686",
+        "v1.28.0-unix-manylinux_2_28_aarch64",
+        "v1.28.0-unix-musllinux_1_2_aarch64",
+        "v1.28.0-unix-manylinux_2_31_armv7l",
+        "v1.28.0-unix-musllinux_1_2_armv7l",
+        "v1.28.0-unix-manylinux_2_39_mipsel",
     ]
+
+
+def test_usermod_targets_products_over_every_tag():
+    # The regression 0051 exists to fix: two tags of the same port/arch
+    # must produce two distinct identifiers, in order, not one collision.
+    targets = usermod_targets(["v1.28.0", "v1.29.0"], ["qemu"], {})
+    assert [t.identifier for t in targets] == ["v1.28.0-qemu", "v1.29.0-qemu"]
 
 
 def test_every_default_unix_cell_has_a_published_image():
@@ -119,36 +136,46 @@ def test_every_default_unix_cell_has_a_published_image():
 
 
 def test_usermod_targets_axis_override_replaces_default():
-    targets = usermod_targets(["unix"], {"unix": ["manylinux_2_28_aarch64"]})
-    assert [t.identifier for t in targets] == ["unix-manylinux_2_28_aarch64"]
+    targets = usermod_targets(
+        ["v1.28.0"], ["unix"], {"unix": ["manylinux_2_28_aarch64"]}
+    )
+    assert [t.identifier for t in targets] == ["v1.28.0-unix-manylinux_2_28_aarch64"]
 
 
 def test_usermod_targets_multiple_ports_preserve_order():
-    targets = usermod_targets(["esp32", "qemu"], {})
-    assert [t.identifier for t in targets] == ["esp32-ESP32_GENERIC", "qemu"]
+    targets = usermod_targets(["v1.28.0"], ["esp32", "qemu"], {})
+    assert [t.identifier for t in targets] == [
+        "v1.28.0-esp32-ESP32_GENERIC",
+        "v1.28.0-qemu",
+    ]
 
 
 def test_usermod_targets_unknown_port_rejected():
     with pytest.raises(UnknownPortError, match="unknown usermod port"):
-        usermod_targets(["stm32"], {})
+        usermod_targets(["v1.28.0"], ["stm32"], {})
 
 
 def test_usermod_targets_axis_override_on_axisless_port_rejected():
     with pytest.raises(UnknownAxisError, match="no configurable axis"):
-        usermod_targets(["webassembly"], {"webassembly": ["pyscript"]})
+        usermod_targets(["v1.28.0"], ["webassembly"], {"webassembly": ["pyscript"]})
 
 
 def test_usermod_targets_qemu_default_stays_bare_identifier():
     # qemu's own default axis value is the "" sentinel, not "MPS2_AN385"
     # -- an unconfigured build must keep its original bare "qemu"
     # identifier (see targets.py's own _PORT_AXES comment for why).
-    targets = usermod_targets(["qemu"], {})
-    assert [t.identifier for t in targets] == ["qemu"]
+    targets = usermod_targets(["v1.28.0"], ["qemu"], {})
+    assert [t.identifier for t in targets] == ["v1.28.0-qemu"]
 
 
 def test_usermod_targets_qemu_board_override_selects_riscv():
-    targets = usermod_targets(["qemu"], {"qemu": ["VIRT_RV32", "VIRT_RV64"]})
-    assert [t.identifier for t in targets] == ["qemu-VIRT_RV32", "qemu-VIRT_RV64"]
+    targets = usermod_targets(
+        ["v1.28.0"], ["qemu"], {"qemu": ["VIRT_RV32", "VIRT_RV64"]}
+    )
+    assert [t.identifier for t in targets] == [
+        "v1.28.0-qemu-VIRT_RV32",
+        "v1.28.0-qemu-VIRT_RV64",
+    ]
 
 
 # ── default_runner (records 0043/0044) ──────────────────────────────────

@@ -5,15 +5,17 @@ from cibuildmp.natmod.targets import (
     NATMOD_ARCH_NATIVE_CODE,
     NATMOD_ARCHS,
     Target,
+    UnknownAbiError,
     UnknownArchError,
     abi_for_tag,
     is_abi_known,
     natmod_targets,
+    newest_tag_for_abi,
     parse_arch_flags,
-    parse_selector,
+    resolve_abi_selector,
     resolve_micropython_tags,
-    select,
 )
+from cibuildmp.selector import parse_selector, select
 
 
 def test_identifier_shape():
@@ -112,6 +114,35 @@ def test_resolve_micropython_tags_honours_override():
     assert resolve_micropython_tags(["v1.22.0", "v1.28.0"], override="7.0") == [
         ("v1.22.0", "7.0")
     ]
+
+
+def test_newest_tag_for_abi_reads_the_table_backwards():
+    # ABI 6.3 spans v1.23.0..v1.29.0 in resources/natmod.toml -- the
+    # newest tag is the one this resolves to, not the first one listed.
+    assert newest_tag_for_abi("6.3") == "v1.29.0"
+    # A prerelease sorts below its own release but above an earlier
+    # release's own tags -- 6.2's newest listed tag is a preview because
+    # no non-preview v1.23.0 entry maps to 6.2 (v1.23.0 itself is 6.3).
+    assert newest_tag_for_abi("6.2") == "v1.23.0-preview"
+    assert newest_tag_for_abi("6.1") == "v1.22.0-preview"
+
+
+def test_newest_tag_for_abi_unknown_abi_is_none():
+    assert newest_tag_for_abi("9.9") is None
+
+
+def test_resolve_abi_selector_states_the_axis_directly():
+    # The direction resolve_micropython_tags() cannot run: ABIs in, tags
+    # out, each resolved to its own newest known tag.
+    assert resolve_abi_selector(["6.3", "6.2"]) == [
+        ("v1.29.0", "6.3"),
+        ("v1.23.0-preview", "6.2"),
+    ]
+
+
+def test_resolve_abi_selector_rejects_unknown_abi():
+    with pytest.raises(UnknownAbiError, match="unknown .mpy ABI '9.9'"):
+        resolve_abi_selector(["9.9"])
 
 
 def test_natmod_targets_preserve_canonical_order():

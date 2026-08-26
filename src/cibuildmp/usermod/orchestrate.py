@@ -269,22 +269,30 @@ def build(
 ) -> list[UsermodBuildResult]:
     """Build every selected target in one invocation.
 
-    MicroPython is fetched and mpy-cross built once, shared across every
-    target -- the same D9 reasoning `cli.build()` already applies for
-    natmod, and for the same reason: nothing here needs a different
-    checkout or a different mpy-cross per target, since none of the five
-    ports' own axes (arch/board) change which MicroPython release is
-    being built, only how it is cross-compiled.
+    Grouped by MicroPython tag (**0051**), the same D9/D13 reasoning
+    natmod's own `cli.build()` already applies: fetching a checkout (and,
+    for the two ports that still need one, a host mpy-cross) is identical
+    for every target sharing a release -- none of the five ports' own
+    axes (arch/board) change which MicroPython release is being built,
+    only how it is cross-compiled -- so paying for it once per tag beats
+    paying for it once per target. Almost always one group, since that is
+    the common case, but `targets` can span more than one release since
+    `micropython` stopped being silently truncated to its first entry.
     """
-    mpy_dir = sources.fetch_micropython(options.micropython)
-    if any(t.port in _HOST_MPY_CROSS_PORTS for t in targets):
-        sources.build_mpy_cross(mpy_dir, quiet=quiet)
-
     results = []
-    for target in targets:
-        results.append(
-            build_one(
-                options, target, mpy_dir, toolchain_root=toolchain_root, quiet=quiet
+    # Preserves first-appearance order (usermod_targets() emits one tag
+    # group at a time), not sorted -- matches natmod's own
+    # dict.fromkeys(bo.target.tag for bo in resolved) idiom exactly.
+    build_tags = list(dict.fromkeys(t.tag for t in targets))
+    for tag in build_tags:
+        group = [t for t in targets if t.tag == tag]
+        mpy_dir = sources.fetch_micropython(tag)
+        if any(t.port in _HOST_MPY_CROSS_PORTS for t in group):
+            sources.build_mpy_cross(mpy_dir, quiet=quiet)
+        for target in group:
+            results.append(
+                build_one(
+                    options, target, mpy_dir, toolchain_root=toolchain_root, quiet=quiet
+                )
             )
-        )
     return results

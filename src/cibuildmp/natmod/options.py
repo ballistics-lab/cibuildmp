@@ -18,15 +18,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..selector import matches, parse_selector, select
 from .targets import (
     NATMOD_ARCHS,
     Target,
-    matches,
     natmod_targets,
     parse_arch_flags,
-    parse_selector,
+    resolve_abi_selector,
     resolve_micropython_tags,
-    select,
 )
 
 CONFIG_FILENAME = "cibuildmp.toml"
@@ -161,6 +160,26 @@ def _as_list(value: Any, key: str) -> list[str]:
     raise ConfigError(f"{key}: expected a list or a string, got {type(value).__name__}")
 
 
+def _parse_mpy_abi(value: Any) -> str | list[str] | None:
+    """`mpy-abi` is dual-shape (0051). A single value is the pre-0051
+    override: force this one ABI onto every `micropython` tag, via
+    `abi_for_tag()`'s own `override` parameter. More than one value --
+    a TOML list, or (from the environment, which can only ever be a
+    string) more than one whitespace-separated token -- states the axis
+    directly: these are the ABIs to build, each resolved to its own
+    newest known tag by `resolve_abi_selector()` instead of derived from
+    `micropython`. A single-token string, whichever layer it came from,
+    keeps meaning what it always has -- this is additive, not a breaking
+    change to the override.
+    """
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return [str(v) for v in value]
+    tokens = str(value).split()
+    return tokens if len(tokens) > 1 else str(value)
+
+
 @dataclass
 class BuildOptions:
     """Fully resolved options for a single target."""
@@ -190,7 +209,7 @@ class Options:
     skip: list[str]
     archs: list[str]
     micropython_submodules: list[str]
-    mpy_abi: str | None
+    mpy_abi: str | list[str] | None
     arch_flags: list[str]
     version: str
     natmod: dict[str, Any]
@@ -257,7 +276,7 @@ class Options:
             micropython_submodules=_as_list(
                 opt("micropython-submodules"), "micropython-submodules"
             ),
-            mpy_abi=(str(opt("mpy-abi")) if opt("mpy-abi") is not None else None),
+            mpy_abi=_parse_mpy_abi(opt("mpy-abi")),
             arch_flags=_as_list(arch_flags_value, "arch-flags"),
             version=str(opt("version", "")),
             natmod=natmod,
@@ -268,12 +287,20 @@ class Options:
     # ── Resolution ────────────────────────────────────────────────────────
 
     def tag_groups(self) -> list[tuple[str, str]]:
-        """One (tag, abi) pair per distinct ABI `micropython` resolves to.
+        """One (tag, abi) pair per distinct ABI this config selects.
 
-        See resolve_micropython_tags(): almost always a single pair, since
-        that is the common case (**D13**), but never fewer than the number
-        of distinct ABIs actually requested.
+        Two ways to state the axis (**0051**). If `mpy-abi` is a list, it
+        names the ABIs directly -- `resolve_abi_selector()` resolves each
+        to its own newest known tag, the direction `MPY_ABI` cannot run
+        forwards. Otherwise `micropython`'s own tags are resolved to the
+        ABI they produce (`resolve_micropython_tags()`, almost always a
+        single pair since that is the common case -- **D13**), with
+        `mpy-abi` as a bare string still available as a per-invocation
+        override forcing one ABI onto every tag, unchanged from before
+        this record.
         """
+        if isinstance(self.mpy_abi, list):
+            return resolve_abi_selector(self.mpy_abi)
         return resolve_micropython_tags(self.micropython, self.mpy_abi)
 
     def extra_files(self) -> list[str]:

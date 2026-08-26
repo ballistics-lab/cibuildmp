@@ -147,6 +147,54 @@ def test_micropython_env_accepts_space_separated_list(tmp_path):
     assert options.tag_groups() == [("v1.22.0", "6.2"), ("v1.28.0", "6.3")]
 
 
+def test_mpy_abi_string_is_still_an_override(tmp_path):
+    # Unchanged from before 0051: a bare string forces every listed tag
+    # to resolve to that one ABI, regardless of what MPY_ABI says.
+    write(
+        tmp_path,
+        """
+        micropython = ["v1.22.0", "v1.28.0"]
+        mpy-abi = "7.0"
+        [natmod]
+        archs = ["x64"]
+        """,
+    )
+    options = Options.load(tmp_path, env={})
+    assert options.mpy_abi == "7.0"
+    assert options.tag_groups() == [("v1.22.0", "7.0")]
+
+
+def test_mpy_abi_list_states_the_axis_directly(tmp_path):
+    # The new path (0051): mpy-abi as a list is the axis itself, resolved
+    # backwards to each ABI's own newest known tag -- micropython is not
+    # consulted at all.
+    write(
+        tmp_path,
+        """
+        micropython = "v1.21.0"
+        mpy-abi = ["6.3", "6.2"]
+        [natmod]
+        archs = ["x64"]
+        """,
+    )
+    options = Options.load(tmp_path, env={})
+    assert options.mpy_abi == ["6.3", "6.2"]
+    assert options.tag_groups() == [("v1.29.0", "6.3"), ("v1.23.0-preview", "6.2")]
+    identifiers = [t.identifier for t in options.targets()]
+    assert identifiers == ["mpy6.3-natmod-x64", "mpy6.2-natmod-x64"]
+
+
+def test_mpy_abi_env_multi_token_is_axis_single_token_is_override(tmp_path):
+    write(tmp_path, '[natmod]\narchs = ["x64"]\n')
+    axis = Options.load(tmp_path, env={"CIBMP_MPY_ABI": "6.3 6.2"})
+    assert axis.mpy_abi == ["6.3", "6.2"]
+    override = Options.load(
+        tmp_path, env={"CIBMP_MICROPYTHON": "v1.22.0", "CIBMP_MPY_ABI": "7.0"}
+    )
+    assert override.mpy_abi == "7.0"
+    assert override.tag_groups() == [("v1.22.0", "7.0")]
+
+
 def test_arch_flags_land_on_rv32imc_identifier_and_make_args(tmp_path):
     write(
         tmp_path,

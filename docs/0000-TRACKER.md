@@ -80,27 +80,24 @@ are *missing*; work that unblocks verification beats work that gets verified
 later; and cheap-with-strong-evidence beats expensive-and-speculative.
 
 - [ ] [0051] one selector for both modes, and an identifier that names what a
-      build is compatible with | **the task itself, and the reason the
-      premise's last clause fails.** One rule -- the identifier is the complete
-      description of one build, selection is globbing over it -- broken in two
-      places. natmod names its axis (the `.mpy` ABI) and selects it *backwards*:
-      you give tags and the ABI is derived, so building for 6.2 means knowing
-      which release carried it, from a table that maps the other way. usermod
-      does not name its axis (the release) **anywhere** -- not the identifier,
-      not the output filename, not the directory -- so two releases overwrite
-      each other, which is why the tag list is silently truncated to one. And
-      usermod's second axis has three shapes (`archs`/`boards`/none), so a flat
-      `--archs` cannot be the selector primitive; identifier globs already are.
-      And the machinery is duplicated: `select()` exists twice, which is how
-      the two modes drifted into reading `build`/`skip` from opposite tables
-      ([0048]). Upstream has one 135-line `selector.py` imported by every
-      platform module, carrying three things we lack entirely -- `EnableGroup`
-      (opt-in as a concept, not an absence from the default axis), a
-      project-declared compatibility constraint, and brace expansion. Read from
-      the real 4.2.0 source, not recalled. Shared *mechanism*, per-mode
-      *tables*: upstream hardcodes its group patterns in the shared class,
-      which is right for one product and wrong for two modes. Renames every usermod identifier,
-      which is why it goes **before** [0038] rather than after
+      build is compatible with | **the axis/identifier half landed
+      2026-08-26; the `--platform`-becomes-port half did not.** natmod's
+      `mpy-abi` can now state the ABI axis directly (list) as well as derive
+      it from tags (string, unchanged); usermod's `micropython` is a real
+      list and its identifier leads with the tag
+      (`v1.29.0-unix-manylinux_2_28_x86_64`), so two releases no longer
+      overwrite each other's output. `select()`/`matches()`/`parse_selector()`
+      moved to one `cibuildmp/selector.py`, which also gained brace
+      expansion. **Still open**, per the record's own addendum: `--archs`
+      still means what it did (point 4), `--platform` still means the build
+      mode rather than the port -- no `platforms/` tree, config still
+      `[usermod.unix]` not `[unix]` (points 6/7) -- and the six
+      emulated-everywhere `unix` cells are still absent from the default
+      axis rather than an `EnableGroup`-style opt-in (point 8). Deferred
+      deliberately: those are a separable epic, not required to close the
+      two live bugs this closed. Still goes **before** [0038] rather than
+      after -- the identifier shape is now settled, so telling the three
+      consuming repos to migrate once is still the right order
 - [ ] [0050] natmod's image needs one more publish, and CI has never been
       green on it | **start here, and it is nearly done.** The image gained
       `gcc-i686-linux-gnu` after v1.29.0 changed `dynruntime.mk`'s `x86` from

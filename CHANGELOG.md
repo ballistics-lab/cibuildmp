@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Every usermod identifier now carries the MicroPython release, and
+  natmod's `mpy-abi` can name the ABI axis directly.**
+  `unix-manylinux_2_28_x86_64` becomes
+  `v1.29.0-unix-manylinux_2_28_x86_64`. Before this, usermod's
+  `micropython` was silently truncated to its first entry whenever more
+  than one was configured -- the only thing standing between a two-tag
+  config and one release's output silently overwriting the other's,
+  since nothing distinguished them: not the identifier, not the output
+  filename, not the directory. `micropython` is a real list now, and a
+  second tag gets its own output. natmod gets the same axis from the
+  other direction: `mpy-abi = ["6.3", "6.2"]` states the ABIs to build
+  directly, each resolved to its own newest known MicroPython tag,
+  rather than only being derivable by supplying tags and letting the ABI
+  fall out (still supported, unchanged). `select()`/`matches()`/
+  `parse_selector()`, previously hand-duplicated between the two modes,
+  now live once in `cibuildmp/selector.py`, which also gained brace
+  expansion (`cp{36,37}-*`-style globs), matching upstream. Record 0051
+  (partial -- moving `--platform` to mean the port, and opt-in groups
+  replacing default-axis omission, are still open).
 - **natmod builds in a container, and there is no bare-host path.** It used to
   resolve a toolchain onto the invoking machine -- an apt probe, a pinned
   tarball, or the host gcc's own 32-bit multilib -- and run `make` there. One

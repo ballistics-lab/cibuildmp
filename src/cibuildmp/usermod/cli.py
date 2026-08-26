@@ -102,7 +102,7 @@ def run(
         # `read_all_configs()` and its help says "Overrides
         # CIBW_BUILD/CIBW_SKIP". "Your config does not select that" is not
         # an answer the flag should be able to give.
-        known = all_usermod_targets()
+        known = all_usermod_targets(options.micropython)
         targets = [t for t in known if t.identifier == args.only]
         if not targets:
             print(
@@ -136,14 +136,16 @@ def run(
     total = len(targets)
     if args.dry_run:
         print(
-            f"cibuildmp: {total} usermod target(s) against MicroPython {options.micropython}"
+            f"cibuildmp: {total} usermod target(s) against MicroPython "
+            f"{', '.join(options.micropython)}"
         )
         for index, target in enumerate(targets, 1):
             print("  " + _plan_line(index, total, target))
         return 0
 
     print(
-        f"cibuildmp: {total} usermod target(s) against MicroPython {options.micropython}"
+        f"cibuildmp: {total} usermod target(s) against MicroPython "
+        f"{', '.join(options.micropython)}"
     )
     try:
         results = orchestrate.build(options, targets)
