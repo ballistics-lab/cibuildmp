@@ -219,6 +219,19 @@ class Target:
             base += f"+0x{self.arch_flags:x}"
         return base
 
+    @property
+    def port(self) -> str:
+        # Always "natmod" -- natmod is a platform among six now (record
+        # 0051 points 4/6), so Target needs the same `.port` UsermodTarget
+        # already has, for Phase G's own per-matched-platform override
+        # validation (natmod/options.py's build_options()). `self.mode` is
+        # always the literal string "natmod" too (natmod_targets() sets
+        # it), but that field names what it decodes back into an
+        # identifier segment, not what a caller asking "which platform" is
+        # actually after -- a distinct property keeps those two questions
+        # from silently meaning the same thing by accident.
+        return "natmod"
+
     def __str__(self) -> str:
         return self.identifier
 

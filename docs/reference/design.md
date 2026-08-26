@@ -97,18 +97,22 @@ The floor is *inside* the identifier here, unlike cibuildwheel's own
 `cp313-manylinux_x86_64`, because cibuildmp curates exactly one floor per
 architecture and offers no knob to choose another.
 
-Landed as of [0051]'s Phase F (see that record's own fourth addendum):
-`--platform` names one or more of six platforms (`natmod`, `unix`,
-`windows`, `qemu`, `webassembly`, `esp32`) rather than a build mode, the way
-upstream's own `--platform` names an OS, and the config tree matches —
-`[unix]`/`[esp32]` sibling to `[natmod]`, not `[usermod.unix]` nested under
-a `[usermod]` that no longer exists. `cibuildmp/options.py`'s cascade-based
-option resolution (`default → global → platform table → environment → CLI`,
-matching upstream's own `Options.get()`) is wired into both `natmod/options.py`
-and `usermod/options.py` now, for the base four layers — `[[overrides]]`/
-`inherit` still stay outside it, [0051]'s own "Phase G" work. Still open:
-that Phase G (one shared `[[overrides]]`, `inherit`, `Target.port`) and
-Phase H (unifying `cli.py`'s dispatch loop).
+Landed as of [0051]'s Phases F and G (see that record's own fourth/fifth
+addenda): `--platform` names one or more of six platforms (`natmod`,
+`unix`, `windows`, `qemu`, `webassembly`, `esp32`) rather than a build
+mode, the way upstream's own `--platform` names an OS, and the config
+tree matches — `[unix]`/`[esp32]` sibling to `[natmod]`, not
+`[usermod.unix]` nested under a `[usermod]` that no longer exists.
+`cibuildmp/options.py`'s cascade-based option resolution (`default →
+global → platform table → environment → CLI`, matching upstream's own
+`Options.get()`) is wired into both `natmod/options.py` and
+`usermod/options.py`, for the base four layers *and* for `[[overrides]]`/
+`inherit` now — one shared top-level `[[overrides]]` list, validated
+loosely (valid on some platform) at parse time and strictly (valid on the
+*matched* identifier's own platform) at build time, `inherit = {
+extra-make-args = "append"|"prepend"|"none"}` layered in via `Options.get()`'s
+own `extra_layers`. Still open: Phase H (unifying `cli.py`'s dispatch
+loop) and Phase I (docs/README consolidation).
 
 [0043]: ../records/0043-unix-adopts-cibuildwheel-native-image-model.md
 [0044]: ../records/0044-unix-native-images-landed.md
@@ -158,7 +162,24 @@ extra-files = []              # copied into every identifier's own directory,
 [[overrides]]
 select = "*-armv7emsp"
 extra-make-args = ["MP_BCLIBC_PRECISION=single"]
+# inherit = {extra-make-args = "append"}   # default "none" (replace);
+                              # "append"/"prepend" only apply to
+                              # extra-make-args, the one option genuinely
+                              # list-shaped across every platform's own
+                              # override surface ([0051] Phase G)
 ```
+
+`[[overrides]]` is shared by every platform now, natmod and every usermod
+port alike — the example above matches natmod's own; a usermod-port
+identifier is matched by the identical `select` mechanism, with
+`module-dir`/`manifest`/`extra-make-args` as its own three settable
+option keys instead of natmod's four. An override's own keys are
+validated twice: loosely (is this key valid for *any* platform's override
+surface — a typo check) when the config is loaded, and strictly (is this
+key valid for the *specific* platform the matched identifier belongs to)
+once `select` has actually matched a real target — `natmod`-only
+`make-target` inside an override that only ever matches `unix`
+identifiers is still a loud, specific error, not silently ignored.
 
 Every option is overridable by environment variable, `CIBMP_`-prefixed and
 screaming-snake-cased: `CIBMP_BUILD`, `CIBMP_SKIP`, `CIBMP_MICROPYTHON`,
@@ -193,14 +214,14 @@ per-port arch/board axis instead), not a variant of the table above. As of
 `[unix]`, `[windows]`, `[qemu]`, `[webassembly]`, `[esp32]` — sibling to
 `[natmod]`; there is no more `[usermod]` umbrella and no more
 `ports = [...]` list (a port's own table presence is what selects it, the
-same rule `[natmod]`'s presence has always followed). It also has its own
-top-level `[[usermod-overrides]]` (renamed from the old nested
-`[[usermod.overrides]]` when `[usermod]` itself was flattened away) — still
-not sharing natmod's own `[[overrides]]`, since the two accept different
-keys (natmod: `module-dir`/`make-target`/`extra-make-args`/
-`pre-build-command`; usermod: `module-dir`/`manifest`/`extra-make-args`)
-and merging them safely needs the runtime per-platform key validation
-[0051]'s own "Phase G" adds.
+same rule `[natmod]`'s presence has always followed). Its own three
+settable option keys (`module-dir`/`manifest`/`extra-make-args`) are
+genuinely global-with-per-platform-override now, resolved through the
+same cascade natmod's own four keys use. `[[overrides]]` is shared with
+natmod as of Phase G (see above) — the old, short-lived
+`[[usermod-overrides]]` name (Phase F's rename of the even older nested
+`[[usermod.overrides]]`) is gone; there is exactly one top-level
+`[[overrides]]` list now, for every platform.
 
 **Opt-in groups** ([0051] point 8, upstream's own `EnableGroup`): `enable`
 (config key, top-level, space-separated string or list; `--enable`,

@@ -352,7 +352,7 @@ def test_shared_top_level_keys_honour_the_environment_in_usermod_mode(
     assert options.output_dir == Path("elsewhere")
 
 
-# ── record 0051 point 7: [[usermod-overrides]] ───────────────────────────
+# ── record 0051 point 7: [[overrides]] ───────────────────────────
 
 
 def test_usermod_overrides_beat_the_file(tmp_path):
@@ -362,7 +362,7 @@ def test_usermod_overrides_beat_the_file(tmp_path):
         [unix]
         extra-make-args = ["COMMON=1"]
 
-        [[usermod-overrides]]
+        [[overrides]]
         select = "*-manylinux_2_28_x86_64"
         extra-make-args = ["FROM=override"]
         """,
@@ -378,7 +378,7 @@ def test_usermod_overrides_beat_the_file(tmp_path):
 def test_usermod_override_without_select_is_an_error(tmp_path):
     write_config(
         tmp_path,
-        '[unix]\n\n[[usermod-overrides]]\nmanifest = "x.py"\n',
+        '[unix]\n\n[[overrides]]\nmanifest = "x.py"\n',
     )
     options = UsermodOptions.load(tmp_path)
     with pytest.raises(UsermodConfigError, match="select"):
@@ -391,7 +391,7 @@ def test_usermod_environment_beats_override(tmp_path):
         """
         [unix]
 
-        [[usermod-overrides]]
+        [[overrides]]
         select = "*"
         extra-make-args = ["FROM=override"]
         """,
@@ -412,7 +412,7 @@ def test_usermod_override_beats_the_file_for_manifest(tmp_path):
         [unix]
         manifest = "default.py"
 
-        [[usermod-overrides]]
+        [[overrides]]
         select = "*"
         manifest = "special.py"
         """,
@@ -427,14 +427,12 @@ def test_an_unknown_key_in_usermod_overrides_is_an_error(tmp_path):
         """
         [unix]
 
-        [[usermod-overrides]]
+        [[overrides]]
         select = "*"
         arch-flags = "zba"
         """,
     )
-    with pytest.raises(
-        UsermodConfigError, match=r"\[\[usermod-overrides\]\]: unknown key"
-    ):
+    with pytest.raises(UsermodConfigError, match=r"\[\[overrides\]\]: unknown key"):
         UsermodOptions.load(tmp_path)
 
 

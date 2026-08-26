@@ -255,13 +255,25 @@ def run(
         total = len(targets)
         tags = ", ".join(tag for tag, _abi in options.tag_groups())
         print(f"cibuildmp: {total} target(s) against MicroPython {tags}")
-        for index, target in enumerate(targets, 1):
-            print("  " + _plan_line(index, total, options.build_options(target)))
+        try:
+            for index, target in enumerate(targets, 1):
+                print("  " + _plan_line(index, total, options.build_options(target)))
+        except ConfigError as exc:
+            # build_options() can still raise here -- a matched
+            # [[overrides]] entry's own key is only checked against the
+            # matched identifier's own platform once a target is actually
+            # resolved (Phase G's tier-2 validation), so an error that
+            # `targets()` above could not have caught is a real
+            # possibility on the very first target this loop resolves.
+            if args.debug_traceback:
+                raise
+            print(f"cibuildmp: error: {exc}", file=sys.stderr)
+            return 2
         return 0
 
     try:
         return build(options, targets)
-    except (SourceError, BuildError) as exc:
+    except (ConfigError, SourceError, BuildError) as exc:
         if args.debug_traceback:
             raise
         print(f"cibuildmp: error: {exc}", file=sys.stderr)

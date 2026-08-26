@@ -80,8 +80,8 @@ def test_publish_table_is_not_mistaken_for_an_unknown_platform():
 
 
 def test_arrays_of_tables_are_not_mistaken_for_unknown_platforms():
-    # [[overrides]] / [[usermod-overrides]] parse as lists, not dicts --
-    # must never trip the unknown-table check.
+    # [[overrides]] (shared by every platform since Phase G) parses as a
+    # list, not a dict -- must never trip the unknown-table check.
     assert active_platforms({"natmod": {}, "overrides": [{"select": "*"}]}, None) == [
         "natmod"
     ]

@@ -24,11 +24,13 @@ own addendum for the full argument, and
 `docs/records/0051-usermod-identifiers-have-no-version-axis.md`'s addendum
 for how this fits points 4/6.
 
-This module is the cascade mechanism alone, proven standalone against
-synthetic fixtures. It is not yet wired into `natmod/options.py` or
-`usermod/options.py` -- both keep reading config exactly as they do today
-until a later phase migrates them one at a time, so a regression here
-cannot yet reach a real build.
+Wired into `natmod/options.py`'s and `usermod/options.py`'s own
+`build_options()` as of Phase G (record 0051's own fourth/fifth addenda):
+`matching_overrides()`/`override_extra_layers()` below turn a config's
+`[[overrides]]` list into the `(value, inherit_rule)` layers `Options.get()`'s
+own `extra_layers` parameter already knew how to consume -- the whole
+mechanism was built ahead of having a real caller for it (Phase E), and
+this is that caller.
 """
 
 from __future__ import annotations
@@ -37,6 +39,8 @@ import difflib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
+
+from .selector import matches, parse_selector
 
 
 class ConfigError(Exception):
@@ -135,6 +139,48 @@ def check_known_keys(table: Mapping[str, Any], known: frozenset[str], *, where: 
         if hint:
             msg += f" Perhaps you meant `{hint}`?"
         raise ConfigError(msg)
+
+
+def matching_overrides(
+    overrides: Sequence[Mapping[str, Any]],
+    identifier: str,
+    *,
+    error: type[Exception] = ConfigError,
+) -> list[Mapping[str, Any]]:
+    """Every override table (file order) whose `select` matches
+    `identifier` -- shared by `natmod/options.py`'s and
+    `usermod/options.py`'s own `build_options()`, replacing the hand-rolled
+    loop each had before Phase G. `error` lets each caller raise its own
+    exception class for a missing `select` (`natmod.options.ConfigError`
+    / `usermod.options.UsermodConfigError`), since existing tests assert
+    the specific class each mode already raises.
+    """
+    result = []
+    for override in overrides:
+        selector = override.get("select")
+        if selector is None:
+            raise error("every [[overrides]] table needs a `select` key")
+        if matches(identifier, parse_selector(selector)):
+            result.append(override)
+    return result
+
+
+def override_extra_layers(
+    matching: Sequence[Mapping[str, Any]], key: str
+) -> list[tuple[Any | None, str]]:
+    """`(value, inherit_rule)` per matching override that sets `key`, in
+    file order -- exactly the shape `Options.get()`'s own `extra_layers`
+    wants. `inherit` defaults to `InheritRule.NONE` (replace) when a
+    matching override has none, so every override written before `inherit`
+    existed keeps its exact "last matching override wins outright" result.
+    """
+    layers: list[tuple[Any | None, str]] = []
+    for override in matching:
+        if key not in override:
+            continue
+        rule = (override.get("inherit") or {}).get(key, InheritRule.NONE)
+        layers.append((override[key], rule))
+    return layers
 
 
 @dataclass(frozen=True)

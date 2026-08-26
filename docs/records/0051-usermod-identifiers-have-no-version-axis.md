@@ -1,6 +1,6 @@
 # 0051 — one selector for both modes, and an identifier that names what a build is compatible with
 
-Status: In progress — Shape points 1/2/3/5/7/8 implemented 2026-08-26; 4/6 target architecture decided and phased (see third addendum), Phases E and F of it landed the same day (fourth addendum)
+Status: In progress — Shape points 1/2/3/5/7/8 implemented 2026-08-26; 4/6 target architecture decided and phased (see third addendum), Phases E, F and G of it landed the same day (fourth/fifth addenda)
 
 Rewritten twice the same day it was written, before anything was built on it.
 The first draft framed this as "usermod cannot build two MicroPython versions",
@@ -706,3 +706,107 @@ migrated `examples/template/cibuildmp.toml` — not just synthetic
 `tmp_path` fixtures.
 
 Phase G (one shared `[[overrides]]`, `inherit`, `Target.port`) is next.
+
+---
+
+## Addendum, 2026-08-26 — Phase G landed: one shared `[[overrides]]`,
+## `inherit`, `Target.port`
+
+Landed the same day as Phases E and F, in the same session.
+`natmod.targets.Target` gains a `.port` property (always `"natmod"`);
+natmod's own top-level `[[overrides]]` and Phase F's `[[usermod-overrides]]`
+merge into one shared top-level `[[overrides]]`, read once by a new
+`natmod/options.py::load_overrides()` both `Options.load()` and
+`UsermodOptions.load()` call; `inherit = {extra-make-args =
+"append"|"prepend"|"none"}` is real now, wired through
+`cibuildmp/options.py`'s `InheritRule`/`resolve_cascade()`/
+`Options.get(..., extra_layers=...)` machinery — built in Phase E,
+deliberately left unused until this phase had a real caller for it.
+
+**The one hard design problem, and how it resolved.** Tier-1 validation
+("is this override key valid for *any* active platform's own override
+surface") genuinely needs cross-platform knowledge: a real mixed config
+(`[natmod]` + `[unix]`, one shared `[[overrides]]` entry carrying only
+`manifest`, a usermod-only key) must not have natmod's own loading path
+reject it as a typo. But `natmod/options.py` must not import
+`usermod/options.py` — the established direction (usermod imports from
+natmod, never the reverse; natmod is the shared base `check_keys`/
+`GENERIC_KEYS`/`read_config` already live in) stays. Resolved with a
+small, explicit, **tested** data duplication rather than an import:
+`natmod/options.py` gains `_USERMOD_OVERRIDE_OPTION_KEYS_MIRROR`, three
+literal strings restating usermod's own `USERMOD_PORT_BASE`, used only to
+build the public `OVERRIDE_UNION_KEYS`. `tests/test_overrides.py`'s own
+`test_override_union_keys_covers_usermod_port_base` guards against drift
+by importing both real constants and asserting the union is a superset —
+this codebase already accepts exactly this tradeoff elsewhere
+(`natmod/targets.py`'s `NATMOD_ARCH_NATIVE_CODE`/`NATIVE_ARCH_CODE`, two
+separately-named constants built from the same data for two call sites);
+tests may cross-import freely, production code may not.
+
+**Two validation tiers, both real errors, matching record 0048's own
+guarantee under the cascade.** *Loose* (tier-1), at parse time
+(`load_overrides()`): a key valid on *no* platform's override surface at
+all is a typo, caught immediately regardless of which target (if any)
+ever matches that override — this is what keeps an override whose
+`select` never matches anything from silently going unvalidated, the
+exact "declared but never checked" shape 0048 was written for. *Strict*
+(tier-2), at `build_options()` resolution time, once the matched
+identifier's own platform (`target.port`) is known: a key valid
+*somewhere* but not on *this* specific platform's own schema is still a
+loud, specific error — validated against that platform's own schema
+alone, never the union, which is what keeps a misplaced key from
+silently becoming "just another platform's default" under a careless
+cascade implementation. Both directions tested directly
+(`test_natmod_only_override_key_rejected_for_a_usermod_target`,
+`test_usermod_only_override_key_rejected_for_a_natmod_target`).
+
+**Environment-beats-override, verified not inverted.** `Options.get()`'s
+own internal layer order is `default → global → platform → env →
+extra_layers`, so naively threading overrides through `extra_layers` on a
+cascade instance with a real `env` mapping would put overrides *after*
+environment — inverting the tested "environment beats override"
+guarantee. It doesn't, because it doesn't need to: Phase F already
+constructs `_cascade_file`/`_cascade` with `env={}` (both modules already
+commented why — `build_options()` checks the real environment itself,
+after overrides, matching the precedence it has always had). With
+`env={}`, the cascade's own env layer always contributes `None` and is
+skipped, so `extra_layers` is effectively the only thing layered after
+`platform`; `build_options()`'s own `opt()` closure still checks the real
+`environ` first and returns immediately when set, before ever calling
+`.get()`. Nothing about cascade construction changed — this is a reuse of
+an existing Phase F decision, not a new mechanism, and every existing
+environment-precedence test (`test_environment_beats_override`,
+`test_usermod_environment_beats_override`) stayed green unmodified.
+
+**A real bug this phase's own live testing found and fixed, not
+introduced by it.** `build_options()` could already raise `ConfigError`/
+`UsermodConfigError` before this phase (a missing `select` key), but
+neither `natmod/cli.py`'s `run()` (its `--dry-run` plan-line loop, and its
+`build(options, targets)` wrapper) nor `usermod/cli.py`'s `run()` (its own
+`orchestrate.build()` wrapper) caught it — `options.targets()`'s own
+try/except runs *before* any individual target is resolved into
+`BuildOptions`, so an error only `build_options()` itself can raise was
+never in scope. Phase G's own tier-2 check makes this a real,
+easy-to-hit path (a plausible config mistake, not a rare edge case), so
+it surfaced immediately on the first live `--dry-run` smoke test against
+a real cross-platform override — a raw Python traceback instead of
+`cibuildmp: error: ...`. Fixed in both CLI modules; regression test
+`tests/test_overrides.py::test_tier_2_rejection_is_a_clean_cli_error_not_a_traceback`
+asserts a clean message and no `Traceback` in stderr.
+
+**Deliberately not done in this phase**, and why: `check_known_keys()`/
+`known_option_names()` (`cibuildmp/options.py`, built in Phase E, still
+unused) were not converged with `natmod/options.py`'s own `check_keys()`
+(GENERIC_KEYS-aware, per-caller `error`-parameterized) — a real,
+separable cleanup with no functional payoff for this phase, deferred
+rather than done as scope creep.
+
+Verified: full test suite green (`tests/test_overrides.py`, new, 11
+tests; five `[[usermod-overrides]]` tests in `tests/test_usermod_options.py`
+mechanically renamed to `[[overrides]]`), `ruff`/`pyright` clean, and live
+smoke tests — `inherit = {extra-make-args = "append"}` actually composing
+in a real `make` invocation's own argument list, and the tier-2 rejection
+producing a clean CLI error — both run against real configs, not just
+`tmp_path` fixtures.
+
+Phase H (unify CLI dispatch and the build loop) is next.

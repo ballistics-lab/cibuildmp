@@ -160,7 +160,13 @@ def run(
     )
     try:
         results = orchestrate.build(options, targets)
-    except (SourceError, UsermodBuildError) as exc:
+    # UsermodConfigError belongs here too, for the same reason build_options()
+    # itself can raise it: a matched [[overrides]] entry's own key is only
+    # checked against the matched identifier's own platform once a target
+    # actually resolves (Phase G's tier-2 validation, natmod/options.py's
+    # check_keys() call inside UsermodOptions.build_options()) --
+    # options.targets() above cannot have caught it.
+    except (SourceError, UsermodBuildError, UsermodConfigError) as exc:
         if args.debug_traceback:
             raise
         print(f"cibuildmp: error: {exc}", file=sys.stderr)

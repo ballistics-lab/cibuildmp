@@ -227,4 +227,17 @@ retired in favour of `check_known_keys()` plus a small per-module
 level" message this record's own resolution introduced, now also with a
 `difflib`-suggested close match for a genuine typo.
 
+**`[[overrides]]`/`inherit` wired too, the same day ([0051]'s own Phase
+G):** this record's own guarantee — a misplaced or unknown key is a loud
+error, never a silent no-op — now covers the merged, shared
+`[[overrides]]` list specifically, re-verified once more under the
+cascade: a key valid on some platform's own schema but written inside an
+override that only ever matches a *different* platform's identifiers is
+still rejected, checked at `build_options()` resolution time once the
+matched identifier's own platform is known ([0051]'s fifth addendum has
+the full account, including a real "raw traceback instead of a clean CLI
+error" bug this phase's own live testing found in both `natmod/cli.py`
+and `usermod/cli.py`, unrelated to the cascade itself, and fixed the same
+day).
+
 [0051]: 0051-usermod-identifiers-have-no-version-axis.md

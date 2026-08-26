@@ -70,6 +70,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a top-level `[[usermod-overrides]]` (still not merged with natmod's own
   `[[overrides]]` -- that unification is record 0051's own next phase).
   Record 0051 (Phase F).
+- **One shared `[[overrides]]` list, and `inherit`.** Natmod's own
+  `[[overrides]]` and `[[usermod-overrides]]` (above) merge into one
+  top-level `[[overrides]]`, shared by every platform. `inherit =
+  {extra-make-args = "append"|"prepend"|"none"}` is real now (default
+  `"none"`, unchanged behaviour for every override written before this):
+  the one option genuinely list-shaped across every platform's own
+  override surface can compose onto the running value instead of always
+  replacing it outright. An override's own key is validated twice --
+  loosely (is it valid for *any* platform) when the config loads, and
+  strictly (is it valid for the platform the matched identifier actually
+  belongs to) once a target resolves -- so a `natmod`-only key inside an
+  override that only ever matches a `unix` identifier is still a loud,
+  specific error, not silently ignored. `natmod.targets.Target` gained a
+  `.port` property (always `"natmod"`) to make the strict check possible
+  for natmod too. Record 0051 (Phase G).
 - **natmod builds in a container, and there is no bare-host path.** It used to
   resolve a toolchain onto the invoking machine -- an apt probe, a pinned
   tarball, or the host gcc's own 32-bit multilib -- and run `make` there. One

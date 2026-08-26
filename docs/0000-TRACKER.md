@@ -125,12 +125,25 @@ later; and cheap-with-strong-evidence beats expensive-and-speculative.
       the record's own fourth addendum for the full account, including the
       one genuinely new diagnostic Phase F had to add
       (`_reject_unknown_tables()`, since presence-based selection has no
-      equivalent to `ports = [...]`'s own "unknown port" check). Phase G
-      ([[overrides]] unification, `inherit`, `Target.port`) is next. Still
-      goes **before** [0038] rather than after -- the identifier shape is
-      now settled and the config tree has now already moved once this
-      session, so telling the three consuming repos to migrate once, after
-      G/H/I land too, is still the right order
+      equivalent to `ports = [...]`'s own "unknown port" check). **Phase G
+      ([[overrides]] unification, `inherit`, `Target.port`) also landed
+      2026-08-26**, same session: natmod's own `[[overrides]]` and Phase
+      F's `[[usermod-overrides]]` are one shared top-level `[[overrides]]`
+      now, `inherit = {extra-make-args = "append"|"prepend"|"none"}` is
+      real (confirmed live in a real `make` invocation's own args), and
+      an override's key is validated both loosely (valid on some
+      platform) at parse time and strictly (valid on the *matched*
+      identifier's own platform) at build time -- `Target.port` (natmod
+      gained one) is what makes the strict check possible for natmod too.
+      A real "raw traceback instead of a clean CLI error" bug in both
+      `natmod/cli.py` and `usermod/cli.py` (pre-existing, not introduced
+      by this phase) was found by this phase's own live testing and
+      fixed the same day. See the record's own fifth addendum. Phase H
+      (unify CLI dispatch) is next. Still goes **before** [0038] rather
+      than after -- the identifier shape is now settled and the config
+      tree has now already moved twice this session, so telling the
+      three consuming repos to migrate once, after H/I land too, is
+      still the right order
 - [ ] [0050] natmod's image needs one more publish, and CI has never been
       green on it | **start here, and it is nearly done.** The image gained
       `gcc-i686-linux-gnu` after v1.29.0 changed `dynruntime.mk`'s `x86` from

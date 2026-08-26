@@ -19,9 +19,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..options import InheritRule, matching_overrides, override_extra_layers, suggest
 from ..options import Options as OptionCascade
-from ..options import suggest
-from ..selector import matches, parse_selector, select
+from ..selector import parse_selector, select
 from .targets import (
     NATMOD_ARCHS,
     Target,
@@ -93,20 +93,53 @@ NATMOD_SCHEMA: frozenset[str] = frozenset(
     }
 )
 
-# `[[overrides]]` layers over natmod's own per-target `opt()`, so it takes
-# the same four keys plus its own `select`. Notably *not* `arch-flags`:
-# that one is resolved once for the whole config, never per target, so an
-# `arch-flags` in an override table would be silently ignored -- exactly
-# the shape 0048 is about.
-OVERRIDE_TABLE_KEYS: frozenset[str] = frozenset(
-    {
-        "select",
-        "module-dir",
-        "make-target",
-        "extra-make-args",
-        "pre-build-command",
-    }
+# ── merged [[overrides]] (Phase G) ──────────────────────────────────────
+#
+# Natmod's own top-level [[overrides]] and usermod's own
+# [[usermod-overrides]] (Phase F) merge into one shared top-level
+# [[overrides]] list here -- record 0051's own "Phase G". Two validation
+# tiers: *loose*, at parse time (load_overrides() below, called by both
+# this module's own Options.load() and usermod/options.py's
+# UsermodOptions.load()) -- is this key valid for *any* platform's
+# override surface at all, a typo check; and *strict*, at build_options()
+# resolution time, once the matched identifier's own platform
+# (target.port) is known -- is this key valid for *that* specific
+# platform. The strict tier is what actually needs Target.port to exist
+# for natmod too (natmod/targets.py).
+NATMOD_OVERRIDE_OPTION_KEYS: frozenset[str] = frozenset(
+    {"module-dir", "make-target", "extra-make-args", "pre-build-command"}
 )
+
+# A mirror of usermod/options.py's own USERMOD_PORT_BASE, restated here
+# rather than imported: this module must not import usermod/options.py
+# (usermod already imports from here -- check_keys, read_config, two
+# constants -- and that direction stays one-way, natmod as the shared
+# base every platform module imports from, never the reverse). Kept in
+# sync by tests/test_overrides.py's own drift-guard test
+# (OVERRIDE_UNION_KEYS >= USERMOD_PORT_BASE, importing both real
+# constants), not by construction -- the same tradeoff natmod/targets.py
+# already makes between NATMOD_ARCH_NATIVE_CODE and NATIVE_ARCH_CODE, two
+# separately-named constants built from the same data for two call sites.
+_USERMOD_OVERRIDE_OPTION_KEYS_MIRROR: frozenset[str] = frozenset(
+    {"module-dir", "manifest", "extra-make-args"}
+)
+
+_OVERRIDE_META_KEYS: frozenset[str] = frozenset({"select", "inherit"})
+
+# The tier-1 schema: every key valid on *some* platform's own override
+# surface. Deliberately excludes `arch-flags` (resolved once for the
+# whole config, never per target, so an override carrying it would be
+# silently ignored -- exactly the shape 0048 is about) and every axis key
+# (`archs`/`boards` -- resolved before any override can match).
+OVERRIDE_UNION_KEYS: frozenset[str] = (
+    NATMOD_OVERRIDE_OPTION_KEYS
+    | _USERMOD_OVERRIDE_OPTION_KEYS_MIRROR
+    | _OVERRIDE_META_KEYS
+)
+
+# The only option genuinely list-shaped across every platform's own
+# override surface -- the one key `inherit` can name.
+INHERITABLE_OVERRIDE_KEYS: frozenset[str] = frozenset({"extra-make-args"})
 
 
 def check_keys(
@@ -143,6 +176,59 @@ def check_keys(
         if hint:
             msg += f" Perhaps you meant `{hint}`?"
         raise error(msg)
+
+
+def _check_inherit(
+    override: Mapping[str, Any], *, where: str, error: type[Exception]
+) -> None:
+    """`inherit = {extra-make-args = "append"}` -- validated at parse
+    time, not deferred to `resolve_cascade()`'s own generic error: a bad
+    `inherit` key can never become valid depending on which target later
+    matches, so failing immediately is both cheaper to pin down and
+    better UX (names the override, not just the eventual cascade call)."""
+    inherit = override.get("inherit")
+    if inherit is None:
+        return
+    if not isinstance(inherit, dict):
+        raise error(
+            f'{where}: inherit must be a table, e.g. {{"extra-make-args" = "append"}}'
+        )
+    for key, rule in inherit.items():
+        if key not in INHERITABLE_OVERRIDE_KEYS:
+            raise error(
+                f"{where}: inherit={{{key} = ...}} -- inherit only applies to "
+                f"list-valued options. Known: "
+                f"{', '.join(sorted(INHERITABLE_OVERRIDE_KEYS))}."
+            )
+        if rule not in InheritRule.ALL:
+            raise error(
+                f"{where}: unknown inherit rule {rule!r} for {key!r}. Known: "
+                f"{', '.join(sorted(InheritRule.ALL))}."
+            )
+
+
+def load_overrides(
+    raw: Mapping[str, Any], *, error: type[Exception] = ConfigError
+) -> list[dict[str, Any]]:
+    """Parse and loosely (tier-1) validate the merged, top-level
+    `[[overrides]]` list -- shared by every platform (Phase G). Called
+    once by each of this module's own `Options.load()` and
+    `usermod/options.py`'s `UsermodOptions.load()`, against the same
+    already-parsed `raw` dict -- re-validating twice is cheap (dict-
+    membership checks over an already-parsed, typically-short list, no
+    I/O), not the "parsing the same file twice" this is written to
+    avoid (`read_config()`/`preread` already solve that).
+    """
+    overrides = list(raw.get("overrides") or [])
+    if not isinstance(overrides, list):
+        raise error("[[overrides]] must be an array of tables")
+    for override in overrides:
+        if isinstance(override, dict):
+            check_keys(
+                override, OVERRIDE_UNION_KEYS, where="[[overrides]]", error=error
+            )
+            _check_inherit(override, where="[[overrides]]", error=error)
+    return overrides
 
 
 def _as_list(value: Any, key: str) -> list[str]:
@@ -246,15 +332,10 @@ class Options:
         )
 
         natmod_table = dict(raw.get("natmod") or {})
-        overrides = list(raw.get("overrides") or [])
-        if not isinstance(overrides, list):
-            raise ConfigError("[[overrides]] must be an array of tables")
+        overrides = load_overrides(raw)
         publish = dict(raw.get("publish") or {})
 
         check_keys(natmod_table, NATMOD_SCHEMA, where="[natmod]")
-        for override in overrides:
-            if isinstance(override, dict):
-                check_keys(override, OVERRIDE_TABLE_KEYS, where="[[overrides]]")
 
         platform_tables = {"natmod": natmod_table}
         cascade_env = OptionCascade(
@@ -389,42 +470,35 @@ class Options:
         self, target: Target, env: Mapping[str, str] | None = None
     ) -> BuildOptions:
         """Resolve per-target options: file (global -> [natmod]) ->
-        overrides -> environment."""
+        matching [[overrides]] (each layered per its own `inherit` rule)
+        -> environment."""
         environ: Mapping[str, str] = os.environ if env is None else env
 
-        base = {
-            "module-dir": self._cascade_file.get(
-                "module-dir", platform="natmod", default=DEFAULT_MODULE_DIR
-            ),
-            "make-target": self._cascade_file.get(
-                "make-target", platform="natmod", default=DEFAULT_MAKE_TARGET
-            ),
-            "extra-make-args": self._cascade_file.get(
-                "extra-make-args", platform="natmod", default=[]
-            ),
-            "pre-build-command": self._cascade_file.get(
-                "pre-build-command", platform="natmod", default=""
-            ),
-        }
-        layers: list[dict[str, Any]] = [base]
-        for override in self.overrides:
-            selector = override.get("select")
-            if selector is None:
-                raise ConfigError("every [[overrides]] table needs a `select` key")
-            if matches(target.identifier, parse_selector(selector)):
-                layers.append(override)
+        matching = matching_overrides(
+            self.overrides, target.identifier, error=ConfigError
+        )
+        for override in matching:
+            option_keys = {
+                k: v for k, v in override.items() if k not in {"select", "inherit"}
+            }
+            check_keys(
+                option_keys,
+                NATMOD_OVERRIDE_OPTION_KEYS,
+                where=f"[[overrides]] matching {target.identifier!r} (platform 'natmod')",
+            )
 
         def opt(key: str, default: Any = None) -> Any:
             env_value = environ.get("CIBMP_" + key.replace("-", "_").upper())
             if env_value is not None:
                 return env_value
-            # Later layers win: a matching override beats the file.
-            for layer in reversed(layers):
-                if key in layer:
-                    return layer[key]
-            return default
+            return self._cascade_file.get(
+                key,
+                platform=target.port,
+                default=default,
+                extra_layers=override_extra_layers(matching, key),
+            )
 
-        extra_make_args = _as_list(opt("extra-make-args"), "extra-make-args")
+        extra_make_args = _as_list(opt("extra-make-args", []), "extra-make-args")
         if target.arch_flags:
             # The packed int as hex, not the config's own raw string: with
             # arch-flags now a list (one rv32imc Target per entry), the
