@@ -79,8 +79,8 @@ disagreed with rather than guessed at: things that are *broken* beat things that
 are *missing*; work that unblocks verification beats work that gets verified
 later; and cheap-with-strong-evidence beats expensive-and-speculative.
 
-- [ ] [0051] the identifier must name what a build is compatible with, and
-      neither mode does it right | **the task itself, and the reason the
+- [ ] [0051] one selector for both modes, and an identifier that names what a
+      build is compatible with | **the task itself, and the reason the
       premise's last clause fails.** One rule -- the identifier is the complete
       description of one build, selection is globbing over it -- broken in two
       places. natmod names its axis (the `.mpy` ABI) and selects it *backwards*:
@@ -91,8 +91,14 @@ later; and cheap-with-strong-evidence beats expensive-and-speculative.
       each other, which is why the tag list is silently truncated to one. And
       usermod's second axis has three shapes (`archs`/`boards`/none), so a flat
       `--archs` cannot be the selector primitive; identifier globs already are.
-      Renames every usermod identifier, which is why it goes **before** [0038]
-      rather than after
+      And the machinery is duplicated: `select()` exists twice, which is how
+      the two modes drifted into reading `build`/`skip` from opposite tables
+      ([0048]). Upstream has one 135-line `selector.py` imported by every
+      platform module, carrying three things we lack entirely -- `EnableGroup`
+      (opt-in as a concept, not an absence from the default axis), a
+      project-declared compatibility constraint, and brace expansion. Read from
+      the real 4.2.0 source, not recalled. Renames every usermod identifier,
+      which is why it goes **before** [0038] rather than after
 - [ ] [0050] natmod's image needs one more publish, and CI has never been
       green on it | **start here, and it is nearly done.** The image gained
       `gcc-i686-linux-gnu` after v1.29.0 changed `dynruntime.mk`'s `x86` from

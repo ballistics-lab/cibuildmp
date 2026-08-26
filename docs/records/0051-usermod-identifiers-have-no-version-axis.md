@@ -1,11 +1,13 @@
-# 0051 — the identifier must name what a build is compatible with; neither mode does it right
+# 0051 — one selector for both modes, and an identifier that names what a build is compatible with
 
 Status: Accepted (design; not implemented)
 
-Rewritten the same day it was written, before anything was built on it: the
-first draft framed this as "usermod cannot build two MicroPython versions",
-which is a symptom. The defect is one thing in two places, and stating it as
-two problems hid that.
+Rewritten twice the same day it was written, before anything was built on it.
+The first draft framed this as "usermod cannot build two MicroPython versions",
+which is a symptom; the second still treated the selector machinery as a
+separate concern. It is not. The identifier, what selects over it, and where
+that selection lives are one design, and cibuildmp has all three wrong in ways
+that only look separate.
 
 ## The rule
 
@@ -108,6 +110,62 @@ whether an **image's** platform is native here, which is how [0049] implemented
 it (`platform_for()`, per cell for `unix`, per port for the rest). Only the name
 came from upstream, where the semantics were narrower.
 
+## What upstream's selector actually is, read rather than recalled
+
+`cibuildwheel==4.2.0`, installed and read. This matters because every divergence
+this project has paid for came from paraphrasing upstream from memory: [0045]
+found `--only` documented in-code as matching upstream semantics when it did
+not, and [0049] deleted a `default_runner` concept upstream never had.
+
+**It is one module, `selector.py`, 135 lines, at the package root** -- imported
+by `__main__.py`, `options.py`, and every platform module (`linux.py`,
+`pyodide.py`, …). One selector for every platform, constructed once in options
+and carried through. cibuildmp has `select()` written twice, in
+`natmod/targets.py` and `usermod/targets.py`, with the second's docstring
+admitting the duplication is deliberate. That is the wrong shape and it is the
+reason the two modes drifted into reading `build`/`skip` from opposite tables
+([0048]).
+
+Four things it has that cibuildmp does not:
+
+**`EnableGroup` — opt-in is a first-class concept, not an absence.** An
+identifier exists in the matrix *always*; groups (`pypy`, `graalpy`,
+prereleases, EoL) are filtered out unless enabled, and that filter runs **before
+`build`/`skip` and outranks them**:
+
+```python
+if EnableGroup.PyPy not in self.enable and is_pypy:
+    return False
+should_build = selector_matches(self.build_config, build_id)
+```
+
+So `build = "*"` never sweeps in PyPy by accident, while `enable = ["pypy"]`
+plus `build = "*"` does. **cibuildmp expresses opt-in by keeping cells out of
+the default axis** (`_UNIX_DEFAULT_TARGETS`), which is weaker and different: the
+cell is unreachable by any glob at all, only by `--only` or by being named in
+`archs`. It also conflates two things that are not the same -- "not proven yet"
+and "not wanted by default". Every "opt-in cell" the tracker has talked about
+for weeks -- the musllinux column before it was proven, the six
+emulated-everywhere cells, a MicroPython prerelease tag -- is an `EnableGroup`
+in upstream's model and nothing at all in ours.
+
+**`requires_python` — the project declares what it supports, and the matrix
+narrows itself.** Upstream reads `requires-python` from the project's own
+metadata and drops identifiers outside it before any glob runs. That is the
+version behaving as a *constraint on the matrix* rather than as a list the user
+must curate, and it is exactly the shape the ABI axis wants: a project says
+which MicroPython or which `.mpy` ABI it supports, once, and identifiers outside
+that stop existing for it.
+
+**`selector_matches` expands braces.** `cp{36,37}-*` via `bracex`, on
+whitespace-separated patterns. cibuildmp uses bare `fnmatch`, so braces are
+literal characters that match nothing.
+
+**`--only` clears everything, including groups.** Upstream sets `build_config`,
+empties `skip_config`, selects all architectures *and* turns on every enable
+group. [0045] implemented the first three; the fourth does not exist here
+because groups do not.
+
 ## Shape
 
 1. **natmod:** `mpy-abi` becomes a selector -- a list of ABIs, each resolved to
@@ -121,6 +179,18 @@ came from upstream, where the semantics were narrower.
    it**, which is the half that stops one release overwriting another.
 4. **`--archs` loses its usermod meaning.** Identifier globs are the primitive;
    host-nativeness gets its own keyword under a name that is not "archs".
+5. **One `cibuildmp/selector.py`, used by both modes**, modelled on upstream's
+   and carrying its four missing pieces: a `BuildSelector` callable built once
+   from `build`/`skip`, brace expansion, `EnableGroup` for opt-in, and a
+   project-declared compatibility constraint. `dockerrun.py` moved to the
+   package root in [0050] for the same reason -- it stopped belonging to one
+   mode the moment both used it, and selection never belonged to one at all.
+   The two `select()` copies go.
+6. **Opt-in cells become groups rather than omissions.** The six
+   emulated-everywhere `unix` cells stop being absent from the default axis and
+   become a group that `build = "*"` does not reach and `enable` does. That
+   answers [0044]'s standing descope question by making it a user's choice
+   instead of a maintainer's, which is what it should have been.
 
 Not conditional on how many tags are selected. Adding the version only when more
 than one is chosen looks conservative -- existing identifiers stay
