@@ -80,35 +80,42 @@ are *missing*; work that unblocks verification beats work that gets verified
 later; and cheap-with-strong-evidence beats expensive-and-speculative.
 
 - [ ] [0051] one selector for both modes, and an identifier that names what a
-      build is compatible with | **five of six shape points landed
-      2026-08-26; only `--platform`-becomes-port (and `--archs` with it)
-      did not.** natmod's `mpy-abi` can now state the ABI axis directly
-      (list) as well as derive it from tags (string, unchanged); usermod's
-      `micropython` is a real list and its identifier leads with the tag
-      (`v1.29.0-unix-manylinux_2_28_x86_64`), so two releases no longer
-      overwrite each other's output. `select()`/`matches()`/`parse_selector()`
-      moved to one `cibuildmp/selector.py`, which also gained brace
-      expansion and, in a same-day second pass, `enable`/`groups`
-      (upstream's own `EnableGroup`) -- the six emulated-everywhere `unix`
-      cells (`ppc64le`/`s390x`/`riscv64`, both libcs) stopped being absent
-      from the default axis and became an opt-in group instead
+      build is compatible with | **points 1/2/3/5/7/8 landed 2026-08-26;
+      4/6's target architecture is now decided and phased (E–I), Phase E
+      landed the same day.** natmod's `mpy-abi` can now state the ABI axis
+      directly (list) as well as derive it from tags (string, unchanged);
+      usermod's `micropython` is a real list and its identifier leads with
+      the tag (`v1.29.0-unix-manylinux_2_28_x86_64`), so two releases no
+      longer overwrite each other's output. `select()`/`matches()`/
+      `parse_selector()` moved to one `cibuildmp/selector.py`, which also
+      gained brace expansion and `enable`/`groups` (upstream's own
+      `EnableGroup`) -- the six emulated-everywhere `unix` cells
+      (`ppc64le`/`s390x`/`riscv64`, both libcs) stopped being absent from
+      the default axis and became an opt-in group instead
       (`--enable unix-emulated-everywhere`/`enable = [...]`), closing this
-      row's own musllinux-adjacent question from [0044] below. usermod also
-      gained its own `[[usermod.overrides]]` (nested, not shared with
-      natmod's top-level one -- the two modes' override tables take
-      different keys). **Still open**, per the record's own addenda:
-      `--platform` still means the build mode rather than the port -- no
-      `platforms/` tree, config still `[usermod.unix]` not `[unix]` (point
-      6) -- and `--archs` still means what it did (point 4, which the
-      record argues dissolves once point 6 lands rather than being fixed
-      independently). Deferred deliberately: moving `--platform` changes
-      the invocation model itself (one usermod run currently builds several
-      ports at once, e.g. `examples/template`'s own `ports = ["unix",
-      "webassembly", "windows"]`), with knock-on `action.yml`/CI changes --
-      a separable epic, not required to close the two live bugs the first
-      pass fixed. Still goes **before** [0038] rather than after -- the
-      identifier shape is now settled, so telling the three consuming repos
-      to migrate once is still the right order
+      row's own musllinux-adjacent question from [0044] below. usermod
+      also gained `[[usermod.overrides]]`.
+      **The "deliberately deferred, separable epic" framing point 6 had is
+      retracted, not just updated** -- a live design session traced *why*
+      cibuildwheel gets away with one platform per invocation (host-OS
+      binding: macOS wheels cannot be built on a Linux runner) and found it
+      does not transfer here (cibuildmp's six platforms are already just
+      different Docker images on the same host, `esp32` included), so
+      "moving `--platform` splits one CI job into several" was importing a
+      constraint upstream has for a reason that does not apply to cibuildmp.
+      The real remaining work turned out bigger than points 4/6 alone,
+      though: making `[[overrides]]` genuinely shared (matching upstream)
+      without losing [0048]'s own no-silent-misplacement guarantee needs
+      per-platform *runtime* key validation instead of [0048]'s parse-time
+      partition, which only has meaning once natmod is a platform among six
+      -- and generalizing that turned into adopting upstream's own cascade
+      option-resolution model wholesale, written up as its own addendum to
+      [0048]. Phased as E (cascade mechanism, standalone, landed) through I
+      (docs consolidation) in the record's own third addendum. Still goes
+      **before** [0038] rather than after -- the identifier shape is now
+      settled, so telling the three consuming repos to migrate once is
+      still the right order, and F onward will move the config tree again,
+      so better to land that before they touch it at all
 - [ ] [0050] natmod's image needs one more publish, and CI has never been
       green on it | **start here, and it is nearly done.** The image gained
       `gcc-i686-linux-gnu` after v1.29.0 changed `dynruntime.mk`'s `x86` from

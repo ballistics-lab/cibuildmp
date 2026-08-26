@@ -97,10 +97,15 @@ The floor is *inside* the identifier here, unlike cibuildwheel's own
 `cp313-manylinux_x86_64`, because cibuildmp curates exactly one floor per
 architecture and offers no knob to choose another.
 
-Still open, per [0051]'s own "Shape" section: `--platform` still means the
-build mode (`natmod`/`usermod`), not the port the way upstream's own
-`--platform` names an OS — that move, and the config tree it implies
-(`[unix]`/`[esp32]` instead of `[usermod.unix]`), has not landed.
+Still open, though the target shape is now decided and phased (see [0051]'s
+own third addendum): `--platform` still means the build mode
+(`natmod`/`usermod`), not the port the way upstream's own `--platform` names
+an OS — that move, and the config tree it implies (`[unix]`/`[esp32]`
+instead of `[usermod.unix]`), has not landed yet. What has landed is the
+foundation for it: `cibuildmp/options.py`'s cascade-based option resolution
+(`default → global → platform table → environment → CLI`, matching
+upstream's own `Options.get()` exactly), standalone and not yet wired to
+either mode's real config loading.
 
 [0043]: ../records/0043-unix-adopts-cibuildwheel-native-image-model.md
 [0044]: ../records/0044-unix-native-images-landed.md

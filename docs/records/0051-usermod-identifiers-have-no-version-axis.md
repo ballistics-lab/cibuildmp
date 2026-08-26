@@ -1,6 +1,6 @@
 # 0051 — one selector for both modes, and an identifier that names what a build is compatible with
 
-Status: In progress — Shape points 1/2/3/5/7/8 implemented 2026-08-26; 4/6 still open (see addenda)
+Status: In progress — Shape points 1/2/3/5/7/8 implemented 2026-08-26; 4/6 target architecture decided and phased (see third addendum), Phase E of it landed the same day
 
 Rewritten twice the same day it was written, before anything was built on it.
 The first draft framed this as "usermod cannot build two MicroPython versions",
@@ -449,6 +449,121 @@ every touched file; live `--print-build-identifiers`/`CIBMP_ENABLE`/
 `--enable`/`--archs all` combinations against `examples/template` and a
 scratch copy carrying a `[[usermod.overrides]]` table, matching every case
 this addendum describes.
+
+## Addendum, 2026-08-26 (third pass) — points 4/6 target architecture decided, phased, Phase E landed
+
+Prompted by a live design conversation that pushed on exactly the three
+things this record's own "Shape" section 4/6 had left underspecified or
+mis-scoped, each checked against real code rather than settled by argument
+alone:
+
+**Overrides are already upstream-shaped; the gap is `inherit`.** Verified
+against `cibuildwheel/options.py`: `[[tool.cibuildwheel.overrides]]` is a
+list of tables with `select`/`inherit` popped and the rest read as option
+values — the same shape `[[overrides]]`/`[[usermod.overrides]]` already
+have. The real, missing piece is `InheritRule` (append/prepend/none) — see
+below, folded into Phase G rather than done as a standalone addition.
+
+**Why upstream gets away with one shared `[[overrides]]` across
+different-key-domain platforms, and why cibuildmp's own two tables were not
+simply a smaller version of the same thing:** `cibuildwheel.Options` takes
+`platform` as a constructor argument and is built once per platform; an
+override's own option keys are **never validated at parse time** —
+`config_override.pop("select", None)` / `.pop("inherit", {})`, and
+everything left just sits in `Override.options`, read only if some
+platform's own `get(name)` later asks for that exact name. A macOS-only key
+inside an override matching a Linux identifier is silently never read —
+which is a milder instance of the exact bug class [0048] fixed here. One
+shared list is only safe *without* losing that guarantee if key validation
+moves from parse-time-against-a-fixed-set to **runtime-against-the-specific-
+platform the matched identifier resolves to** — which only has real meaning
+once natmod is a platform among six, not a mode with its own table shape.
+This is why the previously-planned `[[overrides]]` → `[[natmod.overrides]]`
+rename (mirroring `[[usermod.overrides]]`, to fix the session's own earlier
+naming asymmetry) was **abandoned before being implemented**: it would have
+been the wrong intermediate shape, nesting overrides under a mode-table
+concept (`[natmod]` as "natmod's own umbrella") that this addendum's own
+target architecture deletes outright.
+
+**Why the invocation-model concern that justified deferring points 4/6 in
+the second addendum does not actually hold:** cibuildwheel's platforms are
+bound to host OS — macOS wheels cannot be built on a Linux runner — so one
+platform per invocation is structural there, not a design choice. cibuildmp's
+six platforms are already just different Docker images (except `esp32`,
+host-provisioned but not OS-bound) on the *same* host; nothing forces one
+platform per invocation the way it does upstream, which is exactly why
+`ports = ["unix", "webassembly", "windows"]` already builds three ports in
+one invocation today. The "splits one CI job into several" framing imported
+upstream's own constraint without checking why upstream has it, and it does
+not transfer.
+
+**A larger, related discovery, written up as its own addendum to [0048]:**
+tracing the "why one shared list" question surfaced that upstream's whole
+option-resolution model is a **cascade** (`default → global → platform →
+environment → CLI`, most-specific-wins, nothing is an error to place at any
+layer), not [0048]'s own partition-with-errors model (`TOP_LEVEL_ONLY_KEYS`
+etc.). The cascade satisfies [0048]'s real guarantee (a misplaced key must
+never silently do nothing) by a more general mechanism — there is no "wrong
+location" left to protect against — and it is what makes one shared
+`module-dir`/`manifest`/`extra-make-args` sane across six platforms without
+either forced repetition or a bespoke per-key sharing rule. See [0048]'s own
+addendum for the full argument.
+
+### Target architecture
+
+`--platform` stops meaning "natmod or usermod" and means one of six platform
+names (`natmod`, `unix`, `windows`, `qemu`, `webassembly`, `esp32`), matching
+this record's own original "the ports are the platforms" diagnosis exactly.
+Every platform gets its own top-level config table (`[natmod]`, `[unix]`,
+...), sibling to each other — no more `[usermod]` umbrella, no more
+`ports = [...]` selector (table presence is the selector, generalising
+`detect_mode()`'s own existing "no config → natmod" rule to six values).
+`[[overrides]]` returns to being one shared top-level list, validated loosely
+(does this key exist anywhere) at parse time and strictly (does it belong to
+*this* matched identifier's own platform) at resolution time. `inherit =
+{key = "append"|"prepend"|"none"}` joins it, scoped to list-valued keys
+(`extra-make-args`, the one option genuinely list-shaped across every
+platform). `natmod.targets.Target` gains a `.port` property (`"natmod"`) so
+it satisfies the same shape `UsermodTarget` already does — no dataclass
+merge needed, `cibuildmp.selector`'s own `_HasIdentifier` Protocol already
+covers both.
+
+### Phasing
+
+Large enough to land in ordered, independently-verifiable phases, the same
+discipline this record's own first two passes used (A/B/C, then points 7/8):
+
+- **Phase E (landed 2026-08-26)** — `cibuildmp/options.py`: the cascade
+  mechanism (`Options.get()`, `resolve_cascade()`, `InheritRule`,
+  `known_option_names()`/`check_known_keys()`), standalone and unit-tested
+  (`tests/test_options_cascade.py`, 24 tests) against synthetic fixtures.
+  **Not yet wired to any real config loading** — `natmod/options.py`/
+  `usermod/options.py` are untouched and behave exactly as before this
+  addendum; nothing a real build depends on can regress from this phase.
+- **Phase F (not started)** — flatten the config tree: every
+  `[usermod.<port>]` becomes `[<port>]`; `ports = [...]` deleted, replaced
+  by table presence; `detect_mode()` replaced by `active_platforms()`.
+  Breaking — this repo's own `cibuildmp.toml`, `examples/template`, and
+  every test fixture using the old shape migrate in the same commit.
+- **Phase G (not started)** — one shared `[[overrides]]` with runtime
+  per-platform key validation, `inherit`, and `Target.port`.
+- **Phase H (not started)** — unify CLI dispatch: `natmod_cli.run`/
+  `usermod_cli.run`'s split becomes one loop over the combined target list,
+  dispatching per-target by `.port`. Packaging (`package_target()`, D14's
+  mip step) stays natmod-only and version-gated, called explicitly rather
+  than something every platform's build function has to know about.
+  `stepsummary.write_step_summary()` and `sources.py`
+  (`fetch_micropython`/`build_mpy_cross`) need no change — already
+  mode-agnostic, already shared by both today (confirmed this session,
+  `usermod/orchestrate.py:30` imports the latter directly).
+- **Phase I (not started)** — README's "Target support" tables reconciled
+  into one scheme; `action.yml` (confirmed to need no change — no
+  `platform` input exists today, matching `CIBW_BUILD`'s own env-only
+  shape); this record's own status line and the tracker's `[0051]` row
+  updated to "fully landed" once I is done.
+
+Each phase gets its own plan-review checkpoint before implementation, the
+same way this record's own points 1/2/3/5 and 7/8 passes did.
 
 [0005]: 0005-one-identifier-namespace.md
 [0013]: 0013-micropython-list-dedup-by-abi.md
