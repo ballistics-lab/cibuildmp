@@ -120,9 +120,23 @@ the tree, not on a glob pattern over a flattened string.** `[natmod.x64]`
 *is* the natmod/x64 branch; writing values there (or a `skip` scoped to
 that node) is addressing a real position in the config's own structure,
 not hoping a `select = "*-natmod-x64"` glob matches the right flattened
-string. Whether `[[overrides]]`'s own list-of-tables-with-a-`select`-glob
-survives in any form, or is fully replaced by tree-position addressing,
-is one of the open design questions below.
+string.
+
+**Refined directly by the user, closing what the paragraph above left
+open:** the tree path itself *is* the selector -- the same way a
+filesystem glob addresses a path, not a flattened string representation
+of one. `[usermod.esp32]` (a literal config node) and a `select =
+"usermod.esp32.*"`-shaped override pattern (matching every board under
+it) are the same addressing scheme, not two separate mechanisms bolted
+together -- one writes a concrete node, the other matches a set of nodes
+by pattern, both walking the identical family/platform/sub-node path
+space. `[[overrides]]`'s own `select` therefore does not need replacing
+so much as re-pointing: from globbing a flattened identifier string to
+globbing the tree path that identifier was always secretly a projection
+of. What exactly the path syntax looks like (`.`-joined, matching TOML's
+own nesting; `/`-joined; whether a single glob segment can span more
+than one tree depth the way `**` does in a real filesystem glob) is still
+open.
 
 ## What is decided, and what is not
 
@@ -142,11 +156,19 @@ is that argument.
   that, or is it esp32-specific), and how a board name with characters
   TOML's own bare-key syntax cannot express (spaces, e.g. "some board")
   gets written.
-- Whether `[[overrides]]`'s own `select`-glob mechanism is retained
-  alongside tree addressing (for cross-branch matches a tree position
-  cannot express, e.g. "every arch ending in `emsp`" spanning several
-  `[natmod.<arch>]` nodes), replaced entirely, or kept only for the cases
-  a tree genuinely cannot address.
+- ~~Whether `[[overrides]]`'s own `select`-glob mechanism is retained
+  alongside tree addressing~~ -- resolved in principle: the tree path
+  itself is the selector, `select` re-points from globbing the flattened
+  identifier to globbing the tree path (`usermod.esp32.*` matching every
+  board under `[usermod.esp32]`, the same way a filesystem glob matches
+  a set of paths, not a set of flattened strings). What is still open is
+  the exact path syntax (separator, whether a segment can span more than
+  one depth the way `**` does) and whether every cross-branch match this
+  session's own real `[[overrides]]` examples need (e.g. "every arch
+  ending in `emsp`", spanning several `[natmod.<arch>]` siblings with no
+  common parent narrower than `[natmod]` itself) is expressible as a
+  path glob at all, or still needs a residual flattened-string fallback
+  for genuinely cross-cutting matches a tree path cannot address.
 - How this interacts with record [0051]'s own freshly-built `family_table`
   cascade tier (`default → global → family → platform → env → CLI`) --
   does a tree subsume that cascade, coexist with it, or turn each
