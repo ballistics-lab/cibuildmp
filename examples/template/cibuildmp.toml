@@ -64,10 +64,18 @@ extra-files = ["src/facade.py"]
 # across every unix arch cibuildmp claims to support, plus webassembly --
 # the same "no overrides, every claimed target actually builds here"
 # discipline the natmod side above already holds itself to. archs is
-# left at unix's own default (x64/x86/aarch64/armhf/mipsel, all five real
-# cross-compiles docs/BACKLOG.md's D20/D24 verified live) -- exactly what
-# proves every unix-manylinux-<arch> image's own toolchain set actually
-# works inside the real Docker action, not just in a bare dev sandbox.
+# left at unix's own default, which records 0043/0044 changed from five
+# cross-compiled arches to five native platform-tag targets
+# (manylinux_2_28_x86_64 / _i686 / _aarch64, manylinux_2_31_armv7l,
+# manylinux_2_39_mipsel) -- exactly what proves each published image
+# really is native to its own architecture inside the real Docker action,
+# rather than only in a bare dev sandbox. Three of those five are
+# emulated on an amd64 runner, which is why build-examples.yml's own
+# usermod job now sets up binfmt first.
+#
+# The default is deliberately not the whole fifteen-cell matrix (the
+# musllinux column and ppc64le/s390x/riscv64 are opt-in) -- see
+# usermod/targets.py's own _UNIX_DEFAULT_TARGETS for why.
 # webassembly is named explicitly too since it has no per-build axis of
 # its own (usermod/targets.py's own _PORT_AXES) to separately opt into.
 #

@@ -1,0 +1,168 @@
+# The container images cibuildmp itself publishes and runs builds in --
+# the table `usermod/dockerrun.py` resolves against, and cibuildmp's own
+# equivalent of cibuildwheel's `resources/pinned_docker_images.cfg`.
+#
+# It was a `PORT_IMAGES` dict literal inside `dockerrun.py` until record
+# 0043: the one pinned table that had escaped **record 0010** ("pinned
+# data lives in `resources/`, not in Python"). Every value here goes
+# stale on somebody else's schedule -- pypa rebuilds a base, this repo
+# republishes its layer -- so bumping one is a reviewable data diff
+# rather than a patch to resolver logic.
+#
+# **Base images are not here.** `resources/pinned_pypa_images.toml`
+# mirrors upstream's own pinned list and is the only thing a Dockerfile's
+# `FROM` refers to. This file is the other half: what those bases become
+# once cibuildmp has added the handful of dev packages `ports/unix`
+# actually needs, and what a build then pulls.
+#
+# ── Names ─────────────────────────────────────────────────────────────
+#
+# Image, Dockerfile and identifier all reuse **pypa's own names**, with no
+# `cibuildmp-` prefix and no private dialect:
+#
+#   pypa base    quay.io/pypa/manylinux_2_28_x86_64
+#   cibuildmp    ghcr.io/ballistics-lab/manylinux_2_28_x86_64
+#   Dockerfile   docker/manylinux_2_28_x86_64.Dockerfile
+#   identifier   unix-manylinux_2_28_x86_64
+#
+# `<floor>_<arch>` is a real PEP 600 / PEP 656 platform tag, which is the
+# whole point: record 0031 recorded that "manylinux" here used to mean
+# nothing more than "whatever glibc `ubuntu:24.04` happens to ship",
+# changing silently underneath every image with no floor recorded
+# anywhere. Now the floor *is* the name. It also closes 0043's step 4 --
+# `x86_64` not `x64`, `i686` not `x86`, `armv7l` not `armhf` -- because
+# parity in the matrix is worth little if the labels still need
+# translating at every comparison.
+#
+# ── This table declares the matrix ────────────────────────────────────
+#
+# The **keys** of each `[image.<arch>]` are cibuildmp's own curated
+# choice of which libc floor that architecture gets, the same decision
+# cibuildwheel makes in its `resources/defaults.toml`
+# (`manylinux-x86_64-image = "manylinux_2_28"`) -- trusted, not computed.
+# They are deliberately not uniform, and cannot be: pypa publishes no
+# `manylinux_2_28_armv7l` or `manylinux_2_28_riscv64` at all, so those
+# arches take the floors that exist (`_2_31`, `_2_39`).
+#
+# A key with an **empty value** is a declared cell with nothing published
+# for it yet. It is a real, nameable target: `--print-build-identifiers`
+# lists it, and asking to build it fails with "no image registered", not
+# with "unknown architecture". Those are different errors, and conflating
+# them is how a half-published matrix quietly starts looking like a
+# smaller one.
+#
+# ── Everything is empty right now, on purpose ─────────────────────────
+#
+# Record 0043 changed what every `unix` cell *means* (native-per-target
+# instead of cross-from-amd64) and record 0031's musllinux half added a
+# whole second column, so not one of the previously-published
+# `cibuildmp-unix-manylinux-<arch>` images describes a cell in this table
+# any more: they were amd64 images holding cross toolchains, under arch
+# names (`x64`, `armhf`) this file no longer uses.
+#
+# Carrying those digests forward would be worse than an empty cell. A
+# missing entry is an immediate, explicit error; a wrong-model digest
+# either fails deep inside `make` or -- the exact trap 0043 was written
+# about -- quietly produces a binary of the wrong architecture filed
+# under the right identifier.
+#
+# Fill these in from a real `publish-docker-images.yml` run, copying its
+# "Record the pinned digest" step output in a real PR -- the
+# manual-but-deliberate cadence `bin/update_docker.py` gives
+# cibuildwheel's own pins (record 0033: cibuildmp never builds one of
+# these itself, it only ever pulls one). Until then, local work goes
+# through the documented per-cell override
+# (`CIBMP_UNIX_MANYLINUX_2_28_X86_64_DOCKER_IMAGE=<local tag>`), which is
+# what that knob has always been for.
+#
+# `@sha256:...`, never `:latest`, for cibuildwheel's own reason: an
+# immutable reference makes "already cached" and "still correct" the same
+# fact, so `dockerrun.run()`'s `--pull missing` never has to guess
+# whether a locally-cached image is stale.
+
+
+# ══ unix -- one native image per (arch, libc floor) ═══════════════════
+
+[image.x86_64]
+manylinux_2_28 = ""
+musllinux_1_2 = ""
+
+[image.i686]
+manylinux_2_28 = ""
+musllinux_1_2 = ""
+
+[image.aarch64]
+manylinux_2_28 = ""
+musllinux_1_2 = ""
+
+[image.ppc64le]
+manylinux_2_28 = ""
+musllinux_1_2 = ""
+
+[image.s390x]
+manylinux_2_28 = ""
+musllinux_1_2 = ""
+
+# armv7l's manylinux line starts at `_2_31` upstream (Ubuntu 20.04/apt,
+# unlike the AlmaLinux 8/dnf `_2_28` images) -- `_2_31` is the lower,
+# more compatible of the two floors pypa offers, and cibuildwheel makes
+# the same default choice.
+[image.armv7l]
+manylinux_2_31 = ""
+musllinux_1_2 = ""
+
+# riscv64 is the newest arch upstream and carries the highest floor:
+# `manylinux_2_39` (Rocky Linux 10/dnf) is the only manylinux image pypa
+# publishes for it.
+[image.riscv64]
+manylinux_2_39 = ""
+musllinux_1_2 = ""
+
+# mipsel is cibuildmp's own architecture, not one of cibuildwheel's
+# seven, and the one documented exception to record 0043's model: pypa
+# publishes no image for it, PEP 600 defines no `manylinux_*_mipsel` tag,
+# and there is no Docker official image for 32-bit mipsel either -- there
+# is nothing to be native to. It stays a cross-compile from an amd64
+# host on a plain `ubuntu:24.04` its own Dockerfile names, which is why
+# it has no `pinned_pypa_images.toml` entry: that base is not one of
+# pypa's.
+#
+# Its floor is real all the same, and named the same way as every other
+# cell rather than given a private spelling. PEP 600's tag is
+# `manylinux_${GLIBCMAJOR}_${GLIBCMINOR}_${ARCH}` with the architecture
+# being whatever the platform reports -- it defines a *form*, not a
+# closed list of architectures, so `manylinux_2_39_mipsel` is a
+# well-formed tag that simply has no pypa image behind it. `2_39` is
+# checked, not assumed: `libc6-dev-mipsel-cross` on `ubuntu:24.04` is
+# glibc `2.39-0ubuntu8cross2` (`apt-cache policy`, run in the real
+# image). Recording it beats claiming nothing -- record 0031 found that
+# even this arch's static build still reaches glibc's own `dlopen`-based
+# NSS at runtime, so "no floor" would be the less honest of the two.
+[image.mipsel]
+manylinux_2_39 = ""
+
+
+# ══ cross-compiling ports -- no arch axis, amd64 hosts ═══════════════
+#
+# Outside record 0043's scope entirely and unchanged by it: these target
+# Windows, WASM and bare metal, which no Linux container is ever "native"
+# to, so cibuildwheel has no equivalent and no opinion. Each is a single
+# amd64 image holding a cross toolchain, and `linux/amd64` (stated in
+# `dockerrun.py`, since it is a property of the image rather than of any
+# build target) is what now lets them run on an arm64 host at all --
+# emulated, instead of failing with `exec format error`.
+#
+# Digests move here verbatim from `dockerrun.PORT_IMAGES`:
+# `qemu`/`webassembly` from publish-docker-images.yml's own run
+# 32895072172 (2026-08-25), `windows` from the later by-hand push of the
+# rebuilt llvm-mingw image (record 0042). Nothing about these images
+# changed, so unlike the `unix` cells their pins carry over intact --
+# still under their old `cibuildmp-`-prefixed names, which is simply
+# where those digests live. They lose the prefix at their next publish,
+# alongside the `unix` cells above; renaming a published image means
+# republishing it, not editing a string here.
+
+[port]
+windows = "ghcr.io/ballistics-lab/cibuildmp-windows@sha256:0adc927c7a837b1f58a74f52586bfc323a84bd66ba42bbc3ae8e5124e8062ba6"
+qemu = "ghcr.io/ballistics-lab/cibuildmp-qemu@sha256:65cfe7f8882363dc969e8ef93215e0a19f4cc02ab4ff5f103ef6fe80bf81bb12"
+webassembly = "ghcr.io/ballistics-lab/cibuildmp-webassembly@sha256:55b8e77d2c219be945ea15a4ed4ac15bce9dc466e4317674c4eb767641a1adca"

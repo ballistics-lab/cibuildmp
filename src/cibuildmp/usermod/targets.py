@@ -20,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..natmod.targets import matches, parse_selector
-from .build import UNIX_RUNNABLE_ARCHS, WINDOWS_ARCH_SETTINGS
+from .build import WINDOWS_ARCH_SETTINGS
 
 # port -> (config axis key, every axis value this project can currently
 # build, in identifier order). A `None` key means the port has no
@@ -43,10 +43,36 @@ from .build import UNIX_RUNNABLE_ARCHS, WINDOWS_ARCH_SETTINGS
 # `esp32`'s default is ESP32_GENERIC only, even though other ESP32-family
 # boards are selectable (README's own usermod table footnote: selectable,
 # not itself live-verified) -- not defaulted to, the same "default =
-# everything actually proven" rule `unix`'s own default (excluding
-# armhf/mipsel) already follows.
+# everything actually proven" rule `unix`'s own default below already
+# follows.
+#
+# `unix`'s own default is a deliberate subset of what it can build, not
+# `unix_targets()` in full -- **record 0043**, which took that matrix from
+# five cells to fifteen (seven architectures under pypa's own names x
+# manylinux/musllinux, plus `manylinux_2_39_mipsel`). Defaulting to all fifteen
+# would silently turn every existing consumer's single `[usermod] ports =
+# ["unix"]` line into fifteen emulated container builds.
+#
+# What is listed is the *previous* default, translated one-for-one into
+# the new names and floors -- `x64`->`manylinux_2_28_x86_64`,
+# `x86`->`manylinux_2_28_i686`, `aarch64`->`manylinux_2_28_aarch64`,
+# `armhf`->`manylinux_2_31_armv7l` (armv7l's lowest floor upstream
+# publishes), `mipsel`->`manylinux_2_39_mipsel`. Nothing newly gained a default:
+# `ppc64le`/`s390x`/`riscv64` and the whole musllinux column are
+# selectable via `[usermod.unix] archs = [...]`, which is the same
+# "default = everything actually proven at the time it became the
+# default" rule `qemu`'s own boards and `esp32`'s own single board
+# already follow.
+_UNIX_DEFAULT_TARGETS: tuple[str, ...] = (
+    "manylinux_2_28_x86_64",
+    "manylinux_2_28_i686",
+    "manylinux_2_28_aarch64",
+    "manylinux_2_31_armv7l",
+    "manylinux_2_39_mipsel",
+)
+
 _PORT_AXES: dict[str, tuple[str | None, tuple[str, ...]]] = {
-    "unix": ("archs", UNIX_RUNNABLE_ARCHS),
+    "unix": ("archs", _UNIX_DEFAULT_TARGETS),
     "windows": ("archs", tuple(WINDOWS_ARCH_SETTINGS)),
     "qemu": ("boards", ("",)),
     "webassembly": (None, ("",)),

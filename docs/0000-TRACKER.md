@@ -39,8 +39,9 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 - [ ] [0022] zephyr as a third usermod selector axis (epic) | phase outline M6-M9b mostly landed (boards.py, manifests, five of six build drivers, CLI wiring); zephyr itself and `rp2`'s own build driver not started
 - [ ] [0028] full container-per-port migration plan (epic) | steps 1-3 substantially landed, `PORT_IMAGES` populated for 8 images via [0033]; `esp32.Dockerfile` still explicitly not started, no Docker path for that port at all
-- [ ] [0043] `unix` adopts cibuildwheel's model in full: native per-target images, PEP 600/656, full arch x libc matrix (epic) | plan only, nothing built; unblocks [0031] rather than superseding it, and answers the arm64-host question by removing host arch from the design entirely
-- [ ] [0031] unix usermod builds are glibc-only; no musllinux equivalent yet | manylinux half done (per-arch Docker images); musl toolchain + identifier axis + glibc-floor checker designed, not built
+- [ ] [0043] `unix` adopts cibuildwheel's model in full: native per-target images, PEP 600/656, full arch x libc matrix (epic) | implemented by [0044] -- read that record for what actually landed and what is still unverified; this one stays as the design argument
+- [ ] [0044] landing [0043]: pypa-based native images, full 15-cell matrix, pins moved to `resources/` | code/tests/tooling landed, `manylinux_2_28_x86_64` verified live end to end; **no image published yet** (every `[image.*]` cell empty), most cells and both workflows unverified
+- [ ] [0031] unix usermod builds are glibc-only; no musllinux equivalent yet | musllinux column now declared and Dockerfile-backed by [0044] (Alpine base per arch, identifier axis threaded through), and the glibc-floor checker is built and verified -- nothing in that column has been built or run yet
 - [ ] [0032] unix usermod defaults to Docker via `ensure_image()`; webassembly wired next | end-to-end proof green for unix+webassembly on real CI; superseded in part by [0033]; `windows` wired by [0042], leaving `qemu` as the one port whose `PORT_IMAGES` entry is still dead code
 - [ ] [0038] M5 — adopt cibuildmp in the three consuming repos | repos migrated and repinned; archiving the old `micropython-native-ci` repo and reducing `build-natmod` to a `cibuildmp --only` wrapper still open
 - [ ] [0040] usermod test-runner axis (native/qemu-user/qemu-system/node/rp2040py/mpremote/none) | not scheduled ([0006] holds); four of seven runners already proven by `mp-usermod.yml`, not yet owned by cibuildmp
@@ -68,7 +69,7 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 - [x] [0013] `micropython` accepts a list, deduped by ABI not by tag | verified live against a real second ABI
 - [x] [0012] `pyelftools`/`ar` are cibuildmp's own dependencies | resolved via `PYTHON=<sys.executable>` on the `make` command line
 - [x] [0011] one repository — cibuildmp absorbed `micropython-native-ci` | `v0.3.0` continues `v0.2.0`'s version line
-- [x] [0010] pinned data lives in `resources/`, not in Python | `resources/natmod.toml`, cross-checked at import
+- [x] [0010] pinned data lives in `resources/`, not in Python | `resources/natmod.toml`, cross-checked at import; the one table that had escaped this rule (`dockerrun.PORT_IMAGES`) moved out in [0044], into `pinned_pypa_images.toml` + `pinned_docker_images.toml`
 - [x] [0009] one job looping over targets is the default; fan-out is opt-in | revisited for usermod by [0020]
 - [x] [0008] distribution of the tool itself deferred | both actions install from their own checkout, as designed; reserving the PyPI name is a named nice-to-have, not committed work
 - [x] [0007] usermod vendors mpbuild's board database, not a dependency | `usermod/boards.py`, MIT header + provenance kept
@@ -140,3 +141,4 @@ record is added.
 [0041]: records/0041-docs-restructure.md
 [0042]: records/0042-windows-docker-wiring-and-resolver-removal.md
 [0043]: records/0043-unix-adopts-cibuildwheel-native-image-model.md
+[0044]: records/0044-unix-native-images-landed.md

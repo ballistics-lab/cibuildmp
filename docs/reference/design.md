@@ -79,6 +79,21 @@ names whichever axis that port actually selects on. (In practice, usermod's
 shipped identifier scheme ended up simpler than this — see [0023]; no ABI
 axis, no `package.json`.)
 
+**What is actually true today**, since this is a living document rather than
+a decision record: a usermod identifier is `{port}` or `{port}-{axis value}`
+([0023]), and for `unix` that axis value is a **PEP 600 / PEP 656 platform
+tag** — `unix-manylinux_2_28_x86_64`, `unix-musllinux_1_2_aarch64`,
+`unix-manylinux_2_39_mipsel`. Records [0043]/[0044] put the libc floor and
+pypa's own architecture spelling into the name deliberately, so the
+identifier states a compatibility claim the build then verifies against the
+finished ELF, rather than labelling one. The floor is *inside* the
+identifier here, unlike cibuildwheel's own `cp313-manylinux_x86_64`, because
+cibuildmp curates exactly one floor per architecture and offers no knob to
+choose another.
+
+[0043]: ../records/0043-unix-adopts-cibuildwheel-native-image-model.md
+[0044]: ../records/0044-unix-native-images-landed.md
+
 <!-- migrated verbatim from docs/BACKLOG.md lines 477-518 (Config schema) -->
 
 ## Config schema (phase 1)

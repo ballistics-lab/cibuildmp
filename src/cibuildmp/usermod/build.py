@@ -102,6 +102,7 @@ here, not just the one that surfaced it.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -117,67 +118,136 @@ class UsermodBuildError(Exception):
 
 @dataclass(frozen=True)
 class UnixArchSettings:
+    """Everything about a `unix` build that depends on the *architecture*
+    rather than on the libc floor.
+
+    Keyed by architecture, not by platform tag, on purpose: nothing here
+    differs between `manylinux_2_28_x86_64` and `musllinux_1_2_x86_64`
+    except the container they run in, which is the pin file's business.
+    Duplicating fifteen near-identical rows so each tag could own one
+    would only create fifteen places for a drift to hide -- the same
+    argument `UNIX_RUNNABLE_ARCHS` was derived rather than hand-written
+    under.
+
+    `elf` is `(e_machine, EI_CLASS, EI_DATA)` -- what `verify_unix_output()`
+    checks the finished binary's own header against. Values are read from
+    this machine's `/usr/include/elf.h` (`EM_386` 3, `EM_MIPS` 8,
+    `EM_PPC64` 21, `EM_S390` 22, `EM_ARM` 40, `EM_X86_64` 62,
+    `EM_AARCH64` 183, `EM_RISCV` 243), not recalled.
+    """
+
+    elf: tuple[int, int, int]
     cross_compile: str = ""
     link_opts: tuple[str, ...] = ()
     standalone: bool = False
 
 
-# CROSS_COMPILE, MICROPY_FORCE_32BIT and MICROPY_STANDALONE are
-# ports/unix/Makefile's own variables, verified directly against a real
-# v1.28.0 checkout -- not this project's or the composite action's
-# invention.
+_ELFCLASS32, _ELFCLASS64 = 1, 2
+_ELFDATA2LSB, _ELFDATA2MSB = 1, 2
+
+# **Record 0043 rewrote this table end to end**, and it is worth reading
+# what it stopped saying as much as what it now says.
 #
-# No apt_package field any more (D30: usermod is Docker-only,
-# build_unix() never probes a host toolchain, so nothing ever reads it
-# programmatically) -- what each arch's own image installs is
-# documented in docker/unix-manylinux-<arch>.Dockerfile and, where the
-# reasoning is non-obvious, in this dict's own per-arch comments
-# (armhf/mipsel's own libltdl-dev note below) instead of a second,
-# code-adjacent copy.
+# It used to be five architectures under this project's own private
+# spelling (`x64`, `x86`, `aarch64`, `armhf`, `mipsel`), four of them
+# carrying a `CROSS_COMPILE` prefix naming an apt cross-toolchain
+# installed into an amd64 image. Now it is eight architectures under
+# **pypa's spelling** (`x86_64`, `i686`, `armv7l`, plus `ppc64le`,
+# `s390x`, `riscv64`, which cibuildmp simply did not cover), and only
+# one of them cross-compiles at all.
 #
-# aarch64's cross_compile: verified live end-to-end on a real
-# ubuntu-latest runner -- gcc-aarch64-linux-gnu + libffi-dev:arm64 (once
-# apt's own arm64 sources point at ports.ubuntu.com, not the default
-# amd64-only mirror) cross-compile ports/unix from x86_64 straight to a
-# dynamically-linked ARM aarch64 ELF, no deplibs/static-link step needed
-# the way armhf/mipsel below require.
-# Order is significant, not just alphabetical/historical -- targets.py's
-# own _PORT_AXES derives UNIX_RUNNABLE_ARCHS's build/display order from
-# these keys (dict order is insertion order in Python), so reordering
-# this literal reorders every --dry-run plan and default build sequence
-# for unix too.
+# The reason is structural rather than cosmetic. A `CROSS_COMPILE`
+# prefix here encoded *"the host is x86_64"* as a constant, which is
+# false the moment a build runs on an `ubuntu-24.04-arm` runner --
+# 0043's own triggering question. Under the native-image model each
+# `unix` image is built for its own target arch and holds a plain native
+# gcc, so the target arch and the container platform are one fact, and
+# host architecture is recorded nowhere at all. Much of what D24/D25
+# built -- and the six real apt/gcc bugs D25 paid for -- was
+# cross-compile machinery this deletes rather than fixes, which is the
+# honest description of it: those bugs were real, and so is the fact
+# that the code they fixed is gone.
+#
+# Two arch-specific complications the old table carried are also gone,
+# both because the native base images already solve them -- verified
+# against the real images, not assumed:
+#
+#   * `MICROPY_FORCE_32BIT=1` (the old `x86` row) added `-m32` to a
+#     64-bit host gcc plus a multilib probe. `manylinux_2_28_i686`'s gcc
+#     targets i686 natively; there is nothing to force. The 32-bit case
+#     it was standing in for is handled the way cibuildwheel handles it,
+#     with a `linux32` personality wrapper on the container
+#     (`dockerrun.needs_linux32()`), not with a compiler flag.
+#   * `MICROPY_STANDALONE=1 LDFLAGS_EXTRA=-static` plus a separate
+#     `deplibs` pre-step (the old `armhf`/`mipsel` rows) existed because
+#     no cross-usable libffi was available, so `ports/unix` had to build
+#     the vendored one -- which in turn is why `libltdl-dev` had to be
+#     installed for `autogen.sh` (D25's sixth bug). `pkg-config --libs
+#     libffi` resolves to `-lffi` inside `manylinux_2_31_armv7l`,
+#     checked directly by running it in the real image, so armv7l joins
+#     every other native arch on the plain dynamic path. Only `mipsel`
+#     still needs it.
+#
+# Order is significant, not alphabetical: `targets.py`'s `_PORT_AXES`
+# derives its display/build order from the pin file and this table, so
+# reordering this literal reorders every `--dry-run` plan.
 UNIX_ARCH_SETTINGS: dict[str, UnixArchSettings] = {
-    "x64": UnixArchSettings(),
-    "x86": UnixArchSettings(link_opts=("MICROPY_FORCE_32BIT=1",)),
-    "aarch64": UnixArchSettings(cross_compile="aarch64-linux-gnu-"),
-    "armhf": UnixArchSettings(
-        cross_compile="arm-linux-gnueabihf-",
-        link_opts=("MICROPY_STANDALONE=1", "LDFLAGS_EXTRA=-static"),
-        standalone=True,
-        # libltdl-dev (docker/unix-manylinux-armhf.Dockerfile's own apt
-        # list): not the cross-compiler itself -- deplibs' own
-        # ./autogen.sh (regenerating vendored libffi's configure via
-        # autoreconf) fails with "possibly undefined macro:
-        # LT_SYS_SYMBOL_USCORE" without it. autoconf/automake/libtool
-        # alone do not ship ltdl.m4; verified live, the hard way.
-    ),
+    "x86_64": UnixArchSettings(elf=(62, _ELFCLASS64, _ELFDATA2LSB)),
+    "i686": UnixArchSettings(elf=(3, _ELFCLASS32, _ELFDATA2LSB)),
+    "aarch64": UnixArchSettings(elf=(183, _ELFCLASS64, _ELFDATA2LSB)),
+    "armv7l": UnixArchSettings(elf=(40, _ELFCLASS32, _ELFDATA2LSB)),
+    "ppc64le": UnixArchSettings(elf=(21, _ELFCLASS64, _ELFDATA2LSB)),
+    # The one big-endian target in the matrix, and the reason
+    # `verify_unix_output()` checks `EI_DATA` at all rather than
+    # `e_machine` alone: a big-endian s390x ELF and a hypothetical
+    # little-endian one share `EM_S390`.
+    "s390x": UnixArchSettings(elf=(22, _ELFCLASS64, _ELFDATA2MSB)),
+    "riscv64": UnixArchSettings(elf=(243, _ELFCLASS64, _ELFDATA2LSB)),
+    # The documented exception to 0043 (its own open question, answered
+    # as "keep it, and say plainly that it is different"): pypa publishes
+    # no mipsel image, PEP 600 defines no `manylinux_*_mipsel` tag, and
+    # there is no Docker official image for 32-bit mipsel either -- there
+    # is nothing to be native to. So this arch alone keeps the old
+    # model unchanged: an amd64 container, an apt cross-toolchain, the
+    # `MICROPY_STANDALONE` static libffi path, and the `libltdl-dev`
+    # that D25 found `deplibs`' own `autogen.sh` needs. Its tag is
+    # `manylinux_2_39_mipsel`, PEP 425's plain unqualified platform tag, because
+    # a binary making no libc-floor claim is exactly what that tag names.
+    # `EM_MIPS` is spelled "MIPS R3000 big-endian" in elf.h, but the
+    # value is shared with little-endian MIPS -- `EI_DATA` is what
+    # separates them, which is why it is checked.
     "mipsel": UnixArchSettings(
+        elf=(8, _ELFCLASS32, _ELFDATA2LSB),
         cross_compile="mipsel-linux-gnu-",
         link_opts=("MICROPY_STANDALONE=1", "LDFLAGS_EXTRA=-static"),
         standalone=True,
     ),
 }
 
-# Derived, not hand-maintained separately -- every runnable unix arch is
-# already a key of UNIX_ARCH_SETTINGS above, and the two silently drifting
-# apart (an arch added to one but not the other) is a real failure mode a
-# second, independently-typed tuple invites for no benefit.
+# Every runnable `unix` architecture, in table order. Kept as a derived
+# name rather than a second literal for the reason it always was: the two
+# drifting apart is a real failure mode and a hand-maintained copy buys
+# nothing.
 UNIX_RUNNABLE_ARCHS = tuple(UNIX_ARCH_SETTINGS)
 
 
 @dataclass(frozen=True)
 class UnixBuildOptions:
-    arch: str
+    """`target` is the **platform tag** -- `manylinux_2_28_x86_64`,
+    `musllinux_1_2_aarch64`, `manylinux_2_39_mipsel` -- not a bare architecture.
+
+    It was `arch: str` (`"x64"`, `"armhf"`) until record 0043. The rename
+    is not cosmetic: a bare arch cannot name a cell of the matrix any
+    more, because glibc and musl builds of the same architecture are
+    different artifacts that run on different hosts (record 0031), and
+    because the floor is now part of what the identifier claims
+    (`unix-manylinux_2_28_x86_64` is a real PEP 600 tag, where
+    `unix-x64` was a name for "whatever glibc the base image happened to
+    ship"). `dockerrun.split_tag()` recovers the architecture where
+    something genuinely depends on it alone.
+    """
+
+    target: str
     user_c_modules: str
     frozen_manifest: str
     build_dir: Path
@@ -185,12 +255,169 @@ class UnixBuildOptions:
     extra_make_args: tuple[str, ...] = ()
 
 
+def container_mpy_cross(
+    mpy_dir: Path,
+    *,
+    slug: str,
+    image: str,
+    oci_platform: str | None = None,
+    linux32: bool = False,
+    timeout: float | None = None,
+) -> Path:
+    """Build `mpy-cross` **inside `image`** and return the binary, for the
+    port build to pass as `MICROPY_MPYCROSS=`.
+
+    Found the hard way, on the first real build under record 0043's native
+    images -- not anticipated by that record, and the reason it needed a
+    live run rather than a review:
+
+        mpy-cross: /lib64/libc.so.6: version `GLIBC_2.34' not found
+        make: *** [py/mkrules.mk:231: .../frozen_content.c] Error 1
+
+    `sources.build_mpy_cross()` builds mpy-cross on the **host**, and
+    `py/mkrules.mk` then executes it *inside the container* to compile the
+    frozen manifest. That worked only for as long as every image was
+    `ubuntu:24.04` -- the same glibc as a typical host, by coincidence
+    rather than by design. It breaks two different ways now, and both are
+    structural rather than incidental:
+
+    * **A real libc floor is a floor.** `manylinux_2_28` is AlmaLinux 8,
+      glibc 2.28; a host-built binary needing 2.34 cannot run there. The
+      lower and more useful the floor, the more certainly this fails --
+      so the failure gets *worse* as the manylinux claim gets *better*.
+      For musllinux there is no version to argue about: a glibc binary
+      does not run under musl at all.
+    * **Native images have a native architecture.** An x86_64 host's
+      mpy-cross cannot execute inside a `linux/arm64` container under any
+      libc. This alone makes the in-container build mandatory, not merely
+      safer, for every non-native target -- which under 0043 is most of
+      the matrix.
+
+    The same reasoning reaches the cross-compiling ports (`windows`,
+    `webassembly`, `qemu`) from the other direction: their images are
+    amd64, so on an **arm64 host** the host-built mpy-cross is an arm64
+    binary that cannot run inside them. That is exactly the "one config,
+    either host architecture" property 0043 exists to provide, so they
+    use this too.
+
+    `slug` scopes the build directory (`mpy-cross/build-<slug>/`) so each
+    image gets its own binary and none of them collide with the host
+    build at `mpy-cross/build/` that natmod still uses -- natmod is
+    unaffected by all of this, since it never runs mpy-cross anywhere but
+    the host.
+
+    Cached by existence, like `sources.build_mpy_cross()`: a rebuilt
+    container binary is only needed when the image itself changes, and the
+    image is digest-pinned.
+    """
+    from . import dockerrun
+
+    build_dir = mpy_dir / "mpy-cross" / f"build-{slug}"
+    binary = build_dir / "mpy-cross"
+    if binary.exists():
+        return binary
+
+    dockerrun.run(
+        [
+            "make",
+            "-C",
+            (mpy_dir / "mpy-cross").as_posix(),
+            f"BUILD={build_dir.as_posix()}",
+            f"-j{os.cpu_count() or 1}",
+        ],
+        mounts=[mpy_dir],
+        workdir=mpy_dir / "mpy-cross",
+        image=image,
+        timeout=timeout,
+        oci_platform=oci_platform,
+        linux32=linux32,
+    )
+    if not binary.exists():
+        raise UsermodBuildError(
+            f"mpy-cross build inside {image} reported success but {binary} is missing"
+        )
+    return binary
+
+
 def _unix_dir(mpy_dir: Path) -> Path:
     return mpy_dir / "ports" / "unix"
 
 
-def unix_make_command(opts: UnixBuildOptions, mpy_dir: Path) -> list[str]:
-    settings = UNIX_ARCH_SETTINGS[opts.arch]
+# Per-cell `CFLAGS_EXTRA` (`ports/unix/Makefile`'s own variable, appended
+# to `CFLAGS`). Every entry here suppresses **-Werror on third-party
+# vendored code**, never on MicroPython's own, and every one was found by
+# running a real build rather than predicted -- the same way D25's six
+# apt/gcc bugs were, and the same shape D18's own three Clang-specific
+# `arm64` suppressions already take for `windows`.
+#
+# This is the cost of a real libc floor and a real native toolchain that
+# record 0043 did not price in: leaving `ubuntu:24.04` for AlmaLinux 8 and
+# Alpine means new compilers and new libcs meeting `lib/mbedtls` and
+# `lib/berkeley-db-1.xx` for the first time, and `ports/unix` builds those
+# with `-Werror`.
+#
+# `musllinux` -- `-Wno-error=cpp`. Confirmed on a real
+# `musllinux_1_2_x86_64` build: `extmod/modbtree.c` includes
+# `lib/berkeley-db-1.xx/include/berkeley-db/db.h`, which includes
+# `<sys/cdefs.h>`, and musl's own copy of that header is nothing but
+# `#warning usage of non-standard #include <sys/cdefs.h> is deprecated`.
+# glibc has no such warning, so this is a property of the libc rather
+# than of the architecture, and it applies to the whole musllinux column.
+# The alternative was turning `MICROPY_PY_BTREE` off for musl, which
+# would silently give that column a different feature set from the glibc
+# one -- a worse trade than one narrow suppression in a vendored header.
+_MUSL_CFLAGS: tuple[str, ...] = ("-Wno-error=cpp",)
+
+# Per-tag one-offs, for cells where the *compiler* rather than the libc
+# is what objects.
+#
+# `manylinux_2_28_aarch64` -- `-Wno-error=array-bounds`. Confirmed on a
+# real emulated build: `lib/mbedtls/library/ctr_drbg.c` trips
+# `-Werror=array-bounds=` in `common.h`'s own `mbedtls_xor` ("array
+# subscript 48 is outside array bounds of unsigned char[48]"), a gcc 14
+# false positive on a loop bounded by exactly that size. Worth noting
+# precisely because it is *not* a floor problem: `manylinux_2_28_x86_64`
+# is the same AlmaLinux 8 base and the same gcc 14.2.1, and builds
+# clean -- gcc's own bounds analysis differs by target, so this cannot be
+# a column-wide rule and has to stay per cell.
+#
+# Empty entries are not listed. A cell missing from here has not been
+# proven clean -- it has usually not been built at all yet (record 0044
+# is explicit about which were), so expect this table to grow as the
+# remaining cells get their first real run.
+UNIX_TARGET_CFLAGS: dict[str, tuple[str, ...]] = {
+    "manylinux_2_28_aarch64": ("-Wno-error=array-bounds",),
+}
+
+
+def unix_extra_cflags(target: str) -> tuple[str, ...]:
+    """Every `CFLAGS_EXTRA` flag this cell needs: the libc-wide rules plus
+    any per-tag one-off. Empty for a cell that needs none."""
+    from . import dockerrun
+
+    floor, _arch = dockerrun.split_tag(target)
+    libc_flags = _MUSL_CFLAGS if floor.startswith("musllinux") else ()
+    return (*libc_flags, *UNIX_TARGET_CFLAGS.get(target, ()))
+
+
+def unix_arch_settings(target: str) -> UnixArchSettings:
+    """This platform tag's architecture settings, or a clear error.
+
+    The lookup that turns a matrix cell back into the one thing that
+    genuinely varies by architecture rather than by libc floor. Raises
+    rather than returning `None`: a tag that reaches here unknown is a
+    config or resolver bug, and the two error messages it can produce
+    (`split_tag()`'s "not a known architecture" and this one) say which.
+    """
+    from . import dockerrun
+
+    return UNIX_ARCH_SETTINGS[dockerrun.split_tag(target)[1]]
+
+
+def unix_make_command(
+    opts: UnixBuildOptions, mpy_dir: Path, *, mpy_cross: Path | None = None
+) -> list[str]:
+    settings = unix_arch_settings(opts.target)
     return [
         "make",
         "-C",
@@ -198,6 +425,17 @@ def unix_make_command(opts: UnixBuildOptions, mpy_dir: Path) -> list[str]:
         f"VARIANT={opts.variant}",
         f"BUILD={opts.build_dir.as_posix()}",
         f"CROSS_COMPILE={settings.cross_compile}",
+        *(
+            [f"CFLAGS_EXTRA={' '.join(cflags)}"]
+            if (cflags := unix_extra_cflags(opts.target))
+            else []
+        ),
+        # py/mkenv.mk's own override (`MICROPY_MPYCROSS`, defaulting to
+        # `$(TOP)/mpy-cross/build/mpy-cross`) -- passed only when the
+        # caller built one inside this container, which `build_unix()`
+        # always does. See `container_mpy_cross()` for why the host's
+        # own binary cannot be used here any more.
+        *([f"MICROPY_MPYCROSS={mpy_cross.as_posix()}"] if mpy_cross else []),
         *settings.link_opts,
         f"USER_C_MODULES={opts.user_c_modules}",
         f"FROZEN_MANIFEST={opts.frozen_manifest}",
@@ -218,8 +456,16 @@ def run_unix_deplibs(
     Docker-only (D30): `docker_image` is always real by the time this is
     called -- `build_unix()` itself raises before ever reaching here if
     `ensure_image()` returned `None`.
+
+    Only `manylinux_2_39_mipsel` still reaches this at all. Every other
+    architecture builds natively in an image whose own `pkg-config`
+    resolves `-lffi` (verified by running it inside the real
+    `manylinux_2_28_x86_64` / `manylinux_2_31_armv7l` / `musllinux_1_2_*`
+    images), so record 0043 dropped the whole `MICROPY_STANDALONE`
+    static-libffi path for them along with the cross toolchains it
+    existed to work around.
     """
-    settings = UNIX_ARCH_SETTINGS[opts.arch]
+    settings = unix_arch_settings(opts.target)
     command = [
         "make",
         "-C",
@@ -237,8 +483,170 @@ def run_unix_deplibs(
         mounts=[mpy_dir, Path(opts.user_c_modules)],
         workdir=_unix_dir(mpy_dir),
         image=docker_image,
-        timeout=dockerrun.timeout_for("unix", opts.arch, "manylinux"),
+        timeout=dockerrun.timeout_for("unix", opts.target),
+        oci_platform=dockerrun.platform_for("unix", opts.target),
+        linux32=dockerrun.needs_linux32("unix", opts.target),
     )
+
+
+# Why both checks below exist at all, in one place: **under the
+# native-image model a wrong result no longer looks like a failure**.
+# The target architecture and the container platform are the same fact
+# (record 0043), so getting that fact wrong does not produce an error --
+# point a `unix-manylinux_2_28_x86_64` build at an arm64 image and `make`
+# succeeds, gcc succeeds, and the output is a working aarch64 binary
+# filed under an x86_64 identifier that nothing downstream will question.
+# The same goes for the libc floor: nothing about a successful build
+# says the binary can run on a host meeting the floor its own name
+# advertises.
+#
+# `verify_unix_output()` is `natmod/build.py`'s own `verify_output()` for
+# this port -- that module's "cibuildmp's equivalent of auditwheel",
+# decoded by hand the same way, because an ELF header's first 20 bytes
+# are a fixed layout and reading three fields out of them needs no
+# library. `verify_unix_floor()` is the part that genuinely does need
+# one, and uses `pyelftools` (already a dependency, D12) to read the
+# version-requirement table `auditwheel` reads for wheels.
+#
+# `EM_*`/`ELFCLASS*`/`ELFDATA*` values are in `UnixArchSettings` above,
+# read from this machine's own `/usr/include/elf.h` rather than recalled.
+def _required_glibc(binary: Path) -> tuple[int, int] | None:
+    """The highest `GLIBC_x.y` symbol version this ELF actually requires,
+    or `None` if it requires none at all.
+
+    This is the computed half of PEP 600, and the part record 0031 was
+    explicit could not be faked: a curated table decides which base image
+    a build runs in, but only the finished binary's own symbol versions
+    say which glibc it really needs. `auditwheel` does exactly this for
+    wheels (`elfutils.elf_find_versioned_symbols`); `unix` produces a bare
+    executable rather than a wheel, so the inspection is reimplemented on
+    the same data instead of shelling out to a tool that only accepts
+    `.whl` files.
+
+    `pyelftools` is already a cibuildmp dependency (D12), so this needs
+    nothing new -- 0031 checked that specifically before recommending it.
+
+    `None` covers two real cases, both legitimate: a fully static build
+    (`manylinux_2_39_mipsel`, whose `-static` link leaves no version
+    requirements to read) and a musl binary (musl does not use symbol
+    versioning at all, which is why PEP 656 is a separate spec rather
+    than manylinux with a different number).
+    """
+    from elftools.common.exceptions import ELFError
+    from elftools.elf.elffile import ELFFile
+    from elftools.elf.gnuversions import GNUVerNeedSection
+
+    versions: list[tuple[int, int]] = []
+    try:
+        with binary.open("rb") as handle:
+            elf = ELFFile(handle)
+            for section in elf.iter_sections():
+                if not isinstance(section, GNUVerNeedSection):
+                    continue
+                for _verneed, auxes in section.iter_versions():
+                    for aux in auxes:
+                        name = aux.name
+                        if not name.startswith("GLIBC_"):
+                            continue
+                        parts = name[len("GLIBC_") :].split(".")
+                        if len(parts) >= 2 and all(q.isdigit() for q in parts[:2]):
+                            versions.append((int(parts[0]), int(parts[1])))
+    except ELFError:
+        # "This file has no readable version-requirement table" and "this
+        # file is not a floor violation" are the same answer here, and
+        # this check is not the one that decides whether the output is a
+        # sound binary at all -- `verify_unix_output()` runs first and
+        # has already read a valid ELF header of the expected
+        # architecture out of it. Turning a parse quirk into a build
+        # failure would make the *additional* check the strictest one,
+        # which is backwards.
+        return None
+    return max(versions) if versions else None
+
+
+def verify_unix_floor(target: str, binary: Path) -> None:
+    """The binary must not require a newer glibc than its own tag claims
+    -- **record 0043**'s PEP 600 half, and what stops `manylinux_2_28`
+    from being decorative.
+
+    Record 0031's finding, stated plainly: `unix-manylinux-<arch>` used to
+    mean "whatever glibc `ubuntu:24.04` happens to ship", changing
+    silently underneath every image with no floor recorded anywhere. The
+    floor is now in the name, so it has to be true, and the only way to
+    know it is true is to read the finished binary.
+
+    Checked live while implementing this, not asserted: a real
+    `manylinux_2_28_x86_64` build of `ports/unix` requires at most
+    `GLIBC_2.28` -- the claim and the binary agree exactly, which is also
+    what makes this check meaningful rather than permanently slack.
+
+    Only glibc floors are checked. musllinux is PEP 656 and a separate
+    shape: musl has no symbol versioning, so a musl build's version
+    cannot be recovered from the binary at all, and the guarantee there
+    comes from the pinned `musllinux_1_2_<arch>` base rather than from
+    inspection. `verify_unix_output()`'s architecture check still applies
+    to every target either way.
+    """
+    floor, _arch = _split_target(target)
+    if not floor.startswith("manylinux_"):
+        return
+    parts = floor.split("_")
+    claimed = (int(parts[1]), int(parts[2]))
+    required = _required_glibc(binary)
+    if required is None:
+        return
+    if required > claimed:
+        raise UsermodBuildError(
+            f"unix/{target}: {binary.name} requires GLIBC_"
+            f"{required[0]}.{required[1]}, but this target claims a floor of "
+            f"manylinux_{claimed[0]}_{claimed[1]} -- the binary would not run "
+            f"on a host meeting the floor its own identifier advertises"
+        )
+
+
+def _split_target(target: str) -> tuple[str, str]:
+    from . import dockerrun
+
+    return dockerrun.split_tag(target)
+
+
+def verify_unix_output(target: str, binary: Path) -> None:
+    """The ELF header `ld` actually wrote must name the architecture this
+    identifier claims -- `natmod/build.py`'s own `verify_output()` for
+    the `unix` port, required by **0043**.
+
+    Reads `EI_CLASS`/`EI_DATA` (`e_ident[4]`/`e_ident[5]`) and
+    `e_machine` (a 16-bit little-endian field at offset `0x12`) straight
+    out of the first 20 bytes. `EI_DATA` is checked, not just
+    `e_machine`, because `mipsel` and a big-endian `mips` share one
+    `e_machine` value and differ only there -- and because a header whose
+    endianness does not match is also the case where reading `e_machine`
+    as little-endian would be meaningless.
+
+    Deliberately silent about *why* a mismatch happened: an unregistered
+    or mis-registered `PORT_PLATFORMS` entry, a `CIBMP_*_DOCKER_IMAGE`
+    override pointing at another architecture's image, and a genuinely
+    mis-set `CROSS_COMPILE` all land here identically, and guessing
+    between them in the message would be worse than reporting the fact.
+    """
+    expected = unix_arch_settings(target).elf
+    header = binary.read_bytes()[:20]
+    if len(header) < 20 or header[:4] != b"\x7fELF":
+        raise UsermodBuildError(f"unix/{target}: {binary} is not an ELF file at all")
+    # e_machine is a 16-bit field at 0x12 whose own byte order is the one
+    # EI_DATA (e_ident[5]) declares -- decoding it little-endian
+    # unconditionally would misread every big-endian target, which for
+    # this matrix means s390x.
+    byteorder = "big" if header[5] == _ELFDATA2MSB else "little"
+    actual = (int.from_bytes(header[18:20], byteorder), header[4], header[5])
+    if actual != expected:
+        raise UsermodBuildError(
+            f"unix/{target}: build reported success but {binary.name}'s ELF "
+            f"header encodes (e_machine, class, data) "
+            f"{actual[0]:#x}/{actual[1]}/{actual[2]}, expected "
+            f"{expected[0]:#x}/{expected[1]}/{expected[2]} -- the binary "
+            f"is not the architecture this identifier names"
+        )
 
 
 def build_unix(
@@ -248,7 +656,7 @@ def build_unix(
     toolchain_root: Path | None = None,
     quiet: bool = False,
 ) -> Path:
-    """Build ports/unix for `opts.arch`, returning the produced binary.
+    """Build ports/unix for `opts.target`, returning the produced binary.
 
     mpy-cross itself is not built here -- sources.build_mpy_cross() already
     does that, shared with natmod (both need the same mpy-cross for the
@@ -264,60 +672,85 @@ def build_unix(
     install`ing arch-specific cross-toolchains onto whatever host runs
     it, a real, persistent mutation; a container is the actually
     non-mutating, deterministic, isolated choice, built once from a
-    pinned Dockerfile and discarded per run). `dockerrun.ensure_image()`
-    resolves an explicit `CIBMP_UNIX_<ARCH>_MANYLINUX_DOCKER_IMAGE`
-    override or a `dockerrun.PORT_IMAGES`-registered, digest-pinned
-    default published by `publish-docker-images.yml` -- cibuildmp itself
-    never builds `docker/unix-manylinux-<arch>.Dockerfile` (see
-    usermod/dockerrun.py's own docstring for why). Keyed by
-    (port, arch, libc), not port alone (D31: unix's own five
-    architectures do not share one image, and glibc/musl are a real
-    runtime-compatibility axis a shared image would hide). "manylinux"
-    is passed explicitly here, not a resolver-side default: it is
-    `unix`'s only real libc option today (musllinux needs a real musl
-    toolchain, D31, not built yet) -- once UnixBuildOptions grows a
-    `libc` field for musllinux, that field replaces this literal, the
-    resolver itself needs no change.
+    pinned Dockerfile and discarded per run).
+
+    Under **record 0043** the container is also what decides the
+    *architecture*. `dockerrun.ensure_image("unix", target)` resolves a
+    `CIBMP_UNIX_<TARGET>_DOCKER_IMAGE` override or the digest pinned in
+    `resources/pinned_docker_images.toml`, and
+    `dockerrun.platform_for()` names the OCI platform that image is
+    published for -- which, for `unix`, *is* the build target, because
+    each image is native to its own architecture and holds a plain
+    native gcc. Nothing here records what the host is. That is what lets
+    one config produce the same identifiers on an x86_64 runner and on an
+    `ubuntu-24.04-arm` one, with the non-native side emulated; before
+    0043 an ARM host got `exec format error` from inside `make`.
+
+    Two consequences worth stating because they are easy to misread as
+    bugs. `CROSS_COMPILE=` is passed empty for every target except
+    `manylinux_2_39_mipsel` -- correct, not missing: the compiler in the container
+    already targets the right architecture. And a mismatch cannot be
+    caught by the build succeeding, so `verify_unix_output()` below
+    checks the finished ELF's own machine type against the identifier;
+    an image resolved for the wrong platform otherwise yields a working
+    binary of the wrong architecture, which is the specific trap 0043 was
+    written about.
 
     `toolchain_root`/`quiet` are accepted only for the same call shape
     every `build_<port>()` shares (`orchestrate.py`'s `build_one()`
     passes them uniformly); neither is used on this Docker-only path.
     """
-    if opts.arch not in UNIX_ARCH_SETTINGS:
-        raise UsermodBuildError(
-            f"unknown unix arch {opts.arch!r}. Known: "
-            f"{', '.join(sorted(UNIX_ARCH_SETTINGS))}"
-        )
-
     from . import dockerrun
 
-    docker_image = dockerrun.ensure_image("unix", opts.arch, "manylinux")
-    if docker_image is None:
+    if opts.target not in dockerrun.unix_targets():
         raise UsermodBuildError(
-            f"unix/{opts.arch}: no Docker image registered for this "
-            f"arch and usermod builds are Docker-only -- set "
-            f"CIBMP_UNIX_{opts.arch.upper()}_MANYLINUX_DOCKER_IMAGE, or "
-            f"wait for publish-docker-images.yml to publish one and "
-            f"register it in dockerrun.PORT_IMAGES"
+            f"unknown unix target {opts.target!r}. Known: "
+            f"{', '.join(dockerrun.unix_targets())}"
         )
 
-    if UNIX_ARCH_SETTINGS[opts.arch].standalone:
+    docker_image = dockerrun.ensure_image("unix", opts.target)
+    if docker_image is None:
+        raise UsermodBuildError(
+            f"unix/{opts.target}: no Docker image registered for this "
+            f"target and usermod builds are Docker-only -- set "
+            f"CIBMP_UNIX_{opts.target.upper()}_DOCKER_IMAGE, or wait for "
+            f"publish-docker-images.yml to publish one and fill its digest "
+            f"into resources/pinned_docker_images.toml"
+        )
+
+    oci_platform = dockerrun.platform_for("unix", opts.target)
+    linux32 = dockerrun.needs_linux32("unix", opts.target)
+    timeout = dockerrun.timeout_for("unix", opts.target)
+
+    if unix_arch_settings(opts.target).standalone:
         run_unix_deplibs(opts, mpy_dir, docker_image=docker_image)
 
-    command = unix_make_command(opts, mpy_dir)
+    mpy_cross = container_mpy_cross(
+        mpy_dir,
+        slug=f"unix-{opts.target}",
+        image=docker_image,
+        oci_platform=oci_platform,
+        linux32=linux32,
+        timeout=timeout,
+    )
+    command = unix_make_command(opts, mpy_dir, mpy_cross=mpy_cross)
     dockerrun.run(
         command,
         mounts=[mpy_dir, Path(opts.user_c_modules)],
         workdir=_unix_dir(mpy_dir),
         image=docker_image,
-        timeout=dockerrun.timeout_for("unix", opts.arch, "manylinux"),
+        timeout=timeout,
+        oci_platform=oci_platform,
+        linux32=linux32,
     )
 
     binary = opts.build_dir / "micropython"
     if not binary.exists():
         raise UsermodBuildError(
-            f"unix/{opts.arch}: build reported success but {binary} is missing"
+            f"unix/{opts.target}: build reported success but {binary} is missing"
         )
+    verify_unix_output(opts.target, binary)
+    verify_unix_floor(opts.target, binary)
     return binary
 
 
@@ -430,13 +863,24 @@ class WebassemblyBuildOptions:
     extra_make_args: tuple[str, ...] = ()
 
 
-def webassembly_make_command(opts: WebassemblyBuildOptions, mpy_dir: Path) -> list[str]:
+def webassembly_make_command(
+    opts: WebassemblyBuildOptions, mpy_dir: Path, *, mpy_cross: Path | None = None
+) -> list[str]:
     return [
         "make",
         "-C",
         (mpy_dir / "ports" / "webassembly").as_posix(),
         f"VARIANT={opts.variant}",
         f"BUILD={opts.build_dir.as_posix()}",
+        # py/mkenv.mk's own `MICROPY_MPYCROSS` override. Passed for the
+        # same reason `build_unix()` passes it, arrived at from the other
+        # direction (record 0044): this image is amd64, so on an **arm64
+        # host** the host-built mpy-cross is an arm64 binary that cannot
+        # run inside it, and `py/mkrules.mk` runs mpy-cross *inside* the
+        # container to compile FROZEN_MANIFEST. Without this, this port
+        # works on an amd64 runner and nowhere else -- which is exactly
+        # the host-dependence record 0043 exists to remove.
+        *([f"MICROPY_MPYCROSS={mpy_cross.as_posix()}"] if mpy_cross else []),
         f"USER_C_MODULES={opts.user_c_modules}",
         f"FROZEN_MANIFEST={opts.frozen_manifest}",
         *opts.extra_make_args,
@@ -481,13 +925,30 @@ def build_webassembly(
             "dockerrun.PORT_IMAGES"
         )
 
-    command = webassembly_make_command(opts, mpy_dir)
+    command = webassembly_make_command(
+        opts,
+        mpy_dir,
+        mpy_cross=container_mpy_cross(
+            mpy_dir,
+            slug="webassembly",
+            image=docker_image,
+            oci_platform=dockerrun.platform_for("webassembly"),
+            timeout=dockerrun.timeout_for("webassembly"),
+        ),
+    )
     dockerrun.run(
         command,
         mounts=[mpy_dir, Path(opts.user_c_modules)],
         workdir=mpy_dir / "ports" / "webassembly",
         image=docker_image,
         timeout=dockerrun.timeout_for("webassembly"),
+        # `linux/amd64` -- a statement about this *image* (an emsdk cross
+        # host), not about the build target, which is wasm and which no
+        # container is ever native to. Passing it is what lets this port
+        # run on an arm64 host at all (**0043**): emulated, explicitly,
+        # instead of resolving by accident-of-host and failing with a
+        # bare `exec format error` from inside `make`.
+        oci_platform=dockerrun.platform_for("webassembly"),
     )
 
     produced = opts.build_dir / "micropython.mjs"
@@ -663,7 +1124,9 @@ def _windows_dir(mpy_dir: Path) -> Path:
     return mpy_dir / "ports" / "windows"
 
 
-def windows_make_command(opts: WindowsBuildOptions, mpy_dir: Path) -> list[str]:
+def windows_make_command(
+    opts: WindowsBuildOptions, mpy_dir: Path, *, mpy_cross: Path | None = None
+) -> list[str]:
     settings = WINDOWS_ARCH_SETTINGS[opts.arch]
     command = [
         "make",
@@ -672,6 +1135,15 @@ def windows_make_command(opts: WindowsBuildOptions, mpy_dir: Path) -> list[str]:
         f"VARIANT={opts.variant}",
         f"BUILD={opts.build_dir.as_posix()}",
         f"CROSS_COMPILE={settings.cross_compile}",
+        # py/mkenv.mk's own `MICROPY_MPYCROSS` override. Passed for the
+        # same reason `build_unix()` passes it, arrived at from the other
+        # direction (record 0044): this image is amd64, so on an **arm64
+        # host** the host-built mpy-cross is an arm64 binary that cannot
+        # run inside it, and `py/mkrules.mk` runs mpy-cross *inside* the
+        # container to compile FROZEN_MANIFEST. Without this, this port
+        # works on an amd64 runner and nowhere else -- which is exactly
+        # the host-dependence record 0043 exists to remove.
+        *([f"MICROPY_MPYCROSS={mpy_cross.as_posix()}"] if mpy_cross else []),
         *settings.extra_make_args,
     ]
     if settings.extra_cflags:
@@ -767,13 +1239,27 @@ def build_windows(
             f"register it in dockerrun.PORT_IMAGES"
         )
 
-    command = windows_make_command(opts, mpy_dir)
+    command = windows_make_command(
+        opts,
+        mpy_dir,
+        mpy_cross=container_mpy_cross(
+            mpy_dir,
+            slug="windows",
+            image=docker_image,
+            oci_platform=dockerrun.platform_for("windows", opts.arch),
+            timeout=dockerrun.timeout_for("windows", opts.arch),
+        ),
+    )
     dockerrun.run(
         command,
         mounts=[mpy_dir, Path(opts.user_c_modules)],
         workdir=_windows_dir(mpy_dir),
         image=docker_image,
         timeout=dockerrun.timeout_for("windows", opts.arch),
+        # Same as webassembly's above (**0043**): an amd64 Linux
+        # cross-compile host targeting Windows. All three arches share
+        # one image (D42/D28 step 3), so all three share its platform.
+        oci_platform=dockerrun.platform_for("windows", opts.arch),
     )
 
     binary = opts.build_dir / "micropython.exe"

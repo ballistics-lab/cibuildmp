@@ -49,7 +49,7 @@ alongside a `package.json` once `version` is set — see
 [`examples/template`](examples/template),
 [`examples/wasm2mpy`](examples/wasm2mpy) (native source is WebAssembly,
 compiled through `wasm2c` — the natmod contract doesn't care what
-produced the C), and [`examples/usermod-unix`](examples/usermod-unix)
+produced the C), and [`examples/template`](examples/template)
 (a `USER_C_MODULES` module, all five real `unix` arches).
 
 ### Running via Docker
@@ -112,26 +112,32 @@ but silently feeds `modffi.c` the wrong-arch, 64-bit `ffitarget.h`, which
 genuinely differs by word size — there is no shortcut around installing
 the real `:i386` packages.)
 
-Plus, only if you build `unix/aarch64`, `unix/armhf`, or `unix/mipsel`
-(see [Target support](#target-support) below for exactly which apt
-package each needs) — `unix/aarch64` alone needs one extra step first,
-since `libffi-dev:arm64` is a target-arch package Ubuntu's default
-mirrors don't carry. (A plain `apt install` like the one below pulls
-each cross-compiler's own `libc6-dev-<arch>-cross` automatically —
-Ubuntu ships it as a `Recommends:`, on by default. Only the Dockerfiles
-building the image above skip it deliberately, with
-`--no-install-recommends`, and name it explicitly instead — see that
-Dockerfile's own comment if you ever pass that flag here too.)
+**Nothing to install for `unix` targets.** There used to be a list here
+— `gcc-aarch64-linux-gnu`, `libffi-dev:arm64` behind a
+`ports.ubuntu.com` apt-sources rewrite, `gcc-arm-linux-gnueabihf`,
+`gcc-mipsel-linux-gnu`, `libltdl-dev` — and it is gone with the cross
+toolchains it provisioned (records `0043`/`0044`). Every `unix` target
+now builds inside an image that is *native to it* and carries its own
+compiler, so there is no host-side toolchain to install for any
+architecture.
+
+What you do need for a non-native target is **emulation**, which
+cibuildmp deliberately does not install for you (cibuildwheel's own
+rule, same reasoning: it is a machine-level setting, not a build
+input). On CI that is one step:
+
+```yaml
+- uses: docker/setup-qemu-action@v3
+```
+
+Locally, once per machine:
 
 ```console
-$ sudo dpkg --add-architecture arm64
-# then point apt's own arm64 sources at ports.ubuntu.com -- see
-# action.yml's own apt-prerequisites step for the exact deb822 stanzas
-# this needs on Ubuntu 24.04+, or apt-add-repository on older releases
-$ sudo apt update && sudo apt install \
-    gcc-aarch64-linux-gnu libffi-dev:arm64 \
-    gcc-arm-linux-gnueabihf gcc-mipsel-linux-gnu libltdl-dev
+$ docker run --privileged --rm tonistiigi/binfmt --install all
 ```
+
+If it is missing, cibuildmp says so by name before starting the build
+rather than letting `make` fail with `exec format error`.
 
 **The composite actions.** The original building blocks, and still the
 supported path for CI wanting each usermod target built as its own job
@@ -280,20 +286,20 @@ auto-detected the same way `[natmod]` already is — no `--mode`/
 at once. Verified live end to end, not just against the hermetic
 suite: a real `[usermod]` config with a real custom C module, run
 through the actual `cibuildmp` CLI (no mocking), produced a genuine
-linked `unix-x64` binary that runs and actually calls into that module.
+linked `unix-manylinux_2_28_x86_64` binary that runs and actually calls
+into that module.
 See `docs/BACKLOG.md`'s **D23**/**M9b** for the full design (identifier
 scheme, why there's no `package.json` for usermod output, what's
 deliberately not wired yet — `[[overrides]]`, `extra-files`).
 
 **Exercised through the real `action.yml` end to end** —
-[`examples/usermod-unix`](examples/usermod-unix) builds all five real
-`unix` arches (`x64`/`x86`/`aarch64`/`armhf`/`mipsel`) through the
-actual action on every push (`build-examples.yml`), not just the
-hermetic test suite — real linked binaries, collected with their
+[`examples/template`](examples/template) builds the default
+`unix` targets through the actual action on every push
+(`build-examples.yml`), not just the hermetic test suite — real linked binaries, collected with their
 executable bit intact, confirmed live on CI. `unix` and `webassembly`
 now build **Docker-only** (`docs/BACKLOG.md`'s own **D28**/**D30**: one
 Docker image per port, no bare-host fallback for either) —
-[`examples/usermod-webassembly`](examples/usermod-webassembly) proves
+[`examples/template`](examples/template) proves
 the same path for `webassembly`, which has no arch axis and one
 combined image with emsdk baked in. `windows`/`qemu`/`esp32` are not
 wired into `action.yml` yet — see `docs/BACKLOG.md`'s own **D28** for
@@ -303,11 +309,15 @@ cover yet.
 
 | Port          | Target                    | Provisioning                    | Status |
 |---------------|----------------------------|-----------------------------------|--------|
-| `unix`        | `x64`                      | host gcc                          | ✅ |
-| `unix`        | `x86`                      | apt only[^apt-x86]                | ✅ |
-| `unix`        | `aarch64`                  | `apt install gcc-aarch64-linux-gnu libffi-dev:arm64`[^ports-mirror] | ✅ |
-| `unix`        | `armhf`                    | `apt install gcc-arm-linux-gnueabihf libltdl-dev`[^deplibs-static] | ✅ |
-| `unix`        | `mipsel`                   | `apt install gcc-mipsel-linux-gnu libltdl-dev`[^deplibs-static]    | ✅ |
+| `unix`        | `manylinux_2_28_x86_64`    | native image[^native-image]       | ✅ |
+| `unix`        | `manylinux_2_28_i686`      | native image[^native-image]       | ⚠️[^unverified-cell] |
+| `unix`        | `manylinux_2_28_aarch64`   | native image[^native-image]       | ⚠️[^unverified-cell] |
+| `unix`        | `manylinux_2_28_ppc64le`   | native image[^native-image]       | ⚠️[^unverified-cell] |
+| `unix`        | `manylinux_2_28_s390x`     | native image[^native-image]       | ⚠️[^unverified-cell] |
+| `unix`        | `manylinux_2_31_armv7l`    | native image[^native-image]       | ⚠️[^unverified-cell] |
+| `unix`        | `manylinux_2_39_riscv64`   | native image[^native-image]       | ⚠️[^unverified-cell] |
+| `unix`        | `musllinux_1_2_*` (7 arches) | native image[^native-image]     | ⚠️[^unverified-cell] |
+| `unix`        | `manylinux_2_39_mipsel`    | cross image[^mipsel-cross]        | ⚠️[^unverified-cell] |
 | `qemu`        | `MPS2_AN385` (Cortex-M3)   | `arm-none-eabi-`[^qemu-shared]     | ✅ |
 | `qemu`        | RISC-V boards               | `riscv64-unknown-elf-`             | ❌[^not-attempted] |
 | `webassembly` | `pyscript` variant          | `emsdk`[^linux-x64-only]           | ✅ |
@@ -332,16 +342,11 @@ cover yet.
 | `minimal`     | minimal reference port — not a real target | —          | ❌[^out-of-scope] |
 | `embed`       | embeddable library, not a flashable target | —          | ❌[^out-of-scope] |
 
-[^ports-mirror]: Cross-compiles cleanly from an x86_64 host — verified live, a real linked `ARM aarch64` ELF with a custom C module built in. `libffi-dev:arm64` needs `dpkg --add-architecture arm64`'s apt sources pointed at `ports.ubuntu.com` first: Ubuntu's default `archive.ubuntu.com`/`security.ubuntu.com` mirrors only carry `amd64`/`i386`. Real for any Ubuntu host, not sandbox-specific.
-[^deplibs-static]: Cross-compiles cleanly, statically linking a real `deplibs`-built libffi (`MICROPY_STANDALONE=1`, not apt's dynamic one — verified live, a real linked `ARM`/`MIPS32` ELF with a custom C module built in). `libltdl-dev` is the one non-obvious part: without it, `deplibs`' own `./autogen.sh` (regenerating vendored libffi's `configure` via `autoreconf`) fails on `"possibly undefined macro: LT_SYS_SYMBOL_USCORE"` — `autoconf`/`automake`/`libtool` alone don't ship `ltdl.m4`, only `libltdl-dev` does.
-[^qemu-shared]: Shared with natmod's own `armv7m` toolchain — resolved once, reused, not pinned a second time.
-[^not-attempted]: `ports/qemu` also has RISC-V boards; a real, cheap-to-add extension later, not attempted since nothing here exercises it yet.
-[^linux-x64-only]: Self-downloaded and cached; the pinned release is `linux-x64`-hosted only today.
-[^esp32-other]: Selectable via the same `Esp32BuildOptions`, not itself live-verified — only `ESP32_GENERIC` was actually built and checked.
-[^rp2-gap]: `resources/usermod.toml` already pins its manifest path and `cmake` build-system (target selection is ready), but `usermod/build.py` has no `build_rp2()` driver at all yet — no Pico SDK resolver, no live verification, not started.
-[^out-of-scope]: Out of scope, not started: no reference CI recipe to build this against and no pinned data at all -- `a7p`'s own `mp-usermod.yml` (the real production reference this project's usermod support is built from) doesn't cover it either. Scoped in only when a real consumer needs it, the same way `windows`/arm64 was (see **D18**'s own addenda).
-[^zephyr-gap]: Also out of scope, for a second, structural reason beyond "no reference workflow": `zephyr` doesn't fit this project's own board-selection model at all -- **D22**, confirmed directly against upstream: no `board.json` anywhere in `ports/zephyr/boards/`, board selection is a `<board>.conf`/`<board>.overlay` pair instead, a shape the vendored `boards.py` scanner has nothing to match.
+[^native-image]: Nothing to provision. The image is `ghcr.io/ballistics-lab/<target>`, a thin layer over pypa's own `quay.io/pypa/<target>` (the same images cibuildwheel builds wheels in), published for that target's own architecture and carrying a native compiler. Non-native targets run emulated — see the emulation note above. The target name is a real PEP 600 / PEP 656 platform tag, and the binary is checked against it after every build: both its ELF machine type and, for `manylinux_*`, its actual highest required glibc symbol version.
 
+[^unverified-cell]: Declared and Dockerfile-backed, but **not yet published or verified live** — record `0044` is explicit about which cells were actually run. Until `publish-docker-images.yml` runs, these resolve no image and say so; point `CIBMP_UNIX_<TARGET>_DOCKER_IMAGE` at a locally-built one to work on them.
+
+[^mipsel-cross]: The one target that still cross-compiles, and the documented exception to the native-image model: pypa publishes no mipsel image and there is no Docker official image for 32-bit mipsel, so there is nothing to be native to. An `ubuntu:24.04` amd64 host with `gcc-mipsel-linux-gnu`, plus the `MICROPY_STANDALONE=1` static libffi path (and `libltdl-dev`, which `deplibs`' own `autogen.sh` needs). Its `2_39` floor is the pinned `libc6-dev-mipsel-cross` version, not a guess.
 No Windows or macOS host is needed for any of the seven ✅/⚠️ usermod
 targets above, `windows`'s own three arches included — every toolchain
 there is either already on a Linux host or downloads/apt-installs onto
@@ -441,6 +446,14 @@ submodules included if the natmod Makefile needs any.
 No outputs.
 
 ### `build-usermod-unix`
+
+> **Note.** These composite actions keep their own, older arch names
+> (`x64`, `x86`, `armhf`) and their own apt-based cross toolchains. That
+> is not an inconsistency to be fixed here: `cibuildmp` itself moved to
+> pypa's names and native per-target images in records `0043`/`0044`,
+> while the composite actions remain the separate, still-supported
+> legacy layer they always were (record `0039`). They are unaffected by
+> that change and unchanged by it.
 
 The unix-port cross-compile matrix for a `USER_C_MODULES` usermod: `x64`,
 `x86` (32-bit), `aarch64`, `armhf`, or `mipsel`. Installs the arch's

@@ -69,7 +69,8 @@ class UsermodBuildResult:
 
 def _resolved_build_dir(mpy_dir: Path, port: str, identifier: str) -> Path:
     # One build directory per identifier, not the port's own bare default
-    # -- so building unix-x64 and unix-aarch64 against the same checkout
+    # -- so building unix-manylinux_2_28_x86_64 and
+    # unix-manylinux_2_28_aarch64 against the same checkout
     # in one invocation never has one overwrite the other mid-build.
     return mpy_dir / "ports" / port / f"build-{identifier}"
 
@@ -111,7 +112,12 @@ def _port_build_options(
 
     if port == "unix":
         return UnixBuildOptions(
-            arch=target.arch,
+            # `UsermodTarget.arch` is the port's generic axis value; for
+            # `unix` that value is a platform tag (`manylinux_2_28_x86_64`)
+            # rather than a bare architecture -- record 0043. The axis
+            # itself stays one field on the target, so only the name of
+            # the parameter it feeds changes here.
+            target=target.arch,
             user_c_modules=user_c_modules,
             frozen_manifest=frozen_manifest,
             build_dir=_resolved_build_dir(mpy_dir, port, identifier),

@@ -58,11 +58,11 @@ def test_usermod_table_dispatches_to_usermod_cli(tmp_path, capsys):
 
     assert main([str(tmp_path), "--print-build-identifiers"]) == 0
     assert capsys.readouterr().out.split() == [
-        "unix-x64",
-        "unix-x86",
-        "unix-aarch64",
-        "unix-armhf",
-        "unix-mipsel",
+        "unix-manylinux_2_28_x86_64",
+        "unix-manylinux_2_28_i686",
+        "unix-manylinux_2_28_aarch64",
+        "unix-manylinux_2_31_armv7l",
+        "unix-manylinux_2_39_mipsel",
     ]
 
 
@@ -98,8 +98,18 @@ def test_usermod_only_selects_one_target(tmp_path, capsys):
     make_module_dir(tmp_path)
     write(tmp_path, '[usermod]\nports = ["unix"]\n')
 
-    assert main([str(tmp_path), "--only", "unix-x86", "--print-build-identifiers"]) == 0
-    assert capsys.readouterr().out.split() == ["unix-x86"]
+    assert (
+        main(
+            [
+                str(tmp_path),
+                "--only",
+                "unix-manylinux_2_28_i686",
+                "--print-build-identifiers",
+            ]
+        )
+        == 0
+    )
+    assert capsys.readouterr().out.split() == ["unix-manylinux_2_28_i686"]
 
 
 def test_usermod_only_unknown_identifier_is_an_error(tmp_path, capsys):

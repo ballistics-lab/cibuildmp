@@ -1,10 +1,10 @@
 """Sibling-container execution for usermod port builds -- D26's own
-design, Docker-only for every port (D30). `unix` and `webassembly` are
-wired to `ensure_image()` today, reachable through the real CLI/
-action.yml (`build_unix()`/`build_webassembly()`); `windows`/`qemu`/
-`esp32` still need their own real example project proven live first
-(D26's own "one port, proven live, before the next" precedent) before
-their own `build_<port>()` calls this too.
+design, Docker-only for every port (D30). `unix`, `webassembly` and
+`windows` (D42) are wired to `ensure_image()` today, reachable through
+the real CLI/action.yml; `esp32` has no image at all yet (D28), and
+`qemu` is the remaining gap D32 left open. The rule they are waiting on
+is D26's own: one port, proven live against a real container, before the
+next.
 
 The design this exists to prove out: `cibuildmp` itself stays on the bare
 host (no Docker-in-Docker) and launches an ordinary sibling `docker run`
@@ -18,209 +18,342 @@ here as `mounts`.
 **cibuildmp itself never builds a Docker image.** The user's own call,
 checked against cibuildwheel's real source before deciding, not assumed:
 cibuildwheel's own container runtime (`oci_container.py`) holds nothing
-but the resolved image reference itself -- no separate preload/cache
-step of its own -- and only ever does a plain `docker pull` of an
+but the resolved image reference itself -- no separate preload/cache step
+of its own -- and only ever does a plain `docker pull` of an
 already-published, digest-pinned image
 (`resources/pinned_docker_images.cfg`) the first time it is actually
 used; building one is a rare, out-of-band maintainer task
 (`bin/update_docker.py`), never part of a consumer's own build. This
-module now follows that exactly: the per-port Dockerfiles live at the
-repo root (`docker/*.Dockerfile`, not shipped in the installed wheel any
-more -- see pyproject.toml's own comment), published by
+module follows that exactly: the per-target Dockerfiles live at the repo
+root (`docker/*.Dockerfile`, not shipped in the installed wheel -- see
+pyproject.toml's own comment), published by
 `.github/workflows/publish-docker-images.yml` to GHCR, digest-pinned in
-`PORT_IMAGES` below the same way `pinned_docker_images.cfg` pins
-quay.io's own manylinux/musllinux images. `ensure_image()` just resolves
+`resources/pinned_docker_images.toml`. `ensure_image()` just resolves
 which reference to use; `run()`'s own `--pull missing` is what actually
-fetches it, lazily, the same division of labour cibuildwheel's own code
-already has. Docker's own local image store is the only cache involved
--- no `CIBMP_CACHE_PATH`-backed save/load of image content was added on top
-of that: checked directly, cibuildwheel does not do this either
-(`docker save`/`docker load` do not appear anywhere in its repo), so
-there was no real precedent for it, only extra machinery. No build
-fallback at all any more: `PORT_IMAGES` having nothing registered for a
-(port, arch[, libc]) is now a clear, immediate error, not a slow last
+fetches it, lazily -- the same division of labour cibuildwheel's own code
+has. Docker's local image store is the only cache involved. Nothing
+registered for a target is a clear, immediate error, not a slow last
 resort.
 
-D28 step 2: adding a new port's Docker support is "write the Dockerfile
-at docker/<name>.Dockerfile, let publish-docker-images.yml publish it,
-register the resulting digest in PORT_IMAGES below" -- a maintainer edits
-*this file*, not something an end user configures via cibuildmp.toml.
-There is no config-file knob here and there deliberately never will be: a
-Docker image per port is cibuildmp's own build infrastructure, the same
-way `action.Dockerfile`'s package list isn't a user-facing setting
-either. `CIBMP_<PORT>_<ARCH>_<LIBC>_DOCKER_IMAGE` stays purely as a
-local-testing/override knob (point it at a `:local` tag you just built
-yourself, or swap in a fork's image without editing source) -- it always
-wins over `PORT_IMAGES`'s own default when set. See docs/BACKLOG.md's own
-D26/D28.
+Adding a target's Docker support is "write `docker/<tag>.Dockerfile`, let
+publish-docker-images.yml publish it, record the digest in
+`resources/pinned_docker_images.toml`" -- a maintainer edits *data*, not
+something an end user configures via cibuildmp.toml. There is no
+config-file knob here and deliberately never will be: these images are
+cibuildmp's own build infrastructure (D28).
+`CIBMP_<PORT>_<TARGET>_DOCKER_IMAGE` stays purely as a
+local-testing/override knob (point it at a `:local` tag you just built,
+or swap in a fork's image without touching source), and always wins.
 
-Keyed by (port, arch), with an optional trailing libc segment -- not
-port alone. Corrected mid-session, on review: `unix`'s own five
-architectures do not share one image (D31), cibuildwheel's own
-manylinux_x86_64/musllinux_aarch64 shape, not one combined "linux"
-image. `libc6-dev-arm64-cross` etc. only apply to their own arch
-anyway, so a per-arch split loses nothing a combined image had and
-gains real isolation: an armhf toolchain bump can no longer touch an
-x64 build's own image the way one shared apt-get install line did
-before D26 at all. `libc` is `None` by default, not `"manylinux"`:
-most ports (`windows`, `qemu`, `webassembly`, `esp32`) have no such
-axis at all -- Windows has no second libc a binary could be built
-against -- so forcing every port through a fake "manylinux" label
-would leak `unix`-specific vocabulary onto ports it means nothing for.
-Only `build_unix()` passes one, explicitly, since that port is the one
-place this distinction is real (D31's own musllinux images don't exist
-yet -- no real musl toolchain built or verified -- so `"manylinux"` is
-`unix`'s own only real value today, not a stand-in default here).
+**Record 0043** is what shaped the two things this module resolves.
+
+*Which image.* `unix` is keyed by **platform tag** --
+`manylinux_2_28_x86_64`, `musllinux_1_2_aarch64`,
+`manylinux_2_39_mipsel` -- pypa's own names, which are real PEP 600 /
+PEP 656 tags rather than the decorative "manylinux" label record 0031
+flagged. Split back into `<floor>_<arch>` they are the pin file's own
+`[image.<arch>]`/`<floor>` coordinates, and unsplit they are the
+identifier suffix. Every other port is keyed by the port name alone:
+`windows` (all three arches share one image, D28 step 3), `qemu`,
+`webassembly` -- they cross-compile to Windows, bare metal and wasm,
+which no Linux container is native to, so they have no arch-shaped image
+axis at all.
+
+*Which platform.* `run()` passes `--platform`, cibuildwheel's own
+`OCIContainer` behaviour. For `unix` that platform **is** the build
+target, because each image is native to its own architecture. For the
+cross-compiling ports it is `linux/amd64`, a statement about the image
+rather than about any build target. Before 0043 no `--platform` was
+passed at all, so a pinned reference resolved by accident-of-host --
+correct on `ubuntu-latest`, and on `ubuntu-24.04-arm` a bare `exec format
+error` from inside `make`. Stating it per image is what makes the same
+pins work unchanged on an x86_64 host and an arm64 one, with the
+non-native side emulated. Host architecture is recorded nowhere:
+`host_oci_platform()` is the only place `platform.machine()` is consulted
+at all, and only to decide whether a missing binfmt is worth naming
+(`_probe_platform()`).
 """
 
 from __future__ import annotations
 
 import os
+import platform
 import subprocess
 import uuid
 from pathlib import Path
+from typing import Any
 
+from ..resources import pinned_docker_images, pinned_pypa_images
 from .build import UsermodBuildError
 
-# Maintainer-declared default image per (port, arch[, libc]), keyed
-# "{port}-{arch}" or "{port}-{arch}-{libc}" -- the same port/arch
-# vocabulary `cibuildmp` already uses everywhere else (targets.py's
-# Target.port/Target.arch), plus D31's own manylinux/musllinux libc
-# axis where a port actually has one.
+
+# ── where the pins live now ───────────────────────────────────────────
 #
-# Digest-pinned (`@sha256:...`), never a mutable tag like `:latest` --
-# the same shape cibuildwheel's own `pinned_docker_images.cfg` uses for
-# exactly the same reason: an immutable reference is what makes "already
-# cached" and "still correct" the same fact, so `run()`'s own `--pull
-# missing` never has to guess whether a locally-cached image is stale.
-# `publish-docker-images.yml` is what keeps this table current -- update
-# the digest here (a maintainer, real PR) whenever that workflow
-# publishes a new one, the same manual-but-deliberate cadence
-# `bin/update_docker.py` gives cibuildwheel's own pins.
+# `PORT_IMAGES` used to be a dict literal right here: a maintainer-edited
+# table of digest-pinned references sitting in the middle of resolver
+# logic. It is gone, and its contents now live in
+# `resources/pinned_docker_images.toml` -- **record 0010** ("pinned data
+# lives in `resources/`, not in Python"), applied to the one table that
+# had escaped it, and the same split cibuildwheel itself keeps between
+# `oci_container.py` and `resources/pinned_docker_images.cfg`.
+# `cibuildmp/resources.py`'s own module docstring already stated the reason
+# before this file complied with it: every value in that table goes stale
+# on an upstream's schedule, so bumping one should be a reviewable data
+# diff, not a patch to code.
 #
-# publish-docker-images.yml ran for real on 2026-08-25 (run 32895072172,
-# triggered by the user) and pushed all eight -- digests below are copied
-# from that run's own "Record the pinned digest" step, not guessed.
+# What this module keeps is only what is genuinely logic rather than
+# data: how a (port, target) pair becomes a key, which env var overrides
+# it, and which OCI platform an architecture means.
 #
-# These GHCR packages were private as of that run and are **public
-# now** -- both states confirmed live rather than assumed: an
-# unauthenticated pull returned `401 unauthorized` then, and an
-# unauthenticated manifest fetch of unix-manylinux-x64, windows, qemu
-# and webassembly returns `200` today. That was the one thing standing
-# between this table and a real credential-less consumer being able to
-# use it, so nothing here is blocked on a repo-admin visibility change
-# any more.
+# ── the two shapes a target has ───────────────────────────────────────
 #
-# The three `windows-*` digests below are **not** from that run -- they
-# are from a later push of the rebuilt image, after
-# docker/windows.Dockerfile gained its baked-in llvm-mingw layer (D42's
-# windows wiring: that arch has no apt toolchain and used to download one
-# onto the host per build). All three keys share it, the one combined
-# image D28 step 3 designed for this port. Pushed by hand rather than by
-# publish-docker-images.yml -- the exception, not the cadence: that
-# workflow stays the normal way these get published, and a later run of
-# it against the same Dockerfile is what this digest should be
-# reconciled with. Verified after pushing, not assumed: an
-# unauthenticated manifest fetch of this exact digest returns 200, and a
-# real ports/windows build of all three arches was run through
-# `dockerrun.run()` against this pinned reference.
-PORT_IMAGES: dict[str, str] = {
-    "unix-x64-manylinux": (
-        "ghcr.io/ballistics-lab/cibuildmp-unix-manylinux-x64"
-        "@sha256:0fefebe8221c1f942114705f8eed42981e6efc4889f8989c9c0b6d86a4fe7d75"
-    ),
-    "unix-x86-manylinux": (
-        "ghcr.io/ballistics-lab/cibuildmp-unix-manylinux-x86"
-        "@sha256:076b3654a34b6d3a0748f9cb663764bbec9021fa6c42bd4401d498fc6ffbd817"
-    ),
-    "unix-aarch64-manylinux": (
-        "ghcr.io/ballistics-lab/cibuildmp-unix-manylinux-aarch64"
-        "@sha256:be6719bfbeb03f97b16c5728526aa5a752527faaf7557ee0d688ecf1bfaad27e"
-    ),
-    "unix-armhf-manylinux": (
-        "ghcr.io/ballistics-lab/cibuildmp-unix-manylinux-armhf"
-        "@sha256:07374b6efa6146a81a263784b11b6f56ed73eb7764a5c7179edf49edd708b91d"
-    ),
-    "unix-mipsel-manylinux": (
-        "ghcr.io/ballistics-lab/cibuildmp-unix-manylinux-mipsel"
-        "@sha256:427733939aa102405694aa88975278f3f813cc6820d4196187fbe959e1d459c5"
-    ),
-    # All three windows arches share one combined image (D28 step 3 --
-    # this port has no manylinux/musllinux-shaped axis to split on), and
-    # it is the only one here carrying a toolchain that is not an apt
-    # package: arm64's llvm-mingw (D42).
-    "windows-x64": (
-        "ghcr.io/ballistics-lab/cibuildmp-windows"
-        "@sha256:0adc927c7a837b1f58a74f52586bfc323a84bd66ba42bbc3ae8e5124e8062ba6"
-    ),
-    "windows-x86": (
-        "ghcr.io/ballistics-lab/cibuildmp-windows"
-        "@sha256:0adc927c7a837b1f58a74f52586bfc323a84bd66ba42bbc3ae8e5124e8062ba6"
-    ),
-    "windows-arm64": (
-        "ghcr.io/ballistics-lab/cibuildmp-windows"
-        "@sha256:0adc927c7a837b1f58a74f52586bfc323a84bd66ba42bbc3ae8e5124e8062ba6"
-    ),
-    "qemu": (
-        "ghcr.io/ballistics-lab/cibuildmp-qemu"
-        "@sha256:65cfe7f8882363dc969e8ef93215e0a19f4cc02ab4ff5f103ef6fe80bf81bb12"
-    ),
-    "webassembly": (
-        "ghcr.io/ballistics-lab/cibuildmp-webassembly"
-        "@sha256:55b8e77d2c219be945ea15a4ed4ac15bce9dc466e4317674c4eb767641a1adca"
-    ),
+# `unix` is keyed by **platform tag** -- `manylinux_2_28_x86_64`,
+# `musllinux_1_2_aarch64`, `manylinux_2_39_mipsel` -- pypa's own names, which are
+# real PEP 600 / PEP 656 tags rather than the decorative "manylinux"
+# label record 0031 flagged (**0043**, which also renamed `x64`/`x86`/
+# `armhf` to `x86_64`/`i686`/`armv7l` so the labels stop needing
+# translation). The tag is both the identifier suffix (`unix-manylinux_
+# 2_28_x86_64`) and, split back into `<floor>_<arch>`, the pin file's own
+# `[image.<arch>]` / `<floor>` coordinates.
+#
+# Every other port is keyed by the port name alone -- `windows` (all
+# three arches share one image, D28 step 3), `qemu`, `webassembly`. They
+# cross-compile to Windows, bare metal and wasm, which no Linux container
+# is native to, so they have no arch-shaped image axis at all and 0043
+# does not touch them.
+def _pins() -> dict[str, Any]:
+    return pinned_docker_images()
+
+
+# Target architecture -> the OCI platform Docker must be asked for.
+# cibuildwheel's own `ARCHITECTURE_OCI_PLATFORM_MAP` (`platforms/
+# linux.py`), which `OCIContainer` passes straight through as
+# `--platform=`; kept as code rather than data because it is a fixed
+# property of the architecture, not something that goes stale.
+#
+# For `unix` this is the *build target*: the image is native to it, so
+# the container platform and the target arch are the same fact
+# (**0043**'s whole model). `mipsel` is the exception -- there is no
+# 32-bit mipsel image to be native to, so it stays an amd64 cross host,
+# and saying that here is exactly why the exception stays visible instead
+# of hiding inside a Dockerfile.
+ARCH_OCI_PLATFORM: dict[str, str] = {
+    "x86_64": "linux/amd64",
+    "i686": "linux/386",
+    "aarch64": "linux/arm64",
+    "armv7l": "linux/arm/v7",
+    "ppc64le": "linux/ppc64le",
+    "s390x": "linux/s390x",
+    "riscv64": "linux/riscv64",
+    "mipsel": "linux/amd64",  # cross host, not a native target -- see 0043
+}
+
+# The cross-compiling ports are all amd64 Linux toolchain hosts. Stating
+# it is what lets them run on an arm64 host at all (emulated) instead of
+# resolving by accident-of-host and failing with `exec format error`.
+_PORT_OCI_PLATFORM = "linux/amd64"
+
+# `platform.machine()` -> the OCI platform Docker resolves as native
+# here. Used for exactly one thing -- deciding whether a run needs
+# emulation, so a missing binfmt can be *named* (`_probe_platform()`)
+# instead of surfacing as `exec format error` from inside `make`. It
+# never reaches an image name, a pin key or a build identifier: 0043's
+# "host architecture never appears anywhere" is what makes the same pins
+# work unchanged on an x86_64 and an arm64 host, and this dict is not an
+# exception to it.
+#
+# Docker Desktop on macOS/Windows runs a Linux VM matching the host CPU,
+# so `platform.machine()` still names the right container platform there.
+# An unmapped value means "assume nothing", not "assume amd64".
+_HOST_MACHINE_PLATFORMS: dict[str, str] = {
+    "x86_64": "linux/amd64",
+    "amd64": "linux/amd64",
+    "AMD64": "linux/amd64",
+    "aarch64": "linux/arm64",
+    "arm64": "linux/arm64",
+    "ARM64": "linux/arm64",
+    "armv7l": "linux/arm/v7",
+    "armv8l": "linux/arm/v7",
+    "i386": "linux/386",
+    "i686": "linux/386",
+    "ppc64le": "linux/ppc64le",
+    "s390x": "linux/s390x",
+    "riscv64": "linux/riscv64",
 }
 
 
-def image_for(
-    port: str, arch: str | None = None, libc: str | None = None
-) -> str | None:
-    """An explicitly *named* image for `port`/`arch` (optionally qualified
-    by `libc`) -- an env-var override or a `PORT_IMAGES`-registered
-    default -- or None if neither is set. `arch` is optional for a port
-    with no per-build axis at all (`qemu`, `webassembly`): omit it rather
-    than passing `""`, so the key/env name don't carry a trailing
-    separator that means nothing.
+def host_oci_platform() -> str | None:
+    """This host's own native OCI platform, or `None` when
+    `platform.machine()` returns something unmapped.
 
-    Pure and side-effect-free (no `docker` invocation, no filesystem
-    access) -- what lets `tests/test_usermod_dockerrun.py` cover its
-    precedence rules without a Docker daemon at all. `run()` below is
-    what actually fetches the resolved reference, lazily, the first time
-    it is used.
-
-    `CIBMP_<PORT>_<ARCH>_DOCKER_IMAGE` (e.g.
-    `CIBMP_WINDOWS_X64_DOCKER_IMAGE=cibuildmp-windows:local`), or
-    `CIBMP_<PORT>_<ARCH>_<LIBC>_DOCKER_IMAGE` when `libc` is given
-    (e.g. `CIBMP_UNIX_X64_MANYLINUX_DOCKER_IMAGE=...`), overrides
-    PORT_IMAGES's own registered default when set -- local testing
-    against a freshly-built image, or swapping in a different image
-    entirely, without touching source.
+    Deliberately the only place host architecture is consulted at all,
+    and it never leaves this module -- see `_HOST_MACHINE_PLATFORMS`.
     """
-    parts = _key_parts(port, arch, libc)
-    override = os.environ.get(_env_name(parts, "DOCKER_IMAGE"))
+    return _HOST_MACHINE_PLATFORMS.get(platform.machine())
+
+
+def unix_targets() -> tuple[str, ...]:
+    """Every `unix` platform tag the pin file declares, in table order --
+    `("manylinux_2_28_x86_64", "musllinux_1_2_x86_64", ...)`.
+
+    `resources/pinned_docker_images.toml`'s `[image.<arch>]` keys *are*
+    the matrix: which libc floor each architecture is curated onto, the
+    same decision cibuildwheel makes in its own `resources/defaults.toml`
+    (`manylinux-x86_64-image = "manylinux_2_28"`). A key whose value is
+    empty is a declared cell with nothing published for it yet, and it
+    still counts here: `--print-build-identifiers` must list it, and
+    asking to build it must fail with "no image registered", not with
+    "unknown architecture". Those are different errors, and conflating
+    them is how a half-published matrix quietly starts looking like a
+    smaller one.
+
+    Pure: the packaged resource and nothing else, no Docker, no network
+    -- `targets.py`'s own discipline, which `--print-build-identifiers`
+    depends on.
+    """
+    return tuple(
+        f"{floor}_{arch}"
+        for arch, floors in _pins()["image"].items()
+        for floor in floors
+    )
+
+
+def split_tag(tag: str) -> tuple[str, str]:
+    """`"manylinux_2_28_x86_64"` -> `("manylinux_2_28", "x86_64")`.
+
+    Split against the known architecture list rather than on a separator:
+    both halves contain underscores (`manylinux_2_28`, `x86_64`), so
+    there is no character to split on and no positional rule that holds
+    for `manylinux_2_39_mipsel` and `musllinux_1_2_ppc64le` at once.
+    """
+    for arch in ARCH_OCI_PLATFORM:
+        suffix = f"_{arch}"
+        if tag.endswith(suffix):
+            return tag[: -len(suffix)], arch
+    raise UsermodBuildError(
+        f"{tag!r} does not name a known architecture. Known: "
+        f"{', '.join(ARCH_OCI_PLATFORM)}"
+    )
+
+
+def image_for(port: str, target: str | None = None) -> str | None:
+    """The image `port`'s build should run in for `target`, or `None` when
+    nothing resolves -- an env override first, then
+    `resources/pinned_docker_images.toml`.
+
+    `target` is the platform tag for `unix` (`manylinux_2_28_aarch64`),
+    the arch for `windows` (`x64`/`x86`/`arm64`, all three sharing one
+    image), and omitted entirely for a port with no per-build axis
+    (`qemu`, `webassembly`) -- omit it rather than passing `""`, so the
+    key and env name carry no separator that means nothing.
+
+    Pure and side-effect-free: no `docker` invocation, no filesystem
+    access beyond the packaged resource, which is what lets
+    `tests/test_usermod_dockerrun.py` cover the precedence rules with no
+    Docker daemon at all. `run()` is what actually fetches the resolved
+    reference, lazily, the first time it is used.
+
+    `CIBMP_<PORT>_<TARGET>_DOCKER_IMAGE` (e.g.
+    `CIBMP_UNIX_MANYLINUX_2_28_X86_64_DOCKER_IMAGE=manylinux_2_28_x86_64:local`,
+    or `CIBMP_QEMU_DOCKER_IMAGE` with no target segment) always wins over
+    the pinned default -- local testing against a freshly-built image, or
+    swapping in a fork's image, without touching source or resources.
+    """
+    override = os.environ.get(_env_name(_key_parts(port, target), "DOCKER_IMAGE"))
     if override:
         return override
-    return PORT_IMAGES.get("-".join(parts))
+    if port == "unix":
+        if target is None:
+            return None
+        floor, arch = split_tag(target)
+        # `or None`: a declared-but-empty cell means "this target exists,
+        # nothing published for it yet" and must resolve exactly the way
+        # an unknown one does -- `build_unix()` raises its own "no image
+        # registered" error on None. Returning `""` would sail straight
+        # into `docker run ... "" make`.
+        return _pins()["image"].get(arch, {}).get(floor) or None
+    return _pins()["port"].get(port) or None
 
 
-def _key_parts(port: str, arch: str | None, libc: str | None) -> list[str]:
-    return [port, *([arch] if arch else []), *([libc] if libc else [])]
+def base_image_for(target: str) -> str | None:
+    """The upstream pypa image `docker/<target>.Dockerfile` should say
+    `FROM`, or `None` when this target has no pypa counterpart.
+
+    `resources/pinned_pypa_images.toml`, keyed the same `[<arch>]` /
+    `<floor>` way `image_for()` reads the published table -- the two
+    files describe the same matrix from either side of the `FROM`.
+
+    Nothing in a *build* calls this: it exists so
+    `publish-docker-images.yml` and anyone building an image by hand
+    resolve the base from the pinned mirror rather than from a string
+    typed into a Dockerfile. `manylinux_2_39_mipsel` is the one `None` -- pypa
+    publishes no 32-bit mipsel image, so that Dockerfile names its own
+    base (record 0043's own documented exception).
+    """
+    floor, arch = split_tag(target)
+    return pinned_pypa_images().get(arch, {}).get(floor)
+
+
+def platform_for(port: str, target: str | None = None) -> str | None:
+    """The OCI platform this (port, target)'s image is published for, or
+    `None` to let Docker resolve by itself.
+
+    For `unix` it comes from the tag's own architecture (`ARCH_OCI_
+    PLATFORM`) -- under 0043 the image is native to its build target, so
+    the two are one fact and there is nothing separate to record. For
+    every other port it is `linux/amd64`, a statement about the image (a
+    Linux cross-compile host) rather than about any build target.
+
+    `CIBMP_<PORT>_<TARGET>_DOCKER_PLATFORM` overrides, for the same
+    reason `image_for()`'s override exists and *because* it exists:
+    point `..._DOCKER_IMAGE` at a locally-built image and the registered
+    platform may no longer describe it.
+    """
+    override = os.environ.get(_env_name(_key_parts(port, target), "DOCKER_PLATFORM"))
+    if override:
+        return override
+    if port == "unix":
+        if target is None:
+            return None
+        return ARCH_OCI_PLATFORM.get(split_tag(target)[1])
+    return _PORT_OCI_PLATFORM
+
+
+def needs_linux32(port: str, target: str | None = None) -> bool:
+    """Whether this target is one of the 32-bit ones whose container may
+    need a `linux32` personality wrapper -- `i686` and `armv7l`.
+
+    cibuildwheel's own `OCIContainer` behaviour, copied rather than
+    reinvented: for those two platforms it runs `uname -m` inside the
+    container first and, if the kernel still reports a 64-bit machine
+    (which it does whenever a 32-bit image runs on a 64-bit kernel --
+    the normal case, emulated or not), wraps commands in `linux32` so
+    the build sees the architecture its image is for. 0043's own step 3:
+    "copying cibuildwheel's probe-then-wrap rather than assuming when it
+    is needed". `run()` does the probing; this only says which targets
+    are candidates.
+    """
+    if port != "unix" or target is None:
+        return False
+    return split_tag(target)[1] in ("i686", "armv7l")
+
+
+def _key_parts(port: str, target: str | None) -> list[str]:
+    return [port, *([target] if target else [])]
 
 
 def _env_name(parts: list[str], suffix: str) -> str:
     return "CIBMP_" + "_".join(p.upper() for p in parts) + f"_{suffix}"
 
 
-def timeout_for(
-    port: str, arch: str | None = None, libc: str | None = None
-) -> float | None:
-    """Seconds `run()` should let this (port, arch[, libc])'s own
+def timeout_for(port: str, target: str | None = None) -> float | None:
+    """Seconds `run()` should let this (port, target)'s own
     container run before killing it, or `None` for no limit at all --
     the default the user's own call insisted on: a container hanging
     forever should be opt-in protection, not a surprise ceiling nobody
     asked for.
 
-    `CIBMP_<PORT>_<ARCH>_<LIBC>_TIMEOUT` (the exact same per-container
+    `CIBMP_<PORT>_<TARGET>_TIMEOUT` (the exact same per-container
     key shape `image_for()` uses for its own env override) wins first,
     then the blanket `CIBMP_TIMEOUT` applies to every container that has
     no more specific value of its own, then `None`. Found for real, the
@@ -236,7 +369,7 @@ def timeout_for(
     specifically, not assumed away, since it is the exact failure mode
     this feature exists to close.
     """
-    parts = _key_parts(port, arch, libc)
+    parts = _key_parts(port, target)
     specific = os.environ.get(_env_name(parts, "TIMEOUT"))
     if specific:
         return float(specific)
@@ -246,10 +379,8 @@ def timeout_for(
     return None
 
 
-def ensure_image(
-    port: str, arch: str | None = None, libc: str | None = None
-) -> str | None:
-    """The image `port`/`arch`'s own build command should run in.
+def ensure_image(port: str, target: str | None = None) -> str | None:
+    """The image this (port, target)'s own build command should run in.
 
     A thin alias for `image_for()` -- kept as its own name only because
     every real call site already reads `dockerrun.ensure_image(...)`,
@@ -262,7 +393,114 @@ def ensure_image(
     missing`), so there is nothing for this function to do beyond
     resolving which reference that command should use.
     """
-    return image_for(port, arch, libc)
+    return image_for(port, target)
+
+
+# (image, oci_platform) -> the `uname -m` that pair reports, for pairs
+# `_probe_platform()` has already cleared this process. A build can be two
+# containers against the same image (`manylinux_2_39_mipsel`'s `deplibs` pre-step,
+# then the main build) and the 32-bit check asks the same question again,
+# so the answer is cached rather than re-run. `""` means "the probe could
+# not attribute its own failure and `run()` was left to report it".
+_PROBED: dict[tuple[str, str], str] = {}
+
+
+def _probe_platform(image: str, oci_platform: str) -> str:
+    """Fail early, and by name, when `image` cannot actually be run at
+    `oci_platform` on this host.
+
+    0043's own open question, and the one place this design deliberately
+    goes *beyond* parity: cibuildwheel pushes emulation setup onto the
+    user (`docker/setup-qemu-action` on CI, a working binfmt locally) and
+    does not probe for it at all. Doing the same here would mean a
+    non-native target surfaces as a bare `exec format error` raised from
+    somewhere inside `make`, several process hops down -- a message that
+    names nothing about architecture, emulation, or which of the two
+    platforms involved was the problem. That is precisely the failure
+    0043 was written to stop happening, so it is worth one throwaway
+    container to turn it into a sentence.
+
+    Only runs when `oci_platform` differs from this host's own native one
+    -- a native run has nothing to emulate and pays nothing for this. The
+    probe is `uname -m`, the same trivial command cibuildwheel's own
+    `OCIContainer` already runs inside a freshly-started container for
+    its 32-bit `linux32` detection, cached per (image, platform) so a
+    port whose build is two containers (unix/armhf's own `deplibs`
+    pre-step plus the main build) probes once, not twice.
+
+    Anything the probe cannot attribute to emulation or to a
+    platform/image mismatch is left alone entirely -- a missing image, a
+    dead daemon, a registry auth failure all have their own perfectly
+    clear errors already, and `run()` below is about to surface them
+    itself. This function only ever converts the two failures that
+    otherwise arrive unreadable.
+    """
+    if (image, oci_platform) in _PROBED:
+        return _PROBED[(image, oci_platform)]
+    probe = subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--pull",
+            "missing",
+            f"--platform={oci_platform}",
+            image,
+            "uname",
+            "-m",
+        ],
+        # A failing probe is the whole point of running it -- the two
+        # failures worth naming are read out of `stderr` below, and
+        # anything else is deliberately left for the real `run()` to
+        # report unmangled.
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if probe.returncode == 0:
+        machine = (probe.stdout or "").strip()
+        _PROBED[(image, oci_platform)] = machine
+        return machine
+    stderr = probe.stderr or ""
+    if "exec format error" in stderr:
+        raise UsermodBuildError(
+            f"{image} cannot run as {oci_platform} on this host "
+            f"({platform.machine()}): the kernel has no binfmt handler "
+            f"registered for that architecture. Non-native targets are "
+            f"emulated, and cibuildmp does not install emulation itself "
+            f"-- add `docker/setup-qemu-action` to the job on CI, or "
+            f"register binfmt locally (e.g. `docker run --privileged "
+            f"--rm tonistiigi/binfmt --install all`)."
+        )
+    if "does not match the specified platform" in stderr or (
+        "no matching manifest" in stderr
+    ):
+        raise UsermodBuildError(
+            f"{image} is not published for {oci_platform} -- the pinned "
+            f"reference resolves to a different platform. Each image is "
+            f"published for exactly one platform (see dockerrun's own "
+            f"PORT_PLATFORMS and record 0043); either the pin or that "
+            f"table is stale, or a CIBMP_*_DOCKER_IMAGE override is "
+            f"pointing at an image built for another architecture."
+        )
+    # Not an emulation or platform problem -- let `run()`'s own real
+    # invocation report whatever this actually is, unmangled.
+    _PROBED[(image, oci_platform)] = ""
+    return ""
+
+
+# `uname -m` values that mean "this kernel is 64-bit", which is the only
+# thing the `linux32` decision turns on. Listed rather than inferred: a
+# 32-bit container on a 64-bit kernel reports the *kernel's* machine, so
+# these are exactly the strings a correctly-selected `i686`/`armv7l`
+# image can still report.
+_64BIT_MACHINES = frozenset(
+    {"x86_64", "amd64", "aarch64", "arm64", "ppc64le", "s390x", "riscv64"}
+)
+
+
+def _kernel_is_64bit(image: str, oci_platform: str) -> bool:
+    return _probe_platform(image, oci_platform) in _64BIT_MACHINES
 
 
 def run(
@@ -272,6 +510,8 @@ def run(
     workdir: Path,
     image: str,
     timeout: float | None = None,
+    oci_platform: str | None = None,
+    linux32: bool = False,
 ) -> None:
     """Run `command` inside `image`, as a sibling container -- not nested
     inside one `cibuildmp` itself is already running in (D26's own "why
@@ -304,7 +544,39 @@ def run(
     by, explicitly, the moment the timeout fires -- that kill is what
     actually stops it (and, via `--rm`, removes it); `subprocess.run`'s
     own `TimeoutExpired` is only the signal to go do that.
+
+    `oci_platform` (`platform_for()`'s own resolved value, `None` to let
+    Docker resolve by itself) becomes `--platform=<value>`, exactly what
+    cibuildwheel's own `OCIContainer` passes alongside its `--pull=` --
+    **0043**. Passing it explicitly, rather than letting the daemon pick
+    whatever matches the host, is what makes a pinned image mean the same
+    thing on an x86_64 and an arm64 host: the platform comes from the
+    image's own registration, never from where the build happens to be
+    running. For `unix` that platform *is* the build target (a native
+    toolchain in a native container); for the cross-compiling ports it is
+    just "this image is an amd64 Linux host", which on an arm64 machine
+    now runs emulated instead of failing. `_probe_platform()` above is
+    what turns a missing emulation into a sentence rather than an `exec
+    format error` from inside `make`.
+
+    `linux32` (`dockerrun.needs_linux32()`'s own answer -- `i686` and
+    `armv7l`) asks for cibuildwheel's own 32-bit handling, copied from
+    `OCIContainer` rather than reinvented: probe `uname -m` inside the
+    container first, and only if the kernel still reports a 64-bit
+    machine wrap the command in `linux32`. The probe matters -- a 32-bit
+    image on a 64-bit kernel is the normal case, emulated or not, and the
+    kernel reports its own word size regardless of the image, so
+    `configure`-style logic and MicroPython's own `uname`-derived
+    defaults would otherwise build for the wrong word size inside a
+    correctly-selected 32-bit container. Wrapping unconditionally would
+    be wrong on a genuinely 32-bit kernel, where `linux32` may not exist
+    at all, which is exactly why upstream probes instead of assuming.
     """
+    if oci_platform is not None and oci_platform != host_oci_platform():
+        _probe_platform(image, oci_platform)
+    if linux32 and oci_platform is not None and _kernel_is_64bit(image, oci_platform):
+        command = ["linux32", *command]
+
     container_name = f"cibuildmp-{uuid.uuid4().hex[:12]}"
     docker_command = [
         "docker",
@@ -315,6 +587,8 @@ def run(
         "--name",
         container_name,
     ]
+    if oci_platform is not None:
+        docker_command += [f"--platform={oci_platform}"]
     # Without this, every image here (all Ubuntu-based, no USER directive)
     # runs as root, and every file the build writes under a bind-mounted
     # path -- mpy_dir's own ports/<port>/build-<identifier>/ included --

@@ -23,7 +23,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from .resources import natmod_data
+from ..resources import natmod_data
 from .sources import (
     SourceError,
     cache_root,

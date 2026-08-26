@@ -1,204 +1,470 @@
+"""`usermod/dockerrun.py` -- image/platform resolution and `run()`'s own
+container handling.
+
+Every case here is pure: no Docker daemon, no network. That is a property
+of the resolver rather than of the tests -- `image_for()`/`platform_for()`
+read the packaged pin tables and the environment and nothing else, which
+is what lets the precedence rules be covered at all.
+
+The pins themselves are stubbed through `_pins`/`pinned_pypa_images`
+rather than asserted against `resources/pinned_docker_images.toml`'s real
+contents: those values change every time a maintainer records a new digest
+(record 0033's own publish cadence), and a test that has to be edited on
+every republish is a test that will be edited without being read.
+"""
+
 import pytest
 
 from cibuildmp.usermod import dockerrun
 from cibuildmp.usermod.build import UsermodBuildError
 
-
-def test_no_override_and_no_registration_means_no_image(monkeypatch):
-    monkeypatch.delenv("CIBMP_UNIX_X64_MANYLINUX_DOCKER_IMAGE", raising=False)
-    monkeypatch.setattr(dockerrun, "PORT_IMAGES", {})
-    assert dockerrun.image_for("unix", "x64", "manylinux") is None
-
-
-def test_registered_default_is_used_when_no_env_override(monkeypatch):
-    monkeypatch.delenv("CIBMP_UNIX_X64_MANYLINUX_DOCKER_IMAGE", raising=False)
-    monkeypatch.setattr(
-        dockerrun,
-        "PORT_IMAGES",
-        {
-            "unix-x64-manylinux": "ghcr.io/example/cibuildmp-unix-manylinux-x64"
-            "@sha256:" + "a" * 64
+_FAKE_PINS = {
+    "image": {
+        "x86_64": {
+            "manylinux_2_28": "ghcr.io/example/manylinux_2_28_x86_64@sha256:"
+            + "a" * 64,
+            "musllinux_1_2": "",
         },
-    )
-    assert dockerrun.image_for("unix", "x64", "manylinux") == (
-        "ghcr.io/example/cibuildmp-unix-manylinux-x64@sha256:" + "a" * 64
+        "aarch64": {"manylinux_2_28": "", "musllinux_1_2": ""},
+        "mipsel": {"manylinux_2_39": ""},
+    },
+    "port": {
+        "qemu": "ghcr.io/example/qemu@sha256:" + "b" * 64,
+        "windows": "ghcr.io/example/windows@sha256:" + "c" * 64,
+        "webassembly": "",
+    },
+}
+
+
+@pytest.fixture(autouse=True)
+def _stub_pins(monkeypatch):
+    monkeypatch.setattr(dockerrun, "_pins", lambda: _FAKE_PINS)
+    for name in (
+        "CIBMP_UNIX_MANYLINUX_2_28_X86_64_DOCKER_IMAGE",
+        "CIBMP_UNIX_MANYLINUX_2_28_AARCH64_DOCKER_IMAGE",
+        "CIBMP_UNIX_MANYLINUX_2_28_X86_64_DOCKER_PLATFORM",
+        "CIBMP_QEMU_DOCKER_IMAGE",
+        "CIBMP_WINDOWS_X64_DOCKER_IMAGE",
+        "CIBMP_UNIX_MANYLINUX_2_28_X86_64_TIMEOUT",
+        "CIBMP_TIMEOUT",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
+# ── split_tag() / unix_targets() -- the matrix vocabulary ────────────────
+
+
+def test_split_tag_separates_floor_from_arch():
+    # Both halves contain underscores, so this cannot be a split on a
+    # separator -- it is a match against the known architecture list.
+    assert dockerrun.split_tag("manylinux_2_28_x86_64") == ("manylinux_2_28", "x86_64")
+    assert dockerrun.split_tag("musllinux_1_2_ppc64le") == ("musllinux_1_2", "ppc64le")
+    assert dockerrun.split_tag("manylinux_2_39_mipsel") == (
+        "manylinux_2_39",
+        "mipsel",
     )
 
 
-def test_env_override_wins_over_registered_default(monkeypatch):
+def test_split_tag_rejects_an_unknown_architecture():
+    with pytest.raises(UsermodBuildError, match="does not name a known architecture"):
+        dockerrun.split_tag("manylinux_2_28_sparc64")
+
+
+def test_unix_targets_lists_declared_cells_including_unpublished_ones():
+    # A declared-but-empty cell is still a real, nameable target:
+    # `--print-build-identifiers` must list it, and asking to build it
+    # must fail with "no image registered" rather than "unknown arch".
+    targets = dockerrun.unix_targets()
+
+    assert "manylinux_2_28_x86_64" in targets
+    assert "musllinux_1_2_x86_64" in targets  # declared, value is ""
+    assert "manylinux_2_39_mipsel" in targets
+
+
+def test_unix_targets_comes_from_the_real_pin_file(monkeypatch):
+    # The one case that deliberately reads the shipped resource rather
+    # than the stub: the matrix is data, and a typo that drops a whole
+    # architecture from it should fail here rather than at build time.
+    monkeypatch.undo()
+    targets = dockerrun.unix_targets()
+
+    assert len(targets) == 15
+    for arch in ("x86_64", "i686", "aarch64", "armv7l", "ppc64le", "s390x", "riscv64"):
+        assert f"musllinux_1_2_{arch}" in targets
+    assert "manylinux_2_39_mipsel" in targets
+
+
+# ── image_for() ─────────────────────────────────────────────────────────
+
+
+def test_published_cell_resolves_to_its_pinned_digest():
+    assert dockerrun.image_for("unix", "manylinux_2_28_x86_64") == (
+        "ghcr.io/example/manylinux_2_28_x86_64@sha256:" + "a" * 64
+    )
+
+
+def test_declared_but_unpublished_cell_resolves_to_none():
+    # Empty string means "this target exists, nothing published for it
+    # yet" and must behave exactly like an unknown one -- returning `""`
+    # would sail straight into `docker run ... "" make`.
+    assert dockerrun.image_for("unix", "musllinux_1_2_x86_64") is None
+    assert dockerrun.image_for("unix", "manylinux_2_39_mipsel") is None
+
+
+def test_env_override_wins_over_the_pinned_digest(monkeypatch):
     monkeypatch.setenv(
-        "CIBMP_UNIX_X64_MANYLINUX_DOCKER_IMAGE", "cibuildmp-unix-manylinux-x64:local"
-    )
-    monkeypatch.setattr(
-        dockerrun,
-        "PORT_IMAGES",
-        {
-            "unix-x64-manylinux": "ghcr.io/example/cibuildmp-unix-manylinux-x64"
-            "@sha256:" + "a" * 64
-        },
+        "CIBMP_UNIX_MANYLINUX_2_28_X86_64_DOCKER_IMAGE", "manylinux_2_28_x86_64:local"
     )
     assert (
-        dockerrun.image_for("unix", "x64", "manylinux")
-        == "cibuildmp-unix-manylinux-x64:local"
+        dockerrun.image_for("unix", "manylinux_2_28_x86_64")
+        == "manylinux_2_28_x86_64:local"
     )
 
 
-def test_unregistered_arch_with_no_override_is_none(monkeypatch):
-    # "unix-x64-manylinux" registered, but "unix-aarch64-manylinux" is
-    # not -- each (port, arch, libc) triple is independent, one image
-    # landing does not silently switch every other arch onto Docker too.
-    monkeypatch.delenv("CIBMP_UNIX_AARCH64_MANYLINUX_DOCKER_IMAGE", raising=False)
-    monkeypatch.setattr(
-        dockerrun,
-        "PORT_IMAGES",
-        {
-            "unix-x64-manylinux": "ghcr.io/example/cibuildmp-unix-manylinux-x64"
-            "@sha256:" + "a" * 64
-        },
+def test_env_override_reaches_an_unpublished_cell(monkeypatch):
+    # The documented way to work on a cell before it is published --
+    # every `unix` cell is empty on this branch, so this is the path a
+    # local build actually takes today.
+    monkeypatch.setenv(
+        "CIBMP_UNIX_MANYLINUX_2_28_AARCH64_DOCKER_IMAGE",
+        "manylinux_2_28_aarch64:local",
     )
-    assert dockerrun.image_for("unix", "aarch64", "manylinux") is None
-
-
-def test_unregistered_port_with_no_override_is_none(monkeypatch):
-    monkeypatch.delenv("CIBMP_WINDOWS_X64_DOCKER_IMAGE", raising=False)
-    monkeypatch.setattr(dockerrun, "PORT_IMAGES", {})
-    assert dockerrun.image_for("windows", "x64") is None
-
-
-def test_libc_omitted_uses_a_two_part_key_and_env_name(monkeypatch):
-    # Ports with no manylinux/musllinux-shaped axis (windows, qemu,
-    # webassembly, esp32) call image_for() with no libc at all -- the key
-    # and env var name both drop that segment entirely rather than
-    # defaulting to a "manylinux" label that means nothing for them.
-    monkeypatch.setenv("CIBMP_WINDOWS_X64_DOCKER_IMAGE", "cibuildmp-windows:local")
-    monkeypatch.setattr(dockerrun, "PORT_IMAGES", {})
-    assert dockerrun.image_for("windows", "x64") == "cibuildmp-windows:local"
-
-    monkeypatch.delenv("CIBMP_WINDOWS_X64_DOCKER_IMAGE", raising=False)
-    monkeypatch.setattr(
-        dockerrun,
-        "PORT_IMAGES",
-        {"windows-x64": "ghcr.io/example/cibuildmp-windows@sha256:" + "b" * 64},
+    assert (
+        dockerrun.image_for("unix", "manylinux_2_28_aarch64")
+        == "manylinux_2_28_aarch64:local"
     )
+
+
+def test_each_cell_resolves_independently():
+    # One cell landing does not silently switch every other cell on.
+    assert dockerrun.image_for("unix", "manylinux_2_28_x86_64") is not None
+    assert dockerrun.image_for("unix", "manylinux_2_28_aarch64") is None
+
+
+def test_a_port_with_no_axis_needs_no_target_segment():
+    assert dockerrun.image_for("qemu") == "ghcr.io/example/qemu@sha256:" + "b" * 64
+
+
+def test_windows_arches_share_one_image_via_the_port_key(monkeypatch):
+    # All three windows arches resolve the same image (D28 step 3), so
+    # the arch only ever appears in the env override's own name.
     assert dockerrun.image_for("windows", "x64") == (
-        "ghcr.io/example/cibuildmp-windows@sha256:" + "b" * 64
+        "ghcr.io/example/windows@sha256:" + "c" * 64
     )
+    assert dockerrun.image_for("windows", "arm64") == dockerrun.image_for(
+        "windows", "x64"
+    )
+    monkeypatch.setenv("CIBMP_WINDOWS_X64_DOCKER_IMAGE", "windows:local")
+    assert dockerrun.image_for("windows", "x64") == "windows:local"
+    assert dockerrun.image_for("windows", "arm64") != "windows:local"
 
 
-def test_arch_omitted_resolves_a_no_axis_port(monkeypatch):
-    # qemu/webassembly have no per-build axis at all -- image_for(port)
-    # with no arch must not grow a stray "-" in the key/env name.
-    monkeypatch.setenv("CIBMP_QEMU_DOCKER_IMAGE", "cibuildmp-qemu:local")
-    monkeypatch.setattr(dockerrun, "PORT_IMAGES", {})
-    assert dockerrun.image_for("qemu") == "cibuildmp-qemu:local"
+def test_unregistered_port_resolves_to_none():
+    assert dockerrun.image_for("esp32") is None
 
 
-# ── ensure_image() -- a thin alias for image_for(), no build fallback ──────
-#
-# cibuildmp never builds a Docker image itself any more (see
-# dockerrun.py's own module docstring, checked directly against
-# cibuildwheel's real source before deciding) -- ensure_image() only
-# resolves which reference to use; run()'s own `--pull missing` is what
-# actually fetches it. These cases exist mainly to pin that ensure_image()
-# really is just image_for() under another name, with no extra
-# subprocess call hiding behind it.
+# ── platform_for() / base_image_for() ───────────────────────────────────
 
 
-def test_ensure_image_matches_image_for_when_overridden(monkeypatch):
+def test_unix_platform_is_the_targets_own_architecture():
+    # Record 0043's whole model: the image is native to its build target,
+    # so the container platform and the target arch are one fact.
+    assert dockerrun.platform_for("unix", "manylinux_2_28_x86_64") == "linux/amd64"
+    assert dockerrun.platform_for("unix", "musllinux_1_2_aarch64") == "linux/arm64"
+    assert dockerrun.platform_for("unix", "manylinux_2_31_armv7l") == "linux/arm/v7"
+    assert dockerrun.platform_for("unix", "manylinux_2_39_riscv64") == "linux/riscv64"
+    assert dockerrun.platform_for("unix", "manylinux_2_28_i686") == "linux/386"
+
+
+def test_mipsel_is_an_amd64_cross_host_not_a_native_target():
+    # 0043's documented exception: there is no 32-bit mipsel image to be
+    # native to, so this cell keeps the old cross model and says so.
+    assert dockerrun.platform_for("unix", "manylinux_2_39_mipsel") == "linux/amd64"
+
+
+def test_cross_compiling_ports_are_amd64_hosts():
+    # A statement about the image, not about any build target -- and what
+    # lets these ports run on an arm64 host at all, emulated.
+    assert dockerrun.platform_for("qemu") == "linux/amd64"
+    assert dockerrun.platform_for("windows", "x64") == "linux/amd64"
+
+
+def test_platform_override_exists_because_the_image_override_does(monkeypatch):
     monkeypatch.setenv(
-        "CIBMP_UNIX_X64_MANYLINUX_DOCKER_IMAGE", "cibuildmp-unix-manylinux-x64:local"
+        "CIBMP_UNIX_MANYLINUX_2_28_X86_64_DOCKER_PLATFORM", "linux/arm64"
     )
-    monkeypatch.setattr(dockerrun, "PORT_IMAGES", {})
+    assert dockerrun.platform_for("unix", "manylinux_2_28_x86_64") == "linux/arm64"
 
-    assert (
-        dockerrun.ensure_image("unix", "x64", "manylinux")
-        == "cibuildmp-unix-manylinux-x64:local"
+
+def test_base_image_comes_from_the_pypa_mirror(monkeypatch):
+    monkeypatch.undo()
+    assert dockerrun.base_image_for("manylinux_2_28_x86_64").startswith(
+        "quay.io/pypa/manylinux_2_28_x86_64@sha256:"
     )
-
-
-def test_ensure_image_matches_image_for_when_registered(monkeypatch):
-    monkeypatch.delenv("CIBMP_UNIX_X64_MANYLINUX_DOCKER_IMAGE", raising=False)
-    monkeypatch.setattr(
-        dockerrun,
-        "PORT_IMAGES",
-        {
-            "unix-x64-manylinux": "ghcr.io/example/cibuildmp-unix-manylinux-x64"
-            "@sha256:" + "a" * 64
-        },
-    )
-
-    assert dockerrun.ensure_image("unix", "x64", "manylinux") == (
-        "ghcr.io/example/cibuildmp-unix-manylinux-x64@sha256:" + "a" * 64
+    assert dockerrun.base_image_for("musllinux_1_2_armv7l").startswith(
+        "quay.io/pypa/musllinux_1_2_armv7l@sha256:"
     )
 
 
-def test_ensure_image_is_none_when_nothing_resolves(monkeypatch):
-    # Every port's real state today: publish-docker-images.yml has not
-    # published anything yet, so PORT_IMAGES is empty and there is no
-    # override -- ensure_image() must return None, not invent a build.
-    monkeypatch.delenv("CIBMP_WINDOWS_ARM64_DOCKER_IMAGE", raising=False)
-    monkeypatch.setattr(dockerrun, "PORT_IMAGES", {})
+def test_mipsel_has_no_pypa_base(monkeypatch):
+    # Its Dockerfile names its own base; pinning one in the pypa mirror
+    # would imply a libc floor this arch does not claim.
+    monkeypatch.undo()
+    assert dockerrun.base_image_for("manylinux_2_39_mipsel") is None
 
-    assert dockerrun.ensure_image("windows", "arm64") is None
+
+# ── needs_linux32() ─────────────────────────────────────────────────────
+
+
+def test_only_the_two_32bit_arches_are_linux32_candidates():
+    assert dockerrun.needs_linux32("unix", "manylinux_2_28_i686")
+    assert dockerrun.needs_linux32("unix", "musllinux_1_2_armv7l")
+    assert not dockerrun.needs_linux32("unix", "manylinux_2_28_x86_64")
+    assert not dockerrun.needs_linux32("unix", "manylinux_2_39_mipsel")
+    assert not dockerrun.needs_linux32("windows", "x86")
+
+
+# ── ensure_image() -- a thin alias, no build fallback ───────────────────
+
+
+def test_ensure_image_matches_image_for():
+    assert dockerrun.ensure_image("unix", "manylinux_2_28_x86_64") == (
+        dockerrun.image_for("unix", "manylinux_2_28_x86_64")
+    )
+    assert dockerrun.ensure_image("esp32") is None
 
 
 def test_ensure_image_never_shells_out(monkeypatch):
-    monkeypatch.setattr(
-        dockerrun,
-        "PORT_IMAGES",
-        {
-            "unix-x64-manylinux": "ghcr.io/example/cibuildmp-unix-manylinux-x64"
-            "@sha256:" + "a" * 64
-        },
-    )
     calls = []
     monkeypatch.setattr(dockerrun.subprocess, "run", lambda *a, **k: calls.append(a))
 
-    dockerrun.ensure_image("unix", "x64", "manylinux")
-    dockerrun.ensure_image("windows", "arm64")
+    dockerrun.ensure_image("unix", "manylinux_2_28_x86_64")
+    dockerrun.ensure_image("qemu")
 
     assert calls == []
 
 
-# ── timeout_for() ────────────────────────────────────────────────────────
+# ── timeout_for() ───────────────────────────────────────────────────────
 
 
-def test_timeout_for_unset_is_none(monkeypatch):
-    monkeypatch.delenv("CIBMP_UNIX_X64_MANYLINUX_TIMEOUT", raising=False)
-    monkeypatch.delenv("CIBMP_TIMEOUT", raising=False)
-    assert dockerrun.timeout_for("unix", "x64", "manylinux") is None
+def test_timeout_for_unset_is_none():
+    assert dockerrun.timeout_for("unix", "manylinux_2_28_x86_64") is None
 
 
 def test_timeout_for_blanket_env_applies_to_every_container(monkeypatch):
-    monkeypatch.delenv("CIBMP_UNIX_X64_MANYLINUX_TIMEOUT", raising=False)
     monkeypatch.setenv("CIBMP_TIMEOUT", "600")
-    assert dockerrun.timeout_for("unix", "x64", "manylinux") == 600.0
+    assert dockerrun.timeout_for("unix", "manylinux_2_28_x86_64") == 600.0
     assert dockerrun.timeout_for("webassembly") == 600.0
 
 
 def test_timeout_for_specific_override_wins_over_blanket(monkeypatch):
     monkeypatch.setenv("CIBMP_TIMEOUT", "600")
-    monkeypatch.setenv("CIBMP_UNIX_X64_MANYLINUX_TIMEOUT", "120")
-    assert dockerrun.timeout_for("unix", "x64", "manylinux") == 120.0
-    # A different arch with no specific override of its own still gets
-    # the blanket value, not the x64-specific one.
-    assert dockerrun.timeout_for("unix", "x86", "manylinux") == 600.0
+    monkeypatch.setenv("CIBMP_UNIX_MANYLINUX_2_28_X86_64_TIMEOUT", "120")
+    assert dockerrun.timeout_for("unix", "manylinux_2_28_x86_64") == 120.0
+    # A different cell with no specific override still gets the blanket.
+    assert dockerrun.timeout_for("unix", "musllinux_1_2_x86_64") == 600.0
 
 
-# ── run() -- timeout enforcement ─────────────────────────────────────────
+# ── run() -- platform, emulation, linux32, timeout ──────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _clear_probe_cache():
+    dockerrun._PROBED.clear()
+    yield
+    dockerrun._PROBED.clear()
+
+
+def test_run_passes_the_platform_through(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(dockerrun, "host_oci_platform", lambda: "linux/amd64")
+    monkeypatch.setattr(
+        dockerrun.subprocess, "run", lambda cmd, **k: calls.append((cmd, k))
+    )
+
+    dockerrun.run(
+        ["make"],
+        mounts=[tmp_path],
+        workdir=tmp_path,
+        image="manylinux_2_28_x86_64:local",
+        oci_platform="linux/amd64",
+    )
+
+    assert "--platform=linux/amd64" in calls[0][0]
+
+
+def test_run_omits_platform_when_none_is_resolved(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(
+        dockerrun.subprocess, "run", lambda cmd, **k: calls.append((cmd, k))
+    )
+
+    dockerrun.run(["make"], mounts=[tmp_path], workdir=tmp_path, image="img:local")
+
+    assert not any(a.startswith("--platform") for a in calls[0][0])
+
+
+def test_native_platform_is_not_probed(monkeypatch, tmp_path):
+    # Nothing to emulate, so nothing to pay for -- the probe container
+    # only ever runs for a non-native target.
+    calls = []
+    monkeypatch.setattr(dockerrun, "host_oci_platform", lambda: "linux/amd64")
+    monkeypatch.setattr(dockerrun.subprocess, "run", lambda cmd, **k: calls.append(cmd))
+
+    dockerrun.run(
+        ["make"],
+        mounts=[tmp_path],
+        workdir=tmp_path,
+        image="img:local",
+        oci_platform="linux/amd64",
+    )
+
+    assert len(calls) == 1
+    assert "uname" not in calls[0]
+
+
+def test_missing_emulation_is_named_rather_than_exec_format_error(
+    monkeypatch, tmp_path
+):
+    # 0043's own open question, and the one place this design goes beyond
+    # parity: cibuildwheel lets `exec format error` surface from inside
+    # the build. That message names nothing about architecture.
+    import subprocess as sp
+
+    monkeypatch.setattr(dockerrun, "host_oci_platform", lambda: "linux/amd64")
+    monkeypatch.setattr(
+        dockerrun.subprocess,
+        "run",
+        lambda cmd, **k: sp.CompletedProcess(
+            cmd, 1, stdout="", stderr="exec /bin/sh: exec format error"
+        ),
+    )
+
+    with pytest.raises(UsermodBuildError, match="binfmt"):
+        dockerrun.run(
+            ["make"],
+            mounts=[tmp_path],
+            workdir=tmp_path,
+            image="manylinux_2_28_aarch64:local",
+            oci_platform="linux/arm64",
+        )
+
+
+def test_platform_mismatch_names_the_pin_rather_than_the_daemon(monkeypatch, tmp_path):
+    import subprocess as sp
+
+    monkeypatch.setattr(dockerrun, "host_oci_platform", lambda: "linux/amd64")
+    monkeypatch.setattr(
+        dockerrun.subprocess,
+        "run",
+        lambda cmd, **k: sp.CompletedProcess(
+            cmd, 1, stdout="", stderr="image ... does not match the specified platform"
+        ),
+    )
+
+    with pytest.raises(UsermodBuildError, match="not published for"):
+        dockerrun.run(
+            ["make"],
+            mounts=[tmp_path],
+            workdir=tmp_path,
+            image="manylinux_2_28_aarch64:local",
+            oci_platform="linux/arm64",
+        )
+
+
+def test_an_unattributable_probe_failure_is_left_to_the_real_run(monkeypatch, tmp_path):
+    # A missing image, a dead daemon and a registry auth failure all have
+    # perfectly clear errors of their own; the probe must not mangle them
+    # into an emulation story.
+    import subprocess as sp
+
+    monkeypatch.setattr(dockerrun, "host_oci_platform", lambda: "linux/amd64")
+    calls = []
+
+    def fake_run(cmd, **k):
+        calls.append(cmd)
+        if "uname" in cmd:
+            return sp.CompletedProcess(cmd, 1, stdout="", stderr="no such image")
+        return sp.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
+
+    dockerrun.run(
+        ["make"],
+        mounts=[tmp_path],
+        workdir=tmp_path,
+        image="img:local",
+        oci_platform="linux/arm64",
+    )
+
+    assert len(calls) == 2  # the probe, then the real run
+
+
+def test_linux32_wraps_only_when_the_kernel_is_64bit(monkeypatch, tmp_path):
+    # cibuildwheel's own probe-then-wrap: a 32-bit image on a 64-bit
+    # kernel is the normal case, and the kernel reports its own word size
+    # regardless of the image.
+    import subprocess as sp
+
+    monkeypatch.setattr(dockerrun, "host_oci_platform", lambda: "linux/amd64")
+    calls = []
+
+    def fake_run(cmd, **k):
+        calls.append(cmd)
+        if "uname" in cmd:
+            return sp.CompletedProcess(cmd, 0, stdout="x86_64\n", stderr="")
+        return sp.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
+
+    dockerrun.run(
+        ["make"],
+        mounts=[tmp_path],
+        workdir=tmp_path,
+        image="manylinux_2_28_i686:local",
+        oci_platform="linux/386",
+        linux32=True,
+    )
+
+    assert calls[-1][-2:] == ["linux32", "make"]
+
+
+def test_linux32_is_not_used_on_a_genuinely_32bit_kernel(monkeypatch, tmp_path):
+    import subprocess as sp
+
+    monkeypatch.setattr(dockerrun, "host_oci_platform", lambda: "linux/amd64")
+
+    def fake_run(cmd, **k):
+        if "uname" in cmd:
+            return sp.CompletedProcess(cmd, 0, stdout="i686\n", stderr="")
+        return sp.CompletedProcess(cmd, 0)
+
+    calls = []
+    monkeypatch.setattr(
+        dockerrun.subprocess,
+        "run",
+        lambda cmd, **k: (calls.append(cmd), fake_run(cmd, **k))[1],
+    )
+
+    dockerrun.run(
+        ["make"],
+        mounts=[tmp_path],
+        workdir=tmp_path,
+        image="manylinux_2_28_i686:local",
+        oci_platform="linux/386",
+        linux32=True,
+    )
+
+    assert "linux32" not in calls[-1]
 
 
 def test_run_passes_no_timeout_by_default(monkeypatch, tmp_path):
     calls = []
     monkeypatch.setattr(
-        dockerrun.subprocess,
-        "run",
-        lambda cmd, **k: calls.append((cmd, k)),
+        dockerrun.subprocess, "run", lambda cmd, **k: calls.append((cmd, k))
     )
 
-    dockerrun.run(
-        ["make"], mounts=[tmp_path], workdir=tmp_path, image="cibuildmp-qemu:local"
-    )
+    dockerrun.run(["make"], mounts=[tmp_path], workdir=tmp_path, image="qemu:local")
 
     (cmd, kwargs) = calls[0]
     assert kwargs.get("timeout") is None
@@ -208,16 +474,14 @@ def test_run_passes_no_timeout_by_default(monkeypatch, tmp_path):
 def test_run_forwards_the_resolved_timeout(monkeypatch, tmp_path):
     calls = []
     monkeypatch.setattr(
-        dockerrun.subprocess,
-        "run",
-        lambda cmd, **k: calls.append((cmd, k)),
+        dockerrun.subprocess, "run", lambda cmd, **k: calls.append((cmd, k))
     )
 
     dockerrun.run(
         ["make"],
         mounts=[tmp_path],
         workdir=tmp_path,
-        image="cibuildmp-qemu:local",
+        image="qemu:local",
         timeout=45.0,
     )
 
@@ -241,7 +505,7 @@ def test_run_kills_the_container_on_timeout(monkeypatch, tmp_path):
             ["make"],
             mounts=[tmp_path],
             workdir=tmp_path,
-            image="cibuildmp-qemu:local",
+            image="qemu:local",
             timeout=1.0,
         )
 

@@ -1,9 +1,42 @@
 from pathlib import Path
 
+import pytest
+
 from cibuildmp.usermod import build as build_module
+from cibuildmp.usermod import dockerrun
 from cibuildmp.usermod.options import UsermodOptions
 from cibuildmp.usermod.orchestrate import build, build_one
 from cibuildmp.usermod.targets import UsermodTarget
+
+
+# Every `unix` cell in resources/pinned_docker_images.toml is empty until
+# publish-docker-images.yml has run under record 0043's new names, so
+# these cases resolve an image the same way a local build does today --
+# through the documented override -- rather than depending on the pin
+# table's current contents. `_probe_platform` is stubbed for the same
+# reason test_usermod_build.py stubs it: it starts a real throwaway
+# container, and it has its own coverage in test_usermod_dockerrun.py.
+@pytest.fixture(autouse=True)
+def _resolved_image(monkeypatch):
+    monkeypatch.setattr(dockerrun, "ensure_image", lambda *a, **k: "stub-image:local")
+    monkeypatch.setattr(dockerrun, "_probe_platform", lambda *a, **k: "")
+    monkeypatch.setattr(
+        build_module,
+        "container_mpy_cross",
+        lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build-stub" / "mpy-cross",
+    )
+
+
+# A 20-byte x86_64 ELF header: `verify_unix_output()` (record 0043) reads
+# `e_machine`/`EI_CLASS`/`EI_DATA` off whatever the build produced, so a
+# stub binary has to be a header rather than the four magic bytes.
+FAKE_X86_64_ELF = (
+    b"\x7fELF"
+    + bytes([2, 1, 1, 0])
+    + bytes(8)
+    + (2).to_bytes(2, "little")
+    + (62).to_bytes(2, "little")
+)
 
 
 def write_config(tmp_path: Path, text: str) -> Path:
@@ -27,21 +60,26 @@ def test_build_one_unix_writes_into_output_dir_identifier(tmp_path, monkeypatch)
     options.output_dir = tmp_path / "mpyhouse"
 
     mpy_dir = tmp_path / "mpy"
-    target = UsermodTarget(port="unix", arch="x64")
+    target = UsermodTarget(port="unix", arch="manylinux_2_28_x86_64")
 
     def fake_run(cmd, **kwargs):
-        build_dir = mpy_dir / "ports" / "unix" / "build-unix-x64"
+        build_dir = mpy_dir / "ports" / "unix" / "build-unix-manylinux_2_28_x86_64"
         build_dir.mkdir(parents=True, exist_ok=True)
-        (build_dir / "micropython").write_bytes(b"\x7fELF")
+        (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
 
     monkeypatch.setattr(build_module.subprocess, "run", fake_run)
     (mpy_dir / "ports" / "unix").mkdir(parents=True)
 
     result = build_one(options, target, mpy_dir)
 
-    assert result.identifier == "unix-x64"
-    assert result.output == options.output_dir / "unix-x64" / "micropython-unix-x64"
-    assert result.output.read_bytes() == b"\x7fELF"
+    assert result.identifier == "unix-manylinux_2_28_x86_64"
+    assert (
+        result.output
+        == options.output_dir
+        / "unix-manylinux_2_28_x86_64"
+        / "micropython-unix-manylinux_2_28_x86_64"
+    )
+    assert result.output.read_bytes() == FAKE_X86_64_ELF
 
 
 def test_build_one_qemu_uses_default_board_not_empty_string(tmp_path, monkeypatch):
@@ -64,7 +102,7 @@ def test_build_one_qemu_uses_default_board_not_empty_string(tmp_path, monkeypatc
         captured["cmd"] = cmd
         build_dir = mpy_dir / "ports" / "qemu" / "build-qemu"
         build_dir.mkdir(parents=True, exist_ok=True)
-        (build_dir / "firmware.elf").write_bytes(b"\x7fELF")
+        (build_dir / "firmware.elf").write_bytes(FAKE_X86_64_ELF)
 
     monkeypatch.setattr(build_module.subprocess, "run", fake_run)
     monkeypatch.setattr(
@@ -98,7 +136,7 @@ def test_build_one_writes_combined_manifest_when_present(tmp_path, monkeypatch):
     options.output_dir = tmp_path / "mpyhouse"
 
     mpy_dir = tmp_path / "mpy"
-    target = UsermodTarget(port="unix", arch="x64")
+    target = UsermodTarget(port="unix", arch="manylinux_2_28_x86_64")
     written_manifest = {}
 
     def fake_run(cmd, **kwargs):
@@ -107,9 +145,9 @@ def test_build_one_writes_combined_manifest_when_present(tmp_path, monkeypatch):
                 path = Path(arg.removeprefix("FROZEN_MANIFEST="))
                 written_manifest["path"] = path
                 written_manifest["text"] = path.read_text()
-        build_dir = mpy_dir / "ports" / "unix" / "build-unix-x64"
+        build_dir = mpy_dir / "ports" / "unix" / "build-unix-manylinux_2_28_x86_64"
         build_dir.mkdir(parents=True, exist_ok=True)
-        (build_dir / "micropython").write_bytes(b"\x7fELF")
+        (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
 
     monkeypatch.setattr(build_module.subprocess, "run", fake_run)
     (mpy_dir / "ports" / "unix").mkdir(parents=True)
@@ -147,7 +185,7 @@ def test_build_one_esp32_passes_board_through(tmp_path, monkeypatch):
         captured["cmd"] = cmd
         build_dir = mpy_dir / "ports" / "esp32" / "build-ESP32_GENERIC_S3"
         build_dir.mkdir(parents=True, exist_ok=True)
-        (build_dir / "micropython.bin").write_bytes(b"\x7fELF")
+        (build_dir / "micropython.bin").write_bytes(FAKE_X86_64_ELF)
 
     class _FakeIdf:
         def env(self):
@@ -190,17 +228,17 @@ def test_build_fetches_micropython_and_builds_mpy_cross_once(tmp_path, monkeypat
     )
 
     def fake_run(cmd, **kwargs):
-        build_dir = mpy_dir / "ports" / "unix" / "build-unix-x64"
+        build_dir = mpy_dir / "ports" / "unix" / "build-unix-manylinux_2_28_x86_64"
         build_dir.mkdir(parents=True, exist_ok=True)
-        (build_dir / "micropython").write_bytes(b"\x7fELF")
+        (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
 
     monkeypatch.setattr(build_module.subprocess, "run", fake_run)
 
-    results = build(options, [UsermodTarget(port="unix", arch="x64")])
+    results = build(options, [UsermodTarget(port="unix", arch="manylinux_2_28_x86_64")])
 
     assert calls == [("fetch", "v1.28.0"), ("mpy-cross", mpy_dir)]
     assert len(results) == 1
-    assert results[0].identifier == "unix-x64"
+    assert results[0].identifier == "unix-manylinux_2_28_x86_64"
 
 
 def test_build_one_resolves_relative_output_dir_against_package_dir(
@@ -219,27 +257,27 @@ def test_build_one_resolves_relative_output_dir_against_package_dir(
     options.output_dir = Path("mpyhouse")  # relative, the real default
 
     mpy_dir = tmp_path / "mpy"
-    target = UsermodTarget(port="unix", arch="x64")
+    target = UsermodTarget(port="unix", arch="manylinux_2_28_x86_64")
 
     def fake_run(cmd, **kwargs):
-        build_dir = mpy_dir / "ports" / "unix" / "build-unix-x64"
+        build_dir = mpy_dir / "ports" / "unix" / "build-unix-manylinux_2_28_x86_64"
         build_dir.mkdir(parents=True, exist_ok=True)
-        (build_dir / "micropython").write_bytes(b"\x7fELF")
+        (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
 
     monkeypatch.setattr(build_module.subprocess, "run", fake_run)
     (mpy_dir / "ports" / "unix").mkdir(parents=True)
 
     result = build_one(options, target, mpy_dir)
 
-    assert result.output == package_dir / "mpyhouse" / "unix-x64" / (
-        "micropython-unix-x64"
+    assert result.output == package_dir / "mpyhouse" / "unix-manylinux_2_28_x86_64" / (
+        "micropython-unix-manylinux_2_28_x86_64"
     )
     assert not (tmp_path / "mpyhouse").exists()  # not resolved against cwd/tmp_path
 
 
 def test_build_one_preserves_executable_bit(tmp_path, monkeypatch):
     # Regression check: shutil.copyfile() copies content only, not mode --
-    # a real collected unix-x64 binary came out `-rw-r--r--`, unrunnable,
+    # a real collected unix-manylinux_2_28_x86_64 binary came out `-rw-r--r--`, unrunnable,
     # caught only by actually trying to execute it after a real CLI build.
     # Unlike natmod's own .mpy (never executed directly, D23), a usermod
     # build's output IS meant to be run.
@@ -250,13 +288,13 @@ def test_build_one_preserves_executable_bit(tmp_path, monkeypatch):
     options.output_dir = tmp_path / "mpyhouse"
 
     mpy_dir = tmp_path / "mpy"
-    target = UsermodTarget(port="unix", arch="x64")
+    target = UsermodTarget(port="unix", arch="manylinux_2_28_x86_64")
 
     def fake_run(cmd, **kwargs):
-        build_dir = mpy_dir / "ports" / "unix" / "build-unix-x64"
+        build_dir = mpy_dir / "ports" / "unix" / "build-unix-manylinux_2_28_x86_64"
         build_dir.mkdir(parents=True, exist_ok=True)
         produced = build_dir / "micropython"
-        produced.write_bytes(b"\x7fELF")
+        produced.write_bytes(FAKE_X86_64_ELF)
         produced.chmod(0o755)
 
     monkeypatch.setattr(build_module.subprocess, "run", fake_run)

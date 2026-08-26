@@ -92,29 +92,54 @@ jobs:
     permissions:
       contents: read
     strategy:
+      # One arch's upstream base going missing should not cancel the
+      # seventeen cells that are fine -- and with emulated builds in the
+      # matrix, a cancelled run wastes far more than it saves.
+      fail-fast: false
       matrix:
-        dockerfile:
-          - unix-manylinux-x64
-          - unix-manylinux-x86
-          - unix-manylinux-aarch64
-          - unix-manylinux-armhf
-          - unix-manylinux-mipsel
-          - windows
-          - qemu
-          - webassembly
+        # Record 0043: same eighteen (image, platform) pairs
+        # publish-docker-images.yml pushes, build-checked here on every
+        # push instead. The platform matters as much as the file does now
+        # -- a `manylinux_2_28_aarch64` that only builds as amd64 is not
+        # the image that cell means, and without `platforms:` that is
+        # silently what a build on an amd64 runner would produce.
+        include:
+          - { image: manylinux_2_28_x86_64, platform: linux/amd64 }
+          - { image: musllinux_1_2_x86_64, platform: linux/amd64 }
+          - { image: manylinux_2_28_i686, platform: linux/386 }
+          - { image: musllinux_1_2_i686, platform: linux/386 }
+          - { image: manylinux_2_28_aarch64, platform: linux/arm64 }
+          - { image: musllinux_1_2_aarch64, platform: linux/arm64 }
+          - { image: manylinux_2_28_ppc64le, platform: linux/ppc64le }
+          - { image: musllinux_1_2_ppc64le, platform: linux/ppc64le }
+          - { image: manylinux_2_28_s390x, platform: linux/s390x }
+          - { image: musllinux_1_2_s390x, platform: linux/s390x }
+          - { image: manylinux_2_31_armv7l, platform: linux/arm/v7 }
+          - { image: musllinux_1_2_armv7l, platform: linux/arm/v7 }
+          - { image: manylinux_2_39_riscv64, platform: linux/riscv64 }
+          - { image: musllinux_1_2_riscv64, platform: linux/riscv64 }
+          - { image: manylinux_2_39_mipsel, platform: linux/amd64 }
+          - { image: windows, platform: linux/amd64 }
+          - { image: qemu, platform: linux/amd64 }
+          - { image: webassembly, platform: linux/amd64 }
     steps:
       - uses: actions/checkout@v7
 
+      # Needed to build a non-amd64 image at all: the `dnf`/`apk` step
+      # inside those bases runs foreign binaries.
+      - uses: docker/setup-qemu-action@v3
+
       - uses: docker/setup-buildx-action@v4
 
-      - name: docker build docker/${{ matrix.dockerfile }}.Dockerfile
+      - name: docker build docker/${{ matrix.image }}.Dockerfile
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: docker/${{ matrix.dockerfile }}.Dockerfile
+          file: docker/${{ matrix.image }}.Dockerfile
+          platforms: ${{ matrix.platform }}
           push: false
-          cache-from: type=gha,scope=${{ matrix.dockerfile }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.dockerfile }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
 
   build:
     runs-on: ubuntu-latest
@@ -203,6 +228,17 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v7
+
+      # Records 0043/0044: `unix`'s default targets are native images for
+      # their own architectures, so on this amd64 runner the aarch64 and
+      # armv7l ones run emulated. cibuildmp deliberately does not install
+      # emulation itself -- cibuildwheel's rule, and binfmt registration
+      # is a machine-level setting rather than a build input -- so the
+      # job that needs it sets it up, exactly as a consumer's own
+      # workflow has to. Without this the build stops early with a
+      # message naming the missing binfmt, which is the point of
+      # `dockerrun._probe_platform()`.
+      - uses: docker/setup-qemu-action@v3
 
       - name: Build examples/template (usermod)
         # No CIBMP_VERSION here -- usermod output has no package.json to

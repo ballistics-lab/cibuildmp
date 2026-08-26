@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from cibuildmp.natmod.toolchains import ResolvedToolchain
-from cibuildmp.usermod import build
+from cibuildmp.usermod import build, dockerrun
 from cibuildmp.usermod.build import (
     UNIX_ARCH_SETTINGS,
     WINDOWS_ARCH_SETTINGS,
@@ -28,49 +28,88 @@ from cibuildmp.usermod.build import (
 from cibuildmp.usermod.espidf import ResolvedEspIdf
 
 
-def opts(arch: str = "x64", **overrides) -> UnixBuildOptions:
+def fake_elf(target: str = "manylinux_2_28_x86_64") -> bytes:
+    """A 20-byte ELF header claiming `target`'s own architecture.
+
+    `verify_unix_output()` (record 0043) reads `e_machine`, `EI_CLASS` and
+    `EI_DATA` off the finished binary, so a stub build's output has to be
+    a header rather than the four magic bytes these tests used to write.
+    That is the check earning its keep: under the native-image model a
+    wrong-platform image produces a *working* binary of the wrong
+    architecture, which nothing else here would notice.
+    """
+    machine, elf_class, elf_data = UNIX_ARCH_SETTINGS[
+        dockerrun.split_tag(target)[1]
+    ].elf
+    byteorder = "big" if elf_data == 2 else "little"
+    return (
+        b"\x7fELF"
+        + bytes([elf_class, elf_data, 1, 0])
+        + bytes(8)
+        + (2).to_bytes(2, byteorder)
+        + machine.to_bytes(2, byteorder)
+    )
+
+
+def opts(target: str = "manylinux_2_28_x86_64", **overrides) -> UnixBuildOptions:
     defaults = {
-        "arch": arch,
+        "target": target,
         "user_c_modules": "/gh/ws/micropython/usermod",
         "frozen_manifest": "/gh/ws/a7p_manifest.py",
-        "build_dir": Path("/gh/ws/usermod/build/x64"),
+        "build_dir": Path("/gh/ws/usermod/build/x86_64"),
     }
     defaults.update(overrides)
     return UnixBuildOptions(**defaults)
 
 
-def test_x64_command_matches_a7p_workflow_shape():
-    # build-usermod-unix's own "Build usermod (x64)" step, x64 has no
-    # CROSS_COMPILE and no link_opts.
-    command = unix_make_command(opts("x64"), Path("/gh/ws/mpy"))
+def test_native_command_passes_an_empty_cross_compile():
+    # Record 0043: the compiler inside a `manylinux_2_28_x86_64` image
+    # already targets x86_64, so `CROSS_COMPILE=` is empty on purpose --
+    # not missing. It is passed explicitly rather than omitted so the
+    # Makefile's own default can never quietly supply a prefix.
+    command = unix_make_command(opts(), Path("/gh/ws/mpy"))
 
     assert command == [
         "make",
         "-C",
         "/gh/ws/mpy/ports/unix",
         "VARIANT=standard",
-        "BUILD=/gh/ws/usermod/build/x64",
+        "BUILD=/gh/ws/usermod/build/x86_64",
         "CROSS_COMPILE=",
         "USER_C_MODULES=/gh/ws/micropython/usermod",
         "FROZEN_MANIFEST=/gh/ws/a7p_manifest.py",
     ]
 
 
-def test_x86_command_adds_force_32bit():
-    command = unix_make_command(opts("x86"), Path("/gh/ws/mpy"))
+def test_every_native_target_shares_that_shape():
+    # The point of the native-image model: aarch64, armv7l and i686 stop
+    # being special cases. `MICROPY_FORCE_32BIT` (the old x86 row) and
+    # `MICROPY_STANDALONE` (the old armhf row) are both gone -- their
+    # images provide a native compiler and a resolvable libffi.
+    for target in (
+        "manylinux_2_28_aarch64",
+        "manylinux_2_31_armv7l",
+        "manylinux_2_28_i686",
+        "musllinux_1_2_riscv64",
+    ):
+        command = unix_make_command(opts(target), Path("/gh/ws/mpy"))
 
-    assert "MICROPY_FORCE_32BIT=1" in command
+        assert "CROSS_COMPILE=" in command
+        assert "MICROPY_FORCE_32BIT=1" not in command
+        assert "MICROPY_STANDALONE=1" not in command
 
 
-def test_armhf_command_adds_standalone_and_static_link():
-    command = unix_make_command(opts("armhf"), Path("/gh/ws/mpy"))
+def test_mipsel_is_the_one_target_that_still_cross_compiles():
+    # 0043's documented exception -- no pypa image, no PEP 600 tag, no
+    # Docker official image for 32-bit mipsel, so nothing to be native to.
+    command = unix_make_command(opts("manylinux_2_39_mipsel"), Path("/gh/ws/mpy"))
 
-    assert "CROSS_COMPILE=arm-linux-gnueabihf-" in command
+    assert "CROSS_COMPILE=mipsel-linux-gnu-" in command
     assert "MICROPY_STANDALONE=1" in command
     assert "LDFLAGS_EXTRA=-static" in command
 
 
-_FAKE_UNIX_IMAGE = "cibuildmp-unix-manylinux:local"
+_FAKE_UNIX_IMAGE = "manylinux_2_28_x86_64:local"
 
 
 def _mock_unix_image(monkeypatch, image=_FAKE_UNIX_IMAGE):
@@ -84,6 +123,22 @@ def _mock_unix_image(monkeypatch, image=_FAKE_UNIX_IMAGE):
     monkeypatch.setattr(
         "cibuildmp.usermod.dockerrun.ensure_image", lambda *a, **k: image
     )
+    # Neutralise the emulation/linux32 probe too (record 0043). It starts
+    # a real throwaway container for any non-native platform, which every
+    # target but one is on an x86_64 host -- and it has its own dedicated
+    # coverage in test_usermod_dockerrun.py. These cases are about the
+    # make/deplibs command shape, not about how the image is reached.
+    monkeypatch.setattr(
+        "cibuildmp.usermod.dockerrun._probe_platform", lambda *a, **k: ""
+    )
+    # ...and the in-container mpy-cross build (record 0043's own live
+    # finding: the host's binary cannot run inside these images). It is a
+    # second real container, and these cases are about the port build's
+    # own command shape.
+    monkeypatch.setattr(
+        "cibuildmp.usermod.build.container_mpy_cross",
+        lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build-stub" / "mpy-cross",
+    )
 
 
 def test_deplibs_command_shape(monkeypatch):
@@ -92,26 +147,59 @@ def test_deplibs_command_shape(monkeypatch):
         "cibuildmp.usermod.dockerrun.subprocess.run",
         lambda cmd, **k: calls.append(cmd),
     )
-    run_unix_deplibs(opts("armhf"), Path("/gh/ws/mpy"), docker_image=_FAKE_UNIX_IMAGE)
+    run_unix_deplibs(
+        opts("manylinux_2_39_mipsel"), Path("/gh/ws/mpy"), docker_image=_FAKE_UNIX_IMAGE
+    )
 
     assert calls[0][-1] == "deplibs"
     assert "MICROPY_STANDALONE=1" in calls[0]
 
 
-def test_all_five_archs_have_settings():
-    assert set(UNIX_ARCH_SETTINGS) == {"x64", "x86", "aarch64", "armhf", "mipsel"}
+def test_every_upstream_arch_plus_mipsel_has_settings():
+    # cibuildwheel's own seven, under its own names (0043 step 4), plus
+    # cibuildmp's own mipsel. `x64`/`x86`/`armhf` are gone as spellings.
+    assert set(UNIX_ARCH_SETTINGS) == {
+        "x86_64",
+        "i686",
+        "aarch64",
+        "armv7l",
+        "ppc64le",
+        "s390x",
+        "riscv64",
+        "mipsel",
+    }
 
 
-def test_unknown_arch_rejected():
-    with pytest.raises(UsermodBuildError, match="unknown unix arch"):
-        build_unix(opts("riscv64"), Path("/gh/ws/mpy"))
+def test_unknown_target_rejected():
+    with pytest.raises(UsermodBuildError, match="unknown unix target"):
+        build_unix(opts("manylinux_2_28_sparc64"), Path("/gh/ws/mpy"))
 
 
-@pytest.mark.parametrize("arch", ["x64", "x86", "aarch64", "armhf", "mipsel"])
+def test_a_real_arch_under_an_undeclared_floor_is_rejected():
+    # `manylinux_2_34` is a real upstream floor this project does not
+    # curate for any arch, so it names no cell of the matrix -- and must
+    # fail as an unknown *target*, not slip through on its arch alone.
+    with pytest.raises(UsermodBuildError, match="unknown unix target"):
+        build_unix(opts("manylinux_2_34_x86_64"), Path("/gh/ws/mpy"))
+
+
+@pytest.mark.parametrize(
+    "arch",
+    [
+        "manylinux_2_28_x86_64",
+        "manylinux_2_28_i686",
+        "manylinux_2_28_aarch64",
+        "manylinux_2_31_armv7l",
+        "manylinux_2_39_mipsel",
+    ],
+)
 def test_unix_no_image_registered_is_a_clear_error(monkeypatch, tmp_path, arch):
-    # Docker-only (D30): no bare-host fallback for any unix arch any
-    # more -- with no override and nothing in PORT_IMAGES, build_unix()
-    # must fail loudly, the same shape build_webassembly() already has.
+    # Docker-only (D30): no bare-host fallback for any unix target any
+    # more -- with no override and nothing pinned in
+    # resources/pinned_docker_images.toml, build_unix() must fail loudly,
+    # the same shape build_webassembly() already has. That is the state
+    # every `unix` cell is actually in on this branch (record 0044), not
+    # a hypothetical.
     monkeypatch.setattr(
         "cibuildmp.usermod.dockerrun.ensure_image", lambda *a, **k: None
     )
@@ -127,8 +215,8 @@ def test_unix_no_image_registered_is_a_clear_error(monkeypatch, tmp_path, arch):
     assert calls == []
 
 
-@pytest.mark.parametrize("arch", ["armhf", "mipsel"])
-def test_armhf_mipsel_runs_deplibs_before_build(monkeypatch, tmp_path, arch):
+@pytest.mark.parametrize("arch", ["manylinux_2_39_mipsel"])
+def test_mipsel_runs_deplibs_before_build(monkeypatch, tmp_path, arch):
     _mock_unix_image(monkeypatch)
     run_calls = []
     monkeypatch.setattr(
@@ -137,7 +225,7 @@ def test_armhf_mipsel_runs_deplibs_before_build(monkeypatch, tmp_path, arch):
     )
     build_dir = tmp_path / f"build-{arch}"
     build_dir.mkdir()
-    (build_dir / "micropython").write_bytes(b"\x7fELF")
+    (build_dir / "micropython").write_bytes(fake_elf(arch))
 
     build_unix(opts(arch, build_dir=build_dir), tmp_path / "mpy")
 
@@ -145,12 +233,12 @@ def test_armhf_mipsel_runs_deplibs_before_build(monkeypatch, tmp_path, arch):
     assert any("USER_C_MODULES" in arg for arg in run_calls[1])
 
 
-@pytest.mark.parametrize("arch", ["armhf", "mipsel"])
-def test_armhf_mipsel_builds_and_returns_binary_path(monkeypatch, tmp_path, arch):
+@pytest.mark.parametrize("arch", ["manylinux_2_39_mipsel"])
+def test_mipsel_builds_and_returns_binary_path(monkeypatch, tmp_path, arch):
     _mock_unix_image(monkeypatch)
     build_dir = tmp_path / f"build-{arch}"
     build_dir.mkdir()
-    (build_dir / "micropython").write_bytes(b"\x7fELF")
+    (build_dir / "micropython").write_bytes(fake_elf(arch))
     monkeypatch.setattr(
         "cibuildmp.usermod.dockerrun.subprocess.run", lambda *a, **k: None
     )
@@ -160,30 +248,30 @@ def test_armhf_mipsel_builds_and_returns_binary_path(monkeypatch, tmp_path, arch
     assert result == build_dir / "micropython"
 
 
-def test_x64_builds_and_returns_binary_path(tmp_path, monkeypatch):
+def test_x86_64_builds_and_returns_binary_path(tmp_path, monkeypatch):
     _mock_unix_image(monkeypatch)
-    build_dir = tmp_path / "build-x64"
+    build_dir = tmp_path / "build-x86_64"
     build_dir.mkdir()
-    (build_dir / "micropython").write_bytes(b"\x7fELF")
+    (build_dir / "micropython").write_bytes(fake_elf())
 
     monkeypatch.setattr(
         "cibuildmp.usermod.dockerrun.subprocess.run", lambda *a, **k: None
     )
-    result = build_unix(opts("x64", build_dir=build_dir), tmp_path / "mpy")
+    result = build_unix(opts(build_dir=build_dir), tmp_path / "mpy")
 
     assert result == build_dir / "micropython"
 
 
 def test_missing_binary_after_success_is_an_error(tmp_path, monkeypatch):
     _mock_unix_image(monkeypatch)
-    build_dir = tmp_path / "build-x64"
+    build_dir = tmp_path / "build-x86_64"
     build_dir.mkdir()
 
     monkeypatch.setattr(
         "cibuildmp.usermod.dockerrun.subprocess.run", lambda *a, **k: None
     )
     with pytest.raises(UsermodBuildError, match="build reported success but"):
-        build_unix(opts("x64", build_dir=build_dir), tmp_path / "mpy")
+        build_unix(opts(build_dir=build_dir), tmp_path / "mpy")
 
 
 def test_build_failure_names_the_command(tmp_path, monkeypatch):
@@ -196,31 +284,35 @@ def test_build_failure_names_the_command(tmp_path, monkeypatch):
 
     monkeypatch.setattr("cibuildmp.usermod.dockerrun.subprocess.run", fake_run)
     with pytest.raises(UsermodBuildError, match="failed with exit code"):
-        build_unix(opts("x64", build_dir=tmp_path / "build-x64"), tmp_path / "mpy")
+        build_unix(opts(build_dir=tmp_path / "build-x86_64"), tmp_path / "mpy")
 
 
-def test_aarch64_command_cross_compiles_not_host_gcc():
-    # Verified live on a real ubuntu-latest runner: aarch64-linux-gnu-gcc
-    # (apt) cross-compiles from x86_64 straight to a linked ARM aarch64
-    # ELF -- no MICROPY_STANDALONE/deplibs step needed the way armhf/mipsel
-    # require.
-    command = unix_make_command(opts("aarch64"), Path("/gh/ws/mpy"))
+def test_aarch64_no_longer_cross_compiles():
+    # It did until record 0043 (`CROSS_COMPILE=aarch64-linux-gnu-`, an apt
+    # cross toolchain in an amd64 image, plus a ports.ubuntu.com mirror
+    # rewrite). That whole setup encoded "the host is x86_64" as a
+    # constant, which is false on an arm64 runner -- so the image is
+    # native now and the prefix is empty.
+    command = unix_make_command(opts("manylinux_2_28_aarch64"), Path("/gh/ws/mpy"))
 
-    assert "CROSS_COMPILE=aarch64-linux-gnu-" in command
+    assert "CROSS_COMPILE=" in command
+    assert "CROSS_COMPILE=aarch64-linux-gnu-" not in command
     assert "MICROPY_STANDALONE=1" not in command
 
 
 def test_aarch64_builds_and_returns_binary_path(monkeypatch, tmp_path):
     _mock_unix_image(monkeypatch)
-    build_dir = tmp_path / "build-aarch64"
+    build_dir = tmp_path / "build-manylinux_2_28_aarch64"
     build_dir.mkdir()
-    (build_dir / "micropython").write_bytes(b"\x7fELF")
+    (build_dir / "micropython").write_bytes(fake_elf("manylinux_2_28_aarch64"))
 
     monkeypatch.setattr(
         "cibuildmp.usermod.dockerrun.subprocess.run", lambda *a, **k: None
     )
 
-    result = build_unix(opts("aarch64", build_dir=build_dir), tmp_path / "mpy")
+    result = build_unix(
+        opts("manylinux_2_28_aarch64", build_dir=build_dir), tmp_path / "mpy"
+    )
 
     assert result == build_dir / "micropython"
 
@@ -397,11 +489,13 @@ def test_webassembly_no_image_registered_is_a_clear_error(monkeypatch, tmp_path)
     # Docker-only (D30), and cibuildmp never builds an image itself any
     # more (checked against cibuildwheel's real source before deciding --
     # its own container runtime only ever pulls an already-published,
-    # digest-pinned image) -- with no override and nothing in
-    # PORT_IMAGES, build_webassembly() must fail loudly, not fall back to
-    # building docker/webassembly.Dockerfile on its own.
+    # digest-pinned image) -- with no override and nothing pinned in
+    # resources/pinned_docker_images.toml, build_webassembly() must fail
+    # loudly, not fall back to building docker/webassembly.Dockerfile.
     monkeypatch.delenv("CIBMP_WEBASSEMBLY_DOCKER_IMAGE", raising=False)
-    monkeypatch.setattr("cibuildmp.usermod.dockerrun.PORT_IMAGES", {})
+    monkeypatch.setattr(
+        "cibuildmp.usermod.dockerrun._pins", lambda: {"image": {}, "port": {}}
+    )
     build_dir = tmp_path / "build-wasm"
 
     calls = []
@@ -420,6 +514,12 @@ def test_webassembly_docker_image_override_skips_own_dockerfile_build(
     monkeypatch, tmp_path
 ):
     monkeypatch.setenv("CIBMP_WEBASSEMBLY_DOCKER_IMAGE", "cibuildmp-webassembly:local")
+    # See `_mock_windows_image` for why the in-container mpy-cross build
+    # is stubbed out here too (record 0044).
+    monkeypatch.setattr(
+        "cibuildmp.usermod.build.container_mpy_cross",
+        lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build-stub" / "mpy-cross",
+    )
     build_dir = tmp_path / "build-wasm"
     build_dir.mkdir()
     (build_dir / "micropython.mjs").write_bytes(b"")
@@ -443,6 +543,12 @@ def test_webassembly_docker_image_mounts_mpy_dir_and_user_c_modules(
     monkeypatch, tmp_path
 ):
     monkeypatch.setenv("CIBMP_WEBASSEMBLY_DOCKER_IMAGE", "cibuildmp-webassembly:local")
+    # See `_mock_windows_image` for why the in-container mpy-cross build
+    # is stubbed out here too (record 0044).
+    monkeypatch.setattr(
+        "cibuildmp.usermod.build.container_mpy_cross",
+        lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build-stub" / "mpy-cross",
+    )
     build_dir = tmp_path / "build-wasm"
     build_dir.mkdir()
     (build_dir / "micropython.mjs").write_bytes(b"")
@@ -463,6 +569,12 @@ def test_webassembly_docker_image_mounts_mpy_dir_and_user_c_modules(
 
 def test_webassembly_missing_mjs_after_success_is_an_error(monkeypatch, tmp_path):
     monkeypatch.setenv("CIBMP_WEBASSEMBLY_DOCKER_IMAGE", "cibuildmp-webassembly:local")
+    # See `_mock_windows_image` for why the in-container mpy-cross build
+    # is stubbed out here too (record 0044).
+    monkeypatch.setattr(
+        "cibuildmp.usermod.build.container_mpy_cross",
+        lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build-stub" / "mpy-cross",
+    )
     build_dir = tmp_path / "build-wasm"
     build_dir.mkdir()
 
@@ -478,6 +590,12 @@ def test_webassembly_build_failure_names_the_command(monkeypatch, tmp_path):
     import subprocess as sp
 
     monkeypatch.setenv("CIBMP_WEBASSEMBLY_DOCKER_IMAGE", "cibuildmp-webassembly:local")
+    # See `_mock_windows_image` for why the in-container mpy-cross build
+    # is stubbed out here too (record 0044).
+    monkeypatch.setattr(
+        "cibuildmp.usermod.build.container_mpy_cross",
+        lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build-stub" / "mpy-cross",
+    )
 
     def fake_run(cmd, **kwargs):
         raise sp.CalledProcessError(1, cmd)
@@ -494,6 +612,12 @@ def test_webassembly_no_docker_daemon_raises_clear_error(monkeypatch, tmp_path):
     # Docker-only means "docker unavailable" is a hard, clearly-worded
     # error, not a silent bare-host fallback -- the user's own call.
     monkeypatch.setenv("CIBMP_WEBASSEMBLY_DOCKER_IMAGE", "cibuildmp-webassembly:local")
+    # See `_mock_windows_image` for why the in-container mpy-cross build
+    # is stubbed out here too (record 0044).
+    monkeypatch.setattr(
+        "cibuildmp.usermod.build.container_mpy_cross",
+        lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build-stub" / "mpy-cross",
+    )
 
     def fake_run(cmd, **kwargs):
         raise FileNotFoundError("docker")
@@ -698,15 +822,26 @@ def _mock_windows_image(monkeypatch, image=_FAKE_WINDOWS_IMAGE):
     something first. Tests that only care about the make command shape
     fake a resolved image here and mock dockerrun's own subprocess.run
     -- build.subprocess is no longer called by this port under any
-    circumstance."""
+    circumstance.
+
+    Also stubs the in-container mpy-cross build (record 0044): this
+    port's image is amd64, so on an arm64 host a host-built mpy-cross
+    could not run inside it, and `py/mkrules.mk` runs mpy-cross in the
+    container to compile FROZEN_MANIFEST. It is a second real container
+    and has its own live coverage; these cases are about the make
+    command's own shape."""
     monkeypatch.setattr(
         "cibuildmp.usermod.dockerrun.ensure_image", lambda *a, **k: image
+    )
+    monkeypatch.setattr(
+        "cibuildmp.usermod.build.container_mpy_cross",
+        lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build-stub" / "mpy-cross",
     )
 
 
 @pytest.mark.parametrize("arch", ["x64", "x86", "arm64"])
 def test_windows_no_image_registered_is_a_clear_error(monkeypatch, tmp_path, arch):
-    # D32's own closing gap: `windows` used to have PORT_IMAGES entries
+    # D32's own closing gap: `windows` used to have pinned entries
     # nothing ever read. All three arches now resolve through
     # ensure_image(), so with no override and nothing registered they
     # must fail loudly rather than quietly cross-compiling on the host.
@@ -770,7 +905,7 @@ def test_windows_mounts_mpy_dir_and_user_c_modules(monkeypatch, tmp_path):
         lambda cmd, **k: calls.append(cmd),
     )
 
-    build_dir = tmp_path / "build-x64"
+    build_dir = tmp_path / "build-x86_64"
     build_dir.mkdir()
     (build_dir / "micropython.exe").write_bytes(b"MZ")
 
@@ -816,21 +951,32 @@ def test_windows_build_failure_names_the_command(monkeypatch, tmp_path):
 
 
 def test_unix_docker_image_skips_host_toolchain_probe(monkeypatch, tmp_path):
-    # CIBMP_UNIX_AARCH64_MANYLINUX_DOCKER_IMAGE set: the toolchain lives
+    # CIBMP_UNIX_MANYLINUX_2_28_AARCH64_DOCKER_IMAGE set: the toolchain lives
     # inside the image, not on this host's PATH, so build_unix() must not
     # call shutil.which() at all -- a bare-host probe would reject a
     # perfectly good docker build.
     monkeypatch.setenv(
-        "CIBMP_UNIX_AARCH64_MANYLINUX_DOCKER_IMAGE",
-        "cibuildmp-unix-manylinux-aarch64:local",
+        "CIBMP_UNIX_MANYLINUX_2_28_AARCH64_DOCKER_IMAGE",
+        "manylinux_2_28_aarch64:local",
     )
     # `build` no longer imports shutil at all -- with no bare-host path
     # left for any port there is nothing to probe PATH with, which is a
     # stronger guarantee than mocking shutil.which to fail was.
     assert not hasattr(build, "shutil")
-    build_dir = tmp_path / "build-aarch64"
+    # This case resolves its image through the real env-var path rather
+    # than `_mock_unix_image`, so it has to silence the emulation probe
+    # itself -- aarch64 is non-native on an x86_64 host, and the probe
+    # would otherwise start a real container.
+    monkeypatch.setattr(
+        "cibuildmp.usermod.dockerrun._probe_platform", lambda *a, **k: ""
+    )
+    monkeypatch.setattr(
+        "cibuildmp.usermod.build.container_mpy_cross",
+        lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build-stub" / "mpy-cross",
+    )
+    build_dir = tmp_path / "build-manylinux_2_28_aarch64"
     build_dir.mkdir()
-    (build_dir / "micropython").write_bytes(b"\x7fELF")
+    (build_dir / "micropython").write_bytes(fake_elf("manylinux_2_28_aarch64"))
 
     calls = []
     monkeypatch.setattr(
@@ -838,23 +984,29 @@ def test_unix_docker_image_skips_host_toolchain_probe(monkeypatch, tmp_path):
         lambda cmd, **k: calls.append(cmd) or None,
     )
 
-    result = build_unix(opts("aarch64", build_dir=build_dir), tmp_path / "mpy")
+    result = build_unix(
+        opts("manylinux_2_28_aarch64", build_dir=build_dir), tmp_path / "mpy"
+    )
 
     assert result == build_dir / "micropython"
     assert len(calls) == 1
     docker_command = calls[0]
     assert docker_command[:3] == ["docker", "run", "--rm"]
-    assert "cibuildmp-unix-manylinux-aarch64:local" in docker_command
+    assert "manylinux_2_28_aarch64:local" in docker_command
     assert "make" in docker_command
 
 
 def test_unix_docker_image_mounts_mpy_dir_and_user_c_modules(monkeypatch, tmp_path):
     monkeypatch.setenv(
-        "CIBMP_UNIX_X64_MANYLINUX_DOCKER_IMAGE", "cibuildmp-unix-manylinux-x64:local"
+        "CIBMP_UNIX_MANYLINUX_2_28_X86_64_DOCKER_IMAGE", "manylinux_2_28_x86_64:local"
     )
-    build_dir = tmp_path / "build-x64"
+    monkeypatch.setattr(
+        "cibuildmp.usermod.build.container_mpy_cross",
+        lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build-stub" / "mpy-cross",
+    )
+    build_dir = tmp_path / "build-x86_64"
     build_dir.mkdir()
-    (build_dir / "micropython").write_bytes(b"\x7fELF")
+    (build_dir / "micropython").write_bytes(fake_elf())
 
     calls = []
     monkeypatch.setattr(
@@ -863,7 +1015,7 @@ def test_unix_docker_image_mounts_mpy_dir_and_user_c_modules(monkeypatch, tmp_pa
     )
 
     mpy_dir = tmp_path / "mpy"
-    build_unix(opts("x64", build_dir=build_dir), mpy_dir)
+    build_unix(opts(build_dir=build_dir), mpy_dir)
 
     docker_command = calls[0]
     assert f"{mpy_dir}:{mpy_dir}" in docker_command
@@ -871,6 +1023,5 @@ def test_unix_docker_image_mounts_mpy_dir_and_user_c_modules(monkeypatch, tmp_pa
 
 
 # test_unix_no_image_registered_is_a_clear_error (above) already covers
-# "no CIBMP_UNIX_X64_MANYLINUX_DOCKER_IMAGE / PORT_IMAGES entry" for
-# every arch, x64 included -- unix has no bare-host fallback left to
-# fall back to (D30).
+# "no CIBMP_UNIX_<TARGET>_DOCKER_IMAGE, no pinned digest" for every
+# target -- unix has no bare-host fallback left to fall back to (D30).

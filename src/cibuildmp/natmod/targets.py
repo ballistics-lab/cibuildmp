@@ -13,7 +13,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from .resources import natmod_data
+from ..resources import natmod_data
 
 # ── Architectures ─────────────────────────────────────────────────────────
 # Both tables below are transcriptions of MicroPython's own source, and both

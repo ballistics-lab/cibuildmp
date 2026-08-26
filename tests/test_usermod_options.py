@@ -27,11 +27,11 @@ def test_ports_list_selects_a_subset(tmp_path):
 
     identifiers = [t.identifier for t in options.targets()]
     assert identifiers == [
-        "unix-x64",
-        "unix-x86",
-        "unix-aarch64",
-        "unix-armhf",
-        "unix-mipsel",
+        "unix-manylinux_2_28_x86_64",
+        "unix-manylinux_2_28_i686",
+        "unix-manylinux_2_28_aarch64",
+        "unix-manylinux_2_31_armv7l",
+        "unix-manylinux_2_39_mipsel",
         "esp32-ESP32_GENERIC",
     ]
 
@@ -44,13 +44,13 @@ def test_per_port_axis_override(tmp_path):
         ports = ["unix"]
 
         [usermod.unix]
-        archs = ["aarch64"]
+        archs = ["manylinux_2_28_aarch64"]
         """,
     )
     options = UsermodOptions.load(tmp_path)
 
     identifiers = [t.identifier for t in options.targets()]
-    assert identifiers == ["unix-aarch64"]
+    assert identifiers == ["unix-manylinux_2_28_aarch64"]
 
 
 def test_multiple_boards_same_port(tmp_path):
@@ -125,14 +125,14 @@ def test_build_skip_selectors(tmp_path):
         """
         [usermod]
         ports = ["unix"]
-        build = "unix-x64 unix-x86"
-        skip = "unix-x86"
+        build = "unix-manylinux_2_28_x86_64 unix-manylinux_2_28_i686"
+        skip = "unix-manylinux_2_28_i686"
         """,
     )
     options = UsermodOptions.load(tmp_path)
 
     identifiers = [t.identifier for t in options.targets()]
-    assert identifiers == ["unix-x64"]
+    assert identifiers == ["unix-manylinux_2_28_x86_64"]
 
 
 def test_micropython_shared_top_level_key(tmp_path):
@@ -165,7 +165,7 @@ def test_build_options_carries_module_dir_and_manifest(tmp_path):
     target = options.targets()[0]
     build_options = options.build_options(target)
 
-    assert build_options.identifier == "unix-x64"
+    assert build_options.identifier == "unix-manylinux_2_28_x86_64"
     assert build_options.port == "unix"
     assert build_options.module_dir == "mymod"
     assert build_options.manifest == "extra.py"
