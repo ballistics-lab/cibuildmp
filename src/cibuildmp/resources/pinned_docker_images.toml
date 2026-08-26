@@ -84,39 +84,39 @@
 # ══ unix -- one native image per (arch, libc floor) ═══════════════════
 
 [image.x86_64]
-manylinux_2_28 = ""
-musllinux_1_2 = ""
+manylinux_2_28 = "ghcr.io/ballistics-lab/manylinux_2_28_x86_64@sha256:44c282830770b3852d1311dfe862e3834c57e9d558bacfc4926f11b46b57d8db"
+musllinux_1_2 = "ghcr.io/ballistics-lab/musllinux_1_2_x86_64@sha256:34d89ab288230afb1f988be726a6f0fea1dd7371c1b6e041825915848e6b2322"
 
 [image.i686]
-manylinux_2_28 = ""
-musllinux_1_2 = ""
+manylinux_2_28 = "ghcr.io/ballistics-lab/manylinux_2_28_i686@sha256:d8c6ccf0fdb01161f79fe4e883196c5a17a5e0ad97982927094edf09e0c058f1"
+musllinux_1_2 = "ghcr.io/ballistics-lab/musllinux_1_2_i686@sha256:5f30c323cbf0207c74fe58fc3d4dda7366ff285860205ff0e02db44b5f23b273"
 
 [image.aarch64]
-manylinux_2_28 = ""
-musllinux_1_2 = ""
+manylinux_2_28 = "ghcr.io/ballistics-lab/manylinux_2_28_aarch64@sha256:498ac072047f94dce34e42636629dade70fe2c9c13a8b7f21c169852e0dbd97a"
+musllinux_1_2 = "ghcr.io/ballistics-lab/musllinux_1_2_aarch64@sha256:d761634facc893b372c847ff500836b8f568471c1975d461b3c33c7801087b6f"
 
 [image.ppc64le]
-manylinux_2_28 = ""
-musllinux_1_2 = ""
+manylinux_2_28 = "ghcr.io/ballistics-lab/manylinux_2_28_ppc64le@sha256:f6dc11a9dd6ba10b1c1a0370c984d3428aecb5ce37914597ec7b81656e7cfb3a"
+musllinux_1_2 = "ghcr.io/ballistics-lab/musllinux_1_2_ppc64le@sha256:6392951af86f73aa3970341ddcf4b75a2daa469970f62d84a27a369105411ca5"
 
 [image.s390x]
-manylinux_2_28 = ""
-musllinux_1_2 = ""
+manylinux_2_28 = "ghcr.io/ballistics-lab/manylinux_2_28_s390x@sha256:575a7d5cc8735ad07d519d7bdcf024263db4ca0227cf1d4e81327bb40b6a793c"
+musllinux_1_2 = "ghcr.io/ballistics-lab/musllinux_1_2_s390x@sha256:a193fa99aa683721a176b43dba2f8c26e2430ae8c47713c5e40421affd769e34"
 
 # armv7l's manylinux line starts at `_2_31` upstream (Ubuntu 20.04/apt,
 # unlike the AlmaLinux 8/dnf `_2_28` images) -- `_2_31` is the lower,
 # more compatible of the two floors pypa offers, and cibuildwheel makes
 # the same default choice.
 [image.armv7l]
-manylinux_2_31 = ""
-musllinux_1_2 = ""
+manylinux_2_31 = "ghcr.io/ballistics-lab/manylinux_2_31_armv7l@sha256:ce049c5961fd123639e646fc67f7466b85130ed2cfbec58b45ff8ceac87637b4"
+musllinux_1_2 = "ghcr.io/ballistics-lab/musllinux_1_2_armv7l@sha256:41c40bcafead431cf913954e49b1e5d1504237362ea7e0a0c26034f849a04a43"
 
 # riscv64 is the newest arch upstream and carries the highest floor:
 # `manylinux_2_39` (Rocky Linux 10/dnf) is the only manylinux image pypa
 # publishes for it.
 [image.riscv64]
-manylinux_2_39 = ""
-musllinux_1_2 = ""
+manylinux_2_39 = "ghcr.io/ballistics-lab/manylinux_2_39_riscv64@sha256:46424bcc3a545426fecb2a2ec2a943e329f017ba5966a61f62f1e8dbcd78f73b"
+musllinux_1_2 = "ghcr.io/ballistics-lab/musllinux_1_2_riscv64@sha256:dbd2cc3d11fce7fa22d1db95c70600dcb676746c426e8832516d493ddd5ce743"
 
 # mipsel is cibuildmp's own architecture, not one of cibuildwheel's
 # seven, and the one documented exception to record 0043's model: pypa
@@ -139,7 +139,7 @@ musllinux_1_2 = ""
 # even this arch's static build still reaches glibc's own `dlopen`-based
 # NSS at runtime, so "no floor" would be the less honest of the two.
 [image.mipsel]
-manylinux_2_39 = ""
+manylinux_2_39 = "ghcr.io/ballistics-lab/manylinux_2_39_mipsel@sha256:740276d70517fc1041d8949871440ac919a66b14a325806e3f0ec03d772fa307"
 
 
 # ══ cross-compiling ports -- no arch axis, amd64 hosts ═══════════════
@@ -163,6 +163,6 @@ manylinux_2_39 = ""
 # republishing it, not editing a string here.
 
 [port]
-windows = "ghcr.io/ballistics-lab/cibuildmp-windows@sha256:0adc927c7a837b1f58a74f52586bfc323a84bd66ba42bbc3ae8e5124e8062ba6"
-qemu = "ghcr.io/ballistics-lab/cibuildmp-qemu@sha256:65cfe7f8882363dc969e8ef93215e0a19f4cc02ab4ff5f103ef6fe80bf81bb12"
-webassembly = "ghcr.io/ballistics-lab/cibuildmp-webassembly@sha256:55b8e77d2c219be945ea15a4ed4ac15bce9dc466e4317674c4eb767641a1adca"
+windows = "ghcr.io/ballistics-lab/windows@sha256:7caab34597a3cb2d9f4a412549d4a806134a17a1411aeb612ff61bbbcc151fcd"
+qemu = "ghcr.io/ballistics-lab/qemu@sha256:d0348b84cc684a45ca6f71e6475b5b1ea9fe73ceb6d242af028562795f944928"
+webassembly = "ghcr.io/ballistics-lab/webassembly@sha256:ed489afc6aef801d74d8d3b5673525a24878afc37e6f535cffac60ecff5ce73e"

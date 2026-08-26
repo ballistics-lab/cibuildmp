@@ -207,7 +207,16 @@ def update_images(*, check: bool) -> int:
         # -- `<floor>_<arch>` for unix, the port name otherwise -- so this
         # can fill a whole freshly-published matrix in one pass.
         name = key if arch == "port" else f"{key}_{arch}"
-        repo = _repo_of(reference) if reference else f"{owner}/{name}"
+        # The repository is derived from the table's own coordinates, not
+        # read back out of whatever the cell currently points at. That
+        # matters during a rename and not only in theory: record 0044
+        # dropped the `cibuildmp-` prefix, so the three `[port]` cells
+        # still held `ghcr.io/<owner>/cibuildmp-windows@...` while the
+        # package that had just been published was `<owner>/windows`.
+        # Trusting the old reference would have refreshed the digest of
+        # the image being replaced -- a successful-looking no-op, which is
+        # the worst kind.
+        repo = f"{owner}/{name}"
         current = reference.split("@", 1)[1] if reference else ""
         try:
             latest = ghcr_digest(repo)

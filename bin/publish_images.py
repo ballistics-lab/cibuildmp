@@ -6,12 +6,12 @@ The same work `.github/workflows/publish-docker-images.yml` does, runnable
 by hand. Two reasons it exists rather than the workflow being the only
 way:
 
-* **Visibility.** A GHCR package is created private, and the workflow's
-  own "Make the package public" step usually cannot fix that --
-  `github.token` lacks admin over the package (record 0033 hit exactly
-  this: eight images pushed, every one private, an anonymous pull of a
-  freshly-pinned digest answering `401`). Your own `gh` login normally
-  *does* have that right, so `--public` here actually works.
+* **Visibility.** Record 0033 hit this once for real: eight images
+  pushed, every one private, an anonymous pull of a freshly-pinned digest
+  answering `401`. It cannot be *fixed* from here -- there is no REST
+  resource for a container package's visibility, only the settings UI --
+  but `--make-visible` reads it back for every cell, so the state is one
+  command away instead of a surprise in a consumer's build.
 * **Emulation cost.** Thirteen of the eighteen cells are foreign-arch
   images whose `dnf`/`apk` step runs under binfmt. On a slow runner that
   is a long job; on a workstation with the images half-cached it is often
@@ -26,8 +26,8 @@ Usage:
     bin/publish_images.py                    # build + push everything
     bin/publish_images.py --only manylinux_2_28_x86_64 musllinux_1_2_x86_64
     bin/publish_images.py --no-push          # build locally, push nothing
-    bin/publish_images.py --public           # also flip visibility
-    bin/publish_images.py --make-visible     # ONLY flip visibility, no rebuild
+    bin/publish_images.py --public           # also report visibility
+    bin/publish_images.py --make-visible     # ONLY report it, no rebuild
 
 Afterwards, record the digests:
 
@@ -47,6 +47,7 @@ pin file appears here with no edit.
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -98,32 +99,30 @@ def build_command(name: str, platform: str, owner: str, push: bool) -> list[str]
     return [*command, "."]
 
 
-def visibility_command(name: str, owner: str) -> list[str]:
-    # Personal accounts and organisations have different endpoints and
-    # there is no path that serves both. `ballistics-lab` is an org, but
-    # a fork under a personal account has to work too, so this is decided
-    # by `--user-account` rather than guessed from the name.
-    return [
-        "gh",
-        "api",
-        "-X",
-        "PATCH",
-        f"orgs/{owner}/packages/container/{name}/visibility",
-        "-f",
-        "visibility=public",
-    ]
+def current_visibility(name: str, owner: str, *, user_account: bool) -> str | None:
+    """`"public"` / `"private"`, or `None` if the package cannot be read.
 
-
-def user_visibility_command(name: str) -> list[str]:
-    return [
-        "gh",
-        "api",
-        "-X",
-        "PATCH",
-        f"user/packages/container/{name}/visibility",
-        "-f",
-        "visibility=public",
-    ]
+    Checked before trying to change anything, because the interesting
+    answer is usually "already public". `publish-docker-images.yml` has
+    its own visibility step, and when that step works there is nothing
+    left to do here -- reporting eighteen failures for eighteen packages
+    that are already in the desired state is worse than useless, since it
+    reads exactly like the real failure this script exists to fix.
+    """
+    endpoint = (
+        f"user/packages/container/{name}"
+        if user_account
+        else f"orgs/{owner}/packages/container/{name}"
+    )
+    probe = subprocess.run(
+        ["gh", "api", endpoint], check=False, capture_output=True, text=True
+    )
+    if probe.returncode:
+        return None
+    try:
+        return json.loads(probe.stdout).get("visibility")
+    except json.JSONDecodeError:
+        return None
 
 
 def main() -> int:
@@ -147,8 +146,8 @@ def main() -> int:
     parser.add_argument(
         "--public",
         action="store_true",
-        help="also set each package public afterwards (needs a gh login with "
-        "admin over the package -- this is the part the workflow cannot do)",
+        help="after each push, read the package's visibility back and warn "
+        "if it is not public (it cannot be changed from any API)",
     )
     parser.add_argument(
         "--user-account",
@@ -159,11 +158,10 @@ def main() -> int:
     parser.add_argument(
         "--make-visible",
         action="store_true",
-        help="ONLY set the packages public -- build and push nothing. The "
-        "step to reach for when a workflow run published everything "
-        "correctly and left it all private, which is the normal outcome "
-        "(record 0033), and rebuilding eighteen images to fix a flag "
-        "would be absurd.",
+        help="ONLY report each package's visibility -- build and push "
+        "nothing. Visibility cannot be changed from an API at all (the "
+        "PATCH endpoint does not exist); this tells you which packages "
+        "need the settings UI, without rebuilding anything.",
     )
     parser.add_argument(
         "--dry-run", action="store_true", help="print commands, run nothing"
@@ -183,29 +181,51 @@ def main() -> int:
             return 2
         selected = [cell for cell in selected if cell[0] in set(args.only)]
 
-    def make_visible(name: str) -> bool:
-        command = (
-            user_visibility_command(name)
-            if args.user_account
-            else visibility_command(name, args.owner)
-        )
-        print("  $ " + " ".join(command))
+    def check_visible(name: str) -> bool:
+        """Report whether `name` is publicly pullable. Cannot change it.
+
+        There is no REST resource for a container package's visibility --
+        `PATCH .../packages/container/<name>/visibility` answers 404 with
+        a token carrying `write:packages` and `delete:packages` both, and
+        the same 404 comes back inside Actions. The package settings UI is
+        the only way to change it. An earlier version of this script tried
+        that endpoint anyway and reported eighteen confident failures for
+        eighteen packages that were already public, which is worse than
+        doing nothing.
+
+        Reading it back is still worth a flag of its own: record 0033's
+        failure was real once (eight images published private, an
+        anonymous pull answering 401), and this turns that into a
+        one-line answer instead of a surprise in someone else's build.
+        """
         if args.dry_run:
+            print("  (would read visibility)")
             return True
-        if subprocess.run(command, check=False).returncode:
-            print(f"  !! could not set {name} public -- flip it by hand")
+        visibility = current_visibility(
+            name, args.owner, user_account=args.user_account
+        )
+        if visibility == "public":
+            print("  public")
+            return True
+        if visibility is None:
+            print(f"  !! cannot read {name} -- not published, or no access")
             return False
-        return True
+        print(
+            f"  !! {name} is '{visibility}' -- anonymous pulls will fail. "
+            f"Make it public in the package settings UI; there is no API "
+            f"for this."
+        )
+        return False
 
     failed: list[str] = []
 
     if args.make_visible:
         for index, (name, _platform) in enumerate(selected, start=1):
             print(f"\n[{index}/{len(selected)}] {name}")
-            if not make_visible(name):
+            if not check_visible(name):
                 failed.append(name)
         if failed:
-            print(f"\n{len(failed)} could not be made public: {', '.join(failed)}")
+            print(f"\n{len(failed)} not publicly pullable: {', '.join(failed)}")
             return 1
         print("\nAll selected packages are public.")
         return 0
@@ -226,7 +246,7 @@ def main() -> int:
             print(f"  !! {name} failed, continuing")
             continue
         if args.public and not args.no_push:
-            make_visible(name)
+            check_visible(name)
 
     if failed:
         print(f"\n{len(failed)} failed: {', '.join(failed)}")

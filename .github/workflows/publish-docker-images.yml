@@ -131,40 +131,45 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
 
-      - name: Make the package public
-        # Record 0033 found this the hard way: the first real publish run
-        # pushed eight images and every one of them came out **private**,
-        # so an unauthenticated `docker pull` of a digest this repo had
-        # just pinned returned `401 unauthorized`. That was the one thing
-        # standing between the pin table and a credential-less consumer
-        # being able to use it at all, and it was fixed by hand. Doing it
-        # here is what stops the next new image -- and record 0043 adds
-        # fifteen of them at once -- from landing in the same state.
+      - name: Check the package is publicly pullable
+        # Checks, deliberately -- it does not try to change anything.
         #
-        # `|| true`, and deliberately not a failure: `github.token` often
-        # **cannot** do this. The packages visibility endpoint wants
-        # `write:packages` on a token with admin rights over the package,
-        # which the default workflow token generally does not have, and a
-        # newly-created package is owned by the actor rather than by the
-        # workflow. When it fails the publish itself is still correct --
-        # the image is pushed and its digest is recorded below -- and the
-        # visibility flip stays the manual step it already was. To make it
-        # actually automatic, give the repo a PAT with `write:packages`
-        # and swap `github.token` for it here.
+        # This step first tried `gh api -X PATCH
+        # .../packages/container/<name>/visibility`, on the theory
+        # (record 0033) that a freshly-published package lands private and
+        # an anonymous pull of a digest this repo just pinned would answer
+        # `401`. Both halves of that turned out wrong, and the run that
+        # published record 0044's eighteen images is the evidence:
         #
-        # The owner check picks the right endpoint: personal accounts use
-        # `/user/packages/...`, organisations `/orgs/<owner>/packages/...`
-        # -- there is no single path that works for both.
+        #   * **The PATCH 404s**, in the workflow and from a local `gh`
+        #     login carrying `write:packages` + `delete:packages` alike.
+        #     There is no REST resource for changing a container
+        #     package's visibility; the package settings UI is the only
+        #     way. So the old step was aiming at a URL that does not
+        #     exist and then blaming the token.
+        #   * **The packages were already public** before it fired -- the
+        #     same job log shows `"visibility": "public"` above the PATCH.
+        #     A package published by Actions into a public repository
+        #     comes out public.
+        #
+        # What is left is worth keeping, because 0033's failure was real
+        # once: read the visibility back and say so if it is not public.
+        # That turns "the pins are unusable anonymously" into a warning at
+        # publish time instead of a `401` in some consumer's build, and it
+        # names the one action that actually fixes it.
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [ "${{ github.repository_owner_id }}" = "${{ github.actor_id }}" ]; then
-            ENDPOINT="user/packages/container/${{ matrix.image }}/visibility"
+            ENDPOINT="user/packages/container/${{ matrix.image }}"
           else
-            ENDPOINT="orgs/${{ github.repository_owner }}/packages/container/${{ matrix.image }}/visibility"
+            ENDPOINT="orgs/${{ github.repository_owner }}/packages/container/${{ matrix.image }}"
           fi
-          gh api -X PATCH "$ENDPOINT" -f visibility=public || \
-            echo "::warning::could not set ${{ matrix.image }} public -- flip it by hand, or give this workflow a PAT with write:packages"
+          VISIBILITY=$(gh api "$ENDPOINT" --jq .visibility 2>/dev/null || echo unknown)
+          echo "${{ matrix.image }}: $VISIBILITY"
+          if [ "$VISIBILITY" != "public" ]; then
+            echo "::warning::${{ matrix.image }} is '$VISIBILITY' -- an anonymous pull of the digest below will fail. Make it public in the package settings UI (there is no API for this)."
+          fi
 
       - name: Record the pinned digest
         # The `:latest` tag above is only what makes this image easy to
