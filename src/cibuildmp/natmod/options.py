@@ -41,6 +41,112 @@ class ConfigError(Exception):
     pass
 
 
+# ── where a key is allowed to live ────────────────────────────────────
+#
+# Record 0048: `build`/`skip` were read from the **top level** by natmod
+# and from **`[usermod]`** by usermod, and the wrong placement produced
+# no error, no warning and no diagnostic -- just a target you asked to
+# skip getting built. It cost a real test: `test_only_overrides_skip`
+# wrote its `skip` inside `[natmod]`, where nothing read it, and asserted
+# for years that `--only` overrode a selector that was never applied.
+#
+# Top level is canonical for both modes now. The argument is what these
+# keys *do*: `build`/`skip` filter identifiers, and an identifier names
+# one whole invocation's worth of work rather than anything mode-specific
+# -- the same reason `micropython` and `output-dir` were already
+# top-level in both. cibuildwheel, which has no modes to split over, puts
+# its own equivalents in exactly the same place (`CIBW_BUILD`/`CIBW_SKIP`
+# under `[tool.cibuildwheel]`).
+#
+# `archs`/`arch-flags` stay deliberately dual-read for natmod (top level
+# *or* `[natmod]`) and are not listed here. That predates 0048 and is not
+# the trap: both placements work, so neither is silent.
+TOP_LEVEL_ONLY_KEYS: frozenset[str] = frozenset(
+    {
+        "micropython",
+        "output-dir",
+        "build",
+        "skip",
+        "version",
+        "mpy-abi",
+        "micropython-submodules",
+    }
+)
+
+# Keys `[natmod]` itself may carry: the two dual-read axis keys plus the
+# five per-target ones `build_options()`'s own `opt()` layers over.
+NATMOD_TABLE_KEYS: frozenset[str] = frozenset(
+    {
+        "archs",
+        "arch-flags",
+        "module-dir",
+        "make-target",
+        "runs-on",
+        "extra-make-args",
+        "pre-build-command",
+    }
+)
+
+# `[[overrides]]` layers over `[natmod]` through the same per-target
+# `opt()`, so it takes the same five keys plus its own `select`. Notably
+# *not* `arch-flags`: that one is resolved by the global `opt()` against
+# the top level and `[natmod]`, never per target, so an `arch-flags` in
+# an override table would be silently ignored -- exactly the shape 0048
+# is about.
+OVERRIDE_TABLE_KEYS: frozenset[str] = frozenset(
+    {
+        "select",
+        "module-dir",
+        "make-target",
+        "runs-on",
+        "extra-make-args",
+        "pre-build-command",
+    }
+)
+
+
+def check_table_keys(
+    table: Mapping[str, Any],
+    *,
+    where: str,
+    known: frozenset[str],
+    error: type[Exception] = ConfigError,
+    allowed_extra: frozenset[str] = frozenset(),
+) -> None:
+    """Reject a key that this table does not read.
+
+    The half of record 0048 that matters most, and the cheapest: a key in
+    the wrong table was previously indistinguishable from a key that was
+    honoured, so a typo (`module-dr`) and a misplacement (`skip` under
+    `[natmod]`) both produced a successful build of the wrong thing. An
+    unknown key here is an error rather than a warning for that reason --
+    a config that fails loudly is strictly better than a build that
+    silently ignored what it was told.
+
+    A key that belongs at the top level gets its own message naming where
+    it should go, because "unknown key 'skip'" would be actively
+    misleading about a key the tool very much knows.
+
+    `allowed_extra` is for keys a table tolerates without this function
+    knowing their meaning -- `[usermod]`'s own per-port sub-tables, and
+    its deprecated `build`/`skip`, which are diagnosed separately.
+    """
+    for key in table:
+        if key in known or key in allowed_extra:
+            continue
+        if key in TOP_LEVEL_ONLY_KEYS:
+            raise error(
+                f"{where}: `{key}` is read from the top level of the config, "
+                f"not from {where} -- move it above the {where} line. It "
+                f"applies to the whole invocation rather than to one build "
+                f"mode, so there is only one place it can mean anything."
+            )
+        raise error(
+            f"{where}: unknown key `{key}`. Known keys here: "
+            f"{', '.join(sorted(known))}."
+        )
+
+
 def _as_list(value: Any, key: str) -> list[str]:
     """Accept a list, or a shell-ish string, for list-valued options.
 
@@ -121,6 +227,13 @@ class Options:
         if not isinstance(overrides, list):
             raise ConfigError("[[overrides]] must be an array of tables")
         publish = dict(raw.get("publish") or {})
+
+        check_table_keys(natmod, where="[natmod]", known=NATMOD_TABLE_KEYS)
+        for override in overrides:
+            if isinstance(override, dict):
+                check_table_keys(
+                    override, where="[[overrides]]", known=OVERRIDE_TABLE_KEYS
+                )
 
         def opt(key: str, default: Any = None) -> Any:
             # Environment beats the file for every global option. Keys are

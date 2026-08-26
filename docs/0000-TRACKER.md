@@ -70,10 +70,6 @@ later; and cheap-with-strong-evidence beats expensive-and-speculative.
       `riscv64`) are emulated on every runner GitHub offers, and Alpine's own
       `community/micropython` excludes the first two outright, so they belong
       with [0044]'s descope decision rather than here
-- [ ] [0048] `build`/`skip` live in opposite tables in the two modes | cheap, and
-      a *silent* wrong build. Placed here rather than lower because it makes
-      selector tests untrustworthy until fixed -- it already cost one that
-      passed vacuously -- so it wants doing before more selector work
 - [ ] [0032] wire `qemu` to `ensure_image()` | the last port with a published,
       pinned image and no caller. Small. Worth doing after [0044]'s output
       verification is extended, so the new path is checked from day one rather
@@ -116,6 +112,7 @@ later; and cheap-with-strong-evidence beats expensive-and-speculative.
 
 ### Implemented
 
+- [x] [0048] `build`/`skip` are top-level in both modes, and a misplaced or misspelt key in a mode table is an error | fixed 2026-08-26; the audit it asked for also found `CIBMP_MICROPYTHON`/`CIBMP_OUTPUT_DIR` silently ignored in usermod mode, and `UsermodConfigError` never caught by the CLI -- both fixed alongside
 - [x] [0043] `unix` adopts cibuildwheel's model in full: native per-target images, PEP 600/656, full arch x libc matrix (epic) | the *decision* shipped -- implemented by [0044], whose row above carries the work that remains. Kept here as the design argument, which is still where the reasoning lives
 - [x] [0042] `windows` wired to `ensure_image()`; `emsdk.py`/`llvmmingw.py` deleted | all three arches verified live, including an anonymous pull of the published digest; that image was pushed by hand rather than by `publish-docker-images.yml` — see the record
 - [x] [0041] documentation restructure — this scheme | supersedes the monolithic `docs/BACKLOG.md`

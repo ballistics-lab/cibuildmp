@@ -228,3 +228,53 @@ def test_runs_on_defaults_and_can_be_overridden(tmp_path):
         t.arch: options.build_options(t, env={}).runs_on for t in options.targets()
     }
     assert resolved == {"x64": "ubuntu-latest", "armv6m": "ubuntu-24.04-arm"}
+
+
+# ── record 0048: a key in the wrong table is no longer silent ───────────
+
+
+def test_a_top_level_key_inside_the_natmod_table_names_where_it_goes(tmp_path):
+    # The exact trap that cost `test_only_overrides_skip` its meaning:
+    # `skip` under `[natmod]` was read by nothing, and `archs` right next
+    # to it is dual-read and works, so there was every reason to expect
+    # this to work too. "unknown key" would be a lie here -- the tool
+    # knows precisely what `skip` means, just not in this table.
+    write(tmp_path, 'micropython = "v1.28.0"\n[natmod]\nskip = "*-armv6m"\n')
+
+    with pytest.raises(ConfigError, match="read from the top level"):
+        Options.load(tmp_path)
+
+
+def test_an_unknown_key_in_the_natmod_table_is_an_error(tmp_path):
+    write(tmp_path, '[natmod]\nmodule-dr = "natmod"\n')
+
+    with pytest.raises(ConfigError, match="unknown key `module-dr`"):
+        Options.load(tmp_path)
+
+
+def test_archs_stays_dual_read_and_is_not_flagged(tmp_path):
+    # Predates 0048 and is not the trap: both placements work, so neither
+    # is silent. Asserted so the new check does not quietly take it away.
+    write(tmp_path, '[natmod]\narchs = ["x64"]\n')
+
+    assert Options.load(tmp_path).archs == ["x64"]
+
+
+def test_arch_flags_in_an_overrides_table_is_an_error(tmp_path):
+    # `arch-flags` is resolved by the global opt() against the top level
+    # and `[natmod]`, never per target, so an override carrying one was
+    # ignored outright -- the same shape as the `skip` trap.
+    write(
+        tmp_path,
+        """
+        micropython = "v1.28.0"
+        [natmod]
+        archs = ["x64"]
+        [[overrides]]
+        select = "*"
+        arch-flags = "rv32imc"
+        """,
+    )
+
+    with pytest.raises(ConfigError, match=r"\[\[overrides\]\]: unknown key"):
+        Options.load(tmp_path)

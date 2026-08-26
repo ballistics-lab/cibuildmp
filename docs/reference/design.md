@@ -138,6 +138,21 @@ screaming-snake-cased: `CIBMP_BUILD`, `CIBMP_SKIP`, `CIBMP_MICROPYTHON`,
 `CIBMP_ARCH_FLAGS`, … Precedence, lowest to highest: defaults → config
 file → `[[overrides]]` matching the identifier → environment → CLI flags.
 
+**Where a key goes is part of the schema, and getting it wrong is an
+error** ([0048]). The keys above the first table header — `micropython`,
+`output-dir`, `build`, `skip`, `version`, `mpy-abi`,
+`micropython-submodules` — are invocation-wide and are read **only** from
+the top level, in both build modes. Writing one inside `[natmod]` or
+`[usermod]` fails with a message naming where it belongs; so does any key
+a mode table does not read at all (a typo, or an `arch-flags` inside
+`[[overrides]]`). Until [0048] every one of those was silently ignored,
+which meant a misplaced `skip` produced a successful build of something
+you had asked not to build. `archs`/`arch-flags` remain the one deliberate
+exception: natmod reads them from the top level *or* `[natmod]`, and both
+work, so neither is silent.
+
+[0048]: ../records/0048-build-skip-live-in-opposite-tables.md
+
 Usermod's own `[usermod]` / `[usermod.<port>]` config shape is documented in
 [0023] rather than transcribed here — it is a genuinely different shape
 (no ABI axis, per-port sub-tables), not a variant of the table above.

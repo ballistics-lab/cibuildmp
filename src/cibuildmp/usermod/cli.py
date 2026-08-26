@@ -29,7 +29,7 @@ from ..natmod.stepsummary import write_step_summary
 from ..natmod.toolchains import ToolchainError
 from . import orchestrate
 from .build import UsermodBuildError
-from .options import UsermodOptions
+from .options import UsermodConfigError, UsermodOptions
 from .targets import (
     UnknownAxisError,
     UnknownPortError,
@@ -52,7 +52,13 @@ def run(
     try:
         options = UsermodOptions.load(package_dir, config_file, preread=preread)
         targets = options.targets()
-    except (UnknownPortError, UnknownAxisError) as exc:
+    # UsermodConfigError belongs here as much as the other two and was
+    # simply never added: until record 0048 it had one raise site (a
+    # `[usermod.<port>]` table for a port with no axis yet), so nobody
+    # had hit it from the CLI and it surfaced as a raw traceback. It has
+    # several raise sites now -- every misplaced or misspelt key -- and a
+    # config mistake is the most ordinary error this tool has.
+    except (UnknownPortError, UnknownAxisError, UsermodConfigError) as exc:
         if args.debug_traceback:
             raise
         print(f"cibuildmp: error: {exc}", file=sys.stderr)
