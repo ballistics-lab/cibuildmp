@@ -254,18 +254,18 @@ own **M0**–**M5**), each self-provisioning its own toolchain (**D3**) —
 adopted in all three consuming repos and verified on real CI, arch by
 arch, not just `--dry-run`.
 
-| Arch        | Toolchain              | Provisioning            |
-| ----------- | ---------------------- | ----------------------- |
-| `x64`       | host gcc               | none needed             |
-| `x86`       | host gcc (`-m32`)      | apt only[^apt-x86]      |
-| `armv6m`    | `arm-none-eabi-`       | self-downloaded, cached |
-| `armv7m`    | `arm-none-eabi-`       | self-downloaded, cached |
-| `armv7emsp` | `arm-none-eabi-`       | self-downloaded, cached |
-| `armv7emdp` | `arm-none-eabi-`       | self-downloaded, cached |
-| `xtensa`    | `xtensa-lx106-elf-`    | self-downloaded, cached |
-| `xtensawin` | `xtensa-esp32-elf-`    | self-downloaded, cached |
-| `rv32imc`   | `riscv64-unknown-elf-` | self-downloaded, cached |
-| `rv64imc`   | `riscv64-unknown-elf-` | self-downloaded, cached |
+| Arch        | Toolchain              | Provisioning            | Status |
+| ----------- | ---------------------- | ----------------------- | ------ |
+| `x64`       | host gcc               | none needed             | ✅     |
+| `x86`       | host gcc (`-m32`)      | apt only[^apt-x86]      | ✅     |
+| `armv6m`    | `arm-none-eabi-`       | self-downloaded, cached | ✅     |
+| `armv7m`    | `arm-none-eabi-`       | self-downloaded, cached | ✅     |
+| `armv7emsp` | `arm-none-eabi-`       | self-downloaded, cached | ✅     |
+| `armv7emdp` | `arm-none-eabi-`       | self-downloaded, cached | ✅     |
+| `xtensa`    | `xtensa-lx106-elf-`    | self-downloaded, cached | ✅     |
+| `xtensawin` | `xtensa-esp32-elf-`    | self-downloaded, cached | ✅     |
+| `rv32imc`   | `riscv64-unknown-elf-` | self-downloaded, cached | ✅     |
+| `rv64imc`   | `riscv64-unknown-elf-` | self-downloaded, cached | ✅     |
 
 [^apt-x86]: `apt install gcc-multilib` — no downloadable tarball exists for this one; **D3**'s own "why not docker for x86" note.
 
@@ -273,39 +273,44 @@ arch, not just `--dry-run`.
 
 Upstream MicroPython has 20 ports (`ports/*` in a real checkout); every
 one of them is listed below for orientation, not just the ones this
-project covers. This is `usermod/build.py`'s own build-driver layer
-(`docs/BACKLOG.md`'s **M6**–**M9**) — live-verified against a real
-MicroPython checkout, including a real custom `USER_C_MODULES` module
-for every ✅ row.
+project covers. This is `cibuildmp/platforms/usermod/build.py`'s own
+build-driver layer (`docs/BACKLOG.md`'s **M6**–**M9**) — live-verified
+against a real MicroPython checkout, including a real custom
+`USER_C_MODULES` module for every ✅ row.
 
-**Wired into the `cibuildmp` CLI now (M9b)**: a `[usermod]` table in
-`cibuildmp.toml` (plus per-port `[usermod.<port>]` sub-tables for the
-real axis — `archs` for `unix`/`windows`, `boards` for `esp32`) is
-auto-detected the same way `[natmod]` already is — no `--mode`/
-`--platform` flag needed unless a config genuinely defines both tables
-at once. Verified live end to end, not just against the hermetic
-suite: a real `[usermod]` config with a real custom C module, run
-through the actual `cibuildmp` CLI (no mocking), produced a genuine
-linked `unix-manylinux_2_28_x86_64` binary that runs and actually calls
-into that module.
+**Wired into the `cibuildmp` CLI**: every usermod port is its own
+top-level table in `cibuildmp.toml` — `[unix]`, `[windows]`, `[qemu]`,
+`[webassembly]`, `[esp32]`, sibling to `[natmod]`, each with its own real
+axis (`archs` for `unix`/`windows`, `boards` for `esp32`) — auto-detected
+by table presence the same way `[natmod]` already is, and writing a
+table (even an empty one) is what selects it. More than one platform
+table, `[natmod]` included, can build in a single invocation with no
+flag at all (record 0051's Phase F); `--platform`/`CIBMP_PLATFORM` is an
+optional filter over all six platform names, not a mode selector, the
+way upstream's own `--platform` names an OS. Verified live end to end,
+not just against the hermetic suite: a real `[unix]` config with a real
+custom C module, run through the actual `cibuildmp` CLI (no mocking),
+produced a genuine linked `unix-manylinux_2_28_x86_64` binary that runs
+and actually calls into that module.
 See `docs/BACKLOG.md`'s **D23**/**M9b** for the full design (identifier
-scheme, why there's no `package.json` for usermod output, what's
-deliberately not wired yet — `[[overrides]]`, `extra-files`).
+scheme, why there's no `package.json` for usermod output) and record
+0051 for the config-tree shape, the shared `[[overrides]]`/`inherit`
+(now merged with natmod's own), and the `platforms/` package layout.
+`extra-files` (natmod's own `[publish]` mechanism) is still not wired
+for usermod.
 
 **Exercised through the real `action.yml` end to end** —
-[`examples/template`](examples/template) builds the default
-`unix` targets through the actual action on every push
-(`build-examples.yml`), not just the hermetic test suite — real linked binaries, collected with their
-executable bit intact, confirmed live on CI. `unix` and `webassembly`
-now build **Docker-only** (`docs/BACKLOG.md`'s own **D28**/**D30**: one
-Docker image per port, no bare-host fallback for either) —
-[`examples/template`](examples/template) proves
-the same path for `webassembly`, which has no arch axis and one
-combined image with emsdk baked in. `windows`/`qemu`/`esp32` are not
-wired into `action.yml` yet — see `docs/BACKLOG.md`'s own **D28** for
-the plan. The composite actions above (`build-usermod-*`) remain the
-supported, verified production path for the ports `action.yml` doesn't
-cover yet.
+[`examples/template`](examples/template) builds `unix`, `windows` and
+`webassembly` targets, all three in one invocation, through the actual
+action on every push (`build-examples.yml`), not just the hermetic test
+suite — real linked binaries and executables, collected with their
+executable bit intact, confirmed live on CI. All three build
+**Docker-only** (`docs/BACKLOG.md`'s own **D28**/**D30** for `unix`/
+`webassembly`; record 0042 for `windows`): one Docker image per port,
+no bare-host fallback. `qemu`/`esp32` are not wired into `action.yml`
+yet — see `docs/BACKLOG.md`'s own **D28** for the plan. The composite
+actions above (`build-usermod-*`) remain the supported, verified
+production path for the ports `action.yml` doesn't cover yet.
 
 | Port          | Target                                           | Provisioning                            | Status              |
 | ------------- | ------------------------------------------------ | --------------------------------------- | ------------------- |
@@ -366,16 +371,20 @@ own `package.json` as part of the normal build once `version` is set, the
 same way cibuildwheel has no publish step either. Adopted in all three
 consuming repos' natmod workflows and verified green on real CI, arch by
 arch (`micropython-bclibc`, `a7p`, `micropython-wasm3`) -- not just
-`--dry-run`. usermod's own build drivers exist too (see
-[Target support](#target-support) above) but aren't wired into the CLI's
-own `--mode` yet -- that's the next real milestone, not the composite
-actions below.
+`--dry-run`. usermod's own build drivers are wired into the CLI too now
+(see [Target support](#target-support) above) -- `unix`/`windows`/
+`webassembly` are exercised live through the real `action.yml`
+(`build-examples.yml`), all three in one invocation, no separate `--mode`
+flag needed. What is still open is the *third* consuming repo step:
+none of `micropython-bclibc`/`a7p`/`micropython-wasm3` has repinned its
+own usermod workflow to the `cibuildmp` CLI yet -- deliberately
+sequenced after record 0051 fully lands, since the config tree has
+moved more than once during that record's own work.
 
-Until usermod is wired into the CLI and verified against real CI in a
-consuming repo the way natmod now is, the composite actions below stay
-the supported path for it -- natmod's own composite actions
-(`fetch-micropython`, `build-natmod`) are still here too, unchanged, for
-anything that hasn't repinned to the `cibuildmp` CLI yet.
+Until a repo repins its own usermod workflow to the CLI, the composite
+actions below stay the supported path for it -- natmod's own composite
+actions (`fetch-micropython`, `build-natmod`) are still here too,
+unchanged, for anything that hasn't repinned to the `cibuildmp` CLI yet.
 
 ## Composite actions (`.github/actions/`)
 

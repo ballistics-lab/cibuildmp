@@ -1086,3 +1086,57 @@ pass — confirmed broken before, confirmed resolving after.
 
 Phase I (README's target-support tables, `action.yml` review, doc
 consolidation) is what remains of this record's own scope.
+
+---
+
+## Addendum, 2026-08-26 — Phase I landed: README reconciled, `action.yml`
+## confirmed unchanged, record closed
+
+Landed the same day as Phases E–H, closing this record out.
+
+- **`action.yml` reviewed, no change needed** — confirmed directly
+  against its actual `inputs:` block, not assumed: it has no `platform`
+  input today (`package-dir`/`output-dir`/`config-file`/`only`/`archs`/
+  `extras` only), matching upstream's own `CIBW_BUILD` shape (env var,
+  never an action.yml input). `--platform`/`CIBMP_PLATFORM` stays
+  reachable the same way every other `CIBMP_*` override already is — via
+  a step-level `env:` block on the `uses: cibuildmp` step — with nothing
+  to add here.
+- **README's "Target support"/"Roadmap" sections reconciled.** These had
+  drifted well past what Phase H alone caused — some of it predates this
+  entire session (`--mode`, a flag retired well before Phase F; `[usermod]`/
+  `[usermod.<port>]`, removed by Phase F; "usermod isn't wired into the
+  CLI yet", false since long before this session's own start). Confirmed
+  with the user directly rather than silently deciding how far to fix:
+  scope settled on the two sections actually touched (`Target support`,
+  `Roadmap`), leaving the rest of the file as-is. Concretely: natmod's
+  own arch table gained the same `Status` column usermod's already had
+  (all ✅, additive); the usermod prose now describes six sibling
+  platform tables and `--platform` as an optional six-name filter rather
+  than a `--mode` selector; `[[overrides]]` is no longer listed as
+  "deliberately not wired" (Phase G wired it); `action.yml`'s own
+  coverage is corrected to `unix`/`windows`/`webassembly` (`windows` was
+  wired by record 0042, after the original text was written) with
+  `qemu`/`esp32` still open; the Roadmap section's claim that usermod
+  "isn't wired into the CLI's own `--mode` yet" is replaced with the real
+  open item — none of the three consuming repos has repinned its own
+  usermod workflow to the CLI yet (record 0038's own adoption step,
+  deliberately sequenced after this record).
+- **A live question the Phase I README pass surfaced, answered and
+  recorded rather than silently left implicit:** does a bare `[unix]`/
+  `[esp32]` config with no project module produce a stock, vanilla
+  MicroPython firmware? Traced through the code (`resolve_user_c_modules()`
+  never checks that `module-dir` exists; `combined_manifest()` explicitly
+  treats an empty `FROZEN_MANIFEST` as valid upstream behaviour, "no
+  frozen modules at all") — mechanically, this would probably work. But
+  `docs/reference/design.md`'s own Non-goals section already draws this
+  line deliberately: `cibuildmp` is not a stock-firmware builder (that's
+  `mpbuild`); every build is meant to carry a project's own module and be
+  read as a verification output. Untested and unsupported, not merely
+  undocumented — recorded here so the next person who wonders the same
+  thing finds the answer instead of re-deriving it.
+
+Every point in this record (1/2/3/4/5/6/7/8) is now implemented. Nothing
+about it is still open; the module-dir/user-c-modules key split (sixth
+addendum) is a separate, independently-decided item, not part of this
+record's own remaining scope.

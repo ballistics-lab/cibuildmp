@@ -118,7 +118,9 @@ physically under `cibuildmp/platforms/` now too (Phase H), each a
 dispatch reaches only through a `PLATFORM_FAMILY` registry — it never
 names either module directly, so a future platform family (zephyr,
 [0022]) costs one new module plus registry entries, not a `cli.py`
-change. Still open: Phase I (docs/README consolidation).
+change. Phase I (README's target-support tables, `action.yml` review,
+doc consolidation) landed the same day — [0051] is fully implemented as
+of that phase; nothing about it is still open.
 
 [0043]: ../records/0043-unix-adopts-cibuildwheel-native-image-model.md
 [0044]: ../records/0044-unix-native-images-landed.md

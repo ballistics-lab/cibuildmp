@@ -53,22 +53,33 @@ done and the fourth, the one the whole thing is named after, is not:
 | Docker-only, isolated | done, both modes; `esp32` the one exception ([0028]) |
 | no bare-host builds | done, same exception |
 | a foreign runner still builds | proven live, both directions ([0049]) |
-| **behaves like cibuildwheel** | **no** |
+| **behaves like cibuildwheel** | **the identifier/config gap is closed ([0051]); the acceptance test is what's left** |
 
-The last row is the task, and [0051] is why it fails. Upstream's whole shape is
-that **the identifier is the complete description of one build** and
-`build`/`skip`/`--only`/`--archs` are one mechanism over it. natmod has that
-(`mpy6.3-natmod-x64`). usermod -- half the tool -- has no version axis at all,
-so it cannot build two MicroPython releases, cannot select one, and silently
-drops every tag after the first.
+The last row *was* the task, and [0051] -- now fully landed, epic, points
+1-8 -- was why it failed. Upstream's whole shape is that **the identifier
+is the complete description of one build** and `build`/`skip`/`--only`/
+`--archs` are one mechanism over it. natmod always had that
+(`mpy6.3-natmod-x64`); usermod did not -- no version axis at all, so it
+could not build two MicroPython releases, could not select one, and
+silently dropped every tag after the first. [0051] closed that (both
+modes are real lists now) and went considerably further while it was at
+it: the config tree is flat (`[unix]` etc. sibling to `[natmod]`, table
+presence selects a platform, more than one builds in one invocation with
+no flag), `[[overrides]]` is one shared mechanism with `inherit`, and
+`natmod`/`usermod` are physically one `platforms/` package behind a
+registry `cli.py` never special-cases. See its own row below and its
+record's eight addenda for the full account.
 
-And the acceptance test has never run. [0038] is "adopt cibuildmp in the three
-consuming repos", which is the only thing that answers whether this is
-cibuildwheel for MicroPython or infrastructure that resembles it. Its blast
-radius grew this session rather than shrinking: every `unix` identifier renamed
-([0044]), `--toolchain` and `--print-build-matrix` deleted ([0049]/[0050]),
-natmod now requiring Docker, and [0051]'s Phase F flattening the config tree
-out from under every existing usermod config in the same session.
+What is left is the acceptance test, and it has still never run. [0038]
+is "adopt cibuildmp in the three consuming repos", the only thing that
+answers whether this is cibuildwheel for MicroPython or infrastructure
+that resembles it. Its blast radius grew across this whole session rather
+than shrinking: every `unix` identifier renamed ([0044]), `--toolchain`
+and `--print-build-matrix` deleted ([0049]/[0050]), natmod now requiring
+Docker, and [0051]'s own config-tree/identifier changes on top of all of
+it. That growth is over now, not still happening -- [0051] landing in
+full is exactly what makes this the right moment for [0038], not a reason
+to keep deferring it further.
 
 That ordering is deliberate and is the argument for the list below: finish
 changing the identifiers *before* asking three repos to migrate onto them.
@@ -80,88 +91,6 @@ disagreed with rather than guessed at: things that are *broken* beat things that
 are *missing*; work that unblocks verification beats work that gets verified
 later; and cheap-with-strong-evidence beats expensive-and-speculative.
 
-- [ ] [0051] one selector for both modes, and an identifier that names what a
-      build is compatible with | **points 1/2/3/5/7/8 landed 2026-08-26;
-      4/6's target architecture is now decided and phased (E–I), Phases E
-      and F landed the same day.** natmod's `mpy-abi` can now state the ABI axis
-      directly (list) as well as derive it from tags (string, unchanged);
-      usermod's `micropython` is a real list and its identifier leads with
-      the tag (`v1.29.0-unix-manylinux_2_28_x86_64`), so two releases no
-      longer overwrite each other's output. `select()`/`matches()`/
-      `parse_selector()` moved to one `cibuildmp/selector.py`, which also
-      gained brace expansion and `enable`/`groups` (upstream's own
-      `EnableGroup`) -- the six emulated-everywhere `unix` cells
-      (`ppc64le`/`s390x`/`riscv64`, both libcs) stopped being absent from
-      the default axis and became an opt-in group instead
-      (`--enable unix-emulated-everywhere`/`enable = [...]`), closing this
-      row's own musllinux-adjacent question from [0044] below. usermod
-      also gained `[[usermod.overrides]]`.
-      **The "deliberately deferred, separable epic" framing point 6 had is
-      retracted, not just updated** -- a live design session traced *why*
-      cibuildwheel gets away with one platform per invocation (host-OS
-      binding: macOS wheels cannot be built on a Linux runner) and found it
-      does not transfer here (cibuildmp's six platforms are already just
-      different Docker images on the same host, `esp32` included), so
-      "moving `--platform` splits one CI job into several" was importing a
-      constraint upstream has for a reason that does not apply to cibuildmp.
-      The real remaining work turned out bigger than points 4/6 alone,
-      though: making `[[overrides]]` genuinely shared (matching upstream)
-      without losing [0048]'s own no-silent-misplacement guarantee needs
-      per-platform *runtime* key validation instead of [0048]'s parse-time
-      partition, which only has meaning once natmod is a platform among six
-      -- and generalizing that turned into adopting upstream's own cascade
-      option-resolution model wholesale, written up as its own addendum to
-      [0048]. Phased as E (cascade mechanism, standalone, landed) through I
-      (docs consolidation) in the record's own third addendum. **Phase F
-      (flatten the config tree) also landed 2026-08-26**, in the same
-      session: `[usermod]` no longer exists, every usermod port is its own
-      top-level table (`[unix]`, `[windows]`, `[qemu]`, `[webassembly]`,
-      `[esp32]`) sibling to `[natmod]`, `ports = [...]` is gone (table
-      presence selects a platform), and -- confirmed live against
-      `examples/template/cibuildmp.toml`, not just designed -- one
-      invocation can now build natmod and several usermod ports together
-      with no `--platform` at all, `--platform` itself narrowing to a
-      comma-separated subset of six names rather than choosing a mode. See
-      the record's own fourth addendum for the full account, including the
-      one genuinely new diagnostic Phase F had to add
-      (`_reject_unknown_tables()`, since presence-based selection has no
-      equivalent to `ports = [...]`'s own "unknown port" check). **Phase G
-      ([[overrides]] unification, `inherit`, `Target.port`) also landed
-      2026-08-26**, same session: natmod's own `[[overrides]]` and Phase
-      F's `[[usermod-overrides]]` are one shared top-level `[[overrides]]`
-      now, `inherit = {extra-make-args = "append"|"prepend"|"none"}` is
-      real (confirmed live in a real `make` invocation's own args), and
-      an override's key is validated both loosely (valid on some
-      platform) at parse time and strictly (valid on the *matched*
-      identifier's own platform) at build time -- `Target.port` (natmod
-      gained one) is what makes the strict check possible for natmod too.
-      A real "raw traceback instead of a clean CLI error" bug in both
-      `natmod/cli.py` and `usermod/cli.py` (pre-existing, not introduced
-      by this phase) was found by this phase's own live testing and
-      fixed the same day. See the record's own fifth addendum. **Phase H
-      (physical `platforms/` restructuring + family-registry dispatch)
-      also landed 2026-08-26**, same session: `natmod/` and `usermod/`
-      physically merged under `src/cibuildmp/platforms/` -- the actual
-      cibuildwheel-shaped tree this whole redesign was for, not just the
-      config-level unification E--G already delivered, caught by the
-      user directly challenging whether that unification alone had
-      actually happened (it had not). Dispatch is a `PLATFORM_FAMILY`
-      registry, not two hardcoded branches -- corrected mid-session after
-      the user's own objection ("what happens when zephyr [0022] is
-      added, or any of upstream's ~20 real ports?") showed the original
-      two-branch design would need `cli.py` code edits per future family;
-      adding one now costs one new module plus registry entries, zero
-      `cli.py` changes. Two real bugs found by this phase's own live
-      testing and fixed the same day: a `build`-named function shadowing
-      the `build` submodule once natmod's CLI content merged into its own
-      package `__init__.py` (renamed `build_all()`), and `--platform ","`
-      silently building nothing (now a loud `ConfigError`, closing an
-      accidental fallback rather than working around it). See the
-      record's own seventh addendum. Phase I (README/docs consolidation)
-      is what remains. Still goes **before** [0038] rather than after --
-      the identifier shape is now settled and the config tree has now
-      already moved twice this session, so telling the three consuming
-      repos to migrate once, after I lands too, is still the right order
 - [ ] [0050] natmod's image needs one more publish, and CI has never been
       green on it | **start here, and it is nearly done.** The image gained
       `gcc-i686-linux-gnu` after v1.29.0 changed `dynruntime.mk`'s `x86` from
@@ -241,6 +170,7 @@ later; and cheap-with-strong-evidence beats expensive-and-speculative.
 
 ### Implemented
 
+- [x] [0051] one selector for both modes, and an identifier that names what a build is compatible with (epic, points 1-8, phased E-I) | landed 2026-08-26, one session: natmod's `mpy-abi` and usermod's `micropython` are both real lists (two ABIs/releases in one config no longer overwrite each other's output); `select()`/`matches()`/`enable`/`groups` unified in `cibuildmp/selector.py`; the config tree flattened -- `[unix]`/`[windows]`/`[qemu]`/`[webassembly]`/`[esp32]` are sibling top-level tables to `[natmod]`, table presence selects a platform, `--platform`/`CIBMP_PLATFORM` narrows a set of six rather than choosing a mode, and more than one platform builds in one invocation with no flag at all; one shared top-level `[[overrides]]` with `inherit = {key = "append"|"prepend"|"none"}`, validated loosely (any platform) at parse time and strictly (the matched identifier's own platform) at build time; `natmod`/`usermod` physically merged into `cibuildmp/platforms/`, `cli.py`'s dispatch reached only through a `PLATFORM_FAMILY` registry (never hardcoded branches, so a future platform family costs one module + registry entries, zero `cli.py` changes) -- corrected mid-session after review showed the original two-branch design wouldn't generalize to zephyr ([0022]) or upstream's other real ports; README/`action.yml` reconciled. Superseded [0048]'s parse-time key partition with upstream's own cascade model (that record's own addendum). Full phased account and every bug found by live testing (not just unit tests) are in the record's own eight addenda. Precedes [0038] deliberately -- the identifier shape and config tree are now settled, so the three consuming repos migrate once
 - [x] [0048] `build`/`skip` are top-level in both modes, and a misplaced or misspelt key in a mode table is an error | fixed 2026-08-26; the audit it asked for also found `CIBMP_MICROPYTHON`/`CIBMP_OUTPUT_DIR` silently ignored in usermod mode, and `UsermodConfigError` never caught by the CLI -- both fixed alongside
 - [x] [0031] the musllinux column | four of seven cells green, required, and in the default axis -- every musl cell with a runner it is native to. The mechanism is proven end to end and the column is no longer a separate story: its three remaining cells are `ppc64le`/`s390x`/`riscv64`, which is [0044]'s descope question above and not a musl question at all
 - [x] [0045] `--only` is a filter, not a forced identifier; `--archs auto`/`native`/`all` | both halves done -- `--only` resolves against every identifier that exists, and the vocabulary landed with [0049], which is also where the caution about `--print-build-identifiers` and host-dependence was resolved
