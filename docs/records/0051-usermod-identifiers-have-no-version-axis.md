@@ -166,6 +166,82 @@ empties `skip_config`, selects all architectures *and* turns on every enable
 group. [0045] implemented the first three; the fourth does not exist here
 because groups do not.
 
+## `--platform` is one level too high, and that is what makes the second axis look heterogeneous
+
+The deepest of these, and it dissolves the previous section rather than adding
+to it.
+
+`--platform` today means the *build mode*: `natmod` or `usermod`. Upstream's
+means the thing being built for -- and every value has its own module:
+
+    cibuildwheel/platforms/   android  ios  linux  macos  pyodide  windows
+
+cibuildmp has six build functions with six option shapes -- `build_unix`,
+`build_windows`, `build_qemu`, `build_webassembly`, `build_esp32`, and natmod's
+own `build_target` -- and hides all six behind two `--platform` values. **The
+ports are the platforms.** `natmod` is one too: one build function, one arch
+axis, one artifact kind.
+
+What that buys is not tidiness. Look at the axes once the level is right:
+
+| platform | axis |
+| --- | --- |
+| `natmod` | `archs` |
+| `unix`, `windows` | `archs` |
+| `qemu`, `esp32` | `boards` |
+| `webassembly` | none |
+
+**Every platform has exactly one axis.** The "second axis has three shapes"
+problem above exists *only* because `usermod` bundles five platforms and
+pretends they share one, which is also why a flat `--archs` had to be split in
+two to work at all. Upstream never faces it because `CIBW_ARCHS` always applies
+to the one platform being built. Move `--platform` down a level and the
+heterogeneity is not solved, it stops existing.
+
+`natmod`/`usermod` remain a real distinction -- different artifacts (`.mpy`
+versus a port binary), different packaging ([0014]'s mip package versus a raw
+file) -- but as an internal grouping, not a user-facing axis. Upstream's
+`linux.py` and `pyodide.py` differ at least that much and are both platforms.
+
+### And the config tree falls out of it
+
+Upstream's own check, one line:
+
+```python
+allowed_option_names = self.default_options.keys() | PLATFORMS | {"overrides"}
+```
+
+The top level takes global options, **platform names**, and `overrides`. With
+the port as the platform that is exactly what cibuildmp's config becomes:
+
+```toml
+micropython = "v1.29.0"      # global
+build = "*"
+
+[unix]                       # per-platform, as [tool.cibuildwheel.linux] is
+archs = ["auto"]
+
+[esp32]
+boards = ["ESP32_GENERIC"]
+```
+
+against today's `[usermod.unix]`, which carries a level naming a mode rather
+than a platform.
+
+Per-axis-value options are then a real fork worth deciding rather than
+inheriting. Nested tables (`[esp32.ESP32_GENERIC]`) read well for a small fixed
+set; upstream deliberately chose `[[overrides]]` with a `select` glob instead,
+because a glob expresses what a table cannot -- `select = "*-unix-musllinux_1_2_{i686,armv7l}"`,
+"all 32-bit", "everything except". natmod already has `[[overrides]]`; usermod
+has none.
+
+**`variant` surfaces here too.** `unix` and `webassembly` carry a `variant`
+field (`standard`, `pyscript`) that is an option today, not an axis, and is
+absent from the identifier. Under this record's own rule that is the same defect
+as the missing version: two variants would collide on one identifier and one
+output path. Either it is an axis and belongs in the name, or it is genuinely
+one-per-build and belongs in an override.
+
 ## Shape
 
 1. **natmod:** `mpy-abi` becomes a selector -- a list of ABIs, each resolved to
@@ -203,7 +279,16 @@ because groups do not.
    tables in `resources/` ([0010]). Groups are tables. `dockerrun.py` moved to
    the package root in [0050] on the same reasoning -- it stopped belonging to
    one mode the moment both used it. The two `select()` copies go.
-6. **Opt-in cells become groups rather than omissions.** The six
+6. **`--platform` becomes the port**, `natmod` alongside `unix`/`windows`/
+   `qemu`/`webassembly`/`esp32`, each with its own module under a `platforms/`
+   tree. `natmod`/`usermod` survive as an internal grouping, not as an axis.
+   The config's top level then takes platform names directly (`[unix]`, not
+   `[usermod.unix]`), matching upstream's own
+   `default_options | PLATFORMS | {"overrides"}`.
+7. **Decide per-axis-value config explicitly**: nested tables or
+   `[[overrides]]` + `select`. Upstream chose the second for expressiveness;
+   usermod has neither today.
+8. **Opt-in cells become groups rather than omissions.** The six
    emulated-everywhere `unix` cells stop being absent from the default axis and
    become a group that `build = "*"` does not reach and `enable` does. That
    answers [0044]'s standing descope question by making it a user's choice
