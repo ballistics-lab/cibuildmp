@@ -57,41 +57,64 @@ runs:
 
     - id: resolve
       shell: bash
+      # Inputs reach the script through `env:`, never interpolated into
+      # the body -- the pattern the root action.yml already uses and
+      # documents ("Confirmed against pypa/cibuildwheel's own real
+      # action.yml, which does exactly this"), and which this action
+      # skipped. That omission cost three failed runs in a row the first
+      # time anything called it, all of them templating rather than logic:
+      #
+      #   1. an expression-delimiter example inside the `include` output's
+      #      own description -- metadata is templated too, and `needs` is
+      #      not a valid named value in a composite action's context;
+      #   2. `python3 -c '...'` with hand-escaped double quotes, which a
+      #      single-quoted shell string passes through verbatim, so Python
+      #      saw a backslash inside an f-string expression;
+      #   3. a comment *explaining* (1), written with the delimiters in it
+      #      -- a `run:` block is one template string, comments included.
+      #
+      # All three are structural, and this shape removes them rather than
+      # dodging them. Inputs live in `env:`, so the only expressions in
+      # this file sit where the templating engine is meant to see them. The
+      # heredoc delimiter is quoted (`<< "PY"`), so the shell expands
+      # nothing inside it and Python's own quoting -- single quotes in
+      # f-strings included -- needs no escaping at all. It is also the
+      # standard mitigation for script injection: an input interpolated
+      # into a shell body is executable, an input read from `os.environ` is
+      # a string.
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        ACTION_PACKAGE_DIR: ${{ inputs.package-dir }}
+        ACTION_CONFIG_FILE: ${{ inputs.config-file }}
       run: |
         set -euo pipefail
 
         # This action lives at .github/actions/cibuildmp-matrix/ inside the
-        # cibuildmp repo, so the package root is three levels up from
-        # github.action_path. Resolved rather than passed through with ../
-        # so uv sees a clean path. Once the package has a released name this
-        # becomes a plain `uv tool install cibuildmp==<version>` (D8).
-        REPO_ROOT=$(cd "${{ github.action_path }}/../../.." && pwd)
+        # cibuildmp repo, so the package root is three levels up. Resolved
+        # rather than passed through with ../ so uv sees a clean path. Once
+        # the package has a released name this becomes a plain
+        # `uv tool install cibuildmp==<version>` (D8).
+        REPO_ROOT=$(cd "$ACTION_PATH/../../.." && pwd)
         uv tool install "$REPO_ROOT"
 
-        ARGS=("${{ inputs.package-dir }}" --print-build-matrix)
-        if [ -n "${{ inputs.config-file }}" ]; then
-          ARGS+=(--config-file "${{ inputs.config-file }}")
-        fi
+        python3 -u << "PY"
+        import json
+        import os
+        import subprocess
 
-        INCLUDE=$(cibuildmp "${ARGS[@]}")
-        echo "include=$INCLUDE" >> "$GITHUB_OUTPUT"
+        args = [os.environ["ACTION_PACKAGE_DIR"], "--print-build-matrix"]
+        if config_file := os.environ.get("ACTION_CONFIG_FILE"):
+            args += ["--config-file", config_file]
 
-        # Subscripts are pulled into locals rather than written inline as
-        # `entry[\"only\"]`. That escaping is what this step shipped with and
-        # it cannot work: the surrounding `python3 -c '...'` is
-        # single-quoted, so bash passes the backslashes through unchanged
-        # and Python sees `entry[\"only\"]` inside an f-string expression --
-        # "SyntaxError: unexpected character after line continuation
-        # character". Plain double quotes need no escaping inside a
-        # single-quoted shell string at all. Like the `${{ }}` example in
-        # this action's own output description, it survived because nothing
-        # called this action between D20 and build-examples.yml's fan-out.
-        echo "$INCLUDE" | python3 -c '
-        import json, sys
-        entries = json.load(sys.stdin)
+        include = subprocess.run(
+            ["cibuildmp", *args], check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+        entries = json.loads(include)
         print(f"Resolved {len(entries)} target(s):")
         for entry in entries:
-            identifier = entry["only"]
-            runner = entry["os"]
-            print(f"  {identifier:<34} runs-on: {runner}")
-        '
+            print(f"  {entry['only']:<34} runs-on: {entry['os']}")
+
+        with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+            handle.write(f"include={include}\n")
+        PY
