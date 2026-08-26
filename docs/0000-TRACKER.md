@@ -178,10 +178,24 @@ later; and cheap-with-strong-evidence beats expensive-and-speculative.
       cause behind [0048]'s bug class, [0051]'s own key-collision
       problem, and this session's own family-cascade-tier work, each
       recurring in a new shape. The divergence from cibuildwheel is
-      argued and decided; the mechanism itself (TOML shape beyond a
-      sketch, whether `[[overrides]]`'s own glob `select` survives
-      alongside tree addressing or is replaced, migration for every
-      existing flat config) is not designed. Genuinely large -- on the
+      argued and decided; the tree/matrix mechanism itself (TOML shape
+      beyond a sketch, whether `[[overrides]]`'s own glob `select`
+      survives alongside tree addressing or is replaced, migration for
+      every existing flat config) is still not designed. A same-day
+      follow-up chat session settled several independent sub-questions
+      along the way, each separately implementable without the tree
+      mechanism landing first: natmod's own identifier grammar
+      (`{tag}-mpy{major.minor}[-{arch}][+0x{flags}]`, tag now real and
+      visible), a `{name}-{version}-` artifact-filename prefix (two new/
+      extended global keys), a pre-build reachability audit as the
+      missing other half of `verify_output()`, an `arch_flags`-list dedup
+      bug, and a correction to [0013] (verified live: same-ABI tags are
+      *not* byte-identical -- `tools/mpy_ld.py`'s own x64 encoding
+      changed between `v1.28.0`/`v1.29.0` with no ABI bump -- but *are*
+      functionally interchangeable, also verified live via cross-loading
+      both tags' output on both tags' own `unix` binaries). Full account,
+      including which other landed records this touches and which it
+      does not, in the record's own text. Genuinely large -- on the
       order of [0051]'s own Phase F+G combined by this record's own
       estimate -- and, if it proceeds, likely needs to land **before**
       [0038] rather than after, the same "don't tell three repos to
@@ -216,7 +230,7 @@ later; and cheap-with-strong-evidence beats expensive-and-speculative.
 - [x] [0016] `USER_C_MODULES`: directory on Make ports, `.cmake` entry point on CMake ports | `resources/usermod.toml` + `usermod/portinfo.py`
 - [x] [0015] `rv32imc`'s `ARCH_FLAGS=` is part of the identifier | fixed a latent header-decode masking bug in the process
 - [x] [0014] cibuildmp writes one self-contained mip package per identifier | no separate `publish` command; plain two-element `urls` schema
-- [x] [0013] `micropython` accepts a list, deduped by ABI not by tag | verified live against a real second ABI
+- [x] [0013] `micropython` accepts a list, deduped by ABI not by tag | verified live against a real second ABI; corrected 2026-08-26 -- the "byte-for-byte identical" reason for dropping same-ABI tags was itself never tested and turned out false (verified live: it is not), the dedup decision stays right for a different, now actually-verified reason (functional interchangeability). See the record's own addendum and [0052]
 - [x] [0012] `pyelftools`/`ar` are cibuildmp's own dependencies | resolved via `PYTHON=<sys.executable>` on the `make` command line
 - [x] [0011] one repository — cibuildmp absorbed `micropython-native-ci` | `v0.3.0` continues `v0.2.0`'s version line
 - [x] [0010] pinned data lives in `resources/`, not in Python | `resources/natmod.toml`, cross-checked at import; the one table that had escaped this rule (`dockerrun.PORT_IMAGES`) moved out in [0044], into `pinned_pypa_images.toml` + `pinned_docker_images.toml`

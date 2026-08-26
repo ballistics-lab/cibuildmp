@@ -1,6 +1,6 @@
 # 0013. micropython accepts a list, deduped by ABI, not by tag
 
-- Status: Accepted
+- Status: Accepted, with a correction (see addendum)
 - Related: [0023]
 
 <!-- migrated verbatim from docs/BACKLOG.md lines 233-271 -->
@@ -43,3 +43,79 @@ constraint on which old tags a multi-version config can list on a modern
 runner. `examples/template/cibuildmp.toml` stays single-tag for exactly
 this reason — its job is to keep CI green on M3's build path, not to
 chase every historical tag's own build health.
+
+## Addendum (2026-08-26): "byte-for-byte identical" is false; functional
+## interchangeability is what actually holds, and was unverified until now
+
+Surfaced during the [0052] design conversation, when the user pushed back
+on treating `micropython`/tag as fully collapsible into the ABI-keyed
+identifier: this record's own central justification for dropping a
+same-ABI tag ("otherwise every one of them produces a byte-for-byte
+identical native `.mpy`") was **never actually tested** — the "Verified
+live" paragraph above only exercised two *different* ABIs (6.2 and 6.3),
+never two different tags sharing the *same* ABI, which is the one case
+the byte-identical claim is actually about.
+
+Tested directly this session, not assumed: cloned `v1.28.0` and `v1.29.0`
+(both ABI 6.3 per `resources/natmod.toml`'s own `[mpy-abi]` table),
+confirmed `examples/natmod/features0/{features0.c,Makefile}` are
+byte-identical between the two tags (no confound from the module's own
+source changing), built `features0.mpy` from each. Result:
+
+```
+v1.28.0/features0.mpy   217 bytes   sha256 a085c6ff...
+v1.29.0/features0.mpy   204 bytes   sha256 aac43026...
+cmp: differ at byte 7 (right after the 4-byte .mpy header)
+```
+
+**Not byte-identical.** Root cause, found in `diff tools/mpy_ld.py`
+between the two tags: the x64 GOT-jump encoding changed — v1.28.0 always
+emits a 5-byte jump (`struct.pack("<BI", 0xE9, entry)`); v1.29.0 added a
+compact 2-byte form when the offset fits in 7 signed bits, falling back
+to the old 5-byte form otherwise. A real linker optimization, landed with
+**no `MPY_VERSION`/`MPY_SUB_VERSION` bump** — internal tooling drifted
+inside a single declared ABI group, confirming the risk this record's own
+byte-identical claim had waved away without checking.
+
+**But functional/load compatibility is real, and independently
+verified**, not just inferred from `py/persistentcode.c`'s own subset
+rule: built MicroPython's `unix` port from both tags (`v1.28.0` and
+`v1.29.0`, host, unmodified) and cross-loaded every combination —
+
+```
+1.28-binary + mpy-from-1.28  -> factorial(5) = 120
+1.28-binary + mpy-from-1.29  -> factorial(5) = 120   (cross)
+1.29-binary + mpy-from-1.28  -> factorial(5) = 120   (cross)
+1.29-binary + mpy-from-1.29  -> factorial(5) = 120
+```
+
+All four load and run correctly. So the two claims resolve to:
+
+- **False**: same-ABI tags produce byte-identical output. They do not —
+  internal tooling (`mpy_ld.py`, and by extension anything else gated
+  only by "did `MPY_VERSION`/`MPY_SUB_VERSION` change", not by "did
+  anything change") can drift within one ABI group.
+- **True, and now actually verified rather than assumed**: same-ABI tags
+  produce *functionally interchangeable* output — `py/persistentcode.c`'s
+  loader only ever checks `MPY_VERSION`/`MPY_SUB_VERSION`/native arch/
+  `arch_flags` (a subset check for the last one, not exact — see the
+  `arch_flags = 0` note in [0052]), never anything about internal
+  encoding, and the live cross-load test confirms this holds in practice,
+  not just on paper.
+
+**What this changes:** nothing about the dedup *decision* — collapsing a
+list of same-ABI tags to one build for the "avoid needless, non-load-
+bearing work" goal is still correct, because functional compatibility
+(the thing that actually matters for whether a build serves its purpose)
+is confirmed, independently, by a real cross-load test. What changes is
+the *stated reason* (fixed above: "functionally interchangeable", not
+"byte-for-byte identical") and one downstream consequence: because the
+literal tag chosen out of a same-ABI group is not fully inert (it affects
+the exact bytes shipped, even if not what those bytes do), keeping `tag`
+a real, visible component of the identifier — rather than folding it away
+once ABI is known — has a genuine justification: reproducibility/audit,
+not compatibility. See [0052]'s own identifier-grammar section for where
+this lands.
+
+[0023]: 0023-usermod-identifier-scheme-config-output.md
+[0052]: 0052-config-is-a-tree-not-a-selector-matrix.md

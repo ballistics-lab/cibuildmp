@@ -1,6 +1,6 @@
 # 0051 — one selector for both modes, and an identifier that names what a build is compatible with
 
-Status: Implemented — Shape points 1-8 and 4/6's target architecture (phased E-I) landed 2026-08-26 (fourth/fifth/seventh/eighth addenda); the sixth addendum's own `module-dir`/`user-c-modules` key split landed the same day too, together with a real third cascade tier (`default → global → family → platform → env → CLI`) and `[usermod]`'s own return as a non-selector family-defaults table (ninth addendum). Four independently-scoped follow-ons surfaced while finishing this record -- `[publish]`/`extra-files` split per family, vanilla/no-module usermod builds, a formalized `build-platforms.toml`, and a cross-family `FAMILY_SCHEMA` collision guard -- are explicitly out of this record's own remaining scope; see the ninth addendum's own closing section.
+Status: Implemented — Shape points 1-8 and 4/6's target architecture (phased E-I) landed 2026-08-26 (fourth/fifth/seventh/eighth addenda); the sixth addendum's own `module-dir`/`user-c-modules` key split landed the same day too, together with a real third cascade tier (`default → global → family → platform → env → CLI`) and `[usermod]`'s own return as a non-selector family-defaults table (ninth addendum). Four independently-scoped follow-ons surfaced while finishing this record -- `[publish]`/`extra-files` split per family, vanilla/no-module usermod builds, a formalized `build-platforms.toml`, and a cross-family `FAMILY_SCHEMA` collision guard -- are explicitly out of this record's own remaining scope; see the ninth addendum's own closing section. **A further divergence from this record's own flat-sibling-table model and its `[[overrides]]` glob-over-a-flattened-string mechanism is argued, in detail, in [0052]** -- not yet landed, so nothing here is superseded until it does; read [0052] before extending this record's own shape further.
 
 Rewritten twice the same day it was written, before anything was built on it.
 The first draft framed this as "usermod cannot build two MicroPython versions",
@@ -568,14 +568,19 @@ Each phase gets its own plan-review checkpoint before implementation, the
 same way this record's own points 1/2/3/5 and 7/8 passes did.
 
 [0005]: 0005-one-identifier-namespace.md
+[0010]: 0010-pinned-data-in-resources.md
 [0013]: 0013-micropython-list-dedup-by-abi.md
+[0014]: 0014-mip-package-per-identifier.md
 [0015]: 0015-rv32imc-arch-flags-identifier.md
+[0022]: 0022-zephyr-third-selector-axis.md
 [0023]: 0023-usermod-identifier-scheme-config-output.md
 [0038]: 0038-m5-adopt-in-three-repos.md
 [0044]: 0044-unix-native-images-landed.md
 [0045]: 0045-only-is-a-filter-not-a-forced-identifier.md
 [0048]: 0048-build-skip-live-in-opposite-tables.md
 [0049]: 0049-no-matrix-generation-archs-vocabulary.md
+[0050]: 0050-natmod-is-docker-only.md
+[0052]: 0052-config-is-a-tree-not-a-selector-matrix.md
 
 ---
 
