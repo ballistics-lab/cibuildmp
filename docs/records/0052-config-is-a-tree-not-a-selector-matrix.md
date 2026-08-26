@@ -72,6 +72,46 @@ which-tier-does-this-key-resolve-at questions (this record) keep
 recurring in slightly different shapes: they are all symptoms of forcing
 a tree through a flat, string-matched interface.
 
+## Confirmed against upstream, not assumed: MicroPython's own build tree is real, and unsolved by MicroPython itself
+
+The user's own claim — that MicroPython's own `ports/` layout already is
+a tree, and upstream itself has never built a unified model over it,
+covering it instead with a patchwork of independent workflows — checked
+directly against a real clone of `micropython/micropython`
+(`.github/workflows/`), not recalled or assumed, the same discipline this
+project's own CLAUDE.md demands for cibuildwheel:
+
+- **28 workflow files total; 16 of them are literally `ports_<name>.yml`**
+  — `ports_esp32.yml`, `ports_unix.yml`, `ports_stm32.yml`,
+  `ports_zephyr.yml`, `ports_rp2.yml`, and eleven more, one per port,
+  each independently authored.
+- **No shared selector model ties them together.** `ports_esp32.yml`
+  has its own bespoke matrix (`idf_ver` × `ci_func`, read from
+  `tools/ci.sh`'s own port-specific functions) with no structural
+  relationship to any other port's own workflow. `ports.yml` (no port
+  suffix) is not a unified entry point either — it only builds download
+  metadata (`tools/autobuild/build-downloads.py`), unrelated to
+  selecting or running builds at all.
+- `ports/` itself — `alif`, `esp32`, `esp8266`, `mimxrt`, `nrf`, `qemu`,
+  `renesas-ra`, `rp2`, `samd`, `stm32`, `unix`, `webassembly`, `windows`,
+  `zephyr`, plus `bare-arm`/`minimal`/`embed`/`cc3200`/`pic16bit`/
+  `psoc-edge` — is a real directory tree today, boards nested further
+  inside several of them (`ports/esp32/boards/<BOARD>/`), with no
+  cross-port config format at all; each port's own build is invoked its
+  own way, in its own workflow, by convention rather than by any shared
+  mechanism.
+
+This matters for this record's own argument beyond "the divergence from
+cibuildwheel is justified": it means a working tree-shaped selector
+model in cibuildmp would not be reinventing something upstream already
+solved elegantly and cibuildmp is choosing to diverge from anyway — it
+would be solving a real problem upstream MicroPython's own CI has never
+addressed at all, having accreted 16+ independent workflows instead.
+That is a stronger claim than "our axes don't happen to be rectangular";
+it is "the tree already exists as upstream's own real structure, nothing
+upstream or cibuildwheel has ever modeled it as one, and this project is
+positioned to be the first thing that does."
+
 ## The proposed shape (sketch, not a finished design)
 
 Nested tables return — a direct, deliberate reversal of record [0051]'s
