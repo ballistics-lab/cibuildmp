@@ -167,6 +167,25 @@ later; and cheap-with-strong-evidence beats expensive-and-speculative.
 - [ ] [0040] usermod test-runner axis | not scheduled ([0006] holds); four of
       seven runners already proven by `mp-usermod.yml`, not yet owned by
       cibuildmp
+- [ ] [0052] cibuildmp's config space is a tree, not a selector matrix
+      (epic) | surfaced while closing out [0051]'s own last open items --
+      cibuildmp's axes were never a genuine cross product the way
+      cibuildwheel's own are (`boards` only means anything for `esp32`,
+      `variant` on three of five usermod ports, natmod/usermod's schemas
+      almost entirely disjoint), so matching upstream's flat
+      matrix-plus-glob-selector model has been forcing a tree through a
+      flat, string-matched interface the whole time -- the same root
+      cause behind [0048]'s bug class, [0051]'s own key-collision
+      problem, and this session's own family-cascade-tier work, each
+      recurring in a new shape. The divergence from cibuildwheel is
+      argued and decided; the mechanism itself (TOML shape beyond a
+      sketch, whether `[[overrides]]`'s own glob `select` survives
+      alongside tree addressing or is replaced, migration for every
+      existing flat config) is not designed. Genuinely large -- on the
+      order of [0051]'s own Phase F+G combined by this record's own
+      estimate -- and, if it proceeds, likely needs to land **before**
+      [0038] rather than after, the same "don't tell three repos to
+      migrate twice" reasoning [0051] itself was sequenced by
 
 ### Implemented
 
@@ -280,3 +299,4 @@ record is added.
 [0049]: records/0049-no-matrix-generation-archs-vocabulary.md
 [0050]: records/0050-natmod-is-docker-only.md
 [0051]: records/0051-usermod-identifiers-have-no-version-axis.md
+[0052]: records/0052-config-is-a-tree-not-a-selector-matrix.md
