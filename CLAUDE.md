@@ -1,5 +1,43 @@
 # Working on cibuildmp
 
+## Check cibuildwheel first. Every time. By reading it, not recalling it.
+
+**This is the first rule because ignoring it is what got this project stuck.**
+cibuildmp is cibuildwheel for MicroPython. Before designing, renaming or
+arguing about anything that has an upstream counterpart -- selectors,
+identifiers, options and their precedence, `--platform`, `--only`, `--archs`,
+container invocation, opt-in behaviour, config layout -- **install cibuildwheel
+and read the relevant module**:
+
+```bash
+uv pip install --target /tmp/cbw --no-deps cibuildwheel
+# then read /tmp/cbw/cibuildwheel/{selector,options,architecture,oci_container}.py
+```
+
+Paraphrasing it from memory has cost this project four separate times, and
+every one was recorded only after the damage:
+
+- **[0045]** -- `--only` carried an in-code comment claiming it matched
+  upstream's semantics. It did not, and a test asserting the behaviour passed
+  vacuously for months.
+- **[0049]** -- `default_runner`, `--print-build-matrix` and a composite matrix
+  action were invented for a concept upstream does not have at all. All
+  deleted.
+- **[0050]** -- a 302-line toolchain resolver, replaced by a `FROM` line and
+  four symlinks.
+- **[0051]** -- `--platform` sits one level above upstream's, which is the root
+  cause of a "heterogeneous axis" problem that simply does not exist once it is
+  at the right level.
+
+The pattern is always the same: something is built that *resembles* upstream,
+drifts, and then needs a record to explain why it is being removed. Reading
+takes minutes; a wrong abstraction takes a session to unwind.
+
+Where cibuildmp deliberately diverges, that divergence must be **argued in a
+record**, not left implicit -- [0045] separates the reasoned differences
+(`--platform` means the build mode; natmod's `--archs` has no `auto`) from the
+accidental ones, and that separation is the useful part.
+
 ## Where things stand
 
 Engineering notes live as numbered, append-only records under [docs/records/](docs/records/),
@@ -53,3 +91,7 @@ From there, drill down rather than infer:
 [0040]: docs/records/0040-usermod-tests-deferred.md
 [0042]: docs/records/0042-windows-docker-wiring-and-resolver-removal.md
 [0043]: docs/records/0043-unix-adopts-cibuildwheel-native-image-model.md
+[0045]: docs/records/0045-only-is-a-filter-not-a-forced-identifier.md
+[0049]: docs/records/0049-no-matrix-generation-archs-vocabulary.md
+[0050]: docs/records/0050-natmod-is-docker-only.md
+[0051]: docs/records/0051-usermod-identifiers-have-no-version-axis.md
