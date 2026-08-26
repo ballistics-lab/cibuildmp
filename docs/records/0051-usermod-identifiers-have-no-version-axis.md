@@ -179,13 +179,30 @@ because groups do not.
    it**, which is the half that stops one release overwriting another.
 4. **`--archs` loses its usermod meaning.** Identifier globs are the primitive;
    host-nativeness gets its own keyword under a name that is not "archs".
-5. **One `cibuildmp/selector.py`, used by both modes**, modelled on upstream's
-   and carrying its four missing pieces: a `BuildSelector` callable built once
-   from `build`/`skip`, brace expansion, `EnableGroup` for opt-in, and a
-   project-declared compatibility constraint. `dockerrun.py` moved to the
-   package root in [0050] for the same reason -- it stopped belonging to one
-   mode the moment both used it, and selection never belonged to one at all.
-   The two `select()` copies go.
+5. **One `cibuildmp/selector.py` for the mechanism, per-mode tables for the
+   data.** The split is not "one module or two" -- it is *what belongs in a
+   selector at all*.
+
+   Upstream hardcodes its group predicates inside the shared
+   `BuildSelector.__call__` (`fnmatch(build_id, "cp316*")`, `pp3?-*`, `gp*`),
+   which is fine for one product with a fixed set of Python implementations and
+   is exactly wrong here: a module holding both natmod's `mpy6.*` groups and
+   usermod's `unix-*`/`esp32-*` ones would know about both modes, and that is
+   the coupling to avoid.
+
+   So `selector_matches` (fnmatch + brace expansion) and `BuildSelector`
+   (build/skip, groups, compatibility constraint) are shared and **take their
+   groups as data**; which groups exist, the patterns defining them, and what
+   the constraint means -- ABI for natmod, release for usermod -- come from
+   each mode. Upstream itself parameterises where the thing is data
+   (`Architecture.all_archs(platform)` takes the platform and stays one module)
+   and hardcodes only where it has one product; cibuildmp needs the former in
+   both places.
+
+   This is the split the repo already uses everywhere else: mechanism in code,
+   tables in `resources/` ([0010]). Groups are tables. `dockerrun.py` moved to
+   the package root in [0050] on the same reasoning -- it stopped belonging to
+   one mode the moment both used it. The two `select()` copies go.
 6. **Opt-in cells become groups rather than omissions.** The six
    emulated-everywhere `unix` cells stop being absent from the default axis and
    become a group that `build = "*"` does not reach and `enable` does. That

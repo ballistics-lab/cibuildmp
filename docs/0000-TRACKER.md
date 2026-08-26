@@ -97,7 +97,9 @@ later; and cheap-with-strong-evidence beats expensive-and-speculative.
       platform module, carrying three things we lack entirely -- `EnableGroup`
       (opt-in as a concept, not an absence from the default axis), a
       project-declared compatibility constraint, and brace expansion. Read from
-      the real 4.2.0 source, not recalled. Renames every usermod identifier,
+      the real 4.2.0 source, not recalled. Shared *mechanism*, per-mode
+      *tables*: upstream hardcodes its group patterns in the shared class,
+      which is right for one product and wrong for two modes. Renames every usermod identifier,
       which is why it goes **before** [0038] rather than after
 - [ ] [0050] natmod's image needs one more publish, and CI has never been
       green on it | **start here, and it is nearly done.** The image gained
