@@ -37,6 +37,41 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### In progress / Proposed
 
+### Where this actually stands, 2026-08-26
+
+Read this before the list. The branch is **+18.5k lines across 142 files**
+against `main`, and that number is misleading about progress in a specific way
+worth stating rather than discovering.
+
+Measured against the project's own premise -- *cibuildwheel for MicroPython:
+the same behaviour, Docker-only and isolated, no bare-host builds, and a
+foreign runner can still build through emulation* -- three of those four are
+done and the fourth, the one the whole thing is named after, is not:
+
+| premise | state |
+| --- | --- |
+| Docker-only, isolated | done, both modes; `esp32` the one exception ([0028]) |
+| no bare-host builds | done, same exception |
+| a foreign runner still builds | proven live, both directions ([0049]) |
+| **behaves like cibuildwheel** | **no** |
+
+The last row is the task, and [0051] is why it fails. Upstream's whole shape is
+that **the identifier is the complete description of one build** and
+`build`/`skip`/`--only`/`--archs` are one mechanism over it. natmod has that
+(`mpy6.3-natmod-x64`). usermod -- half the tool -- has no version axis at all,
+so it cannot build two MicroPython releases, cannot select one, and silently
+drops every tag after the first.
+
+And the acceptance test has never run. [0038] is "adopt cibuildmp in the three
+consuming repos", which is the only thing that answers whether this is
+cibuildwheel for MicroPython or infrastructure that resembles it. Its blast
+radius grew this session rather than shrinking: every `unix` identifier renamed
+([0044]), `--toolchain` and `--print-build-matrix` deleted ([0049]/[0050]),
+natmod now requiring Docker -- and [0051] queues one more rename ahead of it.
+
+That ordering is deliberate and is the argument for the list below: finish
+changing the identifiers *before* asking three repos to migrate onto them.
+
 **Listed in execution order, and that order is the plan** -- not by record
 number, not by age. Each row's note says what is true *now*, so the top row is
 where the next session starts. The ordering argument, once, so it can be
@@ -44,6 +79,15 @@ disagreed with rather than guessed at: things that are *broken* beat things that
 are *missing*; work that unblocks verification beats work that gets verified
 later; and cheap-with-strong-evidence beats expensive-and-speculative.
 
+- [ ] [0051] usermod identifiers carry no MicroPython version | **the task
+      itself, and the reason the premise's last clause fails.** usermod cannot
+      build two releases (they collide on one identifier and one output
+      directory), cannot select one (nothing to glob), and silently drops every
+      tag after the first. natmod has carried its own axis since [0013]. The
+      fix is mechanical once decided -- list, `tag` field, tag in the
+      identifier, and `build`/`skip`/`--only` work unchanged -- and it renames
+      every usermod identifier, which is why it goes **before** [0038] rather
+      than after
 - [ ] [0050] natmod's image needs one more publish, and CI has never been
       green on it | **start here, and it is nearly done.** The image gained
       `gcc-i686-linux-gnu` after v1.29.0 changed `dynruntime.mk`'s `x86` from
@@ -226,3 +270,4 @@ record is added.
 [0048]: records/0048-build-skip-live-in-opposite-tables.md
 [0049]: records/0049-no-matrix-generation-archs-vocabulary.md
 [0050]: records/0050-natmod-is-docker-only.md
+[0051]: records/0051-usermod-identifiers-have-no-version-axis.md
