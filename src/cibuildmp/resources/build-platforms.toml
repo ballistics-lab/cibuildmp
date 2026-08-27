@@ -3116,3 +3116,46 @@ identifiers = [
     { tag = "v1.29.0", board = "ALIF_ENSEMBLE", mcu = "AE722F80F55D5XX", product = "Ensemble E7 DevKit", vendor = "Alif Semiconductor", variants = [], identifier = "v1.29.0-alif-ALIF_ENSEMBLE" },
     { tag = "v1.30.0-preview", board = "ALIF_ENSEMBLE", mcu = "AE722F80F55D5XX", product = "Ensemble E7 DevKit", vendor = "Alif Semiconductor", variants = [], identifier = "v1.30.0-preview-alif-ALIF_ENSEMBLE" },
 ]
+
+# ports/esp8266/boards/*/board.json arrived at v1.18 -- v1.12..v1.17
+# correctly contribute zero rows because the boards/<name>/ directories
+# already existed then (mpconfigboard.h present, checked live at v1.17)
+# but board.json itself didn't yet (404 at v1.17, 200 at v1.18) -- the
+# same "port existed, pre-board.json convention" case already seen for
+# alif's own v1.25.0, not a "port didn't exist" absence. The board set
+# was renamed wholesale at v1.21.0 (GENERIC/GENERIC_1M/GENERIC_512K,
+# three boards each with its own board.json, collapsed into one
+# ESP8266_GENERIC board carrying FLASH_1M/FLASH_512K/OTA as variants
+# instead) -- both shapes verified live, not assumed from a neighboring
+# tag. FLASH_2M_ROMFS variant appears from v1.25.0; the OTA variant
+# itself disappears again from v1.28.0 onward -- both real, independently
+# observed changes to the same board's variant list over time.
+[usermod.esp8266]
+identifiers = [
+    { tag = "v1.18", board = "GENERIC", mcu = "esp8266", product = "ESP8266 with 2MiB+ flash", vendor = "Espressif", variants = ["ota"], identifier = "v1.18-esp8266-GENERIC" },
+    { tag = "v1.18", board = "GENERIC_1M", mcu = "esp8266", product = "ESP8266 with 1MiB flash", vendor = "Espressif", variants = [], identifier = "v1.18-esp8266-GENERIC_1M" },
+    { tag = "v1.18", board = "GENERIC_512K", mcu = "esp8266", product = "ESP8266 with 512kiB flash", vendor = "Espressif", variants = [], identifier = "v1.18-esp8266-GENERIC_512K" },
+    { tag = "v1.19", board = "GENERIC", mcu = "esp8266", product = "ESP8266 with 2MiB+ flash", vendor = "Espressif", variants = ["ota"], identifier = "v1.19-esp8266-GENERIC" },
+    { tag = "v1.19", board = "GENERIC_1M", mcu = "esp8266", product = "ESP8266 with 1MiB flash", vendor = "Espressif", variants = [], identifier = "v1.19-esp8266-GENERIC_1M" },
+    { tag = "v1.19", board = "GENERIC_512K", mcu = "esp8266", product = "ESP8266 with 512kiB flash", vendor = "Espressif", variants = [], identifier = "v1.19-esp8266-GENERIC_512K" },
+    { tag = "v1.19.1", board = "GENERIC", mcu = "esp8266", product = "ESP8266 with 2MiB+ flash", vendor = "Espressif", variants = ["ota"], identifier = "v1.19.1-esp8266-GENERIC" },
+    { tag = "v1.19.1", board = "GENERIC_1M", mcu = "esp8266", product = "ESP8266 with 1MiB flash", vendor = "Espressif", variants = [], identifier = "v1.19.1-esp8266-GENERIC_1M" },
+    { tag = "v1.19.1", board = "GENERIC_512K", mcu = "esp8266", product = "ESP8266 with 512kiB flash", vendor = "Espressif", variants = [], identifier = "v1.19.1-esp8266-GENERIC_512K" },
+    { tag = "v1.20.0", board = "GENERIC", mcu = "esp8266", product = "ESP8266 with 2MiB+ flash", vendor = "Espressif", variants = ["ota"], identifier = "v1.20.0-esp8266-GENERIC" },
+    { tag = "v1.20.0", board = "GENERIC_1M", mcu = "esp8266", product = "ESP8266 with 1MiB flash", vendor = "Espressif", variants = [], identifier = "v1.20.0-esp8266-GENERIC_1M" },
+    { tag = "v1.20.0", board = "GENERIC_512K", mcu = "esp8266", product = "ESP8266 with 512kiB flash", vendor = "Espressif", variants = [], identifier = "v1.20.0-esp8266-GENERIC_512K" },
+    { tag = "v1.21.0", board = "ESP8266_GENERIC", mcu = "esp8266", product = "ESP8266", vendor = "Espressif", variants = ["FLASH_1M", "FLASH_512K", "OTA"], identifier = "v1.21.0-esp8266-ESP8266_GENERIC" },
+    { tag = "v1.22.0", board = "ESP8266_GENERIC", mcu = "esp8266", product = "ESP8266", vendor = "Espressif", variants = ["FLASH_1M", "FLASH_512K", "OTA"], identifier = "v1.22.0-esp8266-ESP8266_GENERIC" },
+    { tag = "v1.22.1", board = "ESP8266_GENERIC", mcu = "esp8266", product = "ESP8266", vendor = "Espressif", variants = ["FLASH_1M", "FLASH_512K", "OTA"], identifier = "v1.22.1-esp8266-ESP8266_GENERIC" },
+    { tag = "v1.22.2", board = "ESP8266_GENERIC", mcu = "esp8266", product = "ESP8266", vendor = "Espressif", variants = ["FLASH_1M", "FLASH_512K", "OTA"], identifier = "v1.22.2-esp8266-ESP8266_GENERIC" },
+    { tag = "v1.23.0", board = "ESP8266_GENERIC", mcu = "esp8266", product = "ESP8266", vendor = "Espressif", variants = ["FLASH_1M", "FLASH_512K", "OTA"], identifier = "v1.23.0-esp8266-ESP8266_GENERIC" },
+    { tag = "v1.24.0", board = "ESP8266_GENERIC", mcu = "esp8266", product = "ESP8266", vendor = "Espressif", variants = ["FLASH_1M", "FLASH_512K", "OTA"], identifier = "v1.24.0-esp8266-ESP8266_GENERIC" },
+    { tag = "v1.24.1", board = "ESP8266_GENERIC", mcu = "esp8266", product = "ESP8266", vendor = "Espressif", variants = ["FLASH_1M", "FLASH_512K", "OTA"], identifier = "v1.24.1-esp8266-ESP8266_GENERIC" },
+    { tag = "v1.25.0", board = "ESP8266_GENERIC", mcu = "esp8266", product = "ESP8266", vendor = "Espressif", variants = ["FLASH_1M", "FLASH_2M_ROMFS", "FLASH_512K", "OTA"], identifier = "v1.25.0-esp8266-ESP8266_GENERIC" },
+    { tag = "v1.26.0", board = "ESP8266_GENERIC", mcu = "esp8266", product = "ESP8266", vendor = "Espressif", variants = ["FLASH_1M", "FLASH_2M_ROMFS", "FLASH_512K", "OTA"], identifier = "v1.26.0-esp8266-ESP8266_GENERIC" },
+    { tag = "v1.26.1", board = "ESP8266_GENERIC", mcu = "esp8266", product = "ESP8266", vendor = "Espressif", variants = ["FLASH_1M", "FLASH_2M_ROMFS", "FLASH_512K", "OTA"], identifier = "v1.26.1-esp8266-ESP8266_GENERIC" },
+    { tag = "v1.27.0", board = "ESP8266_GENERIC", mcu = "esp8266", product = "ESP8266", vendor = "Espressif", variants = ["FLASH_1M", "FLASH_2M_ROMFS", "FLASH_512K", "OTA"], identifier = "v1.27.0-esp8266-ESP8266_GENERIC" },
+    { tag = "v1.28.0", board = "ESP8266_GENERIC", mcu = "esp8266", product = "ESP8266", vendor = "Espressif", variants = ["FLASH_1M", "FLASH_2M_ROMFS", "FLASH_512K"], identifier = "v1.28.0-esp8266-ESP8266_GENERIC" },
+    { tag = "v1.29.0", board = "ESP8266_GENERIC", mcu = "esp8266", product = "ESP8266", vendor = "Espressif", variants = ["FLASH_1M", "FLASH_2M_ROMFS", "FLASH_512K"], identifier = "v1.29.0-esp8266-ESP8266_GENERIC" },
+    { tag = "v1.30.0-preview", board = "ESP8266_GENERIC", mcu = "esp8266", product = "ESP8266", vendor = "Espressif", variants = ["FLASH_1M", "FLASH_2M_ROMFS", "FLASH_512K"], identifier = "v1.30.0-preview-esp8266-ESP8266_GENERIC" },
+]
