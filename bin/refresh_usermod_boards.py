@@ -99,6 +99,18 @@ def commit_date(dest: Path) -> str:
     return out.stdout.strip()[:10]
 
 
+def commit_sha(dest: Path) -> str:
+    """The MicroPython tag's own commit sha -- refresh_natmod_archs.py's
+    rows already carry this (a side effect of fetching per-ref content
+    there); this script had no equivalent until this field was pointed
+    out as missing, an oversight rather than a deliberate omission."""
+    out = subprocess.run(
+        ["git", "-C", str(dest), "rev-parse", "HEAD"],
+        capture_output=True, text=True, check=True,
+    )
+    return out.stdout.strip()
+
+
 def submodule_pin(checkout: Path, submodule: str) -> str | None:
     """The commit sha `submodule` (e.g. "lib/pico-sdk") is pinned at in
     this checkout, or None if that path isn't a submodule here at all
@@ -137,6 +149,7 @@ def board_rows(
     tag: str,
     port: str,
     date: str,
+    sha: str,
     checkout: Path,
     *,
     submodule_field: str | None = None,
@@ -151,7 +164,7 @@ def board_rows(
     rows = []
     for name in sorted(db.boards):
         board = db.boards[name]
-        row: dict[str, object] = {"tag": tag, "date": date}
+        row: dict[str, object] = {"tag": tag, "date": date, "sha": sha}
         if submodule_field and submodule_value is not None:
             row[submodule_field] = submodule_value
         row.update(
@@ -264,6 +277,7 @@ def main() -> int:
                 print(f"cloning {tag} ({args.port})...", file=sys.stderr)
                 clone_sparse(tag, args.port, dest)
             date = commit_date(dest)
+            sha = commit_sha(dest)
             submodule_value = None
             if args.submodule:
                 pin = submodule_pin(dest, args.submodule)
@@ -273,7 +287,7 @@ def main() -> int:
                     submodule_value = upstream_tags.get(pin, pin)
             rows.extend(
                 board_rows(
-                    tag, args.port, date, dest,
+                    tag, args.port, date, sha, dest,
                     submodule_field=args.submodule_field,
                     submodule_value=submodule_value,
                 )
