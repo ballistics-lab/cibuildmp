@@ -26,7 +26,10 @@ the digest each `<tag>:latest` points at. That is the same value
 `.github/workflows/publish-docker-images.yml` prints in its "Record the
 pinned digest" step; this script exists so a maintainer can recover it
 afterwards -- or fill in a whole freshly-published matrix at once -- rather
-than copying fifteen digests out of a job summary by hand.
+than copying digests out of a job summary by hand. A cell that names no
+`ghcr.io/...` image (nine `unix` cells add nothing over pypa's own base,
+so they were never published at all) is mirrored straight from
+`pinned_pypa_images.toml`'s matching cell instead of queried on GHCR.
 
 Neither table is rewritten by CI. Record 0033: cibuildmp never builds one
 of these images itself and never repoints its own pins on its own; a pin
@@ -188,6 +191,7 @@ def repo_url(repo: str) -> str:
 def update_images(*, check: bool) -> int:
     data = tomllib.loads(IMAGE_PINS.read_text())
     text = IMAGE_PINS.read_text()
+    pypa = tomllib.loads(PYPA_PINS.read_text())
     owner = _owner()
     drift = 0
 
@@ -201,6 +205,28 @@ def update_images(*, check: bool) -> int:
     ]
 
     for arch, key, reference in cells:
+        # A cell whose current reference is not `ghcr.io/...` has no
+        # cibuildmp-published image behind it at all: nine `unix` cells
+        # (`armv7l`'s `manylinux_2_31`, `riscv64`'s `manylinux_2_39`, every
+        # `musllinux_1_2` floor) were verified to be a bare `FROM` and
+        # nothing else, so their own Dockerfile and GHCR package were
+        # deleted rather than kept as an idle copy -- their pin here is
+        # just `pinned_pypa_images.toml`'s own cell, mirrored. Asking GHCR
+        # about a package that was never published would only ever print
+        # "not published yet" for these nine, forever.
+        if reference and not reference.startswith("ghcr.io/") and arch != "port":
+            pypa_reference = pypa.get(arch, {}).get(key)
+            if not pypa_reference:
+                print(f"  {key}_{arch}: no matching pinned_pypa_images.toml cell")
+                continue
+            if pypa_reference == reference:
+                continue
+            drift += 1
+            print(f"  {key}_{arch}: pinned_pypa_images.toml moved -- mirroring")
+            if not check:
+                text = _replace_value(text, key, reference, pypa_reference, None)
+            continue
+
         # An empty cell is a declared target with nothing published yet
         # (every `unix` cell is empty until publish-docker-images.yml has
         # run under record 0043's names). Its own image name is derivable
