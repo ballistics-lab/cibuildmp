@@ -177,6 +177,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `qemu` runs in its published image like every other port (record 0032, closed
   by 0050).
 
+### Fixed
+
+- **A shared `[[overrides]]` entry meant only for natmod could fail a
+  usermod-only invocation's reachability check.** `cibuildmp --dry-run
+  --platform unix` wrongly rejected a natmod-only override
+  (`select = "*-armv7emsp"`) as unreachable, since `[[overrides]]` is one
+  shared, top-level list but each family's own reachability audit only
+  checked a `select` pattern against its own identifiers. Fixed on
+  usermod's own side (it already imports from natmod, one-way): its
+  reachability check now also considers natmod's own identifiers,
+  computed from the same config. The mirror direction -- a natmod-only
+  invocation flagged by a usermod-only override -- is not yet fixed
+  (natmod must never import usermod back); tracked separately. Record
+  0052's own addendum.
+
 ### Removed
 
 - **`--toolchain`, and the toolchain resolver behind it.** Every question it

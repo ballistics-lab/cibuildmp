@@ -1870,4 +1870,48 @@ no guessing which family it was meant for.
 423 tests pass; ruff and pyright clean. Live-verified end to end for both families, not just
 unit-tested.
 
+## Addendum, 2026-08-27 — task #66 fixed, one direction: `[[overrides]]` reachability now
+sees natmod's own identifiers from usermod's own `check_reachable()`
+
+Not a design task -- a live, blocking bug, reported directly against this project's own
+root `cibuildmp.toml`: `cibuildmp --dry-run --platform unix` failed with
+`[[overrides]] #1: '*-armv7emsp' matches no known identifier`, even though that override
+(`select = "*-armv7emsp"`, an `extra-make-args` tweak) is entirely valid natmod config. Root
+cause: `[[overrides]]` is one shared, top-level list (Phase G), but each family's own
+`check_reachable()` checked every entry's `select` against only *that family's own*
+`all_targets()` domain -- an entry meant for a currently-inactive family failed as
+"unreachable" purely because the invocation never loaded that family at all, not because the
+selector was wrong.
+
+Fixed on `usermod/options.py`'s own side only. `usermod/options.py` already imports from
+`natmod/options.py` (the established one-way direction -- natmod is the shared base module,
+never imports back), so a new `_foreign_override_identifiers()` widens usermod's own
+override-reachability domain by constructing a `NatmodOptions` from the very same raw config
+(`cfg._cascade.global_table`, via the existing `preread` mechanism -- no second file read)
+and adding its `all_targets()` identifiers to the check. `NatmodOptions.load()` never calls
+its own `check_reachable()` (that only runs from `targets()`, not `load()`), so this cannot
+recurse into a natmod-specific reachability failure -- only its plain identifier space is
+read. Wrapped in `except NatmodConfigError: return []`: an unrelated, genuine `[natmod]`
+config mistake is natmod's own to report when natmod is actually loaded, not something that
+should surface as a confusing failure from an unrelated usermod-only invocation.
+
+**Deliberately asymmetric, and said so in the code, not silently left inconsistent**: the
+mirror direction -- a natmod-only invocation flagged by an override meant only for a usermod
+port -- is not fixed by this. `natmod/options.py` must never import `usermod/options.py`
+back (the one constraint this whole redesign has kept since Phase E), so natmod's own
+`check_reachable()` has no equivalent widening available to it without either breaking that
+direction or plumbing the union through `cli.py`/`platforms/__init__.py` instead (both
+already import both families) -- a real, larger restructuring of *where* override
+reachability is checked, not a small fix, and not what this session's live bug needed. Left
+as task #66's own residual, tracked, not solved here.
+
+Regression test: `test_reachability_audit_rejects_an_override_select_that_can_never_match`'s
+sibling, `test_reachability_audit_allows_an_override_meant_only_for_natmod` -- the exact
+repro (`[unix]` active, no `[natmod]` table at all, `select = "*-armv7emsp"`,
+`extra-make-args` deliberately used since it is one of the few keys shared by both families'
+own override schemas, to make sure the fix is about identifier reachability and not merely
+about which key happened to be written). 424 tests pass; ruff and pyright clean; the exact
+failing command from the live report re-run against a copy of this project's own real
+`cibuildmp.toml` now exits 0.
+
 [0051]: 0051-usermod-identifiers-have-no-version-axis.md

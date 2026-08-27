@@ -64,6 +64,8 @@ from ..natmod.options import (
     load_overrides,
     read_config,
 )
+from ..natmod.options import ConfigError as NatmodConfigError
+from ..natmod.options import Options as NatmodOptions
 from .targets import (
     GROUPS,
     KNOWN_PORTS,
@@ -243,6 +245,45 @@ class UsermodBuildOptions:
         return self.target.port
 
 
+def _foreign_override_identifiers(cfg: UsermodOptions) -> list[str]:
+    """`[[overrides]]` is shared with natmod (Phase G) -- an entry meant
+    only for natmod (`select = "*-armv7emsp"`, an arch identifier no
+    usermod port ever produces) must not fail *this* family's own
+    reachability audit just because natmod itself is not part of this
+    invocation (task #66, reported live against the root `cibuildmp.toml`:
+    `cibuildmp --dry-run --platform unix` rejected exactly that override
+    as unreachable, even though it is entirely valid natmod config this
+    invocation simply never loads).
+
+    `usermod/options.py` already imports from `natmod/options.py` (the
+    established one-way direction -- natmod must never import usermod
+    back), so this family alone can widen its own check to include
+    natmod's real identifier space too, computed from the very same raw
+    config (`cfg._cascade.global_table`) natmod would load if it were
+    active this invocation. `NatmodOptions.load()` never calls its own
+    `check_reachable()` (that only runs from `targets()`, not `load()`),
+    so this cannot recurse into natmod's own reachability errors -- only
+    its plain identifier space is used here.
+
+    Best-effort and asymmetric, not yet a full fix: if natmod's own load
+    fails for a reason that has nothing to do with reachability (a
+    genuine `[natmod]` config mistake), that failure is natmod's own to
+    report when natmod is actually loaded -- swallowed here rather than
+    surfacing as a confusing failure from an unrelated usermod-only
+    invocation. The mirror direction (a natmod-only invocation flagged by
+    a usermod-only override) is not fixed by this -- natmod must not
+    import usermod back, so it has no equivalent widening available to
+    it. Left as task #66's own residual, not solved here.
+    """
+    try:
+        natmod_cfg = NatmodOptions.load(
+            cfg.package_dir, preread=(cfg.config_path, dict(cfg._cascade.global_table))
+        )
+        return [t.identifier for t in natmod_cfg.all_targets()]
+    except NatmodConfigError:
+        return []
+
+
 def check_reachable(cfg: UsermodOptions) -> None:
     """Pre-build reachability audit -- the usermod half of record 0052's
     A5 (see `natmod/options.py`'s own `check_reachable()` for the full
@@ -257,19 +298,23 @@ def check_reachable(cfg: UsermodOptions) -> None:
 
     Each active port's own `build`/`skip` -- **only when `[<port>]` itself
     actually sets one** -- is checked a second time, scoped to *that
-    port's own* identifiers: unlike the shared `[[overrides]]` list (task
-    tracked separately: `check_reachable()` there has no way to know
-    which family an entry was meant for), a value written directly inside
-    a port's own table is unambiguous by construction. Deliberately
-    skipped when the port sets neither: `cfg._port_build_skip(port)` then
-    falls back to `cfg.build`/`cfg.skip`, which may itself be a
-    `[usermod]`-level (family-wide) pattern meaning "every port, some of
-    which are not this one" (`skip = "*-webassembly"` legitimately
-    matches nothing among `[unix]`'s own identifiers) -- re-checking it
-    against one port's own narrow subset would be a false positive, not a
-    stricter check; the equality test below is what tells "this port
-    genuinely set its own value" apart from "this is only the inherited
-    default resolving here too."
+    port's own* identifiers: unlike the shared `[[overrides]]` list
+    (widened below via `_foreign_override_identifiers()`), a value
+    written directly inside a port's own table is unambiguous by
+    construction. Deliberately skipped when the port sets neither:
+    `cfg._port_build_skip(port)` then falls back to `cfg.build`/
+    `cfg.skip`, which may itself be a `[usermod]`-level (family-wide)
+    pattern meaning "every port, some of which are not this one"
+    (`skip = "*-webassembly"` legitimately matches nothing among
+    `[unix]`'s own identifiers) -- re-checking it against one port's own
+    narrow subset would be a false positive, not a stricter check; the
+    equality test below is what tells "this port genuinely set its own
+    value" apart from "this is only the inherited default resolving here
+    too."
+
+    `[[overrides]]` reachability is checked against usermod's own
+    identifiers *plus* natmod's (task #66) -- an override entirely valid
+    for the other, currently-inactive family must not be flagged here.
     """
     all_targets = cfg.all_targets()
     identifiers = [t.identifier for t in all_targets]
@@ -289,16 +334,18 @@ def check_reachable(cfg: UsermodOptions) -> None:
             check_selector_reachable(
                 port_skip, f"[{port}] skip", port_identifiers, error=UsermodConfigError
             )
-    for index, override in enumerate(cfg.overrides, 1):
-        selector = override.get("select")
-        if selector is None:
-            continue  # a missing select is its own, separate error elsewhere
-        check_selector_reachable(
-            parse_selector(selector),
-            f"[[overrides]] #{index}",
-            identifiers,
-            error=UsermodConfigError,
-        )
+    if cfg.overrides:
+        override_identifiers = identifiers + _foreign_override_identifiers(cfg)
+        for index, override in enumerate(cfg.overrides, 1):
+            selector = override.get("select")
+            if selector is None:
+                continue  # a missing select is its own, separate error elsewhere
+            check_selector_reachable(
+                parse_selector(selector),
+                f"[[overrides]] #{index}",
+                override_identifiers,
+                error=UsermodConfigError,
+            )
 
 
 @dataclass

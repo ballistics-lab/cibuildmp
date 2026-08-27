@@ -598,6 +598,30 @@ def test_reachability_audit_rejects_an_override_select_that_can_never_match(tmp_
         UsermodOptions.load(tmp_path).targets()
 
 
+def test_reachability_audit_allows_an_override_meant_only_for_natmod(tmp_path):
+    # task #66, reported live against the root cibuildmp.toml:
+    # `cibuildmp --dry-run --platform unix` rejected a natmod-only
+    # override ("*-armv7emsp" names no usermod identifier at all) as
+    # unreachable, even though it is entirely valid natmod config this
+    # invocation simply never loads (no [natmod] table here at all --
+    # natmod's own all_targets() does not require one). extra-make-args
+    # is deliberately used since it is one of the few keys shared by both
+    # families' own override schemas -- the bug was never about the key,
+    # only about which family's identifiers check_reachable() checked
+    # select against.
+    write_config(
+        tmp_path,
+        """
+        [unix]
+
+        [[overrides]]
+        select = "*-armv7emsp"
+        extra-make-args = ["MP_BCLIBC_PRECISION=single"]
+        """,
+    )
+    UsermodOptions.load(tmp_path).targets()  # must not raise
+
+
 def test_reachability_audit_allows_a_deliberate_skip_everything(tmp_path):
     # Same distinction as natmod's own case: skip = "*" narrows a real,
     # reachable domain to zero *selected* targets, which stays legitimate.
