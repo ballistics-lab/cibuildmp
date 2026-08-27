@@ -202,6 +202,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `examples/template` through the new digest, pulled anonymously by a
   fresh CI runner -- the first real CI run to exercise
   natmod-in-a-container end to end. Record 0050's own addendum.
+- **natmod's build identifier is matched against a real `build-platforms.toml`
+  row now, not rebuilt.** The string was already correct but was
+  assembled by an f-string never checked against the file's own (stale,
+  pre-record-0052-A2) `identifier` field. Confirmed against real
+  cibuildwheel source: its own `PythonConfiguration.identifier` is a
+  literal field read off a row, never computed -- natmod's 205 rows were
+  regenerated to the current format and `Target.identifier` now looks
+  its base string up. The per-tag arch-availability table this used to
+  need (`archs_available_for()`) is gone too: selection now matches
+  every real row directly via the existing `build`/`skip` glob mechanism,
+  and only *afterward* collapses to one target per identifier, picking
+  the newest matching tag -- rather than computing an availability table
+  before selection ever ran. Verified byte-identical against a
+  pre-change identifier snapshot. Record 0052's own addendum.
 
 ### Removed
 

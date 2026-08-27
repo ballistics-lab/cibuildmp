@@ -31,9 +31,8 @@ from ...selector import parse_selector, select
 from .targets import (
     NATMOD_ARCHS,
     Target,
-    all_tag_groups,
-    archs_available_for,
-    natmod_targets,
+    collapse_newest_tag,
+    natmod_all_targets,
     newest_known_abi,
     resolve_arch_flags,
     validate_archs_recognized,
@@ -449,15 +448,6 @@ class Options:
 
     # ── Resolution ────────────────────────────────────────────────────────
 
-    def tag_groups(self) -> list[tuple[str, str]]:
-        """One (tag, abi) pair per known ABI -- the full natmod version
-        axis domain (record 0052, A2), each resolved to its own newest
-        known tag. No `micropython`/`mpy-abi` config key states this any
-        more; `build`/`skip` narrow it downstream by matching identifiers,
-        the same way `archs` already narrows `NATMOD_ARCHS`.
-        """
-        return all_tag_groups()
-
     def extra_files(self) -> list[str]:
         """`[publish] extra-files` -- files copied into every identifier's
         own output directory alongside its `.mpy`, for a facade or anything
@@ -467,24 +457,27 @@ class Options:
     def targets(self) -> list[Target]:
         """Every target this config selects.
 
-        One ABI group per `tag_groups()` entry -- every known ABI by
-        default (record 0052, A2), each swept against `self.archs`
-        (`NATMOD_ARCHS` by default) *intersected with* whatever that
-        specific ABI's own tag actually has available
-        (`archs_available_for()`). The intersection matters here and did
-        not before A2: most ABIs predate at least one arch
-        (`rv32imc`/`rv64imc`/`xtensawin` were all added over time), so
-        sweeping every known ABI by default must not crash on the ones
-        that cannot build everything -- it must simply contribute fewer
-        targets for them, exactly as `select()` below then narrows the
-        combined result to what `build`/`skip` actually asked for.
-        `arch_flags` (rv32imc only) is resolved here, before selection,
-        since it is part of the identifier that `build`/`skip`/
-        `[[overrides]]` glob against. A list produces one rv32imc target
-        *per entry* -- "build every arch-flags variant" is its own
-        request, distinct from "build every arch", so
-        `arch-flags = ["", "zba,zcmp"]` is two rv32imc identifiers, not
-        one.
+        Built directly from every real `(tag, arch)` row in
+        `build-platforms.toml` (`natmod_all_targets()`) -- matched against
+        `self.archs`, then `build`/`skip` glob-matched, then collapsed to
+        one `Target` per surviving identifier via `collapse_newest_tag()`.
+        No separate "is this arch available for this ABI's tag" table is
+        consulted anywhere in this path any more: a row existing at all
+        already says so, and filtering a real, already-existence-checked
+        list can never re-admit a combination the file never verified
+        (record 0052's own live-caught correction -- the previous design
+        built the checkable-table *before* selection, duplicating what
+        matching real rows already answers for free; matched against
+        cibuildwheel's own real `get_python_configurations()`, which does
+        exactly this: filter a literal row list by `build_selector`, no
+        parallel availability table at all).
+
+        `arch_flags` (rv32imc only) is resolved before matching, since it
+        is part of the identifier that `build`/`skip`/`[[overrides]]`
+        glob against. A list produces one rv32imc target *per entry* --
+        "build every arch-flags variant" is its own request, distinct
+        from "build every arch", so `arch-flags = ["", "zba,zcmp"]` is two
+        rv32imc identifiers, not one.
 
         Also runs `check_reachable()` (record 0052, A5) once here, the
         one place the real build path, `--print-build-identifiers` and
@@ -495,52 +488,29 @@ class Options:
         check_reachable(self)
         validate_archs_recognized(self.archs)
         arch_flags = resolve_arch_flags("rv32imc", self.arch_flags)
-        all_targets = [
-            target
-            for tag, abi in self.tag_groups()
-            for target in natmod_targets(
-                [a for a in self.archs if a in archs_available_for(tag)],
-                abi,
-                tag,
-                arch_flags,
-            )
-        ]
-        return select(all_targets, self.build, self.skip)
+        candidates = [t for t in natmod_all_targets(arch_flags) if t.arch in self.archs]
+        return collapse_newest_tag(select(candidates, self.build, self.skip))
 
     def all_targets(self) -> list[Target]:
         """Every identifier this config can name, ignoring `archs`,
         `build` and `skip` -- what `--only` resolves against (**0045**).
 
         Upstream's `--only` takes its `choices` from `read_all_configs()`,
-        i.e. from what exists rather than from what is selected. The
-        natmod analogue is not quite that, and the difference is real
-        rather than a shortcut: an identifier's ABI slot (`mpy6.3-`) comes
-        from the `MPY_VERSION`/`MPY_SUB_VERSION` of an actual MicroPython
-        checkout, so the set of nameable identifiers genuinely depends on
-        which tags `resources/build-platforms.toml` has actually walked.
-        `tag_groups()` therefore stays; `archs`, `build` and `skip` --
-        which are selection, not existence -- do not, though the same
-        per-tag intersection `targets()` needs still applies: an arch
-        `NATMOD_ARCHS` lists but a given ABI's own tag does not have is
-        not a *nameable* identifier for that ABI, so it is excluded here
-        too rather than only filtered downstream.
+        i.e. from what exists rather than from what is selected -- and so
+        does this now, directly: `natmod_all_targets()` is every real row,
+        `collapse_newest_tag()` is the only narrowing (one `Target` per
+        identifier, picking the newest-tag candidate among however many
+        rows share it). `archs`/`build`/`skip` are selection, not
+        existence, and stay out, matching `targets()`'s own contract.
 
-        `arch_flags` stays for the same reason as `tag_groups()`: **D15**
-        made a `+0x..` suffix part of the identifier, and which variants
-        exist is a config statement ("build every arch-flags variant" is
-        its own request), not a filter over a fixed set.
+        `arch_flags` stays for the same reason it did before this
+        rewrite: **D15** made a `+0x..` suffix part of the identifier, and
+        which variants exist is a config statement ("build every
+        arch-flags variant" is its own request), not a filter over a
+        fixed set.
         """
         arch_flags = resolve_arch_flags("rv32imc", self.arch_flags)
-        return [
-            target
-            for tag, abi in self.tag_groups()
-            for target in natmod_targets(
-                [a for a in NATMOD_ARCHS if a in archs_available_for(tag)],
-                abi,
-                tag,
-                arch_flags,
-            )
-        ]
+        return collapse_newest_tag(natmod_all_targets(arch_flags))
 
     def build_options(
         self, target: Target, env: Mapping[str, str] | None = None

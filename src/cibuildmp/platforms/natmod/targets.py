@@ -67,33 +67,23 @@ RV32_ARCH_FLAGS: dict[str, int] = dict(natmod_data()["arch-flags"]["rv32imc"])
 # might or might not catch later.
 _NATMOD_ROWS: list[dict[str, Any]] = build_platforms_data()["natmod"]["identifiers"]
 
-MPY_ABI: dict[str, str] = {row["tag"]: row["mpy"] for row in _NATMOD_ROWS}
-
-# Which arches a given tag's own dynruntime.mk source tree actually has --
-# the exact gap that let a config ask for `rv32imc` against a tag that
-# predates it (not available before v1.24.0) and only find out deep inside
-# a real build. Built once, from the same rows MPY_ABI above reads.
-_tag_arch_sets: dict[str, set[str]] = {}
-for _row in _NATMOD_ROWS:
-    _tag_arch_sets.setdefault(_row["tag"], set()).add(_row["arch"])
-_TAG_ARCHS: dict[str, frozenset[str]] = {
-    tag: frozenset(archs) for tag, archs in _tag_arch_sets.items()
+# (abi, arch) -> that pair's own base identifier, straight from
+# `resources/build-platforms.toml`'s own rows -- matched against a real
+# fact, not reconstructed by a Python f-string. `identifier_format =
+# "mpy{mpy}-{arch}"` (the file's own header) is the single place that
+# format is spelled out; every row was regenerated from it, so a
+# (abi, arch) pair with more than one row (several tags sharing one ABI)
+# always agrees on the string, and `dict` collapsing duplicates to the
+# last-seen one is therefore never a real collision. `Target.identifier`
+# below looks this up rather than rebuilding it -- the same shape
+# cibuildwheel's own `PythonConfiguration.identifier` has (a literal
+# field read from `resources/build-platforms.toml`, confirmed by reading
+# `cibuildwheel/platforms/linux.py` directly, not recalled).
+_IDENTIFIER_BY_ABI_ARCH: dict[tuple[str, str], str] = {
+    (row["mpy"], row["arch"]): row["identifier"] for row in _NATMOD_ROWS
 }
 
-
-def archs_available_for(tag: str) -> frozenset[str]:
-    """Every arch `tag`'s own dynruntime.mk source tree actually has, or
-    an empty set for a tag this table has never walked. Public so
-    `Options.targets()`/`all_targets()` (record 0052, A2) can filter a
-    requested archs list down to what a given ABI's own tag can build
-    *before* calling `natmod_targets()`, rather than letting its hard
-    error fire while sweeping every known ABI by default -- most ABIs
-    predate at least one arch (`rv32imc`/`rv64imc`/`xtensawin` were all
-    added over time), so that sweep silently producing fewer targets for
-    an older ABI is the intended, ordinary case, not a config mistake the
-    way an explicit, single-tag request for an unavailable arch still is.
-    """
-    return _TAG_ARCHS.get(tag, frozenset())
+MPY_ABI: dict[str, str] = {row["tag"]: row["mpy"] for row in _NATMOD_ROWS}
 
 
 class UnknownArchError(ValueError):
@@ -278,18 +268,25 @@ class Target:
 
     @property
     def identifier(self) -> str:
-        # Shaped after cibuildwheel's cp311-manylinux_x86_64, i.e.
-        # {ABI}-{platform}_{arch} -- but with no literal "natmod" segment
-        # (record 0052, A2): natmod is now one platform among six sharing
-        # this exact identifier shape (`.port` below), not a special mode
-        # this string needs to spell out, and dropping it is what lets
-        # "mpy6.3-*" and "*-armv7em*" both stay useful, minimal globs.
-        # arch_flags, when present, is an opaque `+0x..` suffix rather than
-        # named flags: it would otherwise have to stay in lockstep with
-        # RV32_ARCH_FLAGS to remain accurate, and the identifier must still
-        # mean the same thing if that table grows a flag this build
-        # predates.
-        base = f"mpy{self.abi}-{self.arch}"
+        # Matched against `_IDENTIFIER_BY_ABI_ARCH` (a real row's own
+        # `identifier` field), not rebuilt -- record 0052's own live
+        # finding, cross-checked against cibuildwheel's real
+        # `PythonConfiguration.identifier` (a literal field, never
+        # computed). `KeyError` here means a `Target` was constructed for
+        # an (abi, arch) pair `build-platforms.toml` has never walked --
+        # every real caller only ever builds one from `natmod_targets()`,
+        # itself fed by `archs_available_for(tag)`'s own gate, so this
+        # can only fire for a hand-built `Target` in a test, and should.
+        #
+        # arch_flags stays a suffix appended here, not a stored fact: it
+        # is config-driven (`arch-flags = [...]`), not something a real
+        # MicroPython tag's own history could record -- every row's own
+        # `arch_flags` column is `0` unconditionally, confirmed by
+        # inspection, because it never varied per (tag, arch) pair to
+        # begin with. Shaped after cibuildwheel's cp311-manylinux_x86_64:
+        # {ABI}-{platform}_{arch}, but with no literal "natmod" segment
+        # (record 0052, A2) since natmod is one platform among six now.
+        base = _IDENTIFIER_BY_ABI_ARCH[(self.abi, self.arch)]
         if self.arch_flags:
             base += f"+0x{self.arch_flags:x}"
         return base
@@ -327,51 +324,59 @@ def validate_archs_recognized(archs: list[str]) -> None:
         )
 
 
-def natmod_targets(
-    archs: list[str], abi: str, tag: str, arch_flags: Sequence[int] = (0,)
-) -> list[Target]:
-    """Build a Target per arch, preserving NATMOD_ARCHS order.
+def natmod_all_targets(rv32imc_arch_flags: Sequence[int] = (0,)) -> list[Target]:
+    """One `Target` per real `(tag, arch)` row in `build-platforms.toml`
+    -- the raw fact list `Options.targets()`/`all_targets()` glob-match
+    `build`/`skip`/`[[overrides]]` against directly, the same shape
+    cibuildwheel's own `get_python_configurations()` has: filter a
+    literal list read straight from data (`PythonConfiguration(**item)
+    for item in config_dicts`, confirmed by reading
+    `cibuildwheel/platforms/linux.py` directly, not recalled). No
+    separate "is this arch available for this tag" table is consulted
+    here -- a row existing at all already answers that, so nothing here
+    can admit a combination the file has never verified.
 
-    `arch_flags` only ever lands on the rv32imc target(s), if `rv32imc` is
-    selected -- every other arch's Target gets 0 regardless, since
-    dynruntime.mk itself only accepts ARCH_FLAGS= for rv32imc. rv32imc
-    itself gets one Target *per* `arch_flags` entry, not one overall --
-    "build every arch-flags variant" is a real, distinct request from
-    "build every arch" (both select on the same `archs`/`arch-flags` list
-    shape everywhere else in this config), so a `[0x1, 0x3]` list produces
-    two rv32imc identifiers, `+0x1` and `+0x3`, side by side.
-
-    Two different ways to be an unknown arch, checked separately (record
-    0052, Track C): `unrecognized` is an arch dynruntime.mk has never
-    heard of at all, at any tag -- a typo. `unavailable` is a real arch
-    this specific `tag`'s own source tree does not have -- `rv32imc`
-    against a tag older than v1.24.0, the exact bug this table exists to
-    catch instead of a real build failing deep inside `dynruntime.mk`.
-    Both raise the same `UnknownArchError` a caller already has to catch
-    (no new exception type), just with a message naming the real reason.
+    rv32imc rows are expanded by `rv32imc_arch_flags`, a real,
+    config-driven variant axis no row can pre-declare: every row's own
+    `arch_flags` column is `0` unconditionally (it never varied per
+    `(tag, arch)` pair to begin with). Every other arch's row produces
+    exactly one `Target`.
     """
-    validate_archs_recognized(archs)
-    available = _TAG_ARCHS.get(tag, frozenset())
-    unavailable = [a for a in archs if a not in available]
-    if unavailable:
-        raise UnknownArchError(
-            f"arch(es) not available for MicroPython {tag}: "
-            f"{', '.join(sorted(unavailable))}. Available for {tag}: "
-            f"{', '.join(sorted(available)) or '(none)'}"
-        )
-    selected = set(archs)
-    targets = []
-    for a in NATMOD_ARCHS:
-        if a not in selected:
-            continue
-        if a == "rv32imc":
-            targets += [
-                Target(abi=abi, arch=a, tag=tag, arch_flags=flags)
-                for flags in arch_flags
-            ]
+    result = []
+    for row in _NATMOD_ROWS:
+        if row["arch"] == "rv32imc":
+            result.extend(
+                Target(abi=row["mpy"], arch="rv32imc", tag=row["tag"], arch_flags=f)
+                for f in rv32imc_arch_flags
+            )
         else:
-            targets.append(Target(abi=abi, arch=a, tag=tag))
-    return targets
+            result.append(Target(abi=row["mpy"], arch=row["arch"], tag=row["tag"]))
+    return result
+
+
+def collapse_newest_tag(targets: Sequence[Target]) -> list[Target]:
+    """One `Target` per distinct identifier, keeping whichever candidate
+    carries the newest `tag` -- the checkout a real build would fetch.
+
+    Runs *after* selection (`select()`'s own glob match against
+    `.identifier`), not before: matching every real row directly and
+    collapsing duplicates afterward needs no separate "which tag is
+    newest for this ABI" table computed up front the way the old
+    `tag_groups()`-first design did -- multiple tags mapping to one ABI
+    collapse to the same `.identifier` (arch_flags-decorated rv32imc
+    identifiers included) and this picks the survivor among them,
+    nothing more.
+    """
+    best: dict[str, Target] = {}
+    order: list[str] = []
+    for t in targets:
+        ident = t.identifier
+        if ident not in best:
+            order.append(ident)
+            best[ident] = t
+        elif _tag_sort_key(t.tag) > _tag_sort_key(best[ident].tag):
+            best[ident] = t
+    return [best[i] for i in order]
 
 
 # Selector mechanism (parse_selector/matches/select) moved to

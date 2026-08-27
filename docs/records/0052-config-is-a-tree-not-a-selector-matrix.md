@@ -1914,4 +1914,66 @@ about which key happened to be written). 424 tests pass; ruff and pyright clean;
 failing command from the live report re-run against a copy of this project's own real
 `cibuildmp.toml` now exits 0.
 
+## Addendum, 2026-08-27 — natmod's own identifier stops being rebuilt and starts being
+matched: rows are the fact, `Target.identifier` looks one up instead of computing one
+
+Raised directly by the user, live, against real CLI output: `mpy6.3-x86` etc. is the correct
+string, but it was assembled by an f-string (`f"mpy{abi}-{arch}"`), never checked against
+`resources/build-platforms.toml`'s own `identifier` field for that row -- which was itself
+stale (`identifier_format = "mpy{mpy}-{tag}-{arch}"`, a pre-A2 shape that still spelled out
+the tag A2 deliberately dropped). Confirmed directly against real cibuildwheel source (not
+recalled, per this file's own first rule): `PythonConfiguration.identifier` is a **literal
+field**, read straight off `resources/build-platforms.toml`'s own row
+(`PythonConfiguration(**item) for item in config_dicts`, `cibuildwheel/platforms/linux.py`) --
+never computed. cibuildmp's own natmod rows were regenerated to the current, tag-free format
+(`identifier = "mpy{mpy}-{arch}"`, 205 rows, mechanical script); `Target.identifier` now looks
+its base string up in `_IDENTIFIER_BY_ABI_ARCH` (keyed by `(abi, arch)`, built once from those
+rows) and appends the config-driven `arch_flags` suffix on top -- the one part of the
+identifier no row can pre-declare, since every row's own `arch_flags` column is `0`
+unconditionally (confirmed by inspection: it never varied per row to begin with, so it was
+never really an axis the data tracked).
+
+**A second, larger correction followed from the same live conversation**: why does
+`archs_available_for(tag)` (Phase C1's own per-tag arch-availability table) exist at all, if
+matching real rows already answers "does this combination exist"? It existed because the old
+design computed *before* selecting -- `tag_groups()` picked one newest tag per ABI, then
+swept that tag's own available arches, intersecting against a purpose-built lookup table
+*before* `select()`'s own glob ever ran. The user's own correction: collapse *after* matching,
+not before -- `natmod_all_targets()` is now literally one `Target` per real `(tag, arch)` row
+(the same shape cibuildwheel's own `get_python_configurations()` has: filter a literal row
+list by `build_selector`, no parallel availability table at all), `select()` glob-matches
+`build`/`skip`/`[[overrides]]` against that raw list exactly as it always has, and the new
+`collapse_newest_tag()` runs **after** selection -- group survivors by `.identifier`, keep
+whichever carries the newest `tag` (the actual checkout a build fetches). `archs_available_for()`,
+`_TAG_ARCHS` and `natmod_targets()` (the function that needed the availability table to
+validate a single tag's own requested arch list) are deleted outright as the exact "100500
+checkers" class this correction removes -- dead once nothing calls them pre-selection, and a
+duplicate of what row-matching-then-collapsing already gives for free. `known_abis()`,
+`newest_known_abi()`, `abi_for_tag()`, `newest_tag_for_abi()`, `all_tag_groups()` all stay:
+each answers a real, still-needed question (which ABI is newest for an unconfigured `build`
+default, which tag a checkout should fetch) that is not itself an availability gate, and
+nothing about this correction touches them.
+
+`Options.tag_groups()` (the method, forwarding to `all_tag_groups()`) is deleted too -- its
+only caller was `targets()`/`all_targets()`, both rewritten to no longer need it.
+
+**Verified, not just asserted**: a full `Options.all_targets()` identifier snapshot taken
+before this change and one taken after are byte-for-byte identical (42 identifiers, diffed),
+and `cibuildmp --dry-run --platform natmod` against this repo's own real config produces the
+exact same ten-line output before and after. 423 tests pass (one net fewer than before,
+`natmod_targets()`'s own dedicated tests replaced by tests of `natmod_all_targets()`/
+`collapse_newest_tag()`); ruff and pyright clean.
+
+**Left open, correctly scoped as its own, larger piece, not attempted here**: usermod's own
+side has the identical problem in a more literal sense -- `usermod_targets()` builds targets
+from static Python axis-value lists (`_PORT_AXES`) cross-produced with freely-typed
+`micropython` tags, consulting `resources/build-platforms.toml` not at all (Track C's own
+Phase C2, tracked since before this addendum, still not started). Doing it properly touches
+`auto`/`native`/`all` keyword expansion, the `unix-emulated-everywhere` opt-in group, and a
+real data inconsistency this same investigation surfaced: `windows`'s own stored `arch` values
+(`win32`/`win_amd64`/`win_arm64`) do not match the runtime's own (`x64`/`x86`/`arm64`,
+`WINDOWS_ARCH_SETTINGS`), and `webassembly`'s stored rows carry an `arch = "wasm32"` axis the
+runtime identifier does not (a bare `{tag}-webassembly`, no arch segment at all) -- both need
+an explicit reconciliation decision, not a mechanical port of natmod's own fix.
+
 [0051]: 0051-usermod-identifiers-have-no-version-axis.md
