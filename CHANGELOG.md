@@ -191,6 +191,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   invocation flagged by a usermod-only override -- is not yet fixed
   (natmod must never import usermod back); tracked separately. Record
   0052's own addendum.
+- **The pinned natmod Docker image is republished, this time by CI itself.**
+  The prior digest was a hand `docker push` and predated the
+  `gcc-i686-linux-gnu` fix (record 0050); republishing it through
+  `publish-docker-images.yml` surfaced that a hand-pushed package also
+  carries no Actions-write grant for any repository, not only the
+  already-known private-visibility issue -- fixed via GHCR's "Connect
+  Repository" plus an explicit "Manage Actions access" grant, both
+  settings-UI-only. Confirmed live: the next push built
+  `examples/template` through the new digest, pulled anonymously by a
+  fresh CI runner -- the first real CI run to exercise
+  natmod-in-a-container end to end. Record 0050's own addendum.
 
 ### Removed
 

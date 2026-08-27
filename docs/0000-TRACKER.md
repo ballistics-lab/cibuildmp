@@ -91,17 +91,26 @@ disagreed with rather than guessed at: things that are *broken* beat things that
 are *missing*; work that unblocks verification beats work that gets verified
 later; and cheap-with-strong-evidence beats expensive-and-speculative.
 
-- [ ] [0050] natmod's image needs one more publish, and CI has never been
-      green on it | **start here, and it is nearly done.** The image gained
-      `gcc-i686-linux-gnu` after v1.29.0 changed `dynruntime.mk`'s `x86` from
-      `-m32` to a real cross prefix; verified locally on both tags and on all
-      ten arches, but the published digest predates it. Republish, update the
-      pin, drop the orphaned `sha256:2389c6fa…` (a hand-push leaves a bare
-      manifest, so it really is orphaned -- unlike the untagged versions of
-      every workflow-published image, which are index children and must not be
-      touched). Only then has any CI run exercised natmod-in-a-container at
-      all: the last one failed on `examples/wasm2mpy`'s `sudo apt-get`, since
-      fixed
+- [x] [0050] natmod's image needs one more publish, and CI has never been
+      green on it | **Republished and CI-confirmed green, 2026-08-27.**
+      `publish-docker-images.yml` was dispatched (`only: natmod`) and, for the
+      first time, actually pushed the image through `docker/build-push-action`
+      rather than by hand -- surfacing a second, previously-unknown gap on the
+      way: the push 403'd with `permission_denied: write_package`, because a
+      hand-pushed package carries no Actions-write grant for any repository
+      (only auto-granted at first-creation-by-Actions time), not just the
+      already-known private-visibility issue. Fixed the same way (settings-UI
+      only, no REST endpoint for either): "Connect Repository" plus an
+      explicit `Write` grant under "Manage Actions access". New digest
+      (`sha256:d3f6c431…`) pinned in `resources/pinned_docker_images.toml`,
+      confirmed live: the next push triggered `build-examples.yml` on a fresh
+      runner, which anonymously pulled exactly that digest and built
+      `examples/template` through it green -- the first real CI run this
+      project has ever had exercise natmod-in-a-container end to end. Record
+      0050's own addendum has the full account. **Still open, not done here:**
+      deleting the two now-fully-superseded orphaned hand-pushed digests from
+      GHCR (registry-UI-only, no API) -- low urgency, they cost nothing sitting
+      there
 - [ ] [0032] `qemu` has never been built anywhere | wired to `ensure_image()`
       by [0050] and in the default port set, so every `--archs auto` run on an
       amd64 runner now selects it -- and nothing has ever built it, here or by

@@ -220,6 +220,37 @@ It was found by the user asking why two test files were sitting unstaged.
   `container_mpy_cross()`; natmod has not been checked for whether its `make`
   reaches that binary at all.
 
+## Addendum, 2026-08-27 — the natmod image republished by CI itself; first real CI run
+
+The "Still open" item above ("the published digest predates `gcc-i686-linux-gnu`... no CI
+run has ever exercised natmod-in-a-container at all") is closed. `publish-docker-images.yml`
+was dispatched (`only: natmod`) against this image's own current Dockerfile content (already
+carrying `gcc-i686-linux-gnu`, committed earlier) and, for the first time, actually pushed
+through `docker/build-push-action` rather than by hand.
+
+**A second, previously-unknown gap surfaced doing this**: the push failed with `denied:
+permission_denied: write_package`, even with `packages: write` in the workflow. A package's
+first hand `docker push` (this record's own earlier text) does more damage than "unlinked and
+private" -- it also leaves the package with no Actions-write grant for any repository, since
+GitHub only auto-grants that at the moment a package is first created *by* a repository's own
+Actions run. Fixed the same way the earlier private-visibility gap was (both settings-UI-only,
+no REST endpoint for either): the package was connected to this repository ("Connect
+Repository") and explicitly granted `Write` under "Manage Actions access". Once both were set,
+the exact same workflow dispatch succeeded immediately, no other change needed.
+
+The resulting digest (`sha256:d3f6c431...`) is a real, workflow-published OCI index with
+provenance and attestation -- not the bare-manifest shape the prior two hand-pushed digests
+had. Content is unchanged (same Dockerfile, same four verified toolchains); only the
+publishing path changed, which is why the digest itself differs from a byte-identical build.
+
+`resources/pinned_docker_images.toml`'s own comment above the `natmod` pin was rewritten to
+carry this history (superseding, not deleting, the account of the second digest). Confirmed
+live, not just by the publish workflow's own "publicly pullable" check: the very next push to
+this branch triggered `build-examples.yml` on a fresh runner with no local cache, which
+anonymously pulled exactly this digest and built `examples/template` through it successfully
+(`Build examples/template (natmod)`, green). That is the first real CI run this project has
+ever had exercise natmod-in-a-container end to end.
+
 [0012]: 0012-pyelftools-ar-own-deps.md
 [0030]: 0030-container-approach-natmod-and-docker-vs-qemu.md
 [0032]: 0032-unix-docker-default-and-webassembly-wiring.md
