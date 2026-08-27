@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **New `name`/`version` config keys give built artifacts real project
+  identity.** Both are read from the top level, for every platform.
+  `version` already existed for natmod (writing it into each identifier's
+  `package.json`, D14) but usermod never read it; `name` is wholly new for
+  both. Setting `name` replaces natmod's `mpy_path.stem`-derived filename
+  prefix and usermod's literal `"micropython"`/`"micropython.exe"` stem
+  with `{name}-{version}-{identifier}` (`mylib-1.2.0-mpy6.3-x64.mpy`,
+  `mylib-1.2.0-v1.29.0-unix-manylinux_2_28_x86_64`) -- two different
+  projects' usermod firmware used to be indistinguishable by filename
+  alone. Leaving `name` unset keeps exactly today's filename. Record 0052,
+  Track A, A3.
 - **natmod's `micropython`/`mpy-abi` config keys are gone; the version
   axis is a statically known domain now, and its identifier drops the
   literal `-natmod-` segment.** `mpy6.3-natmod-armv7emsp` becomes

@@ -180,6 +180,15 @@ def test_version_defaults_empty_and_is_settable(tmp_path):
     assert versioned.version == "0.3.0"
 
 
+def test_name_defaults_empty_and_is_settable(tmp_path):
+    # record 0052, A3: `name`, alongside `version`, feeds output_name()'s
+    # {name}-{version}- filename prefix.
+    write(tmp_path, '[natmod]\narchs = ["x64"]\n')
+    assert Options.load(tmp_path, env={}).name == ""
+    named = Options.load(tmp_path, env={"CIBMP_NAME": "mylib"})
+    assert named.name == "mylib"
+
+
 def test_extra_files_from_publish_table(tmp_path):
     write(
         tmp_path,

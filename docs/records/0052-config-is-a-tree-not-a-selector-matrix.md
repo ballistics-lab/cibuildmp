@@ -1595,6 +1595,50 @@ after the fact.
 408 tests pass; ruff and pyright clean. A3/A4 (independent of each other and of
 everything landed so far) and all of Track B remain open.
 
+## Addendum, 2026-08-27 — A4 and A3 landed, per the "Suggested landing order"'s own step 5
+
+**A4**, docs-only exactly as scoped: `docs/reference/design.md`'s Identifier scheme
+section gains the `arch_flags = 0` compatibility-class paragraph, citing
+`py/persistentcode.c`'s own subset check and cross-referencing `natmod/build.py`'s
+`verify_output()` docstring for the mirror side of the same asymmetry.
+
+**A3** — `{name}-{version}-{identifier}` artifact filenames, for both families:
+
+- `version` (already `GENERIC_KEYS`, already a natmod `Options` field, already written
+  into natmod's own `package.json`) is now genuinely shared: `UsermodOptions` gained the
+  same field, read the same top-level-with-environment-override way. `name` is wholly new
+  for both, added to `GENERIC_KEYS` once (the shared constant both families' `check_keys()`
+  calls already read, confirmed directly rather than assumed — no second copy to touch).
+- `natmod/build.py`'s `output_name()` and `usermod/orchestrate.py`'s `_dest_name()`
+  (the record's own step 5 named `build.py:769,1081,1372` — stale line numbers from
+  before Phase H's move; the function itself lives in `orchestrate.py` now, confirmed by
+  reading the current tree rather than trusting the citation) both gate the whole
+  `{name}-{version}-` prefix on `name` alone: unset, both keep exactly today's filename
+  (`mpy_path.stem`-derived for natmod, the literal `"micropython"`/`"micropython.exe"`
+  stem for usermod); set, the old stem is dropped entirely rather than prefixed, and an
+  empty `version` alongside a set `name` omits the version segment rather than emitting a
+  bare `mylib--mpy6.3-x64.mpy` double dash — a small, deliberate reading of the record's
+  own "gains the `{name}-{version}-` prefix only when name is non-empty" wording, not
+  specified in that literal form there.
+- Confirmed directly, not assumed, before touching either writer: usermod's own schema
+  read `version` nowhere (`grep -n '"version"' platforms/usermod/options.py` — zero hits),
+  and the natmod `package.json` writer already reads `version` off the now-global key with
+  no change needed (it always did — `version` only *became* global in name, its plumbing
+  was already there).
+- New tests: `tests/test_build.py` (name-unset/name-only/name-and-version cases for
+  `output_name()`), `tests/test_usermod_orchestrate.py` (the same three cases for
+  `_dest_name()`, plus one full `build_one()` integration test proving `options.name`/
+  `options.version` actually reach the written file), `tests/test_options.py` and
+  `tests/test_usermod_options.py` (both families' own `name`/`version` load-and-default
+  tests, mirroring the existing `version`-only tests each file already had for natmod).
+- Not done, deliberately out of scope: the D14 `package.json` writer gaining the tag
+  actually used as a provenance field (A2's own step 8, sequenced "with A3... since both
+  touch that writer" by the record's own text) — a genuine A2 leftover, not an A3 step;
+  left open rather than folded in silently.
+
+417 tests pass; ruff and pyright clean. All of Track A is now landed. Only Track B remains
+open, gated on its own B0–B3 review pass per the "Suggested landing order."
+
 [0001]: 0001-natmod-first.md
 [0004]: 0004-config-file-location.md
 [0005]: 0005-one-identifier-namespace.md

@@ -397,6 +397,20 @@ def test_shared_top_level_keys_honour_the_environment_in_usermod_mode(
     assert options.output_dir == Path("elsewhere")
 
 
+def test_name_and_version_default_empty_and_are_settable(tmp_path):
+    # record 0052, A3: usermod reads `name`/`version` too now -- both feed
+    # orchestrate.py's own _dest_name() filename prefix.
+    write_config(tmp_path, "[unix]\n")
+    unset = UsermodOptions.load(tmp_path)
+    assert unset.name == ""
+    assert unset.version == ""
+
+    write_config(tmp_path, 'name = "mylib"\nversion = "1.2.0"\n[unix]\n')
+    options = UsermodOptions.load(tmp_path)
+    assert options.name == "mylib"
+    assert options.version == "1.2.0"
+
+
 # ── record 0051 point 7: [[overrides]] ───────────────────────────
 
 

@@ -6,7 +6,7 @@ from cibuildmp import dockerrun
 from cibuildmp.platforms.natmod.options import DEFAULT_MICROPYTHON
 from cibuildmp.platforms.usermod import build as build_module
 from cibuildmp.platforms.usermod.options import UsermodOptions
-from cibuildmp.platforms.usermod.orchestrate import build, build_one
+from cibuildmp.platforms.usermod.orchestrate import _dest_name, build, build_one
 from cibuildmp.platforms.usermod.targets import UsermodTarget
 
 
@@ -81,6 +81,64 @@ def test_build_one_unix_writes_into_output_dir_identifier(tmp_path, monkeypatch)
         / "micropython-unix-manylinux_2_28_x86_64"
     )
     assert result.output.read_bytes() == FAKE_X86_64_ELF
+
+
+def test_dest_name_unset_keeps_todays_filename():
+    # record 0052, A3: gated on `name` alone -- a project that has not set
+    # it yet keeps exactly today's filename, "micropython" stem included.
+    assert (
+        _dest_name(Path("micropython"), "unix-manylinux_2_28_x86_64")
+        == "micropython-unix-manylinux_2_28_x86_64"
+    )
+
+
+def test_dest_name_with_name_and_version_drops_the_micropython_stem():
+    assert (
+        _dest_name(
+            Path("micropython.exe"),
+            "windows-arm64",
+            name="mylib",
+            version="1.2.0",
+        )
+        == "mylib-1.2.0-windows-arm64.exe"
+    )
+
+
+def test_dest_name_with_name_only_omits_the_version_segment():
+    assert (
+        _dest_name(Path("micropython.bin"), "esp32-ESP32_GENERIC", name="mylib")
+        == "mylib-esp32-ESP32_GENERIC.bin"
+    )
+
+
+def test_build_one_threads_name_and_version_into_the_output_filename(
+    tmp_path, monkeypatch
+):
+    package_dir = tmp_path / "pkg"
+    make_module_dir(package_dir)
+    write_config(package_dir, 'name = "mylib"\nversion = "1.2.0"\n[unix]\n')
+    options = UsermodOptions.load(package_dir)
+    options.output_dir = tmp_path / "mpyhouse"
+
+    mpy_dir = tmp_path / "mpy"
+    target = UsermodTarget(port="unix", arch="manylinux_2_28_x86_64")
+
+    def fake_run(cmd, **kwargs):
+        build_dir = mpy_dir / "ports" / "unix" / "build-unix-manylinux_2_28_x86_64"
+        build_dir.mkdir(parents=True, exist_ok=True)
+        (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
+
+    monkeypatch.setattr(build_module.subprocess, "run", fake_run)
+    (mpy_dir / "ports" / "unix").mkdir(parents=True)
+
+    result = build_one(options, target, mpy_dir)
+
+    assert (
+        result.output
+        == options.output_dir
+        / "unix-manylinux_2_28_x86_64"
+        / "mylib-1.2.0-unix-manylinux_2_28_x86_64"
+    )
 
 
 def test_build_one_qemu_uses_default_board_not_empty_string(tmp_path, monkeypatch):

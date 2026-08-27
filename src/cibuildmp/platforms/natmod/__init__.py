@@ -171,6 +171,7 @@ def build_all(options: Options, targets: list[Target]) -> int:
                 output_dir,
                 package_dir=options.package_dir,
                 extra_files=extra_files,
+                name=options.name,
                 version=options.version,
             )
             results.append(result)

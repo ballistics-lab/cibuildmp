@@ -294,13 +294,24 @@ def verify_output(build_options: BuildOptions, mpy_path: Path) -> None:
         )
 
 
-def output_name(build_options: BuildOptions, mpy_path: Path) -> str:
+def output_name(
+    build_options: BuildOptions, mpy_path: Path, *, name: str = "", version: str = ""
+) -> str:
     # Identifier-qualified even though the file already lives in its own
     # identifier/ directory: package.json's own urls stay unambiguous even
     # if a caller later flattens several identifiers' directories into one
     # namespace (e.g. a GitHub Release's own asset list, which cannot nest
     # directories -- see D14's "still open" deployment note).
-    return f"{mpy_path.stem}-{build_options.identifier}{mpy_path.suffix}"
+    #
+    # `name`/`version` (record 0052, A3) give the file real project
+    # identity -- `mpy_path.stem` alone is a side effect of the user's own
+    # Makefile, not a config value. Gated on `name` being set at all: a
+    # project that has not set it yet keeps exactly today's filename
+    # rather than gaining a bare leading `-`.
+    if not name:
+        return f"{mpy_path.stem}-{build_options.identifier}{mpy_path.suffix}"
+    prefix = f"{name}-{version}-" if version else f"{name}-"
+    return f"{prefix}{build_options.identifier}{mpy_path.suffix}"
 
 
 def _write_package_json(path: Path, urls: list[tuple[str, str]], version: str) -> None:
@@ -359,6 +370,7 @@ def build_target(
     *,
     package_dir: Path,
     extra_files: Sequence[Path] = (),
+    name: str = "",
     version: str = "",
 ) -> BuildResult:
     """Run one target's build end to end: pre-build-command, make, collect,
@@ -384,7 +396,9 @@ def build_target(
 
     identifier_dir = output_dir / build_options.identifier
     identifier_dir.mkdir(parents=True, exist_ok=True)
-    dest = identifier_dir / output_name(build_options, produced)
+    dest = identifier_dir / output_name(
+        build_options, produced, name=name, version=version
+    )
     dest.write_bytes(produced.read_bytes())
 
     package_target(

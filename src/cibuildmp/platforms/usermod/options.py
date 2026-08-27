@@ -30,10 +30,15 @@ same `cibuildmp.options.Options` cascade `natmod/options.py` uses, not
 eagerly-resolved scalar fields shared by every selected port
 unconditionally the way they were before this phase.
 
-No `version`/`package.json` here at all: usermod output is a full port
-binary meant to be flashed or run directly, not a `.mpy` `mip.install()`
-target -- D14's packaging step does not apply (confirmed with the user
-directly before building this, not assumed either way).
+No `package.json` here at all: usermod output is a full port binary meant
+to be flashed or run directly, not a `.mpy` `mip.install()` target -- D14's
+packaging step does not apply (confirmed with the user directly before
+building this, not assumed either way). `name`/`version` do reach usermod
+now (record 0052, A3) -- not for a package.json that will never exist, but
+because `orchestrate.py`'s own `_dest_name()` had no project identity at
+all before this: every produced binary's own stem was always literally
+`"micropython"`/`"micropython.exe"`, regardless of which project's config
+built it.
 """
 
 from __future__ import annotations
@@ -260,6 +265,8 @@ class UsermodOptions:
     ports: list[str]
     build: list[str]
     skip: list[str]
+    name: str
+    version: str
     axis_overrides: dict[str, list[str]]
     # The shared, top-level [[overrides]] list (0051 point 7, merged with
     # natmod's own in Phase G) -- not axis_overrides above (which
@@ -360,6 +367,8 @@ class UsermodOptions:
             ports=ports,
             build=parse_selector(opt("build", "*")),
             skip=parse_selector(opt("skip", "")),
+            name=str(opt("name", "")),
+            version=str(opt("version", "")),
             axis_overrides=axis_overrides,
             overrides=overrides,
             enable=frozenset(parse_selector(opt("enable"))),

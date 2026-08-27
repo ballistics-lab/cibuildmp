@@ -87,6 +87,7 @@ GENERIC_KEYS: frozenset[str] = frozenset(
         "output-dir",
         "build",
         "skip",
+        "name",
         "version",
         "micropython-submodules",
         "enable",
@@ -325,6 +326,7 @@ class Options:
     archs: list[str]
     micropython_submodules: list[str]
     arch_flags: list[str]
+    name: str
     version: str
     overrides: list[dict[str, Any]]
     publish: dict[str, Any]
@@ -415,6 +417,7 @@ class Options:
                 opt("micropython-submodules"), "micropython-submodules"
             ),
             arch_flags=_as_list(arch_flags_value, "arch-flags"),
+            name=str(opt("name", "")),
             version=str(opt("version", "")),
             overrides=overrides,
             publish=publish,

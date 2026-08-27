@@ -182,9 +182,21 @@ micropython = "v1.29.0"       # usermod only ([0052], A2): release tag(s) to
 output-dir = "mpyhouse"       # output-dir/<identifier>/ per target (D14)
 build = "*"                   # glob(s) over identifiers, space-separated
 skip = ""
-version = ""                 # set (CIBMP_VERSION in CI) to also write each
-                              # identifier's package.json (D14); empty means
-                              # just the .mpy, not mip-installable yet
+name = ""                     # ([0052], A3) project identity for artifact
+                              # filenames -- {name}-{version}-{identifier}
+                              # instead of natmod's mpy_path.stem-derived
+                              # default / usermod's literal "micropython"
+                              # stem. Empty keeps today's filename exactly;
+                              # setting it drops the old stem entirely
+                              # rather than prefixing it.
+version = ""                 # ([0052], A3 extended this to usermod too;
+                              # previously natmod-only) set (CIBMP_VERSION
+                              # in CI) to also write each natmod identifier's
+                              # package.json (D14) and feed both families'
+                              # {name}-{version}- filename prefix above --
+                              # empty means just the .mpy/binary, no
+                              # package.json yet for natmod, and no version
+                              # segment in the filename for either family
 
 [natmod]
 archs = ["x64", "x86", "armv6m", "armv7m", "armv7emsp", "armv7emdp",
@@ -227,7 +239,7 @@ identifiers is still a loud, specific error, not silently ignored.
 
 Every option is overridable by environment variable, `CIBMP_`-prefixed and
 screaming-snake-cased: `CIBMP_BUILD`, `CIBMP_SKIP`, `CIBMP_MICROPYTHON`,
-`CIBMP_OUTPUT_DIR`, `CIBMP_EXTRA_MAKE_ARGS`, `CIBMP_VERSION`,
+`CIBMP_OUTPUT_DIR`, `CIBMP_EXTRA_MAKE_ARGS`, `CIBMP_NAME`, `CIBMP_VERSION`,
 `CIBMP_ARCH_FLAGS`, … Precedence, lowest to highest: defaults → config
 file → `[[overrides]]` matching the identifier → environment → CLI flags.
 
@@ -235,8 +247,8 @@ file → `[[overrides]]` matching the identifier → environment → CLI flags.
 error** ([0048], generalised into a cascade by [0051]'s own Phase F). The
 keys above the first table header — `micropython` (usermod only since
 [0052]'s A2 removed natmod's own use of it), `output-dir`, `build`, `skip`,
-`version`, `micropython-submodules`, `enable` — are invocation-wide and are
-read **only** from the top level, across every platform (`mpy-abi` is gone
+`name`, `version`, `micropython-submodules`, `enable` — are invocation-wide
+and are read **only** from the top level, across every platform (`mpy-abi` is gone
 entirely, not merely relocated — writing it anywhere is now a plain unknown-
 key error). Writing one inside `[natmod]` or a usermod port's own table
 fails with a message naming where it belongs; so does any key that table's

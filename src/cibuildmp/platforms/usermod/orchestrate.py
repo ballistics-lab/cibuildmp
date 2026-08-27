@@ -172,13 +172,27 @@ def _port_build_options(
     raise UsermodBuildError(f"no build_options builder wired for port {port!r}")
 
 
-def _dest_name(produced: Path, identifier: str) -> str:
+def _dest_name(
+    produced: Path, identifier: str, *, name: str = "", version: str = ""
+) -> str:
     # Identifier-qualified even though the file already lives in its own
     # identifier/ directory -- same reasoning natmod's own output_name()
     # gives: stays unambiguous if a caller later flattens several
     # identifiers' directories into one namespace (a GitHub Release's own
     # flat asset list, which cannot nest directories).
-    return f"{produced.stem}-{identifier}{produced.suffix}"
+    #
+    # `name`/`version` (record 0052, A3) replace `produced.stem` entirely
+    # when set, rather than prefixing it: `produced.stem` is always
+    # literally "micropython"/"micropython.exe", and restating that a
+    # usermod build produces MicroPython firmware is noise a project name
+    # already displaces (the same reason `natmod` was dropped from
+    # natmod's own identifier). Gated on `name` alone, same as natmod's
+    # own output_name() -- a project that has not set it yet keeps
+    # exactly today's filename.
+    if not name:
+        return f"{produced.stem}-{identifier}{produced.suffix}"
+    prefix = f"{name}-{version}-" if version else f"{name}-"
+    return f"{prefix}{identifier}{produced.suffix}"
 
 
 # Ports whose build still runs a *host* mpy-cross, and therefore the only
@@ -254,7 +268,9 @@ def build_one(
     # package_dir.
     identifier_dir = options.package_dir / options.output_dir / target.identifier
     identifier_dir.mkdir(parents=True, exist_ok=True)
-    dest = identifier_dir / _dest_name(produced, target.identifier)
+    dest = identifier_dir / _dest_name(
+        produced, target.identifier, name=options.name, version=options.version
+    )
     # shutil.copy(), not copyfile(): unlike natmod's own .mpy (always
     # mip.install()-ed or imported, never executed directly -- D23), a
     # usermod build's own output IS a runnable binary. copyfile() only

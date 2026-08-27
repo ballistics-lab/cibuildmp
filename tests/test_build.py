@@ -268,6 +268,32 @@ def test_output_name_is_unambiguous():
     assert output_name(build_options(), mpy) == "mymodule-mpy6.3-armv7emsp.mpy"
 
 
+def test_output_name_unset_name_keeps_todays_filename():
+    # record 0052, A3: gated on `name` alone -- a project that has not set
+    # it yet keeps exactly today's filename rather than gaining a bare
+    # leading `-`.
+    mpy = Path("build/armv7emsp-eabi/mymodule.mpy")
+    assert (
+        output_name(build_options(), mpy, version="1.2.0")
+        == "mymodule-mpy6.3-armv7emsp.mpy"
+    )
+
+
+def test_output_name_with_name_and_version_drops_the_makefile_stem():
+    mpy = Path("build/armv7emsp-eabi/mymodule.mpy")
+    assert (
+        output_name(build_options(), mpy, name="mylib", version="1.2.0")
+        == "mylib-1.2.0-mpy6.3-armv7emsp.mpy"
+    )
+
+
+def test_output_name_with_name_only_omits_the_version_segment():
+    mpy = Path("build/armv7emsp-eabi/mymodule.mpy")
+    assert (
+        output_name(build_options(), mpy, name="mylib") == "mylib-mpy6.3-armv7emsp.mpy"
+    )
+
+
 def _stub_make(tmp_path, native_code=7, arch_flags=0):
     def fake_make(*a, **k):
         write_mpy(
