@@ -19,7 +19,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ...options import InheritRule, matching_overrides, override_extra_layers, suggest
+from ...options import (
+    InheritRule,
+    check_selector_reachable,
+    matching_overrides,
+    override_extra_layers,
+    suggest,
+)
 from ...options import Options as OptionCascade
 from ...selector import parse_selector, select
 from .targets import (
@@ -272,6 +278,41 @@ class BuildOptions:
         return self.target.identifier
 
 
+def check_reachable(cfg: Options) -> None:
+    """Pre-build reachability audit -- the missing other half of
+    `build.verify_output()`'s post-build check (record 0052, A5): every
+    selector a config writes must be *capable* of matching something,
+    checked against `all_targets()` (the full, unfiltered identifier
+    space cfg's own `archs`/every known ABI can ever produce), never
+    against `targets()`'s own already-filtered result -- `build`/`skip`
+    legitimately narrowing a real domain down to zero selected targets
+    (a deliberate `skip = "*"`) is an ordinary, valid outcome and must
+    stay one, not turn into an error just because this check exists. A
+    pattern that can never match *anything at all* is a different,
+    genuine mistake -- a typo, an ABI this project has never verified --
+    and record 0048 already fought exactly this bug class once for a
+    misplaced key; this is the same guarantee one level down, at the
+    selector-string level instead of the key-name level.
+
+    `check_selector_reachable()` (`cibuildmp/options.py`) is the shared
+    mechanism, reused unchanged by `usermod/options.py`'s own
+    `check_reachable()`.
+    """
+    identifiers = [t.identifier for t in cfg.all_targets()]
+    check_selector_reachable(cfg.build, "build", identifiers, error=ConfigError)
+    check_selector_reachable(cfg.skip, "skip", identifiers, error=ConfigError)
+    for index, override in enumerate(cfg.overrides, 1):
+        selector = override.get("select")
+        if selector is None:
+            continue  # a missing select is its own, separate error elsewhere
+        check_selector_reachable(
+            parse_selector(selector),
+            f"[[overrides]] #{index}",
+            identifiers,
+            error=ConfigError,
+        )
+
+
 @dataclass
 class Options:
     """The whole config, before it is narrowed to a single target."""
@@ -418,7 +459,14 @@ class Options:
         request, distinct from "build every arch", so
         `arch-flags = ["", "zba,zcmp"]` is two rv32imc identifiers, not
         one.
+
+        Also runs `check_reachable()` (record 0052, A5) once here, the
+        one place the real build path, `--print-build-identifiers` and
+        `--dry-run` already converge -- so every caller gets the
+        pre-build reachability audit for free, not just the ones that
+        remember to ask for it.
         """
+        check_reachable(self)
         validate_archs_recognized(self.archs)
         arch_flags = resolve_arch_flags("rv32imc", self.arch_flags)
         all_targets = [

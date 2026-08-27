@@ -481,6 +481,33 @@ def test_an_unknown_key_in_usermod_overrides_is_an_error(tmp_path):
         UsermodOptions.load(tmp_path)
 
 
+def test_reachability_audit_rejects_an_override_select_that_can_never_match(tmp_path):
+    # record 0052, A5: "notaport" names no real port at all, in any tag --
+    # all_targets() spans every known port regardless of which ones are
+    # active here, so this is genuinely unreachable, not merely unselected.
+    write_config(
+        tmp_path,
+        """
+        [unix]
+
+        [[overrides]]
+        select = "*-notaport"
+        extra-make-args = ["X=1"]
+        """,
+    )
+    with pytest.raises(
+        UsermodConfigError, match=r"\[\[overrides\]\] #1: '\*-notaport'"
+    ):
+        UsermodOptions.load(tmp_path).targets()
+
+
+def test_reachability_audit_allows_a_deliberate_skip_everything(tmp_path):
+    # Same distinction as natmod's own case: skip = "*" narrows a real,
+    # reachable domain to zero *selected* targets, which stays legitimate.
+    write_config(tmp_path, 'skip = "*"\n[unix]\n')
+    assert UsermodOptions.load(tmp_path).targets() == []
+
+
 # ── record 0051 point 8: enable / GROUPS ──────────────────────────────────
 
 

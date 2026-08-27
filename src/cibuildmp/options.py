@@ -167,6 +167,35 @@ def matching_overrides(
     return result
 
 
+def check_selector_reachable(
+    patterns: Sequence[str],
+    where: str,
+    identifiers: Sequence[str],
+    *,
+    error: type[Exception] = ConfigError,
+) -> None:
+    """Raise unless every pattern in `patterns` matches at least one of
+    `identifiers` (record 0052, A5) -- checked individually per pattern
+    rather than as one OR'd whole, so a group with one working pattern
+    and one typo'd one does not hide the typo behind the pattern that
+    still matches something. Shared by `natmod/options.py`'s and
+    `usermod/options.py`'s own `check_reachable()`, each of which calls
+    this once for `build`, once for `skip`, and once per `[[overrides]]`
+    table's own `select` -- `identifiers` is always that caller's own
+    `all_targets()`, the full, unfiltered domain, never the already-
+    selected result, so a deliberate `skip = "*"` narrowing a real domain
+    to zero *selected* targets stays legitimate and is never confused
+    with a pattern that could never have matched anything in the first
+    place.
+    """
+    for pattern in patterns:
+        if not any(matches(identifier, [pattern]) for identifier in identifiers):
+            raise error(
+                f"{where}: {pattern!r} matches no known identifier -- a typo, "
+                f"or an axis value this project has never verified"
+            )
+
+
 def override_extra_layers(
     matching: Sequence[Mapping[str, Any]], key: str
 ) -> list[tuple[Any | None, str]]:

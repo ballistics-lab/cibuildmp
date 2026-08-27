@@ -46,7 +46,11 @@ from pathlib import Path
 from typing import Any
 
 from ...options import Options as OptionCascade
-from ...options import matching_overrides, override_extra_layers
+from ...options import (
+    check_selector_reachable,
+    matching_overrides,
+    override_extra_layers,
+)
 from ...selector import parse_selector, select
 from ..natmod.options import (
     DEFAULT_MICROPYTHON,
@@ -217,6 +221,33 @@ class UsermodBuildOptions:
         return self.target.port
 
 
+def check_reachable(cfg: UsermodOptions) -> None:
+    """Pre-build reachability audit -- the usermod half of record 0052's
+    A5 (see `natmod/options.py`'s own `check_reachable()` for the full
+    reasoning, unchanged here): every `build`/`skip`/`[[overrides]]`
+    `select` pattern must be capable of matching at least one identifier
+    in `all_targets()` (every known port, this config's own configured
+    `micropython` tags), checked before `targets()`'s own `build`/`skip`
+    narrowing -- which legitimately reaching zero *selected* targets (a
+    deliberate `skip = "*"`) must stay a valid, ordinary outcome, never
+    confused with a pattern that could never have matched anything at
+    all.
+    """
+    identifiers = [t.identifier for t in cfg.all_targets()]
+    check_selector_reachable(cfg.build, "build", identifiers, error=UsermodConfigError)
+    check_selector_reachable(cfg.skip, "skip", identifiers, error=UsermodConfigError)
+    for index, override in enumerate(cfg.overrides, 1):
+        selector = override.get("select")
+        if selector is None:
+            continue  # a missing select is its own, separate error elsewhere
+        check_selector_reachable(
+            parse_selector(selector),
+            f"[[overrides]] #{index}",
+            identifiers,
+            error=UsermodConfigError,
+        )
+
+
 @dataclass
 class UsermodOptions:
     """Every active usermod port's config, before it is narrowed to a
@@ -342,6 +373,7 @@ class UsermodOptions:
                 f"enable: unknown group(s) {', '.join(sorted(unknown))}. Known: "
                 f"{', '.join(sorted(GROUPS))}"
             )
+        check_reachable(self)
         all_targets = usermod_targets(self.micropython, self.ports, self.axis_overrides)
         return select(
             all_targets, self.build, self.skip, enable=self.enable, groups=GROUPS

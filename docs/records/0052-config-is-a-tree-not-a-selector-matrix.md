@@ -1566,6 +1566,35 @@ about a tag+port this table has never walked (a real gap, not the "wrong tag ent
 case decision 1 already covers) — same hard-error direction, in all likelihood, but worth
 confirming once C1 is landed and this phase is actually being scoped, not assumed here.
 
+## Addendum, 2026-08-27 — A5 landed, for both families, per the "Suggested landing order"
+
+`check_reachable()` — natmod's own in `platforms/natmod/options.py`, usermod's own in
+`platforms/usermod/options.py` — called once each from `targets()`, the one place every
+caller (the real build path, `--print-build-identifiers`, `--dry-run`, `--only`, which all
+call `targets()` before any further narrowing) already converges, exactly as A5's own
+point 1 specified. Checked against `all_targets()` (the full, unfiltered identifier
+space), never against `targets()`'s own already-`build`/`skip`-filtered result — a
+deliberate `skip = "*"` narrowing a real, reachable domain to zero *selected* targets
+stays legitimate, proven by its own direct test (`test_reachability_audit_allows_a_
+deliberate_skip_everything`, both families) rather than merely asserted.
+
+The shared per-pattern-group mechanism (`check_selector_reachable()`) lives in
+`cibuildmp/options.py`, alongside `matching_overrides()` — the established home for logic
+generic across both families, `error` parameterized the same way `matching_overrides()`
+already is so each caller's own exception class (`natmod.options.ConfigError` /
+`usermod.options.UsermodConfigError`) is preserved rather than replaced by a third,
+shared one; existing tests assert the specific class each mode already raises, and this
+does not change that. Checks each pattern in a `build`/`skip`/`select` group individually
+rather than the group as one OR'd whole, so one working pattern next to one typo'd one
+does not hide the typo.
+
+Sequenced after A2 exactly as A5's own point 6 required — every new test written against
+the post-A2 identifier shape (`mpy{abi}-{arch}`, no `-natmod-`) directly, not adjusted
+after the fact.
+
+408 tests pass; ruff and pyright clean. A3/A4 (independent of each other and of
+everything landed so far) and all of Track B remain open.
+
 [0001]: 0001-natmod-first.md
 [0004]: 0004-config-file-location.md
 [0005]: 0005-one-identifier-namespace.md

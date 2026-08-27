@@ -238,3 +238,31 @@ def test_arch_flags_in_an_overrides_table_is_an_error(tmp_path):
 
     with pytest.raises(ConfigError, match=r"\[\[overrides\]\]: unknown key"):
         Options.load(tmp_path)
+
+
+def test_reachability_audit_rejects_an_override_select_that_can_never_match(tmp_path):
+    # record 0052, A5: "*-aarch64" can never match any identifier at all
+    # (dynruntime.mk has no such arch, in any ABI) -- caught before a real
+    # build ever starts, the same way a misplaced key already is (0048),
+    # one level down at the selector-string level.
+    write(
+        tmp_path,
+        """
+        [natmod]
+        archs = ["x64"]
+        [[overrides]]
+        select = "*-aarch64"
+        extra-make-args = ["X=1"]
+        """,
+    )
+    with pytest.raises(ConfigError, match=r"\[\[overrides\]\] #1: '\*-aarch64'"):
+        Options.load(tmp_path).targets()
+
+
+def test_reachability_audit_allows_a_deliberate_skip_everything(tmp_path):
+    # The distinction this audit exists to preserve: skip = "*" narrows a
+    # real, reachable domain down to zero *selected* targets, which stays
+    # entirely legitimate -- only a pattern that can never match anything
+    # in the first place is an error.
+    write(tmp_path, 'skip = "*"\n[natmod]\narchs = ["x64"]\n')
+    assert Options.load(tmp_path).targets() == []
