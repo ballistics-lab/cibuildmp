@@ -1020,6 +1020,21 @@ noted here: `v1.30.0-preview` already exists upstream — newer than
 anything `[mpy-abi]` currently pins, confirming the pin table needs
 periodic refreshing (its own stated purpose) rather than being a
 one-time artifact.
+
+**Decided, directly: only the most recent preview tag is pinned, every
+earlier preview dropped.** A superseded preview (`v1.22.0-preview`
+through `v1.28.0-preview`, once `v1.22.0` through `v1.28.0` themselves
+shipped) adds real row count for no ongoing value — its own final
+release already exists, is more authoritative, and is what any real
+config should actually build against. The single most recent preview
+(`v1.29.0-preview`, or `v1.30.0-preview` once the table is refreshed)
+stays pinned because it is the only one naming a version whose final
+release does not exist yet — genuinely the newest thing available to
+build against, not historical. Pruned file sent to the user
+(`build-platforms.pruned.toml`): 15 tags instead of 22, 904 rows instead
+of 1,304. The refresh script's own selection rule, stated plainly: keep
+every non-preview tag, plus the single newest preview tag, drop every
+older preview.
 - **`[mpy-abi]` (tag -> abi)** — already exactly the flat-map-of-real-facts
   shape this lesson calls for; unchanged, and still the source `family =
   "natmod"` rows above derive their own `abi` field from (one lookup per
