@@ -123,11 +123,10 @@ extra-make-args = ["MP_BCLIBC_PRECISION=single"]
 #     [unix]
 #     archs = ["x64", "x86", "aarch64", "armhf", "mipsel"]
 #
-#     [esp32.ESP32_GENERIC]
+#     [esp32]
+#     boards = ["ESP32_GENERIC"]
 #
-# -- is examples/template/cibuildmp.toml, not sketched here. `esp32`'s own
-# boards are tree-node presence now, not a `boards = [...]` list (record
-# 0052, Track B, B4.2) -- one `[esp32.<BOARD_NAME>]` table per board.
+# -- is examples/template/cibuildmp.toml, not sketched here.
 # ("rp2040" was never a real port -- targets.py's own KNOWN_PORTS has no
 # such name; esp32 above is the closest board-axis port that exists.)
 #

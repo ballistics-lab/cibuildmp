@@ -68,15 +68,13 @@ def test_per_port_axis_override(tmp_path):
 
 
 def test_multiple_boards_same_port(tmp_path):
-    # Answers the user's own question directly: yes, one board table per
-    # board produces one target each, built independently -- board
-    # selection is tree-node presence now (record 0052, Track B, B4.2),
-    # not a `boards = [...]` list.
+    # Answers the user's own question directly: yes, a list of boards for
+    # one port produces one target each, built independently.
     write_config(
         tmp_path,
         """
-        [esp32.ESP32_GENERIC]
-        [esp32.ESP32_GENERIC_S3]
+        [esp32]
+        boards = ["ESP32_GENERIC", "ESP32_GENERIC_S3"]
         """,
     )
     options = UsermodOptions.load(tmp_path)
@@ -86,50 +84,6 @@ def test_multiple_boards_same_port(tmp_path):
         f"{DEFAULT_MICROPYTHON}-esp32-ESP32_GENERIC",
         f"{DEFAULT_MICROPYTHON}-esp32-ESP32_GENERIC_S3",
     ]
-
-
-def test_esp32_boards_list_syntax_is_a_dedicated_error(tmp_path):
-    # The pre-B4.2 shape gets its own message, not a generic "unknown
-    # key" -- the same courtesy check_usermod_family_table() already
-    # gives other syntax migrations.
-    write_config(
-        tmp_path,
-        """
-        [esp32]
-        boards = ["ESP32_GENERIC"]
-        """,
-    )
-    with pytest.raises(UsermodConfigError, match=r"\[esp32\] boards = \[\.\.\.\]"):
-        UsermodOptions.load(tmp_path)
-
-
-def test_esp32_unknown_board_name_is_rejected(tmp_path):
-    write_config(tmp_path, "[esp32.NOT_A_REAL_BOARD]\n")
-    with pytest.raises(
-        UsermodConfigError, match=r"\[esp32\.NOT_A_REAL_BOARD\]: unrecognised board"
-    ):
-        UsermodOptions.load(tmp_path)
-
-
-def test_esp32_board_node_accepts_its_own_extra_make_args(tmp_path):
-    write_config(
-        tmp_path,
-        """
-        [esp32.ESP32_GENERIC_S3]
-        extra-make-args = ["BOARD_SPECIFIC=1"]
-        """,
-    )
-    options = UsermodOptions.load(tmp_path)
-    identifiers = [t.identifier for t in options.targets()]
-    assert identifiers == [f"{DEFAULT_MICROPYTHON}-esp32-ESP32_GENERIC_S3"]
-
-
-def test_esp32_board_node_rejects_an_unknown_option_key(tmp_path):
-    write_config(tmp_path, '[esp32.ESP32_GENERIC]\narchs = ["x64"]\n')
-    with pytest.raises(
-        UsermodConfigError, match=r"\[esp32\.ESP32_GENERIC\]: unknown key `archs`"
-    ):
-        UsermodOptions.load(tmp_path)
 
 
 def test_an_unknown_key_on_axisless_port_is_rejected(tmp_path):

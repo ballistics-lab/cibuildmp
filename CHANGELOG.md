@@ -9,20 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **`esp32`'s own `boards = [...]` config key is gone; a board is selected by
-  writing its own `[esp32.BOARD_NAME]` table now, the same table-presence
-  rule every other platform already follows.** `[esp32] boards =
-  ["ESP32_GENERIC", "ESP32_GENERIC_S3"]` becomes `[esp32.ESP32_GENERIC]` +
-  `[esp32.ESP32_GENERIC_S3]` -- two board tables instead of one list. A
-  board's own name is now validated against `resources/build-platforms.toml`'s
-  own independently-verified board list (57 known names today) --
-  previously any string at all became a real build target, typos included.
-  A board's own table can carry its own `user-c-modules`/`manifest`/
-  `extra-make-args` overrides (not yet read into a real build -- that
-  lands with record 0052's own next phase), the same per-node option
-  surface every other config table already has. The old `boards = [...]`
-  syntax is now a dedicated, specific error naming the new shape, not a
-  generic "unknown key". Record 0052, Track B, B4.2.
 - **New `name`/`version` config keys give built artifacts real project
   identity.** Both are read from the top level, for every platform.
   `version` already existed for natmod (writing it into each identifier's
