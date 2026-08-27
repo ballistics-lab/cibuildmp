@@ -1639,6 +1639,90 @@ section gains the `arch_flags = 0` compatibility-class paragraph, citing
 417 tests pass; ruff and pyright clean. All of Track A is now landed. Only Track B remains
 open, gated on its own B0–B3 review pass per the "Suggested landing order."
 
+## Addendum, 2026-08-27 — B0–B3 review/accept pass, per the "Suggested landing order"'s own
+step 6
+
+Whoever the record's own B0–B3 text asked to review it, doing that review now, before B4
+writes any code — each proposal re-checked against the real, current source rather than
+taken on the strength of its own write-up, per this project's own first rule. **All four
+accepted**, two with a clarification worth pinning down explicitly so B4's implementer
+does not have to re-derive it; one genuinely new question surfaced by the re-read, flagged
+rather than silently resolved either way.
+
+**B0 — accepted, unamended.** Re-read against the real `cibuildmp/options.py`'s
+`Options.get()`, not recalled: today's five layers are exactly `default -> global_table ->
+family_table -> platform_tables[platform] -> env(+platform)`, then `extra_layers`
+appended by the caller — confirmed line-for-line, including that `family_table` defaults
+to `{}` for natmod's own `Options` (never passed at all in `platforms/natmod/options.py`'s
+`load()`) and that `env`/`extra_layers` are appended *after* the tree tiers today, exactly
+where B0 proposes they stay. The proposed tree-walk collapse degrades to today's exact
+behaviour at both shallow depths (natmod: root, `natmod` — two layers; a board-less
+usermod port: root, `usermod`, `usermod.<port>` — three layers, byte-identical to today's
+global/family/platform triple) and only gains real new depth at `esp32`/`zephyr`'s own
+board level — precisely the gap this whole record exists to close, not a wider change than
+that.
+
+**B1 — accepted, unamended.** Live-verified rather than trusted from the record's own
+citation: `tomllib.loads('[usermod.esp32."some board"]\nextra-make-args = ["-DBAR=1"]\n')`
+parses to `{"usermod": {"esp32": {"some board": {"extra-make-args": [...]}}}}` with zero
+special handling needed — quoted-key dotted tables are standard TOML, not a cibuildmp-side
+parsing addition. Worth stating plainly since it is easy to miss on a first read: **this is
+a deliberate, already-flagged reversal of [0051]'s own Phase F flat-sibling-table shape**
+(`[unix]`, `[windows]`, ... as top-level siblings), not a new conflict this review is
+discovering — [0051]'s own status line already says so directly: "a further divergence
+from this record's own flat-sibling-table model ... is argued, in detail, in [0052] — not
+yet landed, so nothing here is superseded until it does." B4.5 is where that supersession
+actually lands; nothing about accepting B1 here changes what ships today.
+
+**B2 — accepted, with one clarification pinned down.** Live-verified: `selector.py`'s own
+`matches()` is exactly `fnmatch.fnmatch()` per brace-expanded pattern (read directly, not
+recalled), and `fnmatch.fnmatch("usermod.esp32.ESP32_GENERIC_S3", "usermod.esp32.*")` is
+`True` — fnmatch's `*` has no separator concept and already crosses a `.` the way B2's own
+text claims. The record's own phrasing — "tries a `select` pattern against the tree path of
+**every node** from root to the target's own leaf" — reads ambiguously between two
+implementations: (a) match once against a single root-to-leaf dotted string
+(`"usermod.esp32.ESP32_GENERIC_S3"`), or (b) match separately against every ancestor
+prefix (`"usermod"`, `"usermod.esp32"`, `"usermod.esp32.ESP32_GENERIC_S3"`) as three
+candidate strings. **Clarified here: (a) is correct, and (b) is unnecessary** — since
+fnmatch's `*` already spans multiple segments in one match (re-verified above), a single
+full-path match already covers every case B2's own examples name (`select =
+"usermod.esp32.*"` matches the leaf path directly; no per-ancestor loop needed to reach the
+same result). Implementing (b) would not be wrong, only redundant work B4.3 does not need
+to write. Two more points worth pinning down for the same implementer, both straightforward
+readings of the record's own text rather than new decisions: **matching is additive (an OR
+of the two modes)**, not a "try tree-path, fall back to identifier only if that fails"
+priority order — an override applies if *either* mode matches, matching the record's own
+"the two modes answer genuinely different questions ... neither subsumes the other"; and
+**this dual-mode matching is scoped to `[[overrides]]`'s own `select` only** — `build`/
+`skip` stay identifier-only glob matching, unchanged (B0's own text already draws this
+boundary: "[[overrides]]'s own `select` ... is only for the residual case neither
+[a tree node nor a family-wide default] can express"), so A5's already-landed
+`check_reachable()` (which checks `build`/`skip` reachability against `all_targets()`'s own
+identifiers) needs no change under B2 at all.
+
+One genuinely new question, surfaced by this re-read, not present in B0–B3's own text and
+not resolved here: `OVERRIDE_UNION_KEYS` (`platforms/natmod/options.py`) deliberately
+excludes `arch-flags` today, specifically because "resolved once for the whole config,
+never per target, so an override carrying it would be silently ignored" — a limitation that
+existed only because a flat `select` glob had no way to unambiguously address "just this
+one arch." Under B0/B1's real tree nodes, `[natmod.rv32imc]` *would* unambiguously address
+exactly that arch — the same reason a per-board override already works for `esp32`. Whether
+`arch-flags` should become a legal per-arch-node key once Track B lands, or whether the
+"resolved once globally" constraint is actually load-bearing for some reason this review
+did not surface, is a real open question for B4 to answer explicitly — flagged here rather
+than assumed either way, since accepting B0–B2 as written does not itself answer it.
+
+**B3 — accepted, unamended.** Re-verified alongside B2's own fnmatch check above: since a
+plain `*` already crosses every `.` boundary, a `**`-style multi-depth-only wildcard adds
+no matching power `select` does not already have. Deferred exactly as proposed — a future
+"list every node under this branch" convenience on top of `--print-build-identifiers`,
+out of this record's own landing.
+
+B0–B3 are now settled for B4's own five sub-phases to build against. B4.2's own flagged
+question (boards: tree node replaces the list, not dual-addressable) was already resolved
+earlier in this same record; the new `arch-flags`-per-node question above is the one
+addition this pass leaves open for B4 itself, not for a further review round.
+
 [0001]: 0001-natmod-first.md
 [0004]: 0004-config-file-location.md
 [0005]: 0005-one-identifier-namespace.md
