@@ -929,10 +929,16 @@ several facts can share.
 
 Applying this per axis, checked directly, not assumed:
 
-- **`boards` (qemu), `archs` (unix/windows)** — no per-cell data, no
-  cross-axis validity question checked or found; stay bare lists.
-  Genuinely unaffected, not merely unexamined — worth a real pass before
-  implementation, not assumed safe by analogy to natmod's own mistake.
+- **`boards` (qemu), `archs` (unix/windows)** — checked directly, not
+  assumed safe by analogy: `ports/unix/Makefile` has no `ifeq($(ARCH),...)`
+  gate at all, in either `v1.20.0` or `v1.29.0` — arch there is a
+  toolchain/Docker-image concern (`pinned_docker_images.toml`, already
+  independent of any MicroPython tag), not something the port's own
+  source restricts per release the way `dynruntime.mk` does for natmod.
+  So this class of bug genuinely does not recur here — confirmed, not
+  merely unexamined this time. `qemu`'s own three boards and `windows`'s
+  own arch list were not independently checked the same way; treat as
+  the same open item until they are, not assumed safe by analogy either.
 - **natmod's own version×arch space — one row per verified `(tag, arch[,
   arch_flags])`. Since completed for real: all 22 known tags, not a
   sample.** Cloned and grepped every one of them directly (not two
