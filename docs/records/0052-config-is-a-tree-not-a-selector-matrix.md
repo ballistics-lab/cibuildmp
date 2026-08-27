@@ -1976,4 +1976,165 @@ real data inconsistency this same investigation surfaced: `windows`'s own stored
 runtime identifier does not (a bare `{tag}-webassembly`, no arch segment at all) -- both need
 an explicit reconciliation decision, not a mechanical port of natmod's own fix.
 
+## Addendum, 2026-08-27 — the immediately preceding addendum's own core claim reversed: tag
+*is* part of natmod's identifier, live-corrected against real per-row evidence
+
+The addendum directly above this one shipped `identifier = "mpy{mpy}-{arch}"` (no tag) and
+`collapse_newest_tag()` to resolve the resulting ambiguity. Both are wrong, and both are
+reverted here -- caught live by the user against the real, regenerated
+`resources/build-platforms.toml`, not by re-deriving the shape from first principles a second
+time. The concrete evidence: ABI `6.3` alone spans tags `v1.23.0` through `v1.30.0-preview` in
+that file, and a tag-free identifier collapses every one of them onto one string per arch --
+`mpy5-x86`, checked directly, actually names **seven** distinct real rows (`v1.12` through
+`v1.18`), each a genuinely different MicroPython checkout with its own toolchain/ABI
+particulars. `collapse_newest_tag()` existed only to paper over that collapse by picking one
+survivor -- which is exactly the "match against fact, don't build/pick a fact" violation this
+whole record argues against everywhere else. The other three examples the user gave, matched
+directly against this project's own real rows, confirm there is no *uniform* rule to invent
+either way (natmod always drops its own no-longer-existing `natmod` segment; unix and windows
+never carry a `unix-`/`windows-` port prefix at all; qemu and webassembly do carry their own
+port segment) -- each platform's own stored `identifier` is simply authoritative as written,
+never rebuilt toward a shape that "looks more consistent":
+
+- `identifier = "v1.20.0-manylinux_2_28_x86_64"` (unix -- no port prefix)
+- `identifier = "v1.20.0-win32"` (windows -- no port prefix; the arch segment is the literal
+  stored value `win32`, not the runtime's own current `x64`/`x86`/`arm64` spelling -- the
+  windows/webassembly stored-vs-runtime arch-format mismatch the previous addendum's own
+  closing paragraph already flagged as still open stays exactly that open)
+- `identifier = "v1.24.0-qemu-MICROBIT"` (qemu -- does carry its own port prefix)
+
+**The fix**: `resources/build-platforms.toml`'s natmod rows are regenerated a second time,
+`identifier_format` restored to `"mpy{mpy}-{tag}-{arch}"` (205 rows, e.g.
+`mpy6.3-v1.30.0-preview-armv7emsp`). `natmod/targets.py`'s lookup dict is rekeyed from
+`_IDENTIFIER_BY_ABI_ARCH: dict[(abi, arch), str]` to `_IDENTIFIER_BY_TAG_ARCH: dict[(tag,
+arch), str]` -- every `(tag, arch)` row is now a genuinely unique, unambiguous fact, so
+`collapse_newest_tag()` is deleted outright rather than reworked; there is nothing left for it
+to collapse.
+
+**What replaces it is narrower than a collapse, not a rebuild of one.** The real question
+`collapse_newest_tag()` was answering ("an unconfigured `build` should still resolve to one
+tag per arch, not every tag this project has ever verified") only applies when the config's
+own `build` selector never names a tag in the first place -- when it does
+(`build = "mpy6.3-v1.23.0-*"`, or the reachability-audit test fixtures throughout this file
+that pin a specific historical tag on purpose), every match is real config intent and must be
+trusted as-is, not narrowed. Two small, direct functions carry this, replacing every "which
+tag wins" design this record and its predecessor addendum explored (a `preread`-based
+ambiguity check, an explicit `pick=` config key, a *hierarchical* tree-glob mechanism deep
+enough to disambiguate tag from arch structurally -- all rejected in the same live exchange as
+over-engineering a problem a two-line regex already answers):
+
+```python
+_TAG_SHAPE = re.compile(r"v\d+\.\d+(?:\.\d+)?(?:-preview)?")
+
+
+def selector_names_a_tag(patterns: Sequence[str]) -> bool:
+    """Does any build pattern literally name a tag-shaped substring? If
+    so every match is real, deliberate config intent -- trust it as-is,
+    the same way `mpy6.3-v1.23.0-*` naming an old tag on purpose already
+    has to work."""
+    return any(_TAG_SHAPE.search(p) for p in patterns)
+
+
+def narrow_to_newest_tag(targets: Sequence[Target]) -> list[Target]:
+    """Only called when build names no tag at all: group by (abi, arch,
+    arch_flags), keep the newest tag per group -- today's zero-config
+    behaviour ('build the current release'), now expressed as a plain
+    post-selection filter instead of a pre-selection availability
+    table."""
+    ...
+```
+
+`UsermodOptions.targets()`'s own equivalent call site: `select(candidates, self.build,
+self.skip)`, then `narrow_to_newest_tag(selected)` only `if not
+selector_names_a_tag(self.build)` -- `all_targets()` (existence, not selection) stays
+untouched, exactly as `collapse_newest_tag()` never touched it either. `default_build` reverts
+to the simple, tag-free `f"mpy{newest_known_abi()}-*"` it had before the previous addendum
+pinned an explicit tag into it -- the general mechanism now does what the explicit pin was
+working around.
+
+**Ripple, mechanical**: every test asserting a bare `mpy6.3-x64`-shaped identifier now needs
+the real tag included (`mpy6.3-v1.30.0-preview-x64`) -- `tests/test_targets.py`,
+`tests/test_selector.py`, `tests/test_build.py`, `tests/test_options.py`, `tests/test_cli.py`,
+`tests/test_cli_multi_platform.py`. One fixture needed more than a string update:
+`test_only_overrides_skip_for_print_build_identifiers` used `skip = "mpy6.3-x64"` (bare, no
+wildcard) to prove `--only` overrides `skip` -- under the tag-included identifier space that
+exact literal string now matches nothing at all (the reachability audit correctly flags it:
+`skip: 'mpy6.3-x64' matches no known identifier`), so the fixture's own `skip` pattern became
+the broader `"*-x64"`, which reaches every tag's own x64 row regardless of which one `--only`
+names, preserving the test's actual intent rather than papering over a selector that no longer
+means what it used to.
+
+**Verified, not just asserted**: `Options.load('.', preread=(None, {})).targets()` against
+this repo's own zero-config default produces exactly ten targets, each a real
+`mpy6.3-v1.30.0-preview-{arch}` identifier; `--dry-run --platform natmod --only
+"mpy6.3-v1.23.0-x64"` (a selector that does name a real historical tag) resolves to exactly
+that one target, proving the trust-as-is branch works, not just the narrow-to-newest branch.
+Full suite green (423 passed), ruff and pyright clean.
+
+## Addendum, 2026-08-27 — `[override]`, not `[[overrides]]`: the override table is keyed by
+its own glob directly, syntax simplified below what upstream's own shape needs here
+
+The still-open question this record's own "Not decided" section (Track B, above) left hanging
+-- whether `[[overrides]]`'s own `select`-glob mechanism survives as-is, gains a tree-path
+mode, or gets a residual flattened-string fallback -- is closed here, and closed toward the
+simplest of the three, not the most upstream-faithful one. Track B's own tree-walk mechanism
+(B4.1-B4.3, built and reverted the same day, per this file's own earlier addendum) already
+established live that cibuildmp's identifiers have no real nesting depth for a path glob to
+address that a flat glob does not already reach just as well (`*-esp32-*` already matches
+every esp32 board without a tree). The same live conversation went one step further, applied
+to `[[overrides]]`'s own TOML *syntax* rather than its matching semantics: an array of tables
+each carrying a separate `select = "..."` field is doing more work than this project's own
+override space needs, when the array index carries no meaning and the table's real identity
+*is* the glob it selects on.
+
+**The change**: `[[overrides]]` (an array, each entry `{select = "glob", ...options}`) becomes
+`[override]` (one table, keyed directly by the glob itself -- `[override."*-armv7emsp"]`
+holding `...options` straight, no `select` field inside). This is a real divergence from
+upstream's own `[[tool.cibuildwheel.overrides]]` shape, argued and decided rather than
+inherited by default (per this project's own first rule: cibuildwheel was read, not
+paraphrased, before diverging) -- upstream's own array-of-tables makes sense there because an
+override's own identity is genuinely secondary to its position (upstream selectors can be
+compound boolean expressions, not always a single glob); cibuildmp's own overrides have always
+been "one glob, some options" with nothing else in an entry's own identity, so the glob can
+simply *be* the table's name.
+
+**Precedence is unaffected, because nothing about how it worked changes.** `[[overrides]]`
+never had explicit priority rules beyond file order (`matching_overrides()` walks the list in
+declaration order; `override_extra_layers()`/`resolve_cascade()` treat the last matching
+layer as the one that wins, `inherit="none"`'s default fully replacing the running value). A
+TOML table's own keys parse into a plain `dict` (`tomllib`, insertion-ordered since the
+grammar itself does not permit reordering a document's own keys), so `[override]`'s
+declaration order carries exactly the same meaning `[[overrides]]`'s array order did -- a
+narrower, more specific glob written further down the file still wins over a broader one
+written above it, with **no separate depth/specificity mechanism needed or built**. This was
+floated directly and rejected in the same exchange: a scheme that sorts overrides by selector
+specificity (segment count, wildcard position, whatever) would be exactly the kind of "smart
+multi-level selector" machinery this project keeps deliberately not building --
+`build`/`skip`/`select` are plain `fnmatch` globs precisely because a config author who wants
+narrower-wins-over-broader can already get it for free by writing the narrower one later,
+`git blame`-legible and requiring zero new code.
+
+**Mechanically, the change is small.** `natmod/options.py`'s `load_overrides()` is the only
+function that changes shape -- it now reads `raw.get("override")` (a dict) instead of
+`raw.get("overrides")` (a list), and for each `(glob, body)` pair builds the exact same
+`{"select": glob, **body}` dict the rest of the mechanism (`matching_overrides()`,
+`override_extra_layers()`, `check_reachable()`, `build_options()`'s own tier-2 check) already
+consumed unchanged -- none of those four needed to change at all, since the normalized
+in-memory shape never did. A `select` key surviving inside an override's own body is a new,
+explicit parse-time error (it would only duplicate the table's own name and silently shadow
+it otherwise). `cli.py`'s own `_reject_unknown_tables()` gains `"override"` alongside
+`"publish"`/`"usermod"` in `_NON_PLATFORM_TABLES`, since `[override]` is now a dict-valued
+top-level key exactly the shape a real platform table has, and would otherwise misfire the
+unknown-top-level-table check that exists to catch a typo'd platform name.
+
+**Verified**: every existing `[[overrides]]`-shaped test fixture across
+`tests/test_options.py`, `tests/test_usermod_options.py`, and `tests/test_overrides.py`
+rewritten to `[override."glob"]`, no assertion changed in substance (only the two error
+messages that named `[[overrides]]`/an array index directly, now naming the glob itself,
+which is if anything a more useful error). This repository's own real `cibuildmp.toml`
+rewritten to the new syntax and loaded live end to end -- `Options.load(Path('.'),
+env={}).overrides` returns the same normalized shape as before, and
+`build_options()` for the `armv7emsp` target still resolves `MP_BCLIBC_PRECISION=single`
+correctly through it. Full suite green (423 passed), ruff and pyright clean.
+
 [0051]: 0051-usermod-identifiers-have-no-version-axis.md

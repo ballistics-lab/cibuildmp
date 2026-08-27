@@ -426,7 +426,7 @@ def test_reachability_audit_rejects_an_unreachable_per_port_build(tmp_path):
     # record 0052's own per-platform build/skip addendum: a per-port
     # value gets the same offline reachability check as the global one,
     # scoped to that port's own identifiers -- unambiguous by
-    # construction, unlike the shared [[overrides]] case.
+    # construction, unlike the shared [override] case.
     write_config(tmp_path, '[unix]\nbuild = "*-not-a-real-unix-cell"\n')
 
     with pytest.raises(UsermodConfigError, match=r"\[unix\] build: '\*-not-a-real"):
@@ -494,7 +494,7 @@ def test_name_and_version_default_empty_and_are_settable(tmp_path):
     assert options.version == "1.2.0"
 
 
-# ── record 0051 point 7: [[overrides]] ───────────────────────────
+# ── record 0051 point 7: [override] ──────────────────────────────
 
 
 def test_usermod_overrides_beat_the_file(tmp_path):
@@ -504,8 +504,7 @@ def test_usermod_overrides_beat_the_file(tmp_path):
         [unix]
         extra-make-args = ["COMMON=1"]
 
-        [[overrides]]
-        select = "*-manylinux_2_28_x86_64"
+        [override."*-manylinux_2_28_x86_64"]
         extra-make-args = ["FROM=override"]
         """,
     )
@@ -517,14 +516,13 @@ def test_usermod_overrides_beat_the_file(tmp_path):
     assert resolved["manylinux_2_28_i686"] == ["COMMON=1"]
 
 
-def test_usermod_override_without_select_is_an_error(tmp_path):
+def test_usermod_a_select_key_inside_an_override_body_is_an_error(tmp_path):
     write_config(
         tmp_path,
-        '[unix]\n\n[[overrides]]\nmanifest = "x.py"\n',
+        '[unix]\n\n[override."*"]\nselect = "*"\nmanifest = "x.py"\n',
     )
-    options = UsermodOptions.load(tmp_path)
     with pytest.raises(UsermodConfigError, match="select"):
-        options.build_options(options.targets()[0])
+        UsermodOptions.load(tmp_path)
 
 
 def test_usermod_environment_beats_override(tmp_path):
@@ -533,8 +531,7 @@ def test_usermod_environment_beats_override(tmp_path):
         """
         [unix]
 
-        [[overrides]]
-        select = "*"
+        [override."*"]
         extra-make-args = ["FROM=override"]
         """,
     )
@@ -554,8 +551,7 @@ def test_usermod_override_beats_the_file_for_manifest(tmp_path):
         [unix]
         manifest = "default.py"
 
-        [[overrides]]
-        select = "*"
+        [override."*"]
         manifest = "special.py"
         """,
     )
@@ -569,12 +565,11 @@ def test_an_unknown_key_in_usermod_overrides_is_an_error(tmp_path):
         """
         [unix]
 
-        [[overrides]]
-        select = "*"
+        [override."*"]
         arch-flags = "zba"
         """,
     )
-    with pytest.raises(UsermodConfigError, match=r"\[\[overrides\]\]: unknown key"):
+    with pytest.raises(UsermodConfigError, match=r'\[override\."\*"\]: unknown key'):
         UsermodOptions.load(tmp_path)
 
 
@@ -587,13 +582,12 @@ def test_reachability_audit_rejects_an_override_select_that_can_never_match(tmp_
         """
         [unix]
 
-        [[overrides]]
-        select = "*-notaport"
+        [override."*-notaport"]
         extra-make-args = ["X=1"]
         """,
     )
     with pytest.raises(
-        UsermodConfigError, match=r"\[\[overrides\]\] #1: '\*-notaport'"
+        UsermodConfigError, match=r'\[override\."\*-notaport"\]: \'\*-notaport\''
     ):
         UsermodOptions.load(tmp_path).targets()
 
@@ -614,8 +608,7 @@ def test_reachability_audit_allows_an_override_meant_only_for_natmod(tmp_path):
         """
         [unix]
 
-        [[overrides]]
-        select = "*-armv7emsp"
+        [override."*-armv7emsp"]
         extra-make-args = ["MP_BCLIBC_PRECISION=single"]
         """,
     )

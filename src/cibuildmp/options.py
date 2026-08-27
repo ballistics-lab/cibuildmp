@@ -27,7 +27,7 @@ for how this fits points 4/6.
 Wired into `natmod/options.py`'s and `usermod/options.py`'s own
 `build_options()` as of Phase G (record 0051's own fourth/fifth addenda):
 `matching_overrides()`/`override_extra_layers()` below turn a config's
-`[[overrides]]` list into the `(value, inherit_rule)` layers `Options.get()`'s
+`[override]` list into the `(value, inherit_rule)` layers `Options.get()`'s
 own `extra_layers` parameter already knew how to consume -- the whole
 mechanism was built ahead of having a real caller for it (Phase E), and
 this is that caller.
@@ -161,7 +161,7 @@ def matching_overrides(
     for override in overrides:
         selector = override.get("select")
         if selector is None:
-            raise error("every [[overrides]] table needs a `select` key")
+            raise error("every override needs a `select` key")
         if matches(identifier, parse_selector(selector)):
             result.append(override)
     return result
@@ -180,7 +180,7 @@ def check_selector_reachable(
     and one typo'd one does not hide the typo behind the pattern that
     still matches something. Shared by `natmod/options.py`'s and
     `usermod/options.py`'s own `check_reachable()`, each of which calls
-    this once for `build`, once for `skip`, and once per `[[overrides]]`
+    this once for `build`, once for `skip`, and once per `[override]`
     table's own `select` -- `identifiers` is always that caller's own
     `all_targets()`, the full, unfiltered domain, never the already-
     selected result, so a deliberate `skip = "*"` narrowing a real domain
@@ -229,7 +229,7 @@ class Options:
     only family, so it has nothing a separate family tier would add.
     `env` is the environment mapping (`os.environ` by default, injectable
     so tests never touch the real process environment). Neither
-    CLI-supplied values nor `[[overrides]]` matches live here -- both are
+    CLI-supplied values nor `[override]` matches live here -- both are
     the caller's own, layered in via `get()`'s own `extra_layers`, so
     this class stays config-file-and-environment-only, the same split
     upstream keeps between its own `Options` (file + env) and `argparse`
@@ -253,7 +253,7 @@ class Options:
         """`default -> global -> family -> platform -> env ->
         env(platform) -> extra_layers`, most-specific-wins. `extra_layers`
         is where a caller threads in CLI-supplied values or matching
-        `[[overrides]]` entries (Phase G), each with its own inherit
+        `[override]` entries (Phase G), each with its own inherit
         rule -- this method does not know about either.
 
         `family_table` sits strictly between `global` and `platform`:

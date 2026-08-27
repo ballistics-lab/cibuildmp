@@ -105,12 +105,11 @@ def test_publish_table_is_not_mistaken_for_an_unknown_platform():
     ]
 
 
-def test_arrays_of_tables_are_not_mistaken_for_unknown_platforms():
-    # [[overrides]] (shared by every platform since Phase G) parses as a
-    # list, not a dict -- must never trip the unknown-table check.
-    assert active_platforms({"natmod": {}, "overrides": [{"select": "*"}]}, None) == [
-        "natmod"
-    ]
+def test_the_override_table_is_not_mistaken_for_an_unknown_platform():
+    # [override] (shared by every platform since Phase G, glob-keyed
+    # since the live syntax simplification) is a dict too, same shape as
+    # a real platform table -- must never trip the unknown-table check.
+    assert active_platforms({"natmod": {}, "override": {"*": {}}}, None) == ["natmod"]
 
 
 # ── _parse_platform_names() ─────────────────────────────────────────────

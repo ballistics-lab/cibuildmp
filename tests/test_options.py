@@ -36,8 +36,8 @@ def test_overrides_beat_natmod_table(tmp_path):
         [natmod]
         archs = ["x64", "armv7emsp"]
         extra-make-args = ["COMMON=1"]
-        [[overrides]]
-        select = "*-armv7emsp"
+
+        [override."*-armv7emsp"]
         extra-make-args = ["MP_BCLIBC_PRECISION=single"]
         """,
     )
@@ -50,11 +50,13 @@ def test_overrides_beat_natmod_table(tmp_path):
     assert resolved["armv7emsp"] == ["MP_BCLIBC_PRECISION=single"]
 
 
-def test_override_without_select_is_an_error(tmp_path):
-    write(tmp_path, '[[overrides]]\nextra-make-args = ["X=1"]\n')
-    options = Options.load(tmp_path, env={})
+def test_a_select_key_inside_an_override_body_is_an_error(tmp_path):
+    # The glob is the table's own name now (`[override."glob"]`) -- a
+    # `select` key inside the body would only duplicate it, so it is
+    # rejected at load time rather than silently shadowing the name.
+    write(tmp_path, '[override."*"]\nselect = "*"\nextra-make-args = ["X=1"]\n')
     with pytest.raises(ConfigError, match="select"):
-        options.build_options(options.targets()[0], env={})
+        Options.load(tmp_path, env={})
 
 
 def test_environment_beats_file(tmp_path):
@@ -72,8 +74,8 @@ def test_environment_beats_override(tmp_path):
         """
         [natmod]
         archs = ["armv7emsp"]
-        [[overrides]]
-        select = "*"
+
+        [override."*"]
         extra-make-args = ["FROM=override"]
         """,
     )
@@ -119,8 +121,10 @@ def test_arch_flags_land_on_rv32imc_identifier_and_make_args(tmp_path):
     )
     options = Options.load(tmp_path, env={})
     targets = {t.arch: t for t in options.targets()}
-    assert targets["rv32imc"].identifier == "mpy6.3-rv32imc+0x3"
-    assert targets["rv64imc"].identifier == "mpy6.3-rv64imc"  # unaffected
+    assert targets["rv32imc"].identifier == "mpy6.3-v1.30.0-preview-rv32imc+0x3"
+    assert (
+        targets["rv64imc"].identifier == "mpy6.3-v1.30.0-preview-rv64imc"
+    )  # unaffected
 
     rv32_args = options.build_options(targets["rv32imc"], env={}).extra_make_args
     assert "ARCH_FLAGS=0x3" in rv32_args
@@ -140,19 +144,20 @@ def test_arch_flags_list_builds_one_rv32imc_target_per_variant(tmp_path):
     options = Options.load(tmp_path, env={})
     identifiers = [t.identifier for t in options.targets()]
     assert identifiers == [
-        "mpy6.3-rv32imc",
-        "mpy6.3-rv32imc+0x1",
-        "mpy6.3-rv32imc+0x3",
+        "mpy6.3-v1.30.0-preview-rv32imc",
+        "mpy6.3-v1.30.0-preview-rv32imc+0x1",
+        "mpy6.3-v1.30.0-preview-rv32imc+0x3",
     ]
     make_args_by_id = {
         t.identifier: options.build_options(t, env={}).extra_make_args
         for t in options.targets()
     }
     assert not any(
-        a.startswith("ARCH_FLAGS=") for a in make_args_by_id["mpy6.3-rv32imc"]
+        a.startswith("ARCH_FLAGS=")
+        for a in make_args_by_id["mpy6.3-v1.30.0-preview-rv32imc"]
     )
-    assert "ARCH_FLAGS=0x1" in make_args_by_id["mpy6.3-rv32imc+0x1"]
-    assert "ARCH_FLAGS=0x3" in make_args_by_id["mpy6.3-rv32imc+0x3"]
+    assert "ARCH_FLAGS=0x1" in make_args_by_id["mpy6.3-v1.30.0-preview-rv32imc+0x1"]
+    assert "ARCH_FLAGS=0x3" in make_args_by_id["mpy6.3-v1.30.0-preview-rv32imc+0x3"]
 
 
 def test_arch_flags_list_dedupes_two_spellings_of_the_same_value(tmp_path):
@@ -170,7 +175,7 @@ def test_arch_flags_list_dedupes_two_spellings_of_the_same_value(tmp_path):
     )
     options = Options.load(tmp_path, env={})
     identifiers = [t.identifier for t in options.targets()]
-    assert identifiers == ["mpy6.3-rv32imc+0x3"]
+    assert identifiers == ["mpy6.3-v1.30.0-preview-rv32imc+0x3"]
 
 
 def test_version_defaults_empty_and_is_settable(tmp_path):
@@ -259,13 +264,13 @@ def test_arch_flags_in_an_overrides_table_is_an_error(tmp_path):
         """
         [natmod]
         archs = ["x64"]
-        [[overrides]]
-        select = "*"
+
+        [override."*"]
         arch-flags = "rv32imc"
         """,
     )
 
-    with pytest.raises(ConfigError, match=r"\[\[overrides\]\]: unknown key"):
+    with pytest.raises(ConfigError, match=r'\[override\."\*"\]: unknown key'):
         Options.load(tmp_path)
 
 
@@ -279,12 +284,14 @@ def test_reachability_audit_rejects_an_override_select_that_can_never_match(tmp_
         """
         [natmod]
         archs = ["x64"]
-        [[overrides]]
-        select = "*-aarch64"
+
+        [override."*-aarch64"]
         extra-make-args = ["X=1"]
         """,
     )
-    with pytest.raises(ConfigError, match=r"\[\[overrides\]\] #1: '\*-aarch64'"):
+    with pytest.raises(
+        ConfigError, match=r'\[override\."\*-aarch64"\]: \'\*-aarch64\''
+    ):
         Options.load(tmp_path).targets()
 
 

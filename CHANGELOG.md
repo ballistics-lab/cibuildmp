@@ -203,19 +203,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fresh CI runner -- the first real CI run to exercise
   natmod-in-a-container end to end. Record 0050's own addendum.
 - **natmod's build identifier is matched against a real `build-platforms.toml`
-  row now, not rebuilt.** The string was already correct but was
-  assembled by an f-string never checked against the file's own (stale,
-  pre-record-0052-A2) `identifier` field. Confirmed against real
-  cibuildwheel source: its own `PythonConfiguration.identifier` is a
-  literal field read off a row, never computed -- natmod's 205 rows were
-  regenerated to the current format and `Target.identifier` now looks
-  its base string up. The per-tag arch-availability table this used to
-  need (`archs_available_for()`) is gone too: selection now matches
-  every real row directly via the existing `build`/`skip` glob mechanism,
-  and only *afterward* collapses to one target per identifier, picking
-  the newest matching tag -- rather than computing an availability table
-  before selection ever ran. Verified byte-identical against a
-  pre-change identifier snapshot. Record 0052's own addendum.
+  row now, not rebuilt -- and that row's own tag is part of it.** The
+  string was already close but was assembled by an f-string never
+  checked against the file's own (stale, pre-record-0052-A2) `identifier`
+  field. Confirmed against real cibuildwheel source: its own
+  `PythonConfiguration.identifier` is a literal field read off a row,
+  never computed -- natmod's 205 rows were regenerated and
+  `Target.identifier` now looks its base string up
+  (`mpy{abi}-{tag}-{arch}`, e.g. `mpy6.3-v1.30.0-preview-armv7emsp`). An
+  initial version of this fix dropped tag from the identifier instead --
+  live-caught and reversed the same day: a tag-free identifier collapses
+  every tag sharing one ABI onto one string (`mpy5-x86` alone spans seven
+  real, distinct rows, tags `v1.12`-`v1.18`), which is a real loss of
+  information a `collapse_newest_tag()` helper only papered over. With
+  tag restored, every `(tag, arch)` row is unambiguous and there is
+  nothing left to collapse; a `build` selector that never names a tag
+  still narrows to the newest one automatically
+  (`selector_names_a_tag()`/`narrow_to_newest_tag()`), while a selector
+  that does name a specific historical tag is trusted as-is. The per-tag
+  arch-availability table this used to need (`archs_available_for()`) is
+  gone too: selection now matches every real row directly via the
+  existing `build`/`skip` glob mechanism, narrowed only *afterward*, not
+  via an availability table computed before selection ever ran. Verified
+  live against both the default (no-tag) and an explicit-tag `--only`
+  case. Record 0052's own addenda.
+- **`[[overrides]]` becomes `[override]`, keyed by its own glob directly.**
+  `[[overrides]]\nselect = "*-armv7emsp"\n...` becomes
+  `[override."*-armv7emsp"]\n...` -- no more separate `select =` field. A
+  deliberate simplification below upstream's own
+  `[[tool.cibuildwheel.overrides]]` array-of-tables shape: this project's
+  overrides have always been "one glob, some options," so the glob can
+  simply be the table's own name. Precedence is unchanged (declaration
+  order, which a TOML table's own keys already preserve) -- a narrower
+  glob written further down the file still wins over a broader one above
+  it, with no new depth/specificity mechanism. Record 0052's own latest
+  addendum.
 
 ### Removed
 

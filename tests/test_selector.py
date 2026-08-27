@@ -77,8 +77,8 @@ def test_select_generic_over_any_identifier_bearing_type():
     from cibuildmp.platforms.natmod.targets import Target
     from cibuildmp.platforms.usermod.targets import UsermodTarget
 
-    natmod_targets = [Target(abi="6.3", arch="x64")]
-    assert select(natmod_targets, "*", "")[0].identifier == "mpy6.3-x64"
+    natmod_targets = [Target(abi="6.3", arch="x64", tag="v1.30.0-preview")]
+    assert select(natmod_targets, "*", "")[0].identifier == "mpy6.3-v1.30.0-preview-x64"
 
     usermod_targets = [UsermodTarget(port="qemu", tag="v1.29.0")]
     assert select(usermod_targets, "*", "")[0].identifier == "v1.29.0-qemu"

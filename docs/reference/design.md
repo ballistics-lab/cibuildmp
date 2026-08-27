@@ -127,8 +127,14 @@ names an OS, and the config tree matches — `[unix]`/`[esp32]` sibling to
 global → platform table → environment → CLI`, matching upstream's own
 `Options.get()`) is wired into both `cibuildmp/platforms/natmod/options.py`
 and `cibuildmp/platforms/usermod/options.py`, for the base four layers
-*and* for `[[overrides]]`/`inherit` now — one shared top-level
-`[[overrides]]` list, validated loosely (valid on some platform) at
+*and* for `[override]`/`inherit` now — one shared top-level `[override]`
+table, keyed directly by its own glob (`[override."*-armv7emsp"]`, no
+separate `select =` field — a deliberate simplification over
+cibuildwheel's own `[[tool.cibuildwheel.overrides]]` array-of-tables
+shape, decided live 2026-08-27: this project's own overrides are already
+a flat glob-matched space, so the glob can simply *be* the table's own
+name, and declaration order — which `tomllib` preserves — is what already
+decided precedence), validated loosely (valid on some platform) at
 parse time and strictly (valid on the *matched* identifier's own
 platform) at build time, `inherit = {extra-make-args =
 "append"|"prepend"|"none"}` layered in via `Options.get()`'s own
@@ -208,15 +214,14 @@ pre-build-command = ""        # run in module-dir after mpy-cross, before make
                               # (a7p: "make fetch-nanopb")
 arch-flags = ""               # rv32imc only, e.g. "zba,zcmp" (D15) -- part
                               # of that arch's identifier, so this cannot be
-                              # set per-[[overrides]], only here
+                              # set per-[override], only here
 
 [publish]
 extra-files = []              # copied into every identifier's own directory,
                               # untagged in package.json (D14) -- a facade
                               # or anything else install-everywhere (ffimod)
 
-[[overrides]]
-select = "*-armv7emsp"
+[override."*-armv7emsp"]
 extra-make-args = ["MP_BCLIBC_PRECISION=single"]
 # inherit = {extra-make-args = "append"}   # default "none" (replace);
                               # "append"/"prepend" only apply to
@@ -225,15 +230,15 @@ extra-make-args = ["MP_BCLIBC_PRECISION=single"]
                               # override surface ([0051] Phase G)
 ```
 
-`[[overrides]]` is shared by every platform now, natmod and every usermod
+`[override]` is shared by every platform now, natmod and every usermod
 port alike — the example above matches natmod's own; a usermod-port
-identifier is matched by the identical `select` mechanism, with
+identifier is matched by the identical glob mechanism, with
 `user-c-modules`/`manifest`/`extra-make-args` as its own three settable
 option keys instead of natmod's four. An override's own keys are
 validated twice: loosely (is this key valid for *any* platform's override
 surface — a typo check) when the config is loaded, and strictly (is this
 key valid for the *specific* platform the matched identifier belongs to)
-once `select` has actually matched a real target — `natmod`-only
+once the glob has actually matched a real target — `natmod`-only
 `make-target` inside an override that only ever matches `unix`
 identifiers is still a loud, specific error, not silently ignored.
 
@@ -241,7 +246,7 @@ Every option is overridable by environment variable, `CIBMP_`-prefixed and
 screaming-snake-cased: `CIBMP_BUILD`, `CIBMP_SKIP`, `CIBMP_MICROPYTHON`,
 `CIBMP_OUTPUT_DIR`, `CIBMP_EXTRA_MAKE_ARGS`, `CIBMP_NAME`, `CIBMP_VERSION`,
 `CIBMP_ARCH_FLAGS`, … Precedence, lowest to highest: defaults → config
-file → `[[overrides]]` matching the identifier → environment → CLI flags.
+file → `[override]` matching the identifier → environment → CLI flags.
 
 **Where a key goes is part of the schema, and getting it wrong is an
 error** ([0048], generalised into a cascade by [0051]'s own Phase F). The
@@ -253,7 +258,7 @@ entirely, not merely relocated — writing it anywhere is now a plain unknown-
 key error). Writing one inside `[natmod]` or a usermod port's own table
 fails with a message naming where it belongs; so does any key that table's
 own schema does not read at all (a typo, or an `arch-flags` inside
-`[[overrides]]`). Until [0048] every one of those was silently ignored,
+`[override]`). Until [0048] every one of those was silently ignored,
 which meant a misplaced `skip` produced a successful build of something
 you had asked not to build; the check itself moved from a fixed
 per-table-shape partition to a per-platform-schema one under [0051]'s own
@@ -283,11 +288,11 @@ with natmod's own key of the same name meaning something different, see
 per-platform-override now: `default → global → [usermod] → [<port>] →
 env → CLI`, resolved through the same `Options` class natmod's own four
 keys use, natmod's own instance simply never given a family table since
-it has no sibling ports to share defaults with. `[[overrides]]` is shared
+it has no sibling ports to share defaults with. `[override]` is shared
 with natmod as of Phase G (see above) — the old, short-lived
 `[[usermod-overrides]]` name (Phase F's rename of the even older nested
 `[[usermod.overrides]]`) is gone; there is exactly one top-level
-`[[overrides]]` list now, for every platform.
+`[override]` table now, for every platform.
 
 **Opt-in groups** ([0051] point 8, upstream's own `EnableGroup`): `enable`
 (config key, top-level, space-separated string or list; `--enable`,

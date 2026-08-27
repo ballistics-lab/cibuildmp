@@ -12,7 +12,7 @@ list; now table presence alone selects a port, exactly the rule
 `_reject_legacy_usermod_table()` is what turns a lingering `[usermod]`
 into a loud, specific error before this module ever sees the config.
 
-`[[overrides]]` is shared with natmod now (Phase G, record 0051's third
+`[override]` is shared with natmod now (Phase G, record 0051's third
 addendum) -- `natmod/options.py`'s own `load_overrides()` parses and
 loosely validates the merged, top-level list once; each of natmod's and
 this module's own `build_options()` does its own *strict*,
@@ -114,10 +114,10 @@ USERMOD_PORT_BASE: frozenset[str] = frozenset(
 # cibuildmp's own top-level-only rule, since [0048], was a real, unnoticed
 # divergence). Deliberately *not* folded into `USERMOD_PORT_BASE` itself,
 # since that constant is also `build_options()`'s own tier-2
-# `[[overrides]]` schema (`natmod/options.py`'s own
+# `[override]` schema (`natmod/options.py`'s own
 # `_USERMOD_OVERRIDE_OPTION_KEYS_MIRROR` mirrors `USERMOD_PORT_BASE`
 # specifically, not this) -- `build`/`skip` decide *which targets exist at
-# all*, a question already answered before any `[[overrides]]` entry can
+# all*, a question already answered before any `[override]` entry can
 # match, so writing them there would be circular, not a real per-target
 # option. The same split `NATMOD_SCHEMA`/`NATMOD_OVERRIDE_OPTION_KEYS`
 # already keeps in `natmod/options.py`.
@@ -246,7 +246,7 @@ class UsermodBuildOptions:
 
 
 def _foreign_override_identifiers(cfg: UsermodOptions) -> list[str]:
-    """`[[overrides]]` is shared with natmod (Phase G) -- an entry meant
+    """`[override]` is shared with natmod (Phase G) -- an entry meant
     only for natmod (`select = "*-armv7emsp"`, an arch identifier no
     usermod port ever produces) must not fail *this* family's own
     reachability audit just because natmod itself is not part of this
@@ -287,7 +287,7 @@ def _foreign_override_identifiers(cfg: UsermodOptions) -> list[str]:
 def check_reachable(cfg: UsermodOptions) -> None:
     """Pre-build reachability audit -- the usermod half of record 0052's
     A5 (see `natmod/options.py`'s own `check_reachable()` for the full
-    reasoning, unchanged here): every `build`/`skip`/`[[overrides]]`
+    reasoning, unchanged here): every `build`/`skip`/`[override]`
     `select` pattern must be capable of matching at least one identifier
     in `all_targets()` (every known port, this config's own configured
     `micropython` tags), checked before `targets()`'s own `build`/`skip`
@@ -298,7 +298,7 @@ def check_reachable(cfg: UsermodOptions) -> None:
 
     Each active port's own `build`/`skip` -- **only when `[<port>]` itself
     actually sets one** -- is checked a second time, scoped to *that
-    port's own* identifiers: unlike the shared `[[overrides]]` list
+    port's own* identifiers: unlike the shared `[override]` list
     (widened below via `_foreign_override_identifiers()`), a value
     written directly inside a port's own table is unambiguous by
     construction. Deliberately skipped when the port sets neither:
@@ -312,7 +312,7 @@ def check_reachable(cfg: UsermodOptions) -> None:
     value" apart from "this is only the inherited default resolving here
     too."
 
-    `[[overrides]]` reachability is checked against usermod's own
+    `[override]` reachability is checked against usermod's own
     identifiers *plus* natmod's (task #66) -- an override entirely valid
     for the other, currently-inactive family must not be flagged here.
     """
@@ -336,13 +336,13 @@ def check_reachable(cfg: UsermodOptions) -> None:
             )
     if cfg.overrides:
         override_identifiers = identifiers + _foreign_override_identifiers(cfg)
-        for index, override in enumerate(cfg.overrides, 1):
+        for override in cfg.overrides:
             selector = override.get("select")
             if selector is None:
                 continue  # a missing select is its own, separate error elsewhere
             check_selector_reachable(
                 parse_selector(selector),
-                f"[[overrides]] #{index}",
+                f'[override."{selector}"]',
                 override_identifiers,
                 error=UsermodConfigError,
             )
@@ -363,7 +363,7 @@ class UsermodOptions:
     name: str
     version: str
     axis_overrides: dict[str, list[str]]
-    # The shared, top-level [[overrides]] list (0051 point 7, merged with
+    # The shared, top-level [override] list (0051 point 7, merged with
     # natmod's own in Phase G) -- not axis_overrides above (which
     # port/arch a config selects), per-target *option* overrides layered
     # over user-c-modules/manifest/extra-make-args, the same "file -> matching
@@ -551,7 +551,7 @@ class UsermodOptions:
         self, target: UsermodTarget, env: Mapping[str, str] | None = None
     ) -> UsermodBuildOptions:
         """Resolve per-target options: file (global -> that target's own
-        port table) -> matching [[overrides]] (each layered per its own
+        port table) -> matching [override] (each layered per its own
         `inherit` rule) -> environment -- the same shape natmod's own
         Options.build_options() already has (0051 point 7, merged in
         Phase G)."""
@@ -567,7 +567,7 @@ class UsermodOptions:
             check_keys(
                 option_keys,
                 USERMOD_PORT_BASE,
-                where=f"[[overrides]] matching {target.identifier!r} (platform {target.port!r})",
+                where=f"[override] matching {target.identifier!r} (platform {target.port!r})",
                 error=UsermodConfigError,
             )
 

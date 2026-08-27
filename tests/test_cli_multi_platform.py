@@ -2,7 +2,14 @@ import json
 
 from cibuildmp.cli import main
 from cibuildmp.platforms.natmod.options import DEFAULT_MICROPYTHON
+from cibuildmp.platforms.natmod.targets import newest_tag_for_abi
 from cibuildmp.platforms.usermod.targets import default_axis_values
+
+# Natmod identifiers carry their tag now (record 0052's own live-caught
+# correction) -- an unconfigured build already narrows to the newest known
+# ABI, so this is that same real, resolved tag rather than a literal
+# string pinned here that would go stale on its own schedule.
+NATMOD_X64 = f"mpy6.3-{newest_tag_for_abi('6.3')}-x64"
 
 
 def write(tmp_path, text):
@@ -33,7 +40,7 @@ def test_no_config_still_defaults_to_natmod(tmp_path, capsys):
     # completely untouched by usermod's own existence.
     assert main([str(tmp_path), "--print-build-identifiers"]) == 0
     identifiers = capsys.readouterr().out.split()
-    assert "mpy6.3-x64" in identifiers
+    assert NATMOD_X64 in identifiers
     assert not any(i.startswith("unix") for i in identifiers)
 
 
@@ -190,7 +197,7 @@ def test_both_tables_without_platform_builds_both(tmp_path, capsys):
 
     assert main([str(tmp_path), "--print-build-identifiers"]) == 0
     identifiers = capsys.readouterr().out.split()
-    assert "mpy6.3-x64" in identifiers
+    assert NATMOD_X64 in identifiers
     assert any(i.startswith(f"{DEFAULT_MICROPYTHON}-unix-") for i in identifiers)
 
 
@@ -199,7 +206,7 @@ def test_both_tables_print_build_identifiers_json_is_one_array(tmp_path, capsys)
 
     assert main([str(tmp_path), "--print-build-identifiers", "--json"]) == 0
     identifiers = json.loads(capsys.readouterr().out)
-    assert "mpy6.3-x64" in identifiers
+    assert NATMOD_X64 in identifiers
     assert any(i.startswith(f"{DEFAULT_MICROPYTHON}-unix-") for i in identifiers)
 
 
@@ -208,7 +215,7 @@ def test_both_tables_dry_run_lists_both(tmp_path, capsys):
 
     assert main([str(tmp_path), "--dry-run"]) == 0
     out = capsys.readouterr().out
-    assert "mpy6.3-x64" in out
+    assert NATMOD_X64 in out
     assert "unix" in out
 
 
@@ -230,13 +237,13 @@ def test_only_with_both_tables_narrows_to_the_matching_side(tmp_path, capsys):
             [
                 str(tmp_path),
                 "--only",
-                "mpy6.3-x64",
+                NATMOD_X64,
                 "--print-build-identifiers",
             ]
         )
         == 0
     )
-    assert capsys.readouterr().out.split() == ["mpy6.3-x64"]
+    assert capsys.readouterr().out.split() == [NATMOD_X64]
 
 
 def test_three_platforms_at_once(tmp_path, capsys):
@@ -244,7 +251,7 @@ def test_three_platforms_at_once(tmp_path, capsys):
 
     assert main([str(tmp_path), "--print-build-identifiers", "--json"]) == 0
     identifiers = json.loads(capsys.readouterr().out)
-    assert "mpy6.3-x64" in identifiers
+    assert NATMOD_X64 in identifiers
     assert any(i.startswith(f"{DEFAULT_MICROPYTHON}-unix-") for i in identifiers)
     assert f"{DEFAULT_MICROPYTHON}-esp32-ESP32_GENERIC" in identifiers
 
@@ -258,7 +265,7 @@ def test_both_tables_explicit_platform_natmod(tmp_path, capsys):
     assert (
         main([str(tmp_path), "--platform", "natmod", "--print-build-identifiers"]) == 0
     )
-    assert capsys.readouterr().out.split() == ["mpy6.3-x64"]
+    assert capsys.readouterr().out.split() == [NATMOD_X64]
 
 
 def test_both_tables_explicit_platform_qemu(tmp_path, capsys):
@@ -277,7 +284,7 @@ def test_both_tables_platform_env_var(tmp_path, capsys, monkeypatch):
     write(tmp_path, '[natmod]\narchs = ["x64"]\n[unix]\n')
 
     assert main([str(tmp_path), "--print-build-identifiers"]) == 0
-    assert capsys.readouterr().out.split() == ["mpy6.3-x64"]
+    assert capsys.readouterr().out.split() == [NATMOD_X64]
 
 
 def test_platform_flag_wins_over_env_var(tmp_path, capsys, monkeypatch):

@@ -19,7 +19,7 @@
 # Every option below is overridable by a CIBMP_-prefixed environment
 # variable (CIBMP_BUILD, CIBMP_SKIP, CIBMP_MICROPYTHON, CIBMP_OUTPUT_DIR,
 # CIBMP_EXTRA_MAKE_ARGS, ...). Precedence, lowest to highest:
-#   defaults -> this file -> matching [[overrides]] -> environment -> CLI
+#   defaults -> this file -> matching [override] -> environment -> CLI
 
 # ── Global ────────────────────────────────────────────────────────────────
 # No micropython/mpy-abi key here (record 0052, A2 -- this repo has no
@@ -68,7 +68,7 @@ output-dir = "mpyhouse"
 # already encoded in the arch itself (MP_NATIVE_ARCH_ARMV7EMSP and
 # ...ARMV7EMDP are distinct values, selected from __ARM_FP in
 # py/persistentcode.h). A project-level precision define is an override, not
-# an axis — see [[overrides]] below.
+# an axis — see [override] below.
 #
 # Left unset here on purpose: an unconfigured `build` already narrows to
 # the single newest known ABI (record 0052, A2), which is the sensible
@@ -102,16 +102,18 @@ extra-make-args = []
 pre-build-command = ""
 
 # ── Overrides ─────────────────────────────────────────────────────────────
-# One mechanism, cibuildwheel-shaped: a list of tables, each with a `select`
-# glob over the same identifier the build/skip selectors use. First match
-# wins per option. Everything settable above is settable here.
+# One mechanism, deliberately simpler than cibuildwheel's own
+# `[[tool.cibuildwheel.overrides]]`: a table keyed directly by its own glob
+# over the same identifier build/skip already match against — no separate
+# `select =` field to write. Declaration order decides precedence (a later,
+# narrower glob further down the file wins over an earlier, broader one).
+# Everything settable above is settable here.
 #
 # The example below is real: bclibc's natmod/Makefile already derives
 # MP_BCLIBC_PRECISION from ARCH on its own, so this override is redundant
 # there — it is written out to show the mechanism, and to show where a
 # project-level define belongs (here, not in the identifier).
-[[overrides]]
-select = "*-armv7emsp"
+[override."*-armv7emsp"]
 extra-make-args = ["MP_BCLIBC_PRECISION=single"]
 
 # usermod itself is fully implemented -- this repo's own cibuildmp.toml

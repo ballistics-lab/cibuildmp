@@ -74,7 +74,7 @@ class PlatformModule(Protocol):
     `usermod.options.UsermodConfigError` and friends -- nothing catches
     either polymorphically today, and unifying them would be a real,
     separate redesign with no caller driving it). One rule every family
-    module's own `run()` must still uphold: a matched `[[overrides]]`
+    module's own `run()` must still uphold: a matched `[override]`
     entry's key is only validated against the specific platform a target
     resolves to once `build_options()` actually runs (Phase G's tier-2
     validation) -- so any dry-run/preview code path that calls

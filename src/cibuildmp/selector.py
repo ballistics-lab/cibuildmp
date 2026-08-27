@@ -14,7 +14,7 @@ natmod's `Target` and usermod's `UsermodTarget` already have one, so a
 `Protocol` is enough; no shared base class is needed.
 
 Mechanism lives here; which identifiers exist and what a config's
-`build`/`skip`/`[[overrides]]` mean stays entirely in each mode's own
+`build`/`skip`/`[override]` mean stays entirely in each mode's own
 `targets.py`/`options.py` -- this module knows nothing about ABIs,
 ports, or axes.
 """

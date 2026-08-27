@@ -8,6 +8,7 @@ must not need a MicroPython checkout.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -67,20 +68,23 @@ RV32_ARCH_FLAGS: dict[str, int] = dict(natmod_data()["arch-flags"]["rv32imc"])
 # might or might not catch later.
 _NATMOD_ROWS: list[dict[str, Any]] = build_platforms_data()["natmod"]["identifiers"]
 
-# (abi, arch) -> that pair's own base identifier, straight from
+# (tag, arch) -> that row's own base identifier, straight from
 # `resources/build-platforms.toml`'s own rows -- matched against a real
 # fact, not reconstructed by a Python f-string. `identifier_format =
-# "mpy{mpy}-{arch}"` (the file's own header) is the single place that
-# format is spelled out; every row was regenerated from it, so a
-# (abi, arch) pair with more than one row (several tags sharing one ABI)
-# always agrees on the string, and `dict` collapsing duplicates to the
-# last-seen one is therefore never a real collision. `Target.identifier`
-# below looks this up rather than rebuilding it -- the same shape
-# cibuildwheel's own `PythonConfiguration.identifier` has (a literal
-# field read from `resources/build-platforms.toml`, confirmed by reading
-# `cibuildwheel/platforms/linux.py` directly, not recalled).
-_IDENTIFIER_BY_ABI_ARCH: dict[tuple[str, str], str] = {
-    (row["mpy"], row["arch"]): row["identifier"] for row in _NATMOD_ROWS
+# "mpy{mpy}-{tag}-{arch}"` (the file's own header) is the single place
+# that format is spelled out; every row was regenerated from it. Keyed by
+# (tag, arch), not (abi, arch): tag *is* part of the identifier (a live,
+# user-caught correction of this record's own earlier A2 decision to drop
+# it -- keeping it is what makes every row a genuinely distinct, matchable
+# fact with no collisions, instead of several tags sharing one ABI
+# collapsing onto one identifier and needing an invented "which tag wins"
+# rule). `Target.identifier` below looks this up rather than rebuilding
+# it -- the same shape cibuildwheel's own `PythonConfiguration.identifier`
+# has (a literal field read from `resources/build-platforms.toml`,
+# confirmed by reading `cibuildwheel/platforms/linux.py` directly, not
+# recalled).
+_IDENTIFIER_BY_TAG_ARCH: dict[tuple[str, str], str] = {
+    (row["tag"], row["arch"]): row["identifier"] for row in _NATMOD_ROWS
 }
 
 MPY_ABI: dict[str, str] = {row["tag"]: row["mpy"] for row in _NATMOD_ROWS}
@@ -268,25 +272,27 @@ class Target:
 
     @property
     def identifier(self) -> str:
-        # Matched against `_IDENTIFIER_BY_ABI_ARCH` (a real row's own
+        # Matched against `_IDENTIFIER_BY_TAG_ARCH` (a real row's own
         # `identifier` field), not rebuilt -- record 0052's own live
         # finding, cross-checked against cibuildwheel's real
         # `PythonConfiguration.identifier` (a literal field, never
-        # computed). `KeyError` here means a `Target` was constructed for
-        # an (abi, arch) pair `build-platforms.toml` has never walked --
-        # every real caller only ever builds one from `natmod_targets()`,
-        # itself fed by `archs_available_for(tag)`'s own gate, so this
-        # can only fire for a hand-built `Target` in a test, and should.
+        # computed). Keyed by `(tag, arch)`: tag is part of the identifier
+        # (a live correction of this record's own earlier A2 decision to
+        # drop it -- every row is then a genuinely distinct fact, no two
+        # tags ever collapsing onto one identifier). `KeyError` here means
+        # a `Target` was constructed for a `(tag, arch)` pair
+        # `build-platforms.toml` has never walked -- every real caller
+        # only ever builds one from `natmod_all_targets()`, itself reading
+        # straight off real rows, so this can only fire for a hand-built
+        # `Target` in a test, and should.
         #
         # arch_flags stays a suffix appended here, not a stored fact: it
         # is config-driven (`arch-flags = [...]`), not something a real
         # MicroPython tag's own history could record -- every row's own
         # `arch_flags` column is `0` unconditionally, confirmed by
         # inspection, because it never varied per (tag, arch) pair to
-        # begin with. Shaped after cibuildwheel's cp311-manylinux_x86_64:
-        # {ABI}-{platform}_{arch}, but with no literal "natmod" segment
-        # (record 0052, A2) since natmod is one platform among six now.
-        base = _IDENTIFIER_BY_ABI_ARCH[(self.abi, self.arch)]
+        # begin with.
+        base = _IDENTIFIER_BY_TAG_ARCH[(self.tag, self.arch)]
         if self.arch_flags:
             base += f"+0x{self.arch_flags:x}"
         return base
@@ -327,7 +333,7 @@ def validate_archs_recognized(archs: list[str]) -> None:
 def natmod_all_targets(rv32imc_arch_flags: Sequence[int] = (0,)) -> list[Target]:
     """One `Target` per real `(tag, arch)` row in `build-platforms.toml`
     -- the raw fact list `Options.targets()`/`all_targets()` glob-match
-    `build`/`skip`/`[[overrides]]` against directly, the same shape
+    `build`/`skip`/`[override]` against directly, the same shape
     cibuildwheel's own `get_python_configurations()` has: filter a
     literal list read straight from data (`PythonConfiguration(**item)
     for item in config_dicts`, confirmed by reading
@@ -354,29 +360,46 @@ def natmod_all_targets(rv32imc_arch_flags: Sequence[int] = (0,)) -> list[Target]
     return result
 
 
-def collapse_newest_tag(targets: Sequence[Target]) -> list[Target]:
-    """One `Target` per distinct identifier, keeping whichever candidate
-    carries the newest `tag` -- the checkout a real build would fetch.
+# A tag looks like "v1.30.0-preview" or "v1.24.0" -- MicroPython's own
+# release-tag shape, matched against a `build`/`skip` pattern string
+# itself (not against any one target) to tell "the user named a specific
+# tag" apart from "the user wrote a broad pattern and expects the newest
+# one". A plain regex, not a lookup against known tags: a config naming a
+# tag this project has not walked yet is still a tag-shaped pattern (and
+# will simply match nothing, `check_reachable()`'s own job to catch), not
+# grounds to treat it as "no tag named at all".
+_TAG_SHAPE = re.compile(r"v\d+\.\d+(?:\.\d+)?(?:-preview)?")
 
-    Runs *after* selection (`select()`'s own glob match against
-    `.identifier`), not before: matching every real row directly and
-    collapsing duplicates afterward needs no separate "which tag is
-    newest for this ABI" table computed up front the way the old
-    `tag_groups()`-first design did -- multiple tags mapping to one ABI
-    collapse to the same `.identifier` (arch_flags-decorated rv32imc
-    identifiers included) and this picks the survivor among them,
-    nothing more.
+
+def selector_names_a_tag(patterns: Sequence[str]) -> bool:
+    """Whether any of `build`'s own glob patterns literally names a
+    MicroPython tag. If none do, `narrow_to_newest_tag()` below treats a
+    pattern matching more than one tag for the same `(abi, arch, arch_flags)`
+    as intentionally broad ("give me whichever tag is newest"), not
+    ambiguous; if at least one does, every match is trusted as-is, tag
+    and all, including a wildcard's own multiple real matches within that
+    named tag.
     """
-    best: dict[str, Target] = {}
-    order: list[str] = []
+    return any(_TAG_SHAPE.search(p) for p in patterns)
+
+
+def narrow_to_newest_tag(targets: Sequence[Target]) -> list[Target]:
+    """One `Target` per distinct `(abi, arch, arch_flags)`, keeping
+    whichever candidate carries the newest `tag` -- what a `build`
+    pattern that never names a tag (`selector_names_a_tag()` false) means
+    by "give me this arch", now that tag is part of the identifier and
+    several real tags can otherwise match one arch at once.
+    """
+    best: dict[tuple[str, str, int], Target] = {}
+    order: list[tuple[str, str, int]] = []
     for t in targets:
-        ident = t.identifier
-        if ident not in best:
-            order.append(ident)
-            best[ident] = t
-        elif _tag_sort_key(t.tag) > _tag_sort_key(best[ident].tag):
-            best[ident] = t
-    return [best[i] for i in order]
+        key = (t.abi, t.arch, t.arch_flags)
+        if key not in best:
+            order.append(key)
+            best[key] = t
+        elif _tag_sort_key(t.tag) > _tag_sort_key(best[key].tag):
+            best[key] = t
+    return [best[k] for k in order]
 
 
 # Selector mechanism (parse_selector/matches/select) moved to

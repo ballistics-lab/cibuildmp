@@ -302,7 +302,7 @@ def run(
                 print("  " + _plan_line(index, total, options.build_options(target)))
         except ConfigError as exc:
             # build_options() can still raise here -- a matched
-            # [[overrides]] entry's own key is only checked against the
+            # [override] entry's own key is only checked against the
             # matched identifier's own platform once a target is actually
             # resolved (Phase G's tier-2 validation), so an error that
             # `targets()` above could not have caught is a real

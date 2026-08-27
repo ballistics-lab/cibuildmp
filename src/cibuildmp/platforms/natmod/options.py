@@ -1,7 +1,7 @@
 """Config loading and option resolution.
 
 Precedence, lowest to highest:
-    defaults -> global config -> platform config -> matching [[overrides]]
+    defaults -> global config -> platform config -> matching [override]
     -> environment -> CLI
 
 Config lives in cibuildmp.toml at the package root, with the same tree
@@ -31,10 +31,11 @@ from ...selector import parse_selector, select
 from .targets import (
     NATMOD_ARCHS,
     Target,
-    collapse_newest_tag,
+    narrow_to_newest_tag,
     natmod_all_targets,
     newest_known_abi,
     resolve_arch_flags,
+    selector_names_a_tag,
     validate_archs_recognized,
 )
 
@@ -120,11 +121,11 @@ NATMOD_SCHEMA: frozenset[str] = frozenset(
     }
 )
 
-# ── merged [[overrides]] (Phase G) ──────────────────────────────────────
+# ── merged [override] (Phase G) ──────────────────────────────────────
 #
-# Natmod's own top-level [[overrides]] and usermod's own
+# Natmod's own top-level [override] and usermod's own
 # [[usermod-overrides]] (Phase F) merge into one shared top-level
-# [[overrides]] list here -- record 0051's own "Phase G". Two validation
+# [override] list here -- record 0051's own "Phase G". Two validation
 # tiers: *loose*, at parse time (load_overrides() below, called by both
 # this module's own Options.load() and usermod/options.py's
 # UsermodOptions.load()) -- is this key valid for *any* platform's
@@ -238,23 +239,49 @@ def load_overrides(
     raw: Mapping[str, Any], *, error: type[Exception] = ConfigError
 ) -> list[dict[str, Any]]:
     """Parse and loosely (tier-1) validate the merged, top-level
-    `[[overrides]]` list -- shared by every platform (Phase G). Called
-    once by each of this module's own `Options.load()` and
+    `[override]` table -- shared by every platform (Phase G). Each entry
+    is keyed by its own glob directly (`[override."*-armv7emsp"]`) rather
+    than an array of tables each carrying a separate `select =` field --
+    a deliberate simplification decided live (2026-08-27) over
+    cibuildwheel's own `[[tool.cibuildwheel.overrides]]` shape: this
+    project's own overrides are already a flat glob-matched list with no
+    real nesting depth to speak of, so the glob can simply *be* the
+    table's own name. Declaration order is still what decides precedence
+    (`tomllib` parses a table's own keys into a plain, insertion-ordered
+    `dict`) -- a later, narrower glob written further down the file still
+    wins over an earlier, broader one, exactly as `[override]` file
+    order already did. No `select` key survives inside the table itself;
+    it would only duplicate the table's own name.
+
+    Internally still normalised to `{"select": glob, **body}` dicts --
+    the one shape `matching_overrides()`/`check_reachable()`/
+    `build_options()` already consume, and the only thing this function
+    changes is how that shape gets built from the raw TOML.
+
+    Called once by each of this module's own `Options.load()` and
     `usermod/options.py`'s `UsermodOptions.load()`, against the same
     already-parsed `raw` dict -- re-validating twice is cheap (dict-
-    membership checks over an already-parsed, typically-short list, no
+    membership checks over an already-parsed, typically-short table, no
     I/O), not the "parsing the same file twice" this is written to
     avoid (`read_config()`/`preread` already solve that).
     """
-    overrides = list(raw.get("overrides") or [])
-    if not isinstance(overrides, list):
-        raise error("[[overrides]] must be an array of tables")
-    for override in overrides:
-        if isinstance(override, dict):
-            check_keys(
-                override, OVERRIDE_UNION_KEYS, where="[[overrides]]", error=error
+    table = raw.get("override") or {}
+    if not isinstance(table, dict):
+        raise error('[override] must be a table of "glob" = { ... } entries')
+    overrides: list[dict[str, Any]] = []
+    for glob, body in table.items():
+        if not isinstance(body, dict):
+            raise error(f'[override."{glob}"] must be a table')
+        if "select" in body:
+            raise error(
+                f'[override."{glob}"]: `select` is the table\'s own name '
+                f"now, not a key inside it -- remove it."
             )
-            _check_inherit(override, where="[[overrides]]", error=error)
+        where = f'[override."{glob}"]'
+        override = {"select": glob, **body}
+        check_keys(override, OVERRIDE_UNION_KEYS, where=where, error=error)
+        _check_inherit(override, where=where, error=error)
+        overrides.append(override)
     return overrides
 
 
@@ -314,13 +341,13 @@ def check_reachable(cfg: Options) -> None:
     identifiers = [t.identifier for t in cfg.all_targets()]
     check_selector_reachable(cfg.build, "build", identifiers, error=ConfigError)
     check_selector_reachable(cfg.skip, "skip", identifiers, error=ConfigError)
-    for index, override in enumerate(cfg.overrides, 1):
+    for override in cfg.overrides:
         selector = override.get("select")
         if selector is None:
             continue  # a missing select is its own, separate error elsewhere
         check_selector_reachable(
             parse_selector(selector),
-            f"[[overrides]] #{index}",
+            f'[override."{selector}"]',
             identifiers,
             error=ConfigError,
         )
@@ -415,7 +442,11 @@ class Options:
         # unconfigured `build` selector still keeps today's narrow default
         # -- only the newest known ABI -- by defaulting to
         # `f"mpy{newest_known_abi()}-*"` instead of `"*"`; an explicit
-        # `build = "*"` (or `"mpy6.2-*"`, etc.) opens it up wider.
+        # `build = "*"` (or `"mpy6.2-*"`, etc.) opens it up wider. This
+        # pattern deliberately names no tag: `targets()`'s own
+        # `narrow_to_newest_tag()` is what then picks the newest tag per
+        # arch for it, the same rule any other tag-less pattern gets --
+        # not a special case baked into the default string itself.
         default_build = f"mpy{newest_known_abi()}-*"
 
         # Through the real cascade now, not the ad-hoc opt() chain --
@@ -459,21 +490,31 @@ class Options:
 
         Built directly from every real `(tag, arch)` row in
         `build-platforms.toml` (`natmod_all_targets()`) -- matched against
-        `self.archs`, then `build`/`skip` glob-matched, then collapsed to
-        one `Target` per surviving identifier via `collapse_newest_tag()`.
-        No separate "is this arch available for this ABI's tag" table is
-        consulted anywhere in this path any more: a row existing at all
-        already says so, and filtering a real, already-existence-checked
+        `self.archs`, then `build`/`skip` glob-matched against each row's
+        own real identifier. No separate "is this arch available for this
+        tag" table is consulted anywhere in this path: a row existing at
+        all already says so, and filtering an already-existence-checked
         list can never re-admit a combination the file never verified
-        (record 0052's own live-caught correction -- the previous design
-        built the checkable-table *before* selection, duplicating what
-        matching real rows already answers for free; matched against
-        cibuildwheel's own real `get_python_configurations()`, which does
-        exactly this: filter a literal row list by `build_selector`, no
-        parallel availability table at all).
+        (matched against cibuildwheel's own real
+        `get_python_configurations()`, which does exactly this: filter a
+        literal row list by `build_selector`, no parallel availability
+        table at all).
+
+        Tag is part of the identifier now (record 0052's own live
+        correction of its earlier A2), so several real tags can survive
+        selection for the same `(abi, arch, arch_flags)` -- most often
+        because `build` never named one at all (`mpy6.3-*` matches every
+        tag mapping to ABI 6.3, the un-narrowed default included).
+        `selector_names_a_tag(self.build)` tells the two cases apart by a
+        plain regex over the pattern strings themselves, not by
+        inspecting what matched: if `build` never names a tag,
+        `narrow_to_newest_tag()` keeps only the newest-tag candidate per
+        arch (what "give me this arch" means without a tag pinned); if it
+        does, every match is trusted as-is, tag and all, since the
+        selector was already specific.
 
         `arch_flags` (rv32imc only) is resolved before matching, since it
-        is part of the identifier that `build`/`skip`/`[[overrides]]`
+        is part of the identifier that `build`/`skip`/`[override]`
         glob against. A list produces one rv32imc target *per entry* --
         "build every arch-flags variant" is its own request, distinct
         from "build every arch", so `arch-flags = ["", "zba,zcmp"]` is two
@@ -489,7 +530,10 @@ class Options:
         validate_archs_recognized(self.archs)
         arch_flags = resolve_arch_flags("rv32imc", self.arch_flags)
         candidates = [t for t in natmod_all_targets(arch_flags) if t.arch in self.archs]
-        return collapse_newest_tag(select(candidates, self.build, self.skip))
+        selected = select(candidates, self.build, self.skip)
+        if not selector_names_a_tag(self.build):
+            selected = narrow_to_newest_tag(selected)
+        return selected
 
     def all_targets(self) -> list[Target]:
         """Every identifier this config can name, ignoring `archs`,
@@ -497,11 +541,10 @@ class Options:
 
         Upstream's `--only` takes its `choices` from `read_all_configs()`,
         i.e. from what exists rather than from what is selected -- and so
-        does this now, directly: `natmod_all_targets()` is every real row,
-        `collapse_newest_tag()` is the only narrowing (one `Target` per
-        identifier, picking the newest-tag candidate among however many
-        rows share it). `archs`/`build`/`skip` are selection, not
-        existence, and stay out, matching `targets()`'s own contract.
+        does this now, directly: `natmod_all_targets()` *is* every real
+        row, with no narrowing at all. `archs`/`build`/`skip` are
+        selection, not existence, and stay out, matching `targets()`'s
+        own contract.
 
         `arch_flags` stays for the same reason it did before this
         rewrite: **D15** made a `+0x..` suffix part of the identifier, and
@@ -510,13 +553,13 @@ class Options:
         fixed set.
         """
         arch_flags = resolve_arch_flags("rv32imc", self.arch_flags)
-        return collapse_newest_tag(natmod_all_targets(arch_flags))
+        return natmod_all_targets(arch_flags)
 
     def build_options(
         self, target: Target, env: Mapping[str, str] | None = None
     ) -> BuildOptions:
         """Resolve per-target options: file (global -> [natmod]) ->
-        matching [[overrides]] (each layered per its own `inherit` rule)
+        matching [override] (each layered per its own `inherit` rule)
         -> environment."""
         environ: Mapping[str, str] = os.environ if env is None else env
 
@@ -530,7 +573,7 @@ class Options:
             check_keys(
                 option_keys,
                 NATMOD_OVERRIDE_OPTION_KEYS,
-                where=f"[[overrides]] matching {target.identifier!r} (platform 'natmod')",
+                where=f"[override] matching {target.identifier!r} (platform 'natmod')",
             )
 
         def opt(key: str, default: Any = None) -> Any:

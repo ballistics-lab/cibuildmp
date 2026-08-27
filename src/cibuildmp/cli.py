@@ -188,13 +188,16 @@ def _parse_platform_names(value: str) -> list[str]:
 
 
 # Top-level tables that are not platforms and never were -- `[publish]`
-# (natmod's own extra-files) and `[usermod]` (record 0051's ninth
-# addendum: shared defaults for every active usermod port, sibling to
-# `[natmod]`, brought back after Phase F removed it -- not the same
-# table, see `usermod.options.check_usermod_family_table()`'s own
-# docstring for exactly what changed) -- so `_reject_unknown_tables()`
-# below does not mistake either for a typo'd platform name.
-_NON_PLATFORM_TABLES: frozenset[str] = frozenset({"publish", "usermod"})
+# (natmod's own extra-files), `[usermod]` (record 0051's ninth addendum:
+# shared defaults for every active usermod port, sibling to `[natmod]`,
+# brought back after Phase F removed it -- not the same table, see
+# `usermod.options.check_usermod_family_table()`'s own docstring for
+# exactly what changed), and `[override]` (the shared, glob-keyed
+# override table every platform reads from -- `natmod.options.
+# load_overrides()`'s own docstring has the shape) -- so
+# `_reject_unknown_tables()` below does not mistake any of the three for
+# a typo'd platform name.
+_NON_PLATFORM_TABLES: frozenset[str] = frozenset({"publish", "usermod", "override"})
 
 
 def _reject_unknown_tables(raw: dict) -> None:

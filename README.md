@@ -294,7 +294,7 @@ produced a genuine linked `unix-manylinux_2_28_x86_64` binary that runs
 and actually calls into that module.
 See `docs/BACKLOG.md`'s **D23**/**M9b** for the full design (identifier
 scheme, why there's no `package.json` for usermod output) and record
-0051 for the config-tree shape, the shared `[[overrides]]`/`inherit`
+0051 for the config-tree shape, the shared `[override]`/`inherit`
 (now merged with natmod's own), and the `platforms/` package layout.
 `extra-files` (natmod's own `[publish]` mechanism) is still not wired
 for usermod.

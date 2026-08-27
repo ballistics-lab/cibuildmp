@@ -8,7 +8,6 @@ from cibuildmp.platforms.natmod.targets import (
     UnknownTagError,
     abi_for_tag,
     all_tag_groups,
-    collapse_newest_tag,
     known_abis,
     natmod_all_targets,
     newest_known_abi,
@@ -20,19 +19,23 @@ from cibuildmp.selector import parse_selector, select
 
 
 def test_identifier_shape():
-    # No literal "natmod" segment (record 0052, A2): natmod is one
-    # platform among six sharing this exact identifier shape now, not a
-    # mode this string needs to spell out.
-    t = Target(abi="6.3", arch="armv7emsp")
-    assert t.identifier == "mpy6.3-armv7emsp"
+    # Tag is part of the identifier (a live, user-caught correction of
+    # this record's own earlier A2 decision to drop it): a real
+    # (tag, arch) row is a genuinely distinct fact, matched against
+    # `resources/build-platforms.toml`'s own `identifier` field, not
+    # rebuilt. No literal "natmod" segment, though (A2's other half,
+    # unchanged) -- natmod is one platform among six sharing this exact
+    # identifier shape now, not a mode this string needs to spell out.
+    t = Target(abi="6.3", arch="armv7emsp", tag="v1.30.0-preview")
+    assert t.identifier == "mpy6.3-v1.30.0-preview-armv7emsp"
     assert t.port == "natmod"
 
 
 def test_identifier_carries_arch_flags_only_when_set():
-    plain = Target(abi="6.3", arch="rv32imc")
-    assert plain.identifier == "mpy6.3-rv32imc"
-    flagged = Target(abi="6.3", arch="rv32imc", arch_flags=3)
-    assert flagged.identifier == "mpy6.3-rv32imc+0x3"
+    plain = Target(abi="6.3", arch="rv32imc", tag="v1.30.0-preview")
+    assert plain.identifier == "mpy6.3-v1.30.0-preview-rv32imc"
+    flagged = Target(abi="6.3", arch="rv32imc", tag="v1.30.0-preview", arch_flags=3)
+    assert flagged.identifier == "mpy6.3-v1.30.0-preview-rv32imc+0x3"
 
 
 def test_parse_arch_flags_numeric_forms():
@@ -77,7 +80,7 @@ def test_resolve_arch_flags_preserves_first_seen_order():
 
 
 def test_natmod_all_targets_arch_flags_land_only_on_rv32imc():
-    targets = collapse_newest_tag(natmod_all_targets([3]))
+    targets = [t for t in natmod_all_targets([3]) if t.tag == "v1.30.0-preview"]
     by_arch = {t.arch: t.arch_flags for t in targets}
     assert by_arch["rv32imc"] == 3
     assert all(flags == 0 for arch, flags in by_arch.items() if arch != "rv32imc")
@@ -86,9 +89,17 @@ def test_natmod_all_targets_arch_flags_land_only_on_rv32imc():
 def test_natmod_all_targets_one_rv32imc_identifier_per_arch_flags_entry():
     # "build every arch-flags variant" is distinct from "build every arch":
     # each entry produces its own rv32imc identifier, side by side.
-    targets = collapse_newest_tag(natmod_all_targets([0, 1, 3]))
-    rv32imc_ids = sorted(t.identifier for t in targets if t.arch == "rv32imc")
-    assert rv32imc_ids == ["mpy6.3-rv32imc", "mpy6.3-rv32imc+0x1", "mpy6.3-rv32imc+0x3"]
+    targets = natmod_all_targets([0, 1, 3])
+    rv32imc_ids = sorted(
+        t.identifier
+        for t in targets
+        if t.arch == "rv32imc" and t.tag == "v1.30.0-preview"
+    )
+    assert rv32imc_ids == [
+        "mpy6.3-v1.30.0-preview-rv32imc",
+        "mpy6.3-v1.30.0-preview-rv32imc+0x1",
+        "mpy6.3-v1.30.0-preview-rv32imc+0x3",
+    ]
 
 
 def test_ten_arches_five_toolchains():
@@ -180,16 +191,16 @@ def test_natmod_all_targets_is_the_raw_row_list_not_gated_up_front():
     assert {"x64", "x86", "armv6m"} <= v1_23
 
 
-def test_collapse_newest_tag_keeps_the_newest_tag_per_identifier():
-    # Many tags map to ABI 6.3 (record 0052, A2's own version axis) and
-    # therefore share one identifier (mpy6.3-x64) -- collapse_newest_tag()
-    # is what picks which one a real build would fetch.
-    collapsed = collapse_newest_tag(natmod_all_targets())
-    x64_63 = next(t for t in collapsed if t.identifier == "mpy6.3-x64")
-    assert x64_63.tag == newest_tag_for_abi("6.3")
-    # One Target per identifier -- no duplicates survive collapsing.
-    ids = [t.identifier for t in collapsed]
+def test_every_row_is_its_own_distinct_identifier_no_collapsing_needed():
+    # record 0052's own live, user-caught correction: with tag part of
+    # the identifier, several tags mapping to one ABI (6.3 spans
+    # v1.23.0..v1.30.0-preview) no longer collide on one identifier --
+    # each row stays its own separately matchable fact.
+    targets = natmod_all_targets()
+    ids = [t.identifier for t in targets]
     assert len(ids) == len(set(ids))
+    assert "mpy6.3-v1.23.0-x64" in ids
+    assert "mpy6.3-v1.30.0-preview-x64" in ids
 
 
 def test_parse_selector_accepts_both_forms():
@@ -198,14 +209,16 @@ def test_parse_selector_accepts_both_forms():
     assert parse_selector(None) == []
 
 
-def test_select_globs_against_the_collapsed_domain():
-    targets = [t for t in collapse_newest_tag(natmod_all_targets()) if t.abi == "6.3"]
+def test_select_globs_against_one_tags_own_row_set():
+    targets = [
+        t for t in natmod_all_targets() if t.tag == "v1.30.0-preview" and t.abi == "6.3"
+    ]
     assert sorted(t.arch for t in select(targets, "*-armv7em*", "")) == [
         "armv7emdp",
         "armv7emsp",
     ]
-    assert sorted(t.arch for t in select(targets, "mpy6.3-*", "*-xtensa*")) == sorted(
-        a for a in NATMOD_ARCHS if not a.startswith("xtensa")
-    )
+    assert sorted(
+        t.arch for t in select(targets, "mpy6.3-v1.30.0-preview-*", "*-xtensa*")
+    ) == sorted(a for a in NATMOD_ARCHS if not a.startswith("xtensa"))
     # skip is applied after build, and wins
     assert select(targets, "*-x64", "*-x64") == []

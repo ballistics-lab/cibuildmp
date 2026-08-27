@@ -26,7 +26,9 @@ def build_options(
     arch: str = "armv7emsp", arch_flags: int = 0, **overrides
 ) -> BuildOptions:
     defaults = {
-        "target": Target(abi="6.3", arch=arch, arch_flags=arch_flags),
+        "target": Target(
+            abi="6.3", arch=arch, tag="v1.30.0-preview", arch_flags=arch_flags
+        ),
         "micropython": "v1.28.0",
         "output_dir": Path("mpyhouse"),
         "module_dir": "natmod",
@@ -265,7 +267,10 @@ def test_verify_output_rejects_mismatched_arch_flags(tmp_path):
 
 def test_output_name_is_unambiguous():
     mpy = Path("build/armv7emsp-eabi/mymodule.mpy")
-    assert output_name(build_options(), mpy) == "mymodule-mpy6.3-armv7emsp.mpy"
+    assert (
+        output_name(build_options(), mpy)
+        == "mymodule-mpy6.3-v1.30.0-preview-armv7emsp.mpy"
+    )
 
 
 def test_output_name_unset_name_keeps_todays_filename():
@@ -275,7 +280,7 @@ def test_output_name_unset_name_keeps_todays_filename():
     mpy = Path("build/armv7emsp-eabi/mymodule.mpy")
     assert (
         output_name(build_options(), mpy, version="1.2.0")
-        == "mymodule-mpy6.3-armv7emsp.mpy"
+        == "mymodule-mpy6.3-v1.30.0-preview-armv7emsp.mpy"
     )
 
 
@@ -283,14 +288,15 @@ def test_output_name_with_name_and_version_drops_the_makefile_stem():
     mpy = Path("build/armv7emsp-eabi/mymodule.mpy")
     assert (
         output_name(build_options(), mpy, name="mylib", version="1.2.0")
-        == "mylib-1.2.0-mpy6.3-armv7emsp.mpy"
+        == "mylib-1.2.0-mpy6.3-v1.30.0-preview-armv7emsp.mpy"
     )
 
 
 def test_output_name_with_name_only_omits_the_version_segment():
     mpy = Path("build/armv7emsp-eabi/mymodule.mpy")
     assert (
-        output_name(build_options(), mpy, name="mylib") == "mylib-mpy6.3-armv7emsp.mpy"
+        output_name(build_options(), mpy, name="mylib")
+        == "mylib-mpy6.3-v1.30.0-preview-armv7emsp.mpy"
     )
 
 
@@ -317,7 +323,12 @@ def test_build_target_writes_into_its_own_identifier_directory(tmp_path, monkeyp
         package_dir=tmp_path,
     )
     assert isinstance(result, BuildResult)
-    expected = tmp_path / "out" / "mpy6.3-armv7emsp" / "mymodule-mpy6.3-armv7emsp.mpy"
+    expected = (
+        tmp_path
+        / "out"
+        / "mpy6.3-v1.30.0-preview-armv7emsp"
+        / "mymodule-mpy6.3-v1.30.0-preview-armv7emsp.mpy"
+    )
     assert result.output == expected
     assert result.output.exists()
     assert result.size > 0

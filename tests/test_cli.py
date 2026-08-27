@@ -28,12 +28,20 @@ archs = ["x64", "armv6m"]
 
 def test_print_build_identifiers(tmp_path, capsys):
     assert main([write(tmp_path, CONFIG), "--print-build-identifiers"]) == 0
-    assert capsys.readouterr().out.split() == ["mpy6.3-x64", "mpy6.3-armv6m"]
+    tag = newest_tag_for_abi("6.3")
+    assert capsys.readouterr().out.split() == [
+        f"mpy6.3-{tag}-x64",
+        f"mpy6.3-{tag}-armv6m",
+    ]
 
 
 def test_print_build_identifiers_json(tmp_path, capsys):
     assert main([write(tmp_path, CONFIG), "--print-build-identifiers", "--json"]) == 0
-    assert json.loads(capsys.readouterr().out) == ["mpy6.3-x64", "mpy6.3-armv6m"]
+    tag = newest_tag_for_abi("6.3")
+    assert json.loads(capsys.readouterr().out) == [
+        f"mpy6.3-{tag}-x64",
+        f"mpy6.3-{tag}-armv6m",
+    ]
 
 
 def test_dry_run_covers_every_target_and_succeeds(tmp_path, capsys):
@@ -61,7 +69,7 @@ def test_dry_run_spans_multiple_abis_via_build_selector(tmp_path, capsys):
     tag_62 = newest_tag_for_abi("6.2")
     tag_63 = newest_tag_for_abi("6.3")
     assert f"{tag_62}, {tag_63}" in out
-    assert "mpy6.2-x64" in out and "mpy6.3-x64" in out
+    assert f"mpy6.2-{tag_62}-x64" in out and f"mpy6.3-{tag_63}-x64" in out
 
 
 def test_only_overrides_skip(tmp_path, capsys):
@@ -73,7 +81,8 @@ def test_only_overrides_skip(tmp_path, capsys):
     # anything. Found while writing 0045; the placement asymmetry itself is
     # its own bug, see 0048.
     config = 'skip = "*-armv6m"\n[natmod]\narchs = ["x64", "armv6m"]\n'
-    argv = [write(tmp_path, config), "--only", "mpy6.3-armv6m", "--dry-run"]
+    tag = newest_tag_for_abi("6.3")
+    argv = [write(tmp_path, config), "--only", f"mpy6.3-{tag}-armv6m", "--dry-run"]
     assert main(argv) == 0
     assert "ARCH=armv6m" in capsys.readouterr().out
 
@@ -85,7 +94,7 @@ def test_only_unknown_identifier_is_an_error(tmp_path, capsys):
     assert main([write(tmp_path, CONFIG), "--only", "mpy6.3-sparc"]) == 2
     err = capsys.readouterr().err
     assert "is not a known identifier" in err
-    assert "mpy6.3-xtensa" in err
+    assert f"mpy6.3-{newest_tag_for_abi('6.3')}-xtensa" in err
 
 
 def test_only_reaches_an_arch_outside_the_config(tmp_path, capsys):
@@ -96,18 +105,19 @@ def test_only_reaches_an_arch_outside_the_config(tmp_path, capsys):
     # -- cibuildwheel's `--only` takes its choices from
     # `read_all_configs()` and its `--arch` is *computed from* the
     # identifier rather than checked against it.
+    identifier = f"mpy6.3-{newest_tag_for_abi('6.3')}-xtensa"
     assert (
         main(
             [
                 write(tmp_path, CONFIG),
                 "--only",
-                "mpy6.3-xtensa",
+                identifier,
                 "--print-build-identifiers",
             ]
         )
         == 0
     )
-    assert capsys.readouterr().out.split() == ["mpy6.3-xtensa"]
+    assert capsys.readouterr().out.split() == [identifier]
 
 
 def test_only_overrides_skip_for_print_build_identifiers(tmp_path, capsys):
@@ -115,19 +125,25 @@ def test_only_overrides_skip_for_print_build_identifiers(tmp_path, capsys):
     # than --dry-run. Note the placement again: top level, above
     # `[natmod]`, because that is the only place natmod reads `skip` at
     # all (0048).
-    config = 'skip = "mpy6.3-x64"\n[natmod]\narchs = ["x64", "armv6m"]\n'
+    # A bare, tag-less "mpy6.3-x64" is no longer a reachable pattern at all
+    # now that every real identifier carries its tag (record 0052's own
+    # live-caught correction) -- "*-x64" is the broad glob that reaches
+    # every tag's own x64 row regardless of which one --only ends up
+    # naming below, same as any other selector-narrowed set.
+    config = 'skip = "*-x64"\n[natmod]\narchs = ["x64", "armv6m"]\n'
+    identifier = f"mpy6.3-{newest_tag_for_abi('6.3')}-x64"
     assert (
         main(
             [
                 write(tmp_path, config),
                 "--only",
-                "mpy6.3-x64",
+                identifier,
                 "--print-build-identifiers",
             ]
         )
         == 0
     )
-    assert capsys.readouterr().out.split() == ["mpy6.3-x64"]
+    assert capsys.readouterr().out.split() == [identifier]
 
 
 def test_bad_arch_is_an_error(tmp_path, capsys):
