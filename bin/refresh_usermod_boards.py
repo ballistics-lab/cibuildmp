@@ -42,6 +42,22 @@ the name list) -- neither esp32 nor rp2 has a variant-selection axis in
 cibuildmp's own code today (`Esp32BuildOptions`/a future `Rp2BuildOptions`
 take a board name only), so this is a fact about the board, not something
 usermod/targets.py's own identifier scheme resolves through yet.
+
+Optional `--submodule PATH --submodule-field NAME [--submodule-repo URL]`
+adds one more per-row fact: that submodule's own pin at each tag (`git
+ls-tree HEAD <PATH>`), stored under `NAME`. This covers the three ports
+seen so far that vendor their SDK as a real git submodule (rp2's
+lib/pico-sdk, mimxrt's lib/nxp_driver, samd's lib/asf4) -- NOT esp32,
+whose ESP-IDF pin is not a submodule at all (resolved from tools/ci.sh /
+ports/esp32/lockfiles/dependencies.lock.esp32 instead, a genuinely
+different mechanism this flag does not cover). If `--submodule-repo` is
+given, the pinned commit is cross-checked against that repo's own real
+tags (`git ls-remote --tags`) and the matching tag name is stored instead
+of the raw sha when one exists -- exactly the by-hand resolution rp2's
+own pico_sdk_version already used, now reusable. Omit `--submodule-repo`
+(or when no tag matches) and the raw sha is stored, matching mimxrt's
+nxp_driver_sha and samd's asf4_sha -- neither of their own upstream repos
+carries any tags to resolve against.
 """
 
 from __future__ import annotations
@@ -83,7 +99,49 @@ def commit_date(dest: Path) -> str:
     return out.stdout.strip()[:10]
 
 
-def board_rows(tag: str, port: str, date: str, checkout: Path) -> list[dict]:
+def submodule_pin(checkout: Path, submodule: str) -> str | None:
+    """The commit sha `submodule` (e.g. "lib/pico-sdk") is pinned at in
+    this checkout, or None if that path isn't a submodule here at all
+    (e.g. esp32 -- its ESP-IDF pin lives outside .gitmodules entirely)."""
+    out = subprocess.run(
+        ["git", "-C", str(checkout), "ls-tree", "HEAD", submodule],
+        capture_output=True, text=True, check=True,
+    )
+    line = out.stdout.strip()
+    if not line:
+        return None
+    # "160000 commit <sha>\t<path>" -- a submodule entry's own mode/type.
+    fields = line.split()
+    if len(fields) < 3 or fields[1] != "commit":
+        return None
+    return fields[2]
+
+
+def load_upstream_tags(repo_url: str) -> dict[str, str]:
+    """{sha: tag_name} for every tag `repo_url` has, fetched once and
+    reused across every row that shares the same --submodule-repo."""
+    out = subprocess.run(
+        ["git", "ls-remote", "--tags", repo_url],
+        capture_output=True, text=True, check=True,
+    )
+    tags: dict[str, str] = {}
+    for line in out.stdout.splitlines():
+        fields = line.split()
+        if len(fields) != 2 or fields[1].endswith("^{}"):
+            continue
+        tags[fields[0]] = fields[1].removeprefix("refs/tags/")
+    return tags
+
+
+def board_rows(
+    tag: str,
+    port: str,
+    date: str,
+    checkout: Path,
+    *,
+    submodule_field: str | None = None,
+    submodule_value: str | None = None,
+) -> list[dict]:
     try:
         db = Database(mpy_root_directory=checkout, port_filter=port)
     except BoardDatabaseError as exc:
@@ -93,10 +151,11 @@ def board_rows(tag: str, port: str, date: str, checkout: Path) -> list[dict]:
     rows = []
     for name in sorted(db.boards):
         board = db.boards[name]
-        rows.append(
+        row: dict[str, object] = {"tag": tag, "date": date}
+        if submodule_field and submodule_value is not None:
+            row[submodule_field] = submodule_value
+        row.update(
             {
-                "tag": tag,
-                "date": date,
                 "board": name,
                 "mcu": board.mcu,
                 "product": board.product,
@@ -105,6 +164,7 @@ def board_rows(tag: str, port: str, date: str, checkout: Path) -> list[dict]:
                 "identifier": f"{tag}-{port}-{name}",
             }
         )
+        rows.append(row)
     return rows
 
 
@@ -163,7 +223,31 @@ def main() -> int:
         "clones are namespaced by port, so one --workdir is safe to reuse "
         "across ports)",
     )
+    parser.add_argument(
+        "--submodule",
+        default=None,
+        help="path of a git submodule to record the per-tag pin of, e.g. "
+        "lib/pico-sdk (see the module docstring -- covers rp2/mimxrt/samd, "
+        "NOT esp32, which vendors ESP-IDF outside .gitmodules entirely)",
+    )
+    parser.add_argument(
+        "--submodule-field",
+        default=None,
+        help="row field name for --submodule's value, e.g. pico_sdk_version",
+    )
+    parser.add_argument(
+        "--submodule-repo",
+        default=None,
+        help="optional upstream repo URL to resolve --submodule's pinned "
+        "commit against real tags (git ls-remote --tags); the raw sha is "
+        "stored instead when omitted or when no tag matches",
+    )
     args = parser.parse_args()
+
+    if bool(args.submodule) != bool(args.submodule_field):
+        parser.error("--submodule and --submodule-field must be given together")
+
+    upstream_tags = load_upstream_tags(args.submodule_repo) if args.submodule_repo else {}
 
     workdir = args.workdir
     cleanup = False
@@ -180,7 +264,20 @@ def main() -> int:
                 print(f"cloning {tag} ({args.port})...", file=sys.stderr)
                 clone_sparse(tag, args.port, dest)
             date = commit_date(dest)
-            rows.extend(board_rows(tag, args.port, date, dest))
+            submodule_value = None
+            if args.submodule:
+                pin = submodule_pin(dest, args.submodule)
+                if pin is None:
+                    print(f"!! {tag}: {args.submodule!r} is not a submodule here", file=sys.stderr)
+                else:
+                    submodule_value = upstream_tags.get(pin, pin)
+            rows.extend(
+                board_rows(
+                    tag, args.port, date, dest,
+                    submodule_field=args.submodule_field,
+                    submodule_value=submodule_value,
+                )
+            )
     finally:
         if cleanup:
             shutil.rmtree(workdir, ignore_errors=True)
