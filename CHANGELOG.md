@@ -258,6 +258,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pattern a config already has, so this is an honest capability loss
   rather than a fragile synthesized one. `--archs` is unaffected for
   usermod ports. Record 0052's own newest addendum.
+- **Per-platform config tables are gone entirely -- `[unix] key = "..."`,
+  `[natmod] key = "..."` no longer set anything.** The same argument
+  that removed `archs`, one tier further: every platform's own real
+  identifier already carries a marker (`manylinux`/`musllinux` for unix,
+  `win32` for windows, the literal `mpy` prefix for natmod, ...) a
+  `build`/`skip` glob or an `[override]` selector can already address
+  directly, so a per-platform table was always a second way to say a
+  value already sayable at the top level (or, per-target, through
+  `[override]`). `[natmod]`'s own schema is empty now -- its presence
+  still activates natmod alongside other platforms in one invocation,
+  its content does not carry anything any more; each usermod port's own
+  table (`[unix]`, `[esp32]`, ...) keeps only its own axis key
+  (`archs`/`boards`), nothing else. `[usermod]` (shared defaults across
+  every active port) is unaffected -- kept deliberately, a distinct,
+  still-load-bearing tier. `CIBMP_BUILD_NATMOD`-style per-platform
+  *environment* overrides are unaffected too -- a real, distinct
+  capability the TOML argument above doesn't touch. `--archs` no longer
+  applies to natmod. Record 0052's own newest addendum, including a
+  real, separately-tracked gap this surfaced: a `build`/`skip` pattern
+  meant for one active platform can now fail a different active
+  platform's own reachability check, the same shape as the still-open
+  cross-family `[override]` reachability gap.
 - **`--toolchain`, and the toolchain resolver behind it.** Every question it
   answered -- is a compiler for this arch here, where is one fetched from, does
   its prefix match what `dynruntime.mk` hardcodes -- is answered by the natmod

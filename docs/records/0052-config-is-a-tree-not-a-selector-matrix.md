@@ -2230,4 +2230,94 @@ smoke-tested against the real root `cibuildmp.toml` (now with no `archs` line at
 all) -- byte-identical ten-target `--dry-run` output before and after -- and against
 both `--archs`'s new failure mode for natmod and its unaffected usermod path.
 
+## Addendum, 2026-08-27 — `platform_tables` retracted entirely: a per-platform TOML
+table was always a sufficiently-scoped global (or `[override]`) value restated
+
+The same live conversation, extended one tier further: `[unix] user-c-modules =
+"..."` is exactly `[override."*-{manylinux,musllinux}*"] user-c-modules = "..."`
+restated, for the identical reason `archs` above was removed -- every platform's
+own real identifier already carries a marker (`manylinux`/`musllinux` for unix,
+`win32` for windows, the literal `mpy` prefix for natmod, `qemu-`/`esp32-` port
+segments for those two) a `build`/`skip` glob or an `[override]` selector can
+already address directly, so a *third* place to write the same value (a
+per-platform table, sitting between global and `[override]`) is the identical
+"two ways to say the same thing" shape this whole record keeps refusing to build.
+Retracted: the "per-platform build/skip" addendum (`docs/records/0048`'s own,
+cross-referenced from here) and Phase F's own per-platform option-key wiring both
+land back where 0048 originally put `build`/`skip` -- global-only -- joined now by
+every option key that previously lived in a platform table at all.
+
+**What is *not* retracted, on direct instruction:** `[usermod]`, the family tier
+sitting between global and (the now-gone) per-platform table. It was added at the
+user's own explicit insistence (record 0051's ninth addendum) specifically because
+a family-wide usermod default distinct from natmod's own global default is a real,
+still-load-bearing distinction `extra-make-args` genuinely needs (natmod and every
+usermod port both read that one key by the same name) -- retracting the tier
+sitting *below* it (per-platform) does not retract this one. Also not retracted:
+the per-platform *environment* override (`CIBMP_BUILD_NATMOD`,
+`CIBMP_MODULE_DIR_NATMOD`, ...) -- a real, distinct capability (a one-off CI
+override with no config-file edit at all) untouched by the TOML-redundancy
+argument above, and still reachable through `Options.get()`'s own `platform=`
+parameter, which no longer selects a table at all, only the env var's own name.
+
+**Mechanically:** `cibuildmp/options.py`'s `Options` dataclass loses its
+`platform_tables` field outright (a `platform_tables=` constructor keyword is now
+a plain `TypeError`) and the platform-tier lookup layer inside `.get()`; the
+method's own precedence collapses to `default -> global -> family -> env ->
+env(platform) -> extra_layers`. `natmod/options.py`'s `NATMOD_SCHEMA` -- the set
+of keys `[natmod]` itself may carry -- is now empty: `[natmod]`'s own presence
+still matters (platform activation, unchanged), its *content* does not, any more.
+`GENERIC_KEYS` grows to include `build`/`skip`/`extra-make-args` (truly shared,
+identically named and meant on both sides); a new `NATMOD_ONLY_GENERIC_KEYS`
+(`arch-flags`/`module-dir`/`make-target`/`pre-build-command`) and
+`usermod/options.py`'s own new `USERMOD_ONLY_GENERIC_KEYS`
+(`user-c-modules`/`manifest`) hold the keys that are generic *to one side* but
+would misleadingly imply a top-level meaning to the other (natmod has no
+`user-c-modules` key at all, usermod has no `module-dir`). `check_keys()` gained
+an `extra_generic` parameter for exactly this split, defaulting to empty (every
+existing call site's behaviour is unchanged unless it opts in) -- the two calls
+that validate a platform's own table (`[natmod]`, each `[<port>]`) are the only
+ones that pass one, turning a stray `[unix] user-c-modules = "..."` into a
+specific "move it to the top level" redirect instead of a bare "unknown key".
+`usermod/options.py`'s own `SCHEMAS[port]` shrinks to just that port's own axis
+key (`archs`/`boards`) -- nothing else is legal inside a port's own table any
+more. `_port_build_skip()` (usermod) keeps its exact shape -- it was already only
+ever reading through the cascade's own `platform=` parameter, which now silently
+degrades to "env-only," no code change needed beyond the docstring.
+
+**A real gap surfaced, not fixed here, the same shape as task #66's own residual
+half:** `check_reachable()` (both sides) validates every `build`/`skip`/
+`[override]` selector against *that family's own* identifier universe only.
+With `build`/`skip` now genuinely global (shared by every active platform in one
+invocation), a single pattern meaningful to one platform but not another --
+`build = "mpy6.3-*-x64"` when `[natmod]` and `[unix]` are both active -- fails
+unix's own reachability check, which has no way to know the pattern was never
+meant for it. This is *not* the already-fixed direction (usermod's own
+`check_reachable()` already widens for `[override]` using natmod's own
+`all_targets()`, since usermod may import natmod) -- it is the mirror, natmod-side
+gap that direction's own fix explicitly left open, now reachable through
+`build`/`skip` too, not just `[override]`. `CIBMP_BUILD_NATMOD`
+(the retained per-platform env tier, see above) is today's real answer for
+"restrict one of several simultaneously-active platforms without touching the
+others" -- proven live in `tests/test_cli_multi_platform.py`'s own multi-platform
+fixtures, rewritten onto it. Left open, not scheduled, same residual-task shape as
+#66's own natmod-side half.
+
+**Ripple:** every fixture across `tests/test_options.py`,
+`tests/test_options_cascade.py`, `tests/test_overrides.py`,
+`tests/test_usermod_options.py`, `tests/test_usermod_orchestrate.py` and
+`tests/test_cli_multi_platform.py` that wrote an option key inside `[natmod]` or a
+usermod port's own table moved that key to the top level (or, for
+`tests/test_overrides.py`'s own cross-family composition test, re-expressed as a
+platform-scoped `[override]` entry instead, matching a `mpy*`/manylinux-marker
+glob directly, with the underlying `Target`/`UsermodTarget` constructed by hand
+rather than resolved through `.targets()` to sidestep the still-open reachability
+gap just described -- that gap is not what the test is about). Several tests whose
+entire premise was "a per-platform table beats the top level" were replaced
+outright with tests proving the opposite (a loud, specific redirect error), the
+same treatment `test_archs_is_gone_as_a_config_key` already got one addendum up.
+
+Full suite green (421 passed, two fewer than before -- two now-inverted-premise
+tests replacing, not joining, the ones they superseded), ruff and pyright clean.
+
 [0051]: 0051-usermod-identifiers-have-no-version-axis.md

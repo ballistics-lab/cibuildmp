@@ -180,8 +180,8 @@ def test_build_one_writes_combined_manifest_when_present(tmp_path, monkeypatch):
     write_config(
         package_dir,
         """
-        [unix]
         manifest = "extra_manifest.py"
+        [unix]
         """,
     )
     options = UsermodOptions.load(package_dir)

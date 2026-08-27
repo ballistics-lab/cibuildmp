@@ -219,11 +219,9 @@ class Options:
     """One config's worth of cascade-resolvable option tables.
 
     `global_table` is the top-level config dict, meaningful to *every*
-    family (natmod included) -- `platform_tables` maps a platform name to
-    that platform's own sub-dict (e.g. `raw.get("unix")` once Phase F
-    flattens the config tree). `family_table` sits between the two: one
-    dict shared by every platform in *one* family and no other (record
-    0051's ninth addendum) -- usermod's own `[usermod]` table
+    family (natmod included). `family_table` sits above it: one dict
+    shared by every platform in *one* family and no other (record 0051's
+    ninth addendum) -- usermod's own `[usermod]` table
     (`user-c-modules`/`manifest`/`extra-make-args`, defaults for all five
     ports at once), empty for natmod, whose one platform already *is* its
     only family, so it has nothing a separate family tier would add.
@@ -234,11 +232,25 @@ class Options:
     this class stays config-file-and-environment-only, the same split
     upstream keeps between its own `Options` (file + env) and `argparse`
     (CLI).
+
+    **There is no `platform_tables` tier any more** (record 0052's own
+    live-caught correction, retracting the "per-platform build/skip"
+    addendum this docstring used to describe): a per-platform TOML table
+    (`[unix] key = "..."`) is always exactly a sufficiently-scoped global
+    value restated, since every platform's own real identifier already
+    carries a marker a `build`/`skip` glob or an `[override]` entry can
+    address directly (`manylinux`/`musllinux` for unix, `win32` for
+    windows, the literal `mpy` prefix for natmod, ...) -- a second way to
+    say the same thing this project keeps refusing to build, the same
+    argument that already removed natmod's own `archs` config key one
+    axis over. What replaces it: option values resolve from
+    `default -> global -> family -> env -> extra_layers` only, and
+    per-target customisation goes through `[override]`'s own glob match
+    (`extra_layers`), never a per-platform table.
     """
 
     global_table: Mapping[str, Any]
     family_table: Mapping[str, Any] = field(default_factory=dict)
-    platform_tables: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     env: Mapping[str, str] = field(default_factory=dict)
 
     def get(
@@ -250,36 +262,38 @@ class Options:
         env_plat: bool = True,
         extra_layers: Sequence[tuple[Any | None, str]] = (),
     ) -> Any:
-        """`default -> global -> family -> platform -> env ->
-        env(platform) -> extra_layers`, most-specific-wins. `extra_layers`
-        is where a caller threads in CLI-supplied values or matching
-        `[override]` entries (Phase G), each with its own inherit
-        rule -- this method does not know about either.
+        """`default -> global -> family -> env -> env(platform) ->
+        extra_layers`, most-specific-wins. `extra_layers` is where a
+        caller threads in CLI-supplied values or matching `[override]`
+        entries (Phase G), each with its own inherit rule -- this method
+        does not know about either.
 
-        `family_table` sits strictly between `global` and `platform`:
-        more specific than "every platform's own default" (natmod never
-        sees it -- its own `Options` instance is always constructed with
-        an empty one), less specific than a value written directly in
-        one platform's own table. A caller with no real family tier
-        (natmod, or a direct test construction) passes nothing and gets
-        exactly today's four-layer behaviour -- an empty `Mapping.get()`
-        always contributes `None`, which `resolve_cascade()` skips.
+        `family_table` sits strictly between `global` and `env`: more
+        specific than "every platform's own default" (natmod never sees
+        it -- its own `Options` instance is always constructed with an
+        empty one), less specific than the environment. A caller with no
+        real family tier (natmod, or a direct test construction) passes
+        nothing and gets exactly today's three-layer behaviour -- an
+        empty `Mapping.get()` always contributes `None`, which
+        `resolve_cascade()` skips.
 
-        Env var names are `CIBMP_<KEY>` and, when `platform` is given and
-        `env_plat` is true, `CIBMP_<KEY>_<PLATFORM>` too -- upstream's own
-        two-tier `CIBW_<NAME>`/`CIBW_<NAME>_<PLATFORM>` shape.
+        `platform` no longer selects a TOML table (there is none left to
+        select) -- it is kept purely to build the env var's own
+        per-platform name: `CIBMP_<KEY>` always, and `CIBMP_<KEY>_
+        <PLATFORM>` too when `platform` is given and `env_plat` is true
+        -- upstream's own two-tier `CIBW_<NAME>`/`CIBW_<NAME>_<PLATFORM>`
+        shape. A real, still-useful capability distinct from the TOML
+        question above: CI can inject a one-off `CIBMP_BUILD_NATMOD=...`
+        without touching the config file at all, something no sufficiently
+        -scoped global glob can substitute for.
         """
         env_key = "CIBMP_" + name.replace("-", "_").upper()
         layers: list[tuple[Any | None, str]] = [
             (default, InheritRule.NONE),
             (self.global_table.get(name), InheritRule.NONE),
             (self.family_table.get(name), InheritRule.NONE),
+            (self.env.get(env_key), InheritRule.NONE),
         ]
-        if platform is not None:
-            layers.append(
-                (self.platform_tables.get(platform, {}).get(name), InheritRule.NONE)
-            )
-        layers.append((self.env.get(env_key), InheritRule.NONE))
         if platform is not None and env_plat:
             plat_env_key = f"{env_key}_{platform.upper()}"
             layers.append((self.env.get(plat_env_key), InheritRule.NONE))

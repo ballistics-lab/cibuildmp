@@ -133,23 +133,15 @@ def test_options_get_global_beats_default():
     assert options.get("micropython", default="v1.29.0") == "v1.28.0"
 
 
-def test_options_get_platform_beats_global():
-    options = Options(
-        global_table={"archs": ["x64"]},
-        platform_tables={"unix": {"archs": ["aarch64"]}},
-    )
-    assert options.get("archs", platform="unix") == ["aarch64"]
-    # A different platform never sees unix's own table.
-    assert options.get("archs", platform="windows") == ["x64"]
-
-
-def test_options_get_env_beats_platform():
-    options = Options(
-        global_table={},
-        platform_tables={"unix": {"archs": ["aarch64"]}},
-        env={"CIBMP_ARCHS": "x64,x86"},
-    )
-    assert options.get("archs", platform="unix") == "x64,x86"
+def test_options_get_platform_no_longer_selects_a_table_at_all():
+    # record 0052's own live-caught correction, retracting the earlier
+    # "per-platform build/skip" addendum this test used to cover:
+    # Options has no platform_tables field left at all -- `platform=` is
+    # kept purely to build the per-platform env var's own name (below),
+    # not to select a TOML sub-table. A `platform_tables=` keyword is a
+    # plain TypeError now, not a real construction option.
+    with pytest.raises(TypeError):
+        Options(global_table={}, platform_tables={"unix": {"archs": ["aarch64"]}})  # type: ignore[call-arg]
 
 
 def test_options_get_platform_env_beats_plain_env():
@@ -178,11 +170,6 @@ def test_options_get_extra_layers_come_last_and_can_append():
     assert result == ["COMMON=1", "FROM=override"]
 
 
-def test_options_get_no_platform_table_for_this_platform_is_fine():
-    options = Options(global_table={"archs": ["x64"]}, platform_tables={})
-    assert options.get("archs", platform="unix") == ["x64"]
-
-
 # ── family_table (record 0051's ninth addendum) ──────────────────────────
 
 
@@ -194,15 +181,14 @@ def test_options_get_family_beats_global():
     assert options.get("user-c-modules") == "family"
 
 
-def test_options_get_platform_beats_family():
-    options = Options(
-        global_table={},
-        family_table={"user-c-modules": "family"},
-        platform_tables={"unix": {"user-c-modules": "unix-only"}},
-    )
-    assert options.get("user-c-modules", platform="unix") == "unix-only"
-    # A platform with no override of its own still falls through to the
-    # family layer, not straight past it to global.
+def test_options_get_family_wins_regardless_of_platform_argument():
+    # The counterpart to test_options_get_platform_no_longer_selects_a_
+    # table_at_all above: passing `platform=` no longer narrows anything
+    # below the family layer -- every platform sees the exact same
+    # family-resolved value, since there is no more per-platform table to
+    # distinguish them.
+    options = Options(global_table={}, family_table={"user-c-modules": "family"})
+    assert options.get("user-c-modules", platform="unix") == "family"
     assert options.get("user-c-modules", platform="webassembly") == "family"
 
 

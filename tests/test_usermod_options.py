@@ -176,53 +176,46 @@ def test_user_c_modules_and_manifest_overridable_globally(tmp_path):
     assert build_options.manifest == "extra_manifest.py"
 
 
-def test_user_c_modules_overridable_per_port(tmp_path):
-    # The direct test for Phase F's own cascade wiring: a value only
-    # [unix] sets does not leak into [webassembly], which falls back to
-    # the global default -- previously impossible, since this key was
-    # one shared scalar across every selected port unconditionally.
+def test_user_c_modules_inside_a_port_table_is_an_error(tmp_path):
+    # record 0052's own live-caught correction, retracting Phase F's own
+    # per-platform-table cascade wiring this test used to cover:
+    # [unix] user-c-modules = "..." was always exactly a sufficiently-
+    # scoped global (or [usermod]-family) value restated, since unix's
+    # own real identifiers already carry a marker ([override] could
+    # already address directly). It is a loud, specific "move it to the
+    # top level" error now, the same as any other generic key.
     write_config(
         tmp_path,
         """
         user-c-modules = "shared"
         [unix]
         user-c-modules = "unix-only"
-        [webassembly]
         """,
     )
-    options = UsermodOptions.load(tmp_path)
-    by_port = {
-        t.port: options.build_options(t).user_c_modules for t in options.targets()
-    }
-
-    assert by_port["unix"] == "unix-only"
-    assert by_port["webassembly"] == "shared"
+    with pytest.raises(UsermodConfigError, match="read from the top level"):
+        UsermodOptions.load(tmp_path)
 
 
-def test_usermod_family_table_beats_global_but_platform_beats_family(tmp_path):
-    # The direct test for the ninth addendum's own new cascade tier:
-    # [usermod] sits strictly between the bare top level and each
-    # port's own table. [webassembly] has no override of its own, so it
+def test_usermod_family_table_beats_global(tmp_path):
+    # [usermod] still sits strictly between the bare top level and every
+    # port -- that tier was never in question, only the per-port table
+    # one level below it (see test_user_c_modules_inside_a_port_table_is_
+    # an_error above). [webassembly] has no override of its own, so it
     # falls through to [usermod]'s value, not the (less specific) global
-    # one; [unix] overrides both.
+    # one.
     write_config(
         tmp_path,
         """
         user-c-modules = "global-default"
         [usermod]
         user-c-modules = "family-default"
-        [unix]
-        user-c-modules = "unix-only"
         [webassembly]
         """,
     )
     options = UsermodOptions.load(tmp_path)
-    by_port = {
-        t.port: options.build_options(t).user_c_modules for t in options.targets()
-    }
+    build_options = options.build_options(options.targets()[0])
 
-    assert by_port["unix"] == "unix-only"
-    assert by_port["webassembly"] == "family-default"
+    assert build_options.user_c_modules == "family-default"
 
 
 def test_empty_usermod_family_table_is_not_an_error(tmp_path):
@@ -306,9 +299,9 @@ def test_build_options_carries_user_c_modules_and_manifest(tmp_path):
     write_config(
         tmp_path,
         """
-        [unix]
         user-c-modules = "mymod"
         manifest = "extra.py"
+        [unix]
         """,
     )
     options = UsermodOptions.load(tmp_path)
@@ -327,8 +320,8 @@ def test_extra_make_args_shared_across_targets(tmp_path):
     write_config(
         tmp_path,
         """
-        [unix]
         extra-make-args = ["DEBUG=1"]
+        [unix]
         """,
     )
     options = UsermodOptions.load(tmp_path)
@@ -357,36 +350,32 @@ def test_skip_is_read_from_the_top_level(tmp_path):
 
 
 def test_a_generic_key_inside_a_port_table_names_where_it_goes(tmp_path):
-    # `version` stays truly top-level-only (record 0052's own
-    # per-platform build/skip addendum moved build/skip out of
-    # GENERIC_KEYS, not version) -- "unknown key" would be a lie here,
-    # the tool knows precisely what `version` means, just not in this
-    # table.
+    # `version` is truly top-level-only, same as every other generic key
+    # -- "unknown key" would be a lie here, the tool knows precisely what
+    # `version` means, just not in this table.
     write_config(tmp_path, '[unix]\nversion = "0.1.0"\n')
 
     with pytest.raises(UsermodConfigError, match="read from the top level"):
         UsermodOptions.load(tmp_path)
 
 
-def test_build_skip_inside_a_port_table_beat_the_top_level(tmp_path):
-    # record 0052's own per-platform build/skip addendum: [unix]'s own
-    # skip is now legal, and more specific -- matching upstream's own
-    # [tool.cibuildwheel.<platform>] build/skip, and every other
-    # dual-read key `archs` already has here. A sibling port with no
-    # skip of its own still respects the top-level one.
+def test_skip_inside_a_port_table_is_an_error(tmp_path):
+    # record 0052's own live-caught correction, retracting the earlier
+    # "per-platform build/skip" addendum this test used to cover:
+    # [unix]'s own skip was always exactly a sufficiently-scoped
+    # top-level pattern restated, so it is a loud, specific "move it to
+    # the top level" error now -- `archs` (the port's own real axis key)
+    # stays legal right beside it, unaffected.
     write_config(
         tmp_path,
         """
-        skip = "*-manylinux_2_28_i686 *-manylinux_2_28_x86_64"
         [unix]
         archs = ["manylinux_2_28_i686", "manylinux_2_28_x86_64"]
         skip = ""
         """,
     )
-    identifiers = [t.identifier for t in UsermodOptions.load(tmp_path).targets()]
-
-    assert any(i.endswith("manylinux_2_28_i686") for i in identifiers)
-    assert any(i.endswith("manylinux_2_28_x86_64") for i in identifiers)
+    with pytest.raises(UsermodConfigError, match="read from the top level"):
+        UsermodOptions.load(tmp_path)
 
 
 def test_family_skip_narrows_every_active_port_but_not_natmod(tmp_path):
@@ -422,14 +411,13 @@ def test_per_port_build_skip_env_override(tmp_path, monkeypatch):
     assert any(i.endswith("webassembly") for i in identifiers)
 
 
-def test_reachability_audit_rejects_an_unreachable_per_port_build(tmp_path):
-    # record 0052's own per-platform build/skip addendum: a per-port
-    # value gets the same offline reachability check as the global one,
-    # scoped to that port's own identifiers -- unambiguous by
-    # construction, unlike the shared [override] case.
-    write_config(tmp_path, '[unix]\nbuild = "*-not-a-real-unix-cell"\n')
+def test_reachability_audit_rejects_an_unreachable_build(tmp_path):
+    # No [unix]-table build tier any more (record 0052's own live-caught
+    # correction) -- build is global-only, checked against the full
+    # identifier space this config can reach.
+    write_config(tmp_path, 'build = "*-not-a-real-unix-cell"\n[unix]\n')
 
-    with pytest.raises(UsermodConfigError, match=r"\[unix\] build: '\*-not-a-real"):
+    with pytest.raises(UsermodConfigError, match=r"build: '\*-not-a-real"):
         UsermodOptions.load(tmp_path).targets()
 
 
@@ -501,8 +489,8 @@ def test_usermod_overrides_beat_the_file(tmp_path):
     write_config(
         tmp_path,
         """
-        [unix]
         extra-make-args = ["COMMON=1"]
+        [unix]
 
         [override."*-manylinux_2_28_x86_64"]
         extra-make-args = ["FROM=override"]
@@ -548,8 +536,8 @@ def test_usermod_override_beats_the_file_for_manifest(tmp_path):
     write_config(
         tmp_path,
         """
-        [unix]
         manifest = "default.py"
+        [unix]
 
         [override."*"]
         manifest = "special.py"

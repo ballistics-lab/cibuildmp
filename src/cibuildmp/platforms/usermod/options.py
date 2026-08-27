@@ -106,35 +106,42 @@ USERMOD_PORT_BASE: frozenset[str] = frozenset(
     {"user-c-modules", "manifest", "extra-make-args"}
 )
 
-# `build`/`skip` are dual-read now, legal at the family table (`[usermod]`)
-# and each port's own table (record 0052's own per-platform build/skip
-# addendum -- reread directly against `cibuildwheel/options.py`: upstream's
-# own `build`/`skip` go through the identical cascade every other option
-# does and are genuinely settable inside `[tool.cibuildwheel.<platform>]`;
-# cibuildmp's own top-level-only rule, since [0048], was a real, unnoticed
-# divergence). Deliberately *not* folded into `USERMOD_PORT_BASE` itself,
-# since that constant is also `build_options()`'s own tier-2
-# `[override]` schema (`natmod/options.py`'s own
-# `_USERMOD_OVERRIDE_OPTION_KEYS_MIRROR` mirrors `USERMOD_PORT_BASE`
-# specifically, not this) -- `build`/`skip` decide *which targets exist at
-# all*, a question already answered before any `[override]` entry can
-# match, so writing them there would be circular, not a real per-target
-# option. The same split `NATMOD_SCHEMA`/`NATMOD_OVERRIDE_OPTION_KEYS`
-# already keeps in `natmod/options.py`.
+# `USERMOD_ONLY_GENERIC_KEYS`'s own counterpart to `user-c-modules`/
+# `manifest` -- generic (global-only, or per-target via `[override]`) but
+# meaningless to natmod's own `check_keys()` caller under these names (it
+# has no `user-c-modules`/`manifest` key at all, only its own differently-
+# named `module-dir`, record 0051's sixth addendum), so kept out of the
+# truly-shared `GENERIC_KEYS` in `natmod/options.py` the same way that
+# module's own `NATMOD_ONLY_GENERIC_KEYS` is. `extra-make-args`/`build`/
+# `skip` do not need an entry here -- they are already in the shared
+# `GENERIC_KEYS`, being real, identically-named, identically-meant keys on
+# both sides.
+USERMOD_ONLY_GENERIC_KEYS: frozenset[str] = frozenset({"user-c-modules", "manifest"})
+
+# `[usermod]` (the family table) still carries `user-c-modules`/
+# `manifest`/`extra-make-args`/`build`/`skip` as shared defaults for every
+# active port at once -- that tier was never in question (record 0051's
+# ninth addendum, kept at the user's own explicit insistence). What is
+# gone is the *per-port* table's own copy of the same settability
+# (`[unix] build = "..."`, `[esp32] user-c-modules = "..."`) -- record
+# 0052's own live-caught correction: a per-port table was always exactly
+# a sufficiently-scoped global (or `[usermod]`-family) value restated,
+# since every port's own real identifier already carries a marker a glob
+# can address directly. `SCHEMAS[port]` below reflects that: a port's own
+# table now carries nothing but its own axis key.
 USERMOD_PLATFORM_KEYS: frozenset[str] = USERMOD_PORT_BASE | {"build", "skip"}
 
 
 def _port_schema(port: str) -> frozenset[str]:
     key = axis_key(port)
-    return USERMOD_PLATFORM_KEYS | ({key} if key else frozenset())
+    return frozenset({key}) if key else frozenset()
 
 
 # port name -> that port's own option-key schema, for `check_keys()`'s
-# per-platform-table validation. A key valid for a *different* port's
-# table (e.g. `make-target`, natmod-only) is still a loud, specific error
-# -- validating against `SCHEMAS[port]` alone, never the union, is what
-# keeps record 0048's original guarantee (misplaced key is never silent)
-# under the cascade.
+# per-port-table validation -- just the port's own axis key now (`archs`/
+# `boards`), nothing else: every other key that used to live here moved
+# to global-only/`[usermod]`-family/`[override]` (see `USERMOD_PLATFORM_KEYS`'s
+# own comment above).
 SCHEMAS: dict[str, frozenset[str]] = {port: _port_schema(port) for port in KNOWN_PORTS}
 
 __all__ = [
@@ -440,34 +447,35 @@ class UsermodOptions:
 
         family_table = check_usermod_family_table(raw, error=UsermodConfigError)
 
-        platform_tables: dict[str, dict[str, Any]] = {}
         axis_overrides: dict[str, list[str]] = {}
         for port in ports:
             port_table = dict(raw.get(port) or {})
+            # A port's own table has nothing left in it but its own axis
+            # key (`archs`/`boards`) -- every option key that used to be
+            # legal here (`user-c-modules`/`manifest`/`extra-make-args`/
+            # `build`/`skip`) moved to global-only/`[usermod]`-family/
+            # `[override]` (record 0052's own live-caught correction,
+            # `USERMOD_PLATFORM_KEYS`'s own comment above has the
+            # argument). `extra_generic` is what turns a stray
+            # `[unix] user-c-modules = "..."` into a specific "move it to
+            # the top level" message instead of a bare "unknown key".
             check_keys(
-                port_table, SCHEMAS[port], where=f"[{port}]", error=UsermodConfigError
+                port_table,
+                SCHEMAS[port],
+                where=f"[{port}]",
+                error=UsermodConfigError,
+                extra_generic=USERMOD_ONLY_GENERIC_KEYS,
             )
-            platform_tables[port] = port_table
             key = axis_key(port)
             if key is not None and key in port_table:
                 axis_overrides[port] = _as_list(port_table[key], f"{port}.{key}")
 
-        cascade = OptionCascade(
-            global_table=raw,
-            family_table=family_table,
-            platform_tables=platform_tables,
-            env={},
-        )
+        cascade = OptionCascade(global_table=raw, family_table=family_table, env={})
         # Env-aware sibling of `cascade` above -- build/skip's own
-        # per-port resolution (targets() below) reads through this one
-        # directly, the same way natmod/options.py's own cascade_env
-        # already does (record 0052's own per-platform build/skip
-        # addendum).
+        # resolution (targets() below) reads through this one directly,
+        # the same way natmod/options.py's own cascade_env already does.
         cascade_env = OptionCascade(
-            global_table=raw,
-            family_table=family_table,
-            platform_tables=platform_tables,
-            env=os.environ,
+            global_table=raw, family_table=family_table, env=os.environ
         )
 
         overrides = load_overrides(raw, error=UsermodConfigError)
@@ -498,11 +506,18 @@ class UsermodOptions:
         )
 
     def _port_build_skip(self, port: str) -> tuple[list[str], list[str]]:
-        """This port's own `build`/`skip`, `self.build`/`self.skip` (the
-        global+family-resolved baseline) as the default when `[port]`
-        itself sets neither -- record 0052's own per-platform build/skip
-        addendum, the same more-specific-wins cascade `archs`/
-        `extra-make-args` already have."""
+        """This port's own `build`/`skip` -- `self.build`/`self.skip` (the
+        global+family-resolved baseline) unless a per-platform environment
+        override (`CIBMP_BUILD_<PORT>`/`CIBMP_SKIP_<PORT>`) is set. No
+        `[port]`-table tier any more (record 0052's own live-caught
+        correction, retracting the earlier "per-platform build/skip"
+        addendum): `[unix] build = "..."` was always exactly a
+        sufficiently-scoped global `build` pattern restated, since unix's
+        own real identifiers already carry `manylinux`/`musllinux` as a
+        marker no other platform's own identifiers share. The env-var
+        tier survives -- a real, distinct capability (a one-off CI
+        override with no config-file edit), not a TOML duplication of
+        anything a glob already expresses."""
         build = parse_selector(
             self._cascade_env.get("build", platform=port, default=self.build)
         )

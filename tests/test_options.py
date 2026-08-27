@@ -52,7 +52,6 @@ def test_overrides_beat_natmod_table(tmp_path):
         tmp_path,
         build_for("x64", "armv7emsp")
         + """
-        [natmod]
         extra-make-args = ["COMMON=1"]
 
         [override."*-armv7emsp"]
@@ -131,7 +130,6 @@ def test_arch_flags_land_on_rv32imc_identifier_and_make_args(tmp_path):
         tmp_path,
         build_for("rv32imc", "rv64imc")
         + """
-        [natmod]
         arch-flags = "zba,zcmp"
         """,
     )
@@ -153,7 +151,6 @@ def test_arch_flags_list_builds_one_rv32imc_target_per_variant(tmp_path):
         tmp_path,
         build_for("rv32imc")
         + """
-        [natmod]
         arch-flags = ["", "zba", "zba,zcmp"]
         """,
     )
@@ -185,7 +182,6 @@ def test_arch_flags_list_dedupes_two_spellings_of_the_same_value(tmp_path):
         tmp_path,
         build_for("rv32imc")
         + """
-        [natmod]
         arch-flags = ["0x3", "zba,zcmp"]
         """,
     )
@@ -223,34 +219,25 @@ def test_extra_files_from_publish_table(tmp_path):
 
 
 def test_a_top_level_key_inside_the_natmod_table_names_where_it_goes(tmp_path):
-    # `version` stays truly top-level-only (record 0052's own per-platform
-    # build/skip addendum moved build/skip out of GENERIC_KEYS, not
-    # version) -- "unknown key" would be a lie here, the tool knows
-    # precisely what `version` means, just not in this table.
+    # `version` is truly top-level-only, same as every other generic key
+    # -- "unknown key" would be a lie here, the tool knows precisely what
+    # `version` means, just not in this table.
     write(tmp_path, 'version = "0.1.0"\n[natmod]\nname = "x"\nversion = "0.2.0"\n')
 
     with pytest.raises(ConfigError, match="read from the top level"):
         Options.load(tmp_path)
 
 
-def test_build_skip_inside_the_natmod_table_beat_the_top_level(tmp_path):
-    # record 0052's own per-platform build/skip addendum: [natmod]'s own
-    # build/skip is now legal, and more specific -- matching upstream's
-    # own [tool.cibuildwheel.<platform>] build/skip.
-    write(
-        tmp_path,
-        'skip = "*-armv6m"\n'
-        + build_for("x64", "armv6m")
-        + """
-        [natmod]
-        skip = ""
-        """,
-    )
-    options = Options.load(tmp_path, env={})
-    identifiers = [t.identifier for t in options.targets()]
-    # [natmod]'s own skip = "" beats the top-level skip = "*-armv6m" --
-    # more specific wins, exactly like build already does.
-    assert any(i.endswith("-armv6m") for i in identifiers)
+def test_build_skip_inside_the_natmod_table_is_an_error(tmp_path):
+    # record 0052's own live-caught correction, retracting the earlier
+    # "per-platform build/skip" addendum this test used to cover:
+    # [natmod] build/skip was always exactly a sufficiently-scoped
+    # top-level pattern restated, so it is a loud, specific "move it to
+    # the top level" error now, the same as any other generic key.
+    write(tmp_path, 'skip = "*-armv6m"\n[natmod]\nskip = ""\n')
+
+    with pytest.raises(ConfigError, match="read from the top level"):
+        Options.load(tmp_path, env={})
 
 
 def test_an_unknown_key_in_the_natmod_table_is_an_error(tmp_path):

@@ -14,11 +14,13 @@ import pytest
 
 from cibuildmp.cli import main
 from cibuildmp.platforms.natmod.options import OVERRIDE_UNION_KEYS, ConfigError, Options
+from cibuildmp.platforms.natmod.targets import Target, newest_tag_for_abi
 from cibuildmp.platforms.usermod.options import (
     USERMOD_PORT_BASE,
     UsermodConfigError,
     UsermodOptions,
 )
+from cibuildmp.platforms.usermod.targets import UsermodTarget
 
 
 def write(tmp_path: Path, text: str) -> Path:
@@ -37,14 +39,28 @@ def test_override_union_keys_covers_usermod_port_base():
 def test_one_shared_override_reaches_both_natmod_and_a_usermod_port(tmp_path):
     # The headline claim: one [override] table, one config, both
     # platforms honour it -- with inherit=append actually composing onto
-    # each platform's own base, not replacing it.
+    # each platform's own base, not replacing it. Record 0052's own
+    # live-caught correction retracted per-platform tables entirely
+    # (`[natmod] extra-make-args = "..."` is gone), so each platform's own
+    # "base" is itself expressed as a scoped [override] entry now --
+    # natmod's own identifiers all start with the literal "mpy" prefix,
+    # unix's own always carry "manylinux"/"musllinux" -- written *before*
+    # the universal "*" entry so file order still layers append on top.
+    #
+    # Targets are constructed directly rather than resolved through
+    # .targets() -- natmod's own reachability audit has no way to widen
+    # its domain with usermod's own identifiers without importing it back
+    # (a one-way dependency this project keeps deliberately), so a
+    # unix-only override selector genuinely is unreachable *from natmod's
+    # own side*, a real, separately-tracked, still-open gap (record
+    # 0052's own addendum on task #66) -- not what this test is about.
     write(
         tmp_path,
         """
-        [natmod]
+        [override."mpy*"]
         extra-make-args = ["N=1"]
 
-        [unix]
+        [override."v*-{manylinux,musllinux}*"]
         extra-make-args = ["U=1"]
 
         [override."*"]
@@ -54,14 +70,16 @@ def test_one_shared_override_reaches_both_natmod_and_a_usermod_port(tmp_path):
     )
 
     natmod_options = Options.load(tmp_path, env={})
-    natmod_target = natmod_options.targets()[0]
+    natmod_target = Target(abi="6.3", arch="x64", tag=newest_tag_for_abi("6.3"))
     assert natmod_options.build_options(natmod_target, env={}).extra_make_args == [
         "N=1",
         "EXTRA=1",
     ]
 
     usermod_options = UsermodOptions.load(tmp_path, ports=["unix"])
-    usermod_target = usermod_options.targets()[0]
+    usermod_target = UsermodTarget(
+        port="unix", arch="manylinux_2_28_x86_64", tag="v1.29.0"
+    )
     assert usermod_options.build_options(usermod_target).extra_make_args == [
         "U=1",
         "EXTRA=1",
@@ -176,7 +194,6 @@ def test_inherit_prepend(tmp_path):
     write(
         tmp_path,
         """
-        [natmod]
         extra-make-args = ["BASE=1"]
 
         [override."*"]

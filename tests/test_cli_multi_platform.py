@@ -12,11 +12,17 @@ from cibuildmp.platforms.usermod.targets import default_axis_values
 NATMOD_X64 = f"mpy6.3-{newest_tag_for_abi('6.3')}-x64"
 
 # No `archs` config key any more either (record 0052's own live-caught
-# correction) -- narrowing natmod to x64 alone is a build glob now.
-# Scoped inside [natmod] specifically (not the top level) so it does not
-# also become unix's own default build when both tables are active in
-# one invocation -- build/skip are dual-read, more-specific-wins.
-NATMOD_X64_BUILD = f'[natmod]\nbuild = "mpy{newest_known_abi()}-*-x64"\n'
+# correction) -- narrowing natmod to x64 alone is a build glob now. There
+# is no TOML way left to scope it to natmod alone while a second platform
+# (unix) is active in the same invocation, though: build/skip are global
+# now (record 0052's own further correction, retracting per-platform
+# build/skip entirely), and a single global pattern spanning two
+# platforms' own disjoint identifier shapes fails *each* platform's own
+# check_reachable() on the other's half (each checks every pattern
+# against only its own identifiers). CIBMP_BUILD_NATMOD -- the
+# per-platform *environment* override, a real, distinct capability
+# untouched by any of this -- is what these fixtures use instead.
+NATMOD_X64_BUILD_ENV = f"mpy{newest_known_abi()}-*-x64"
 
 
 def write(tmp_path, text):
@@ -199,8 +205,9 @@ def test_usermod_only_reaches_a_port_the_config_does_not_list(tmp_path, capsys):
 # ── the headline new capability: >1 platform, one invocation ────────────
 
 
-def test_both_tables_without_platform_builds_both(tmp_path, capsys):
-    write(tmp_path, NATMOD_X64_BUILD + "[unix]\n")
+def test_both_tables_without_platform_builds_both(tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("CIBMP_BUILD_NATMOD", NATMOD_X64_BUILD_ENV)
+    write(tmp_path, "[natmod]\n[unix]\n")
 
     assert main([str(tmp_path), "--print-build-identifiers"]) == 0
     identifiers = capsys.readouterr().out.split()
@@ -208,8 +215,11 @@ def test_both_tables_without_platform_builds_both(tmp_path, capsys):
     assert any(i.startswith(f"{DEFAULT_MICROPYTHON}-unix-") for i in identifiers)
 
 
-def test_both_tables_print_build_identifiers_json_is_one_array(tmp_path, capsys):
-    write(tmp_path, NATMOD_X64_BUILD + "[unix]\n")
+def test_both_tables_print_build_identifiers_json_is_one_array(
+    tmp_path, capsys, monkeypatch
+):
+    monkeypatch.setenv("CIBMP_BUILD_NATMOD", NATMOD_X64_BUILD_ENV)
+    write(tmp_path, "[natmod]\n[unix]\n")
 
     assert main([str(tmp_path), "--print-build-identifiers", "--json"]) == 0
     identifiers = json.loads(capsys.readouterr().out)
@@ -217,8 +227,9 @@ def test_both_tables_print_build_identifiers_json_is_one_array(tmp_path, capsys)
     assert any(i.startswith(f"{DEFAULT_MICROPYTHON}-unix-") for i in identifiers)
 
 
-def test_both_tables_dry_run_lists_both(tmp_path, capsys):
-    write(tmp_path, NATMOD_X64_BUILD + "[unix]\n")
+def test_both_tables_dry_run_lists_both(tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("CIBMP_BUILD_NATMOD", NATMOD_X64_BUILD_ENV)
+    write(tmp_path, "[natmod]\n[unix]\n")
 
     assert main([str(tmp_path), "--dry-run"]) == 0
     out = capsys.readouterr().out
@@ -226,18 +237,24 @@ def test_both_tables_dry_run_lists_both(tmp_path, capsys):
     assert "unix" in out
 
 
-def test_both_tables_combined_exit_code_is_the_worse_of_the_two(tmp_path, capsys):
+def test_both_tables_combined_exit_code_is_the_worse_of_the_two(
+    tmp_path, capsys, monkeypatch
+):
     # skip="*-unix-*" matches every unix identifier (they all carry
     # "-unix-") and no natmod one ("mpy6.3-x64"), so unix selects
     # zero targets while natmod still builds fine. No --allow-empty, so
     # the combined exit code must still be 2.
-    write(tmp_path, 'skip = "*-unix-*"\n' + NATMOD_X64_BUILD + "[unix]\n")
+    monkeypatch.setenv("CIBMP_BUILD_NATMOD", NATMOD_X64_BUILD_ENV)
+    write(tmp_path, 'skip = "*-unix-*"\n[natmod]\n[unix]\n')
 
     assert main([str(tmp_path), "--dry-run"]) == 2
 
 
-def test_only_with_both_tables_narrows_to_the_matching_side(tmp_path, capsys):
-    write(tmp_path, NATMOD_X64_BUILD + "[unix]\n")
+def test_only_with_both_tables_narrows_to_the_matching_side(
+    tmp_path, capsys, monkeypatch
+):
+    monkeypatch.setenv("CIBMP_BUILD_NATMOD", NATMOD_X64_BUILD_ENV)
+    write(tmp_path, "[natmod]\n[unix]\n")
 
     assert (
         main(
@@ -253,8 +270,9 @@ def test_only_with_both_tables_narrows_to_the_matching_side(tmp_path, capsys):
     assert capsys.readouterr().out.split() == [NATMOD_X64]
 
 
-def test_three_platforms_at_once(tmp_path, capsys):
-    write(tmp_path, NATMOD_X64_BUILD + "[unix]\n[esp32]\n")
+def test_three_platforms_at_once(tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("CIBMP_BUILD_NATMOD", NATMOD_X64_BUILD_ENV)
+    write(tmp_path, "[natmod]\n[unix]\n[esp32]\n")
 
     assert main([str(tmp_path), "--print-build-identifiers", "--json"]) == 0
     identifiers = json.loads(capsys.readouterr().out)
@@ -266,8 +284,9 @@ def test_three_platforms_at_once(tmp_path, capsys):
 # ── --platform, now a filter over six names rather than a mode select ───
 
 
-def test_both_tables_explicit_platform_natmod(tmp_path, capsys):
-    write(tmp_path, NATMOD_X64_BUILD + "[unix]\n")
+def test_both_tables_explicit_platform_natmod(tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("CIBMP_BUILD_NATMOD", NATMOD_X64_BUILD_ENV)
+    write(tmp_path, "[natmod]\n[unix]\n")
 
     assert (
         main([str(tmp_path), "--platform", "natmod", "--print-build-identifiers"]) == 0
@@ -288,7 +307,8 @@ def test_both_tables_platform_env_var(tmp_path, capsys, monkeypatch):
     # env-override every cibuildmp.toml key already has, matching
     # cibuildwheel's own CIBW_BUILD shape.
     monkeypatch.setenv("CIBMP_PLATFORM", "natmod")
-    write(tmp_path, NATMOD_X64_BUILD + "[unix]\n")
+    monkeypatch.setenv("CIBMP_BUILD_NATMOD", NATMOD_X64_BUILD_ENV)
+    write(tmp_path, "[natmod]\n[unix]\n")
 
     assert main([str(tmp_path), "--print-build-identifiers"]) == 0
     assert capsys.readouterr().out.split() == [NATMOD_X64]
