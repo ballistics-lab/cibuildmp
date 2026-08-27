@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import platform
 from dataclasses import dataclass
+from typing import Any
 
+from ...resources import build_platforms_data
 from .build import WINDOWS_ARCH_SETTINGS
 
 # port -> (config axis key, every axis value this project can currently
@@ -66,6 +68,20 @@ _PORT_AXES: dict[str, tuple[str | None, tuple[str, ...]]] = {
 }
 
 KNOWN_PORTS: tuple[str, ...] = tuple(_PORT_AXES)
+
+# Every esp32 board `resources/build-platforms.toml` has independently
+# verified, across every MicroPython tag it has walked -- not tag-gated
+# here (a board existing for *some* tag but not the one(s) actually
+# selected needs the same tag-gated treatment natmod's own
+# `archs_available_for()` gives arches, Track C Phase C2's own job for
+# usermod, not started; this is deliberately the loose "does this board
+# exist at all" check). Closes a real, live-verified gap: `boards =
+# [...]`'s own values were never checked against anything before this --
+# any string at all became a real `UsermodTarget`, board typos included.
+_ESP32_ROWS: list[dict[str, Any]] = build_platforms_data()["usermod"]["esp32"][
+    "identifiers"
+]
+KNOWN_ESP32_BOARDS: frozenset[str] = frozenset(row["board"] for row in _ESP32_ROWS)
 
 # ── opt-in groups (0051 point 8, upstream's own EnableGroup) ────────────
 #
@@ -403,6 +419,15 @@ def usermod_targets(
                     f"usermod/{port} has no configurable axis yet -- "
                     f"remove [usermod.{port}] from the config"
                 )
+            if port == "esp32":
+                unknown_boards = [v for v in values if v not in KNOWN_ESP32_BOARDS]
+                if unknown_boards:
+                    raise UnknownAxisError(
+                        f"usermod/esp32: unrecognised board {unknown_boards[0]!r} -- "
+                        f"not in resources/build-platforms.toml's own esp32 "
+                        f"identifiers. A typo, or a real board this project has "
+                        f"never verified."
+                    )
             for value in values:
                 targets.append(UsermodTarget(port=port, arch=value, tag=tag))
     return targets

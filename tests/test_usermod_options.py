@@ -4,7 +4,11 @@ import pytest
 
 from cibuildmp.platforms.natmod.options import DEFAULT_MICROPYTHON
 from cibuildmp.platforms.usermod.options import UsermodConfigError, UsermodOptions
-from cibuildmp.platforms.usermod.targets import KNOWN_PORTS, default_axis_values
+from cibuildmp.platforms.usermod.targets import (
+    KNOWN_PORTS,
+    UnknownAxisError,
+    default_axis_values,
+)
 
 
 def write_config(tmp_path: Path, text: str) -> Path:
@@ -84,6 +88,18 @@ def test_multiple_boards_same_port(tmp_path):
         f"{DEFAULT_MICROPYTHON}-esp32-ESP32_GENERIC",
         f"{DEFAULT_MICROPYTHON}-esp32-ESP32_GENERIC_S3",
     ]
+
+
+def test_unknown_esp32_board_is_rejected(tmp_path):
+    # boards = [...] values were never validated against anything before
+    # this -- any string became a real UsermodTarget, board typos
+    # included. Checked against resources/build-platforms.toml's own
+    # independently-verified board list. Propagates as UnknownAxisError,
+    # the same class usermod_targets() already raises for an axis put on
+    # a port that has none -- not wrapped into UsermodConfigError.
+    write_config(tmp_path, '[esp32]\nboards = ["NOT_A_REAL_BOARD"]\n')
+    with pytest.raises(UnknownAxisError, match="unrecognised board 'NOT_A_REAL_BOARD'"):
+        UsermodOptions.load(tmp_path).targets()
 
 
 def test_an_unknown_key_on_axisless_port_is_rejected(tmp_path):
