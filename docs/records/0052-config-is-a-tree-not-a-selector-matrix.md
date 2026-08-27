@@ -964,7 +964,19 @@ Applying this per axis, checked directly, not assumed:
   (`mcu = "esp32"`, `variants = ["D2WD", "SPIRAM", "UNICORE", "OTA"]`)
   and `ESP32_GENERIC_S3` (`mcu = "esp32s3"`,
   `variants = ["SPIRAM_OCT"]`), both read directly from their own
-  real `ports/esp32/boards/<name>/board.json`.
+  real `ports/esp32/boards/<name>/board.json`. **Caught directly, a
+  second time on this same axis: board metadata is not the same fact as
+  board *existence per tag*, and esp32 needs its own `identifiers` list
+  of `(tag, board)` rows — the same shape natmod/unix have, initially
+  missing here entirely.** Verified live, not assumed: `v1.29.0`'s own
+  `ports/esp32/boards/` has `ESP32_GENERIC_H2`; `v1.28.0`'s own does not
+  — diffed the two real checkouts directly. `ESP32_GENERIC_S3`'s own
+  `board.json` is byte-identical between `v1.28.0` and today's `master`,
+  so metadata stability and per-tag existence are two independent facts,
+  neither derivable from the other — both need the refresh script to
+  check per real release, not extrapolate from one checkout the way the
+  metadata above was pulled from `master` alone (worth re-pulling
+  per-tag too, flagged, not yet done).
 
 Refreshed by a maintainer-run script (not part of any build invocation)
 that clones MicroPython once, walks `ports/esp32/boards/*/board.json` via
