@@ -966,15 +966,60 @@ Applying this per axis, checked directly, not assumed:
   prefix at all — while `v1.24.1` onward uses `ESP32_GENERIC`,
   `ESP32_GENERIC_C3`. A `board = "ESP32_GENERIC"` row for `v1.20.0`
   would not merely be an unverified guess, it would be flatly wrong — no
-  board by that name exists in that tag's own checkout. **This closes
-  any remaining case for deriving board identity from a formula or a
-  recent tag's own vocabulary — the row for each tag has to come from
-  that tag's own real directory listing, individually, full stop.**
-  Full per-board enumeration (name + metadata × 22 tags) is hundreds of
-  individual `board.json` reads — genuinely refresh-script scope, a
-  mechanical, well-specified, high-volume task suited to automation, not
-  a single manual documentation pass; not attempted further here beyond
-  this confirmation and the earlier four-row slice.
+  board by that name exists in that tag's own checkout. This closes any
+  remaining case for deriving board identity from a formula or a recent
+  tag's own vocabulary — the row for each tag has to come from that
+  tag's own real directory listing, individually, full stop.
+
+**Pushed to completion, directly requested: every platform's own
+`identifiers` list, generated for real across all 22 tags, not samples
+— 1,304 rows total, sent to the user as `build-platforms.full.toml`.**
+Per platform, what was actually checked before generating (not
+assumed):
+
+- **`natmod`** — 189 rows, `dynruntime.mk` grepped per tag directly
+  (already covered above).
+- **`unix`/`windows`** — 330 + 66 rows. Confirmed, for all 22 tags this
+  time (not two samples): neither `ports/unix/Makefile` nor
+  `ports/windows/Makefile` has an `ARCH`-conditional gate in *any* of
+  them — a genuine full cross-product, not an assumption extended from
+  a partial check.
+- **`webassembly`** — 22 rows (one per tag, no sub-axis); `ports/
+  webassembly/` confirmed present in all 22.
+- **`qemu`** — real per-tag board lists, not a fixed three: the port
+  **does not exist before `v1.24.0`** (`v1.20.0`-`v1.23.0-preview`
+  checkouts have no `ports/qemu` directory at all); `v1.24.0`-`v1.26.1`
+  have 5 boards (`.mk` files: `MICROBIT`, `MPS2_AN385`, `NETDUINO2`,
+  `SABRELITE`, `VIRT_RV32`); `v1.27.0`-`v1.29.0-preview` add
+  `MPS2_AN500`/`MPS3_AN547`/`VIRT_RV64` (8); `v1.29.0` adds `POWERNV9`
+  (9, now directories not `.mk` files). cibuildmp's own current default
+  (`MPS2_AN385`/`VIRT_RV32`/`VIRT_RV64`) is a real, live-verified subset
+  of what upstream actually offers at the newest tag, not the full set —
+  worth a real decision (stay a curated subset, or track upstream's own
+  growth) once this lands, not resolved here.
+- **`esp32`** — 616 rows, **names only** (`identifier`/`tag`/`date`/
+  `board`, no `mcu`/`product`/`vendor`/`variants`) — full per-board
+  metadata across all 22 tags would be 600+ individual `board.json`
+  reads, declined as disproportionate for one documentation pass;
+  genuinely the refresh script's own job, not a gap left by oversight.
+
+**`date` added as a field on every row, all platforms — a real, useful
+fact that was missing, caught directly**: preview tags carry no date in
+their own tag *name* (confirmed against the real upstream tag list —
+`v1.22.0-preview`, no timestamp suffix), but every tag's own git commit
+does (`git log -1 --format=%cs`) — `v1.22.0-preview` was committed
+2023-10-06, `v1.22.0` itself 2023-12-27, `v1.29.0-preview` 2026-04-07,
+`v1.29.0` 2026-08-24. Worth having on every row (not only previews) for
+the same reason `newest_tag_for_abi()`'s own semver-only ordering can be
+ambiguous or surprising — a real timestamp is a second, independent
+check on "which one is actually newest," not redundant with the tag
+string itself.
+
+Also surfaced in passing, worth its own follow-up rather than silently
+noted here: `v1.30.0-preview` already exists upstream — newer than
+anything `[mpy-abi]` currently pins, confirming the pin table needs
+periodic refreshing (its own stated purpose) rather than being a
+one-time artifact.
 - **`[mpy-abi]` (tag -> abi)** — already exactly the flat-map-of-real-facts
   shape this lesson calls for; unchanged, and still the source `family =
   "natmod"` rows above derive their own `abi` field from (one lookup per
