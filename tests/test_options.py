@@ -179,7 +179,12 @@ def test_mpy_abi_list_states_the_axis_directly(tmp_path):
     )
     options = Options.load(tmp_path, env={})
     assert options.mpy_abi == ["6.3", "6.2"]
-    assert options.tag_groups() == [("v1.29.0", "6.3"), ("v1.23.0-preview", "6.2")]
+    # record 0052, Track C: newest-tag-per-ABI now reads
+    # resources/build-platforms.toml, which prunes every superseded
+    # preview but the single newest one -- 6.3's newest tag is the still-
+    # open v1.30.0-preview, and 6.2's is its own real release v1.22.2
+    # rather than a now-pruned preview tag.
+    assert options.tag_groups() == [("v1.30.0-preview", "6.3"), ("v1.22.2", "6.2")]
     identifiers = [t.identifier for t in options.targets()]
     assert identifiers == ["mpy6.3-natmod-x64", "mpy6.2-natmod-x64"]
 

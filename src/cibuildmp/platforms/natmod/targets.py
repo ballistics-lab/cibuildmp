@@ -12,16 +12,22 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from ...resources import natmod_data
+from ...resources import build_platforms_data, natmod_data
 
 # ── Architectures ─────────────────────────────────────────────────────────
-# Both tables below are transcriptions of MicroPython's own source, and both
-# live in resources/natmod.toml rather than here -- see resources.py for
-# why pinned data is kept out of the source.
+# Transcribed from MicroPython's own source, and living in resources/
+# natmod.toml rather than here -- see resources.py for why pinned data is
+# kept out of the source.
 #
 #   [arch]     py/dynruntime.mk's ifeq chain: the ten ARCH values it accepts
 #              and the CROSS prefix each selects. Ten arches, five toolchains.
-#   [mpy-abi]  py/persistentcode.h's MPY_VERSION/MPY_SUB_VERSION per tag.
+#
+# This table alone -- never gated by tag. Whether a given (tag, arch) pair
+# is one dynruntime.mk source tree actually ever supported is a different
+# question, answered below from resources/build-platforms.toml instead
+# (record 0052's own Track C): [mpy-abi]'s old tag -> abi table and every
+# arch's "available since" boundary used to live nowhere at all -- every
+# arch was silently treated as buildable against every tag.
 _ARCH_TABLE: dict[str, dict[str, Any]] = natmod_data()["arch"]
 
 # The ten `ARCH` values `py/dynruntime.mk` accepts. Only the keys, since
@@ -48,23 +54,33 @@ NATIVE_ARCH_CODE: dict[str, int] = {
 # Nothing else accepts arch-flags at all -- see parse_arch_flags().
 RV32_ARCH_FLAGS: dict[str, int] = dict(natmod_data()["arch-flags"]["rv32imc"])
 
-# ── .mpy ABI ──────────────────────────────────────────────────────────────
-_ABI_TABLE: dict[str, str] = dict(natmod_data()["mpy-abi"])
-
-# Used when a tag is not listed. Every release since v1.23.0 has been 6.3,
-# so assuming the latest for an unknown (i.e. newer, or a branch name) tag
-# is right far more often than it is wrong -- and when it is wrong the build
-# catches it: the ABI actually encoded in each produced .mpy header is
-# verified against its identifier before the file is collected.
-LATEST_KNOWN_ABI: str = _ABI_TABLE.pop("latest")
-
-MPY_ABI: dict[str, str] = _ABI_TABLE
-
-
-# ── Runners ───────────────────────────────────────────────────────────────
-# Which GitHub Actions runner a target needs.
+# ── .mpy ABI and per-tag arch availability (record 0052, Track C) ──────────
 #
-# For natmod this is genuinely one value: every one of the ten arches is a
+# Both read from resources/build-platforms.toml's own `[natmod].identifiers`
+# rows -- one row per independently-verified `(tag, arch)` pair, not an
+# axis product. This replaces resources/natmod.toml's own `[mpy-abi]` table
+# (confirmed, not assumed: zero mismatches across every tag both tables
+# know about) and its `LATEST_KNOWN_ABI` fallback, which is deleted rather
+# than kept as a second, disagreeing source of "what to do for an unknown
+# tag" -- an unrecognised tag is now a loud `UnknownTagError`, naming
+# `bin/refresh_natmod_archs.py` as the fix, not a silent guess a real build
+# might or might not catch later.
+_NATMOD_ROWS: list[dict[str, Any]] = build_platforms_data()["natmod"]["identifiers"]
+
+MPY_ABI: dict[str, str] = {row["tag"]: row["mpy"] for row in _NATMOD_ROWS}
+
+# Which arches a given tag's own dynruntime.mk source tree actually has --
+# the exact gap that let a config ask for `rv32imc` against a tag that
+# predates it (not available before v1.24.0) and only find out deep inside
+# a real build. Built once, from the same rows MPY_ABI above reads.
+_tag_arch_sets: dict[str, set[str]] = {}
+for _row in _NATMOD_ROWS:
+    _tag_arch_sets.setdefault(_row["tag"], set()).add(_row["arch"])
+_TAG_ARCHS: dict[str, frozenset[str]] = {
+    tag: frozenset(archs) for tag, archs in _tag_arch_sets.items()
+}
+
+
 class UnknownArchError(ValueError):
     pass
 
@@ -73,16 +89,27 @@ class UnknownAbiError(ValueError):
     pass
 
 
+class UnknownTagError(ValueError):
+    pass
+
+
 def abi_for_tag(tag: str, override: str | None = None) -> str:
-    """Return the .mpy ABI ("6.3") a MicroPython tag produces."""
+    """Return the .mpy ABI ("6.3") a MicroPython tag produces.
+
+    Raises `UnknownTagError` for a tag `build-platforms.toml` has never
+    walked -- no silent fallback. `bin/refresh_natmod_archs.py <tag>` is
+    the fix, not a guess a real build might catch later or might not.
+    """
     if override is not None:
         return override
-    return MPY_ABI.get(tag, LATEST_KNOWN_ABI)
-
-
-def is_abi_known(tag: str) -> bool:
-    """False when abi_for_tag() had to fall back to LATEST_KNOWN_ABI."""
-    return tag in MPY_ABI
+    try:
+        return MPY_ABI[tag]
+    except KeyError:
+        raise UnknownTagError(
+            f"MicroPython tag {tag!r} is not in resources/build-platforms.toml "
+            f"-- run bin/refresh_natmod_archs.py {tag} and merge the result, "
+            f"or pass mpy-abi explicitly to override the lookup."
+        ) from None
 
 
 def parse_arch_flags(arch: str, value: str) -> int:
@@ -202,7 +229,7 @@ def resolve_abi_selector(abis: list[str]) -> list[tuple[str, str]]:
     for abi in abis:
         tag = newest_tag_for_abi(abi)
         if tag is None:
-            known = sorted(set(MPY_ABI.values()) | {LATEST_KNOWN_ABI})
+            known = sorted(set(MPY_ABI.values()))
             raise UnknownAbiError(
                 f"unknown .mpy ABI {abi!r} -- no known MicroPython tag "
                 f"produces it. Known ABIs: {', '.join(known)}"
@@ -274,12 +301,29 @@ def natmod_targets(
     "build every arch" (both select on the same `archs`/`arch-flags` list
     shape everywhere else in this config), so a `[0x1, 0x3]` list produces
     two rv32imc identifiers, `+0x1` and `+0x3`, side by side.
+
+    Two different ways to be an unknown arch, checked separately (record
+    0052, Track C): `unrecognized` is an arch dynruntime.mk has never
+    heard of at all, at any tag -- a typo. `unavailable` is a real arch
+    this specific `tag`'s own source tree does not have -- `rv32imc`
+    against a tag older than v1.24.0, the exact bug this table exists to
+    catch instead of a real build failing deep inside `dynruntime.mk`.
+    Both raise the same `UnknownArchError` a caller already has to catch
+    (no new exception type), just with a message naming the real reason.
     """
-    unknown = [a for a in archs if a not in NATMOD_ARCH_NATIVE_CODE]
-    if unknown:
+    unrecognized = [a for a in archs if a not in NATMOD_ARCH_NATIVE_CODE]
+    if unrecognized:
         raise UnknownArchError(
-            f"unknown natmod arch(es): {', '.join(sorted(unknown))}. "
+            f"unknown natmod arch(es): {', '.join(sorted(unrecognized))}. "
             f"py/dynruntime.mk supports: {', '.join(NATMOD_ARCHS)}"
+        )
+    available = _TAG_ARCHS.get(tag, frozenset())
+    unavailable = [a for a in archs if a not in available]
+    if unavailable:
+        raise UnknownArchError(
+            f"arch(es) not available for MicroPython {tag}: "
+            f"{', '.join(sorted(unavailable))}. Available for {tag}: "
+            f"{', '.join(sorted(available)) or '(none)'}"
         )
     selected = set(archs)
     targets = []

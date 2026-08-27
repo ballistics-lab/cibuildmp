@@ -6,10 +6,10 @@
 # script or a bot can make and a human can review as a diff, not a patch to
 # resolver logic.
 #
-# Three tables, three different upstreams:
-#   [arch]      transcribed from MicroPython's py/dynruntime.mk
-#   [mpy-abi]   transcribed from MicroPython's py/persistentcode.h, per tag
-#   [[toolchain]]  third-party toolchain releases, pinned by sha256
+# Two tables, both transcribed from MicroPython's own source, neither
+# gated by tag (see below for the table that is):
+#   [arch]              py/dynruntime.mk's own ARCH= vocabulary
+#   [arch-flags.rv32imc]  tools/mpy_ld.py's own RV32_EXTENSIONS
 
 # ── Architectures ─────────────────────────────────────────────────────────
 # The ten ARCH values py/dynruntime.mk accepts.
@@ -57,38 +57,20 @@ rv64imc   = { native-code = 12 }
 zba = 1    # 1 << 0
 zcmp = 2   # 1 << 1
 
-# ── .mpy ABI per MicroPython tag ──────────────────────────────────────────
-# "<MPY_VERSION>.<MPY_SUB_VERSION>" from py/persistentcode.h at that tag.
+# ── .mpy ABI per MicroPython tag -- moved (record 0052, Track C) ──────────
 #
-# This is the compatibility axis, and deliberately not the release tag: a
-# native .mpy loads into any runtime where both numbers match, and ABI 6.3
-# alone spans v1.23.0 through v1.29.0. Pinning a matrix to a release
-# tag would claim far narrower compatibility than the artifact has.
+# Used to live here as `[mpy-abi]` (tag -> "<MPY_VERSION>.<MPY_SUB_VERSION>"
+# from py/persistentcode.h), with an unlisted tag silently assumed to be
+# `latest`. That fallback is gone, not just moved: an unrecognised tag is
+# now a loud `UnknownTagError` (platforms/natmod/targets.py), not a guess
+# a real build might or might not catch later.
 #
-# A tag missing here is not an error -- see `latest` below.
-[mpy-abi]
-latest = "6.3"     # assumed for any tag not listed; the built .mpy's own
-                   # header is checked against it before anything ships
-"v1.20.0" = "6.1"
-"v1.21.0" = "6.1"
-"v1.22.0-preview" = "6.1"
-"v1.22.0" = "6.2"
-"v1.22.1" = "6.2"
-"v1.22.2" = "6.2"
-"v1.23.0-preview" = "6.2"
-"v1.23.0" = "6.3"
-"v1.24.0-preview" = "6.3"
-"v1.24.0" = "6.3"
-"v1.24.1" = "6.3"
-"v1.25.0-preview" = "6.3"
-"v1.25.0" = "6.3"
-"v1.26.0-preview" = "6.3"
-"v1.26.0" = "6.3"
-"v1.26.1" = "6.3"
-"v1.27.0-preview" = "6.3"
-"v1.27.0" = "6.3"
-"v1.28.0-preview" = "6.3"
-"v1.28.0" = "6.3"
-"v1.29.0-preview" = "6.3"
-"v1.29.0" = "6.3"          # released 2026-08-24; read from py/persistentcode.h
-                          # at that tag, not inferred from the preview
+# The table itself now lives in resources/build-platforms.toml's own
+# `[natmod].identifiers` rows (one row per independently-verified
+# `(tag, arch)` pair, `mpy` field) -- confirmed, not assumed, to already
+# agree with every tag this table used to know about before the table was
+# removed. It also answers the question this table could not: which arches
+# a given tag's own dynruntime.mk source tree actually has (`rv32imc` is
+# not available before v1.24.0, `rv64imc` not before v1.27.0 -- both
+# verified live against the real tags in that table) -- a fact with no
+# per-tag home at all until build-platforms.toml existed.

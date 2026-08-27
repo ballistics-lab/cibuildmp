@@ -32,13 +32,7 @@ from ...sources import (
 from ...stepsummary import write_step_summary
 from .build import BuildError, BuildResult, build_target
 from .options import BuildOptions, ConfigError, Options
-from .targets import (
-    LATEST_KNOWN_ABI,
-    NATMOD_ARCHS,
-    Target,
-    UnknownArchError,
-    is_abi_known,
-)
+from .targets import NATMOD_ARCHS, Target, UnknownArchError, UnknownTagError
 
 
 def _plan_line(index: int, total: int, options: BuildOptions) -> str:
@@ -145,17 +139,18 @@ def build_all(options: Options, targets: list[Target]) -> int:
         build_mpy_cross(mpy_dir)
 
         # The checkout is authoritative about the ABI; targets.MPY_ABI's
-        # table is only a way to answer the question without one. A
-        # disagreement means the identifiers already printed are wrong, so
-        # it stops here rather than producing files labelled with an ABI
-        # they do not have.
+        # table (resources/build-platforms.toml, record 0052 Track C) is
+        # only a way to answer the question without one. A disagreement
+        # means the identifiers already printed are wrong, so it stops
+        # here rather than producing files labelled with an ABI they do
+        # not have.
         actual_abi = read_mpy_abi(mpy_dir)
         if actual_abi != abi:
             raise SourceError(
                 f"MicroPython {tag} has .mpy ABI {actual_abi}, but the "
                 f"identifiers were built assuming {abi}. Set `mpy-abi = "
-                f'"{actual_abi}"` in the config, or report the stale entry in '
-                f"cibuildmp.targets.MPY_ABI."
+                f'"{actual_abi}"` in the config, or refresh the stale entry '
+                f"with bin/refresh_natmod_archs.py {tag}."
             )
 
         print(f"\ncibuildmp: building {len(group)} target(s) for MicroPython {tag}")
@@ -237,7 +232,7 @@ def run(
     try:
         options = resolve_options(args, package_dir, config_file, preread, ports=ports)
         targets = options.targets()
-    except (ConfigError, UnknownArchError, SourceError) as exc:
+    except (ConfigError, UnknownArchError, UnknownTagError, SourceError) as exc:
         if args.debug_traceback:
             raise
         print(f"cibuildmp: error: {exc}", file=sys.stderr)
@@ -283,15 +278,12 @@ def run(
         )
         return 2
 
-    unknown_tags = [tag for tag in options.micropython if not is_abi_known(tag)]
-    if unknown_tags:
-        print(
-            f"cibuildmp: warning: no recorded .mpy ABI for MicroPython "
-            f"{', '.join(unknown_tags)}; assuming {LATEST_KNOWN_ABI}. The ABI "
-            f"actually encoded in each built .mpy is verified against its "
-            f"identifier, so a wrong guess fails the build rather than shipping.",
-            file=sys.stderr,
-        )
+    # No unknown-tag warning here any more (record 0052, Track C): every
+    # tag `targets` above could possibly carry already passed through
+    # `abi_for_tag()` inside `options.targets()`, which now raises
+    # `UnknownTagError` -- caught above -- instead of silently falling
+    # back to a guessed ABI. Reaching this line means every tag in play
+    # is a real, recorded fact.
 
     if args.dry_run:
         total = len(targets)

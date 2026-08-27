@@ -1,14 +1,13 @@
 import pytest
 
 from cibuildmp.platforms.natmod.targets import (
-    LATEST_KNOWN_ABI,
     NATMOD_ARCH_NATIVE_CODE,
     NATMOD_ARCHS,
     Target,
     UnknownAbiError,
     UnknownArchError,
+    UnknownTagError,
     abi_for_tag,
-    is_abi_known,
     natmod_targets,
     newest_tag_for_abi,
     parse_arch_flags,
@@ -104,10 +103,14 @@ def test_abi_spans_many_releases():
     assert abi_for_tag("v1.21.0") == "6.1"
 
 
-def test_unknown_tag_falls_back_and_is_reported():
-    assert abi_for_tag("v1.99.0") == LATEST_KNOWN_ABI
-    assert not is_abi_known("v1.99.0")
-    assert is_abi_known("v1.28.0")
+def test_unknown_tag_is_a_hard_error_not_a_fallback():
+    # record 0052, Track C: an unrecognised tag used to silently resolve
+    # to LATEST_KNOWN_ABI; it is now a loud UnknownTagError instead, since
+    # resources/build-platforms.toml names every tag this project has
+    # actually verified.
+    with pytest.raises(UnknownTagError, match="v1.99.0"):
+        abi_for_tag("v1.99.0")
+    # An explicit override still bypasses the lookup entirely.
     assert abi_for_tag("v1.99.0", override="7.0") == "7.0"
 
 
@@ -134,14 +137,20 @@ def test_resolve_micropython_tags_honours_override():
 
 
 def test_newest_tag_for_abi_reads_the_table_backwards():
-    # ABI 6.3 spans v1.23.0..v1.29.0 in resources/natmod.toml -- the
-    # newest tag is the one this resolves to, not the first one listed.
-    assert newest_tag_for_abi("6.3") == "v1.29.0"
-    # A prerelease sorts below its own release but above an earlier
-    # release's own tags -- 6.2's newest listed tag is a preview because
-    # no non-preview v1.23.0 entry maps to 6.2 (v1.23.0 itself is 6.3).
-    assert newest_tag_for_abi("6.2") == "v1.23.0-preview"
-    assert newest_tag_for_abi("6.1") == "v1.22.0-preview"
+    # ABI 6.3 spans v1.23.0..v1.30.0-preview in resources/build-platforms.toml
+    # (record 0052, Track C) -- the newest tag is the one this resolves
+    # to, not the first one listed. Every superseded preview except the
+    # single newest one is pruned from that table (A6's own "only the
+    # most recent preview tag is pinned" rule), so 6.3's newest tag is
+    # now the still-open v1.30.0-preview, not v1.29.0's own real release.
+    assert newest_tag_for_abi("6.3") == "v1.30.0-preview"
+    # 6.2 and 6.1 are each fully covered by a real, non-preview release
+    # tag (v1.22.2, v1.21.0) already present in build-platforms.toml, so
+    # pruning the old previews that used to answer this in natmod.toml
+    # (v1.23.0-preview, v1.22.0-preview) does not lose anything real --
+    # it resolves to the actual shipped release instead.
+    assert newest_tag_for_abi("6.2") == "v1.22.2"
+    assert newest_tag_for_abi("6.1") == "v1.21.0"
 
 
 def test_newest_tag_for_abi_unknown_abi_is_none():
@@ -152,8 +161,8 @@ def test_resolve_abi_selector_states_the_axis_directly():
     # The direction resolve_micropython_tags() cannot run: ABIs in, tags
     # out, each resolved to its own newest known tag.
     assert resolve_abi_selector(["6.3", "6.2"]) == [
-        ("v1.29.0", "6.3"),
-        ("v1.23.0-preview", "6.2"),
+        ("v1.30.0-preview", "6.3"),
+        ("v1.22.2", "6.2"),
     ]
 
 
@@ -171,6 +180,21 @@ def test_natmod_targets_preserve_canonical_order():
 def test_unknown_arch_rejected():
     with pytest.raises(UnknownArchError, match="aarch64"):
         natmod_targets(["x64", "aarch64"], "6.3", "v1.28.0")
+
+
+def test_arch_not_available_for_this_specific_tag_is_rejected():
+    # record 0052, Track C: rv32imc/rv64imc are real dynruntime.mk arches
+    # (accepted by test_unknown_arch_rejected's own check above), but
+    # v1.23.0's own source tree predates both -- rv32imc arrives at
+    # v1.24.0, rv64imc at v1.27.0, verified live against
+    # resources/build-platforms.toml. This is the exact bug the table
+    # exists to catch before a real build fails deep inside dynruntime.mk.
+    with pytest.raises(UnknownArchError, match="not available for.*v1.23.0"):
+        natmod_targets(["rv32imc"], "6.3", "v1.23.0")
+    # x64/x86/armv6m are all real for v1.23.0 -- no false positive from
+    # the same check.
+    targets = natmod_targets(["x64", "armv6m"], "6.3", "v1.23.0")
+    assert {t.arch for t in targets} == {"x64", "armv6m"}
 
 
 def test_parse_selector_accepts_both_forms():
