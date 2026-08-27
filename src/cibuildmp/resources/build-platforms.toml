@@ -89,6 +89,15 @@
 [natmod]
 identifier_format = "mpy{mpy}-{tag}-{arch}"
 artifacts_dir_name = "{name}-{ver}-mpy{abi}-{arch}[+0x{arch_flags:x}]"
+# Unlike every usermod port's own post_checkout, this is not an
+# unconditional MicroPython-per-tag fact -- docs/develop/natmod.rst's own
+# "Compiling the module" section: mpy-cross is only needed "if .py source
+# is used" in the module being built, a property of the user's own
+# module (module-dir config), not of the MicroPython tag/arch this row
+# describes. Kept here anyway (harmless, if redundant, for a pure-C
+# module) rather than left conditional on data this table has no way to
+# express.
+post_checkout = "make -C mpy-cross"
 identifiers = [
     { tag = "v1.12", mpy = "5", arch = "x86", arch_code = 1, arch_flags = 0, cross = "", identifier = "mpy5-v1.12-x86" },
     { tag = "v1.12", mpy = "5", arch = "x64", arch_code = 2, arch_flags = 0, cross = "", identifier = "mpy5-v1.12-x64" },
