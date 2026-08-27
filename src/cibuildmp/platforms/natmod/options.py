@@ -25,14 +25,23 @@ from ...selector import parse_selector, select
 from .targets import (
     NATMOD_ARCHS,
     Target,
+    all_tag_groups,
+    archs_available_for,
     natmod_targets,
-    resolve_abi_selector,
+    newest_known_abi,
     resolve_arch_flags,
-    resolve_micropython_tags,
+    validate_archs_recognized,
 )
 
 CONFIG_FILENAME = "cibuildmp.toml"
 
+# Still natmod's own constant (usermod/options.py imports it too, for its
+# own unrelated `micropython` key -- A2 is natmod-only) but no longer read
+# by natmod's own load() below: the version axis has no config key any
+# more, and `newest_known_abi()` -- derived from resources/build-
+# platforms.toml, not a literal string needing a manual bump on every
+# MicroPython release -- is what an unconfigured natmod `build` selector
+# narrows to instead (record 0052, A2).
 DEFAULT_MICROPYTHON = "v1.29.0"
 DEFAULT_OUTPUT_DIR = "mpyhouse"
 DEFAULT_MODULE_DIR = "natmod"
@@ -73,7 +82,6 @@ GENERIC_KEYS: frozenset[str] = frozenset(
         "build",
         "skip",
         "version",
-        "mpy-abi",
         "micropython-submodules",
         "enable",
     }
@@ -247,26 +255,6 @@ def _as_list(value: Any, key: str) -> list[str]:
     raise ConfigError(f"{key}: expected a list or a string, got {type(value).__name__}")
 
 
-def _parse_mpy_abi(value: Any) -> str | list[str] | None:
-    """`mpy-abi` is dual-shape (0051). A single value is the pre-0051
-    override: force this one ABI onto every `micropython` tag, via
-    `abi_for_tag()`'s own `override` parameter. More than one value --
-    a TOML list, or (from the environment, which can only ever be a
-    string) more than one whitespace-separated token -- states the axis
-    directly: these are the ABIs to build, each resolved to its own
-    newest known tag by `resolve_abi_selector()` instead of derived from
-    `micropython`. A single-token string, whichever layer it came from,
-    keeps meaning what it always has -- this is additive, not a breaking
-    change to the override.
-    """
-    if value is None:
-        return None
-    if isinstance(value, list):
-        return [str(v) for v in value]
-    tokens = str(value).split()
-    return tokens if len(tokens) > 1 else str(value)
-
-
 @dataclass
 class BuildOptions:
     """Fully resolved options for a single target."""
@@ -290,13 +278,11 @@ class Options:
 
     package_dir: Path
     config_path: Path | None
-    micropython: list[str]
     output_dir: Path
     build: list[str]
     skip: list[str]
     archs: list[str]
     micropython_submodules: list[str]
-    mpy_abi: str | list[str] | None
     arch_flags: list[str]
     version: str
     overrides: list[dict[str, Any]]
@@ -367,20 +353,26 @@ class Options:
         )
         arch_flags_value = cascade_env.get("arch-flags", platform="natmod", default=[])
 
+        # No `micropython`/`mpy-abi` config key any more (record 0052, A2):
+        # the version axis is a statically known domain (`all_tag_groups()`,
+        # `targets.py`), narrowed by `build`/`skip` matching identifiers,
+        # exactly like `archs` already narrows `NATMOD_ARCHS`. An
+        # unconfigured `build` selector still keeps today's narrow default
+        # -- only the newest known ABI -- by defaulting to
+        # `f"mpy{newest_known_abi()}-*"` instead of `"*"`; an explicit
+        # `build = "*"` (or `"mpy6.2-*"`, etc.) opens it up wider.
+        default_build = f"mpy{newest_known_abi()}-*"
+
         return cls(
             package_dir=package_dir,
             config_path=config_path,
-            micropython=_as_list(
-                opt("micropython", DEFAULT_MICROPYTHON), "micropython"
-            ),
             output_dir=Path(str(opt("output-dir", DEFAULT_OUTPUT_DIR))),
-            build=parse_selector(opt("build", "*")),
+            build=parse_selector(opt("build", default_build)),
             skip=parse_selector(opt("skip", "")),
             archs=_as_list(archs_value, "archs"),
             micropython_submodules=_as_list(
                 opt("micropython-submodules"), "micropython-submodules"
             ),
-            mpy_abi=_parse_mpy_abi(opt("mpy-abi")),
             arch_flags=_as_list(arch_flags_value, "arch-flags"),
             version=str(opt("version", "")),
             overrides=overrides,
@@ -391,21 +383,13 @@ class Options:
     # ── Resolution ────────────────────────────────────────────────────────
 
     def tag_groups(self) -> list[tuple[str, str]]:
-        """One (tag, abi) pair per distinct ABI this config selects.
-
-        Two ways to state the axis (**0051**). If `mpy-abi` is a list, it
-        names the ABIs directly -- `resolve_abi_selector()` resolves each
-        to its own newest known tag, the direction `MPY_ABI` cannot run
-        forwards. Otherwise `micropython`'s own tags are resolved to the
-        ABI they produce (`resolve_micropython_tags()`, almost always a
-        single pair since that is the common case -- **D13**), with
-        `mpy-abi` as a bare string still available as a per-invocation
-        override forcing one ABI onto every tag, unchanged from before
-        this record.
+        """One (tag, abi) pair per known ABI -- the full natmod version
+        axis domain (record 0052, A2), each resolved to its own newest
+        known tag. No `micropython`/`mpy-abi` config key states this any
+        more; `build`/`skip` narrow it downstream by matching identifiers,
+        the same way `archs` already narrows `NATMOD_ARCHS`.
         """
-        if isinstance(self.mpy_abi, list):
-            return resolve_abi_selector(self.mpy_abi)
-        return resolve_micropython_tags(self.micropython, self.mpy_abi)
+        return all_tag_groups()
 
     def extra_files(self) -> list[str]:
         """`[publish] extra-files` -- files copied into every identifier's
@@ -416,19 +400,36 @@ class Options:
     def targets(self) -> list[Target]:
         """Every target this config selects.
 
-        One ABI group per `tag_groups()` entry, archs in NATMOD_ARCHS order
-        within each group. `arch_flags` (rv32imc only) is resolved here,
-        before selection, since it is part of the identifier that
-        `build`/`skip`/`[[overrides]]` glob against. A list produces one
-        rv32imc target *per entry* -- "build every arch-flags variant" is
-        its own request, distinct from "build every arch", so
-        `arch-flags = ["", "zba,zcmp"]` is two rv32imc identifiers, not one.
+        One ABI group per `tag_groups()` entry -- every known ABI by
+        default (record 0052, A2), each swept against `self.archs`
+        (`NATMOD_ARCHS` by default) *intersected with* whatever that
+        specific ABI's own tag actually has available
+        (`archs_available_for()`). The intersection matters here and did
+        not before A2: most ABIs predate at least one arch
+        (`rv32imc`/`rv64imc`/`xtensawin` were all added over time), so
+        sweeping every known ABI by default must not crash on the ones
+        that cannot build everything -- it must simply contribute fewer
+        targets for them, exactly as `select()` below then narrows the
+        combined result to what `build`/`skip` actually asked for.
+        `arch_flags` (rv32imc only) is resolved here, before selection,
+        since it is part of the identifier that `build`/`skip`/
+        `[[overrides]]` glob against. A list produces one rv32imc target
+        *per entry* -- "build every arch-flags variant" is its own
+        request, distinct from "build every arch", so
+        `arch-flags = ["", "zba,zcmp"]` is two rv32imc identifiers, not
+        one.
         """
+        validate_archs_recognized(self.archs)
         arch_flags = resolve_arch_flags("rv32imc", self.arch_flags)
         all_targets = [
             target
             for tag, abi in self.tag_groups()
-            for target in natmod_targets(self.archs, abi, tag, arch_flags)
+            for target in natmod_targets(
+                [a for a in self.archs if a in archs_available_for(tag)],
+                abi,
+                tag,
+                arch_flags,
+            )
         ]
         return select(all_targets, self.build, self.skip)
 
@@ -442,9 +443,13 @@ class Options:
         rather than a shortcut: an identifier's ABI slot (`mpy6.3-`) comes
         from the `MPY_VERSION`/`MPY_SUB_VERSION` of an actual MicroPython
         checkout, so the set of nameable identifiers genuinely depends on
-        this config's own `micropython` key and cannot be enumerated
-        without it. `tag_groups()` therefore stays; `archs`, `build` and
-        `skip` -- which are selection, not existence -- do not.
+        which tags `resources/build-platforms.toml` has actually walked.
+        `tag_groups()` therefore stays; `archs`, `build` and `skip` --
+        which are selection, not existence -- do not, though the same
+        per-tag intersection `targets()` needs still applies: an arch
+        `NATMOD_ARCHS` lists but a given ABI's own tag does not have is
+        not a *nameable* identifier for that ABI, so it is excluded here
+        too rather than only filtered downstream.
 
         `arch_flags` stays for the same reason as `tag_groups()`: **D15**
         made a `+0x..` suffix part of the identifier, and which variants
@@ -455,7 +460,12 @@ class Options:
         return [
             target
             for tag, abi in self.tag_groups()
-            for target in natmod_targets(list(NATMOD_ARCHS), abi, tag, arch_flags)
+            for target in natmod_targets(
+                [a for a in NATMOD_ARCHS if a in archs_available_for(tag)],
+                abi,
+                tag,
+                arch_flags,
+            )
         ]
 
     def build_options(

@@ -35,34 +35,39 @@ relationship `pypa/cibuildwheel@v3` has with `python -m cibuildwheel`).
 
 ## Identifier scheme
 
-Shaped after `cp311-manylinux_x86_64` = *{ABI}-{platform}\_{arch}*:
+Shaped after `cp311-manylinux_x86_64` = *{ABI}\_{arch}*, but with no literal
+mode segment (record [0052], Track A/A2):
 
 ```
-mpy6.3-natmod-armv7emsp
-mpy6.3-natmod-x64
+mpy6.3-armv7emsp
+mpy6.3-x64
 ```
 
 - **`mpy6.3`** — the `.mpy` ABI: `MPY_VERSION`.`MPY_SUB_VERSION` from
   `py/persistentcode.h`. This is the correct compatibility axis, not the
   MicroPython release tag: a native `.mpy` loads into any runtime with a
   matching `MPY_VERSION`/`MPY_SUB_VERSION` pair, which spans several
-  releases. The release tag is *what you build against* and stays a config
-  key; the ABI is *where the result runs* and is derived from the checked-out
-  source (and cross-checked against the built file's own header).
+  releases.
 
-  Two ways to state which ABIs to build, as of [0051]: `micropython = [tags]`
-  derives the ABI forward from each tag (the original shape, still the
-  default); `mpy-abi = [abis]` states the axis directly and resolves each ABI
-  backward to its own newest known tag. A bare `mpy-abi = "6.3"` string keeps
-  its older, narrower meaning — an override forcing that ABI onto every
-  listed tag, rather than the axis itself.
-- **`natmod`** — the build mode, i.e. the "platform" slot.
+  There is no `micropython`/`mpy-abi` config key any more ([0052], A2): the
+  version axis is a statically known domain — `resources/build-platforms.toml`
+  records every `.mpy` ABI this project has actually verified against a real
+  MicroPython tag (five today: `5`, `6`, `6.1`, `6.2`, `6.3`), each resolved
+  to its own newest known tag automatically. `build`/`skip` narrow that
+  domain by matching identifiers, exactly the way they already narrow
+  `archs`; a bare, unconfigured `build` selector narrows it further still, to
+  the single newest known ABI, so a zero-config invocation keeps building
+  only that one ABI rather than every one this project has ever verified.
+  There is currently no way to pin an explicit tag instead of the
+  auto-picked newest one for a given ABI — a real, open gap, not yet
+  designed.
+- No literal mode/platform segment — `natmod` is one platform among the
+  usermod ports too now ([0051]), all sharing this same *{ABI}\_{arch}*
+  shape rather than natmod alone spelling its own name into the string.
 - **arch** — one of `dynruntime.mk`'s ten `ARCH` values.
 - **`+0x..`** (optional, `rv32imc` only) — `arch_flags`, present only when
-  `arch-flags` is set (**D15**): `mpy6.3-natmod-rv32imc+0x3`. Absent for
-  every other arch and for `rv32imc` with no `arch-flags` configured, so
-  every identifier in this file predating D15 is still exactly what it
-  was.
+  `arch-flags` is set (**D15**): `mpy6.3-rv32imc+0x3`. Absent for every
+  other arch and for `rv32imc` with no `arch-flags` configured.
 
 No separate float/precision field. Precision is already encoded in the arch
 itself (`MP_NATIVE_ARCH_ARMV7EMSP` vs `…ARMV7EMDP` are distinct values, and
@@ -150,16 +155,16 @@ choice.
 ```toml
 # cibuildmp.toml — repo root
 
-micropython = "v1.28.0"       # release tag(s) to build against -- also
-                              # accepts a list (D13): ["v1.22.0", "v1.28.0"].
-                              # For usermod, this list is the leading axis:
-                              # every listed tag builds, output kept apart
-                              # by identifier ([0051])
-# mpy-abi = ["6.3", "6.2"]    # natmod only: states the .mpy ABI axis
-                              # directly instead of deriving it from tags
-                              # ([0051]); a bare string keeps its older,
-                              # narrower meaning -- force this ABI onto
-                              # every listed tag
+micropython = "v1.29.0"       # usermod only ([0052], A2): release tag(s) to
+                              # build against -- also accepts a list (D13):
+                              # ["v1.22.0", "v1.29.0"]. This list is the
+                              # leading axis; every listed tag builds, output
+                              # kept apart by identifier ([0051]). natmod has
+                              # no version config key at all any more -- its
+                              # own version axis is the static domain of
+                              # every `.mpy` ABI resources/build-platforms.toml
+                              # has verified, narrowed by build/skip matching
+                              # identifiers exactly like archs already is.
 output-dir = "mpyhouse"       # output-dir/<identifier>/ per target (D14)
 build = "*"                   # glob(s) over identifiers, space-separated
 skip = ""
@@ -214,10 +219,12 @@ file → `[[overrides]]` matching the identifier → environment → CLI flags.
 
 **Where a key goes is part of the schema, and getting it wrong is an
 error** ([0048], generalised into a cascade by [0051]'s own Phase F). The
-keys above the first table header — `micropython`, `output-dir`, `build`,
-`skip`, `version`, `mpy-abi`, `micropython-submodules`, `enable` — are
-invocation-wide and are read **only** from the top level, across every
-platform. Writing one inside `[natmod]` or a usermod port's own table
+keys above the first table header — `micropython` (usermod only since
+[0052]'s A2 removed natmod's own use of it), `output-dir`, `build`, `skip`,
+`version`, `micropython-submodules`, `enable` — are invocation-wide and are
+read **only** from the top level, across every platform (`mpy-abi` is gone
+entirely, not merely relocated — writing it anywhere is now a plain unknown-
+key error). Writing one inside `[natmod]` or a usermod port's own table
 fails with a message naming where it belongs; so does any key that table's
 own schema does not read at all (a typo, or an `arch-flags` inside
 `[[overrides]]`). Until [0048] every one of those was silently ignored,

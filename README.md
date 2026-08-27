@@ -37,14 +37,14 @@ is implemented so far.
 
 ```console
 $ cibuildmp --dry-run
-cibuildmp: 10 target(s) against MicroPython v1.28.0
-  [ 1/10] mpy6.3-natmod-x86            CROSS=(host)                 make -C natmod ARCH=x86 dist
-  [ 2/10] mpy6.3-natmod-x64            CROSS=(host)                 make -C natmod ARCH=x64 dist
+cibuildmp: 10 target(s) against MicroPython v1.30.0-preview
+  [ 1/10] mpy6.3-x86                   make -C natmod ARCH=x86 dist
+  [ 2/10] mpy6.3-x64                   make -C natmod ARCH=x64 dist
   ...
 ```
 
 Drop `--dry-run` and it builds for real: each target lands in its own
-`output-dir/<identifier>/` directory (`mpyhouse/mpy6.3-natmod-x64/`, …)
+`output-dir/<identifier>/` directory (`mpyhouse/mpy6.3-x64/`, …)
 alongside a `package.json` once `version` is set — see
 [`examples/template`](examples/template),
 [`examples/wasm2mpy`](examples/wasm2mpy) (native source is WebAssembly,

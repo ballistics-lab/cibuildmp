@@ -26,7 +26,7 @@ def build_options(
     arch: str = "armv7emsp", arch_flags: int = 0, **overrides
 ) -> BuildOptions:
     defaults = {
-        "target": Target(abi="6.3", mode="natmod", arch=arch, arch_flags=arch_flags),
+        "target": Target(abi="6.3", arch=arch, arch_flags=arch_flags),
         "micropython": "v1.28.0",
         "output_dir": Path("mpyhouse"),
         "module_dir": "natmod",
@@ -265,7 +265,7 @@ def test_verify_output_rejects_mismatched_arch_flags(tmp_path):
 
 def test_output_name_is_unambiguous():
     mpy = Path("build/armv7emsp-eabi/mymodule.mpy")
-    assert output_name(build_options(), mpy) == "mymodule-mpy6.3-natmod-armv7emsp.mpy"
+    assert output_name(build_options(), mpy) == "mymodule-mpy6.3-armv7emsp.mpy"
 
 
 def _stub_make(tmp_path, native_code=7, arch_flags=0):
@@ -291,12 +291,7 @@ def test_build_target_writes_into_its_own_identifier_directory(tmp_path, monkeyp
         package_dir=tmp_path,
     )
     assert isinstance(result, BuildResult)
-    expected = (
-        tmp_path
-        / "out"
-        / "mpy6.3-natmod-armv7emsp"
-        / "mymodule-mpy6.3-natmod-armv7emsp.mpy"
-    )
+    expected = tmp_path / "out" / "mpy6.3-armv7emsp" / "mymodule-mpy6.3-armv7emsp.mpy"
     assert result.output == expected
     assert result.output.exists()
     assert result.size > 0

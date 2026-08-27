@@ -22,7 +22,10 @@
 # Upstream wasm2mpy presumably handles this in its own CI toolchain choice
 # or an unmerged dynruntime.mk difference (see its now-obsolete
 # mpy-ld-link-archives fork); not something to guess a fix for here.
-micropython = "v1.29.0"
+#
+# No micropython key (record 0052, A2 -- this file has no usermod table
+# either, so nothing would read it): natmod auto-resolves the newest tag
+# for the newest known .mpy ABI on its own now.
 
 [natmod]
 archs = ["x64", "x86", "armv6m", "armv7m", "armv7emsp", "armv7emdp",

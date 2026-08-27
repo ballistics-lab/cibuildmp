@@ -18,7 +18,7 @@ inputs:
     default: ""
   only:
     description: >
-      Build exactly this one identifier (e.g. mpy6.3-natmod-armv7emsp),
+      Build exactly this one identifier (e.g. mpy6.3-armv7emsp),
       ignoring the config's own build/skip selectors and its axis alike.
       Resolved against every identifier that exists, not against what the
       config selects (record 0045).

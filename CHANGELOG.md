@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **natmod's `micropython`/`mpy-abi` config keys are gone; the version
+  axis is a statically known domain now, and its identifier drops the
+  literal `-natmod-` segment.** `mpy6.3-natmod-armv7emsp` becomes
+  `mpy6.3-armv7emsp` -- natmod is one platform among six sharing this
+  identifier shape (record 0051), not a mode this string spells out.
+  `resources/build-platforms.toml` records every `.mpy` ABI this project
+  has verified against a real MicroPython tag (five today), each resolved
+  to its own newest known tag automatically; `build`/`skip` narrow that
+  domain the same way they already narrow `archs`. An unconfigured
+  `build` still defaults to the single newest known ABI, matching the old
+  `micropython`-pinned default's own narrow footprint rather than opening
+  up to every ABI this project has ever verified. Natmod also gained
+  `resources/build-platforms.toml`-backed per-tag arch availability: an
+  arch dynruntime.mk really does support but a specific tag's own source
+  tree predates (`rv32imc` before v1.24.0, `rv64imc` before v1.27.0) is
+  now a loud, specific error instead of a real build failing deep inside
+  `dynruntime.mk`. An unrecognised MicroPython tag is now a hard error
+  too, naming `bin/refresh_natmod_archs.py` as the fix, replacing a
+  silent fallback to a guessed ABI. Record 0052, Tracks A (A2) and C.
+
 - **Every usermod identifier now carries the MicroPython release, and
   natmod's `mpy-abi` can name the ABI axis directly.**
   `unix-manylinux_2_28_x86_64` becomes

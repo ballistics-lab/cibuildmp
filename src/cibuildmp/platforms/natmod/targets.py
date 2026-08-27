@@ -81,11 +81,22 @@ _TAG_ARCHS: dict[str, frozenset[str]] = {
 }
 
 
+def archs_available_for(tag: str) -> frozenset[str]:
+    """Every arch `tag`'s own dynruntime.mk source tree actually has, or
+    an empty set for a tag this table has never walked. Public so
+    `Options.targets()`/`all_targets()` (record 0052, A2) can filter a
+    requested archs list down to what a given ABI's own tag can build
+    *before* calling `natmod_targets()`, rather than letting its hard
+    error fire while sweeping every known ABI by default -- most ABIs
+    predate at least one arch (`rv32imc`/`rv64imc`/`xtensawin` were all
+    added over time), so that sweep silently producing fewer targets for
+    an older ABI is the intended, ordinary case, not a config mistake the
+    way an explicit, single-tag request for an unavailable arch still is.
+    """
+    return _TAG_ARCHS.get(tag, frozenset())
+
+
 class UnknownArchError(ValueError):
-    pass
-
-
-class UnknownAbiError(ValueError):
     pass
 
 
@@ -153,9 +164,10 @@ def resolve_arch_flags(arch: str, values: Sequence[str]) -> list[int]:
     bitmask (a bare numeric string, or a comma-separated flag list) --
     two different spellings that resolve to the same integer would
     otherwise silently produce two `Target`s sharing one identifier, the
-    same collision class `resolve_micropython_tags()` already exists to
-    prevent for tags. `dict.fromkeys` preserves first-seen order, the
-    same "whichever came first" rule that function follows too.
+    same collision class `all_tag_groups()` avoids for ABIs below by
+    working from a dict keyed on the resolved value, not the raw one.
+    `dict.fromkeys` preserves first-seen order, the same "whichever came
+    first" rule that function follows too.
 
     Empty input means "no flags requested" -- one target, `arch_flags=0`,
     not zero targets.
@@ -163,32 +175,6 @@ def resolve_arch_flags(arch: str, values: Sequence[str]) -> list[int]:
     if not values:
         return [0]
     return list(dict.fromkeys(parse_arch_flags(arch, value) for value in values))
-
-
-def resolve_micropython_tags(
-    tags: list[str], override: str | None = None
-) -> list[tuple[str, str]]:
-    """One (tag, abi) pair per distinct ABI `tags` resolves to.
-
-    Building against several tags is a real use case only when they span an
-    ABI boundary (py/persistentcode.h's MPY_VERSION/MPY_SUB_VERSION) --
-    otherwise every one of them produces *functionally interchangeable*
-    native `.mpy` output, verified live (D13's own addendum: two same-ABI
-    tags' unix binaries correctly cross-load and run both tags' own
-    output). Not byte-identical -- verified false the same way, `tools/
-    mpy_ld.py`'s own internal encoding can drift within one ABI group with
-    no version bump -- so the tag actually kept is not fully inert, only
-    load-compatible with any other tag its ABI group would have kept. A
-    later tag whose ABI an earlier one already covers is silently dropped
-    rather than built again for no functional difference; order follows
-    `tags`, so the kept tag is whichever came first in the config.
-    """
-    seen: dict[str, str] = {}
-    for tag in tags:
-        abi = abi_for_tag(tag, override)
-        if abi not in seen:
-            seen[abi] = tag
-    return [(tag, abi) for abi, tag in seen.items()]
 
 
 def _tag_sort_key(tag: str) -> tuple[tuple[int, ...], int, str]:
@@ -219,21 +205,55 @@ def newest_tag_for_abi(abi: str) -> str | None:
     return max(candidates, key=_tag_sort_key)
 
 
-def resolve_abi_selector(abis: list[str]) -> list[tuple[str, str]]:
-    """One (tag, abi) pair per entry in `abis` -- the axis stated directly,
-    the direction resolve_micropython_tags() cannot run since MPY_ABI only
-    maps tag -> abi (0051). Order follows `abis`, matching
-    resolve_micropython_tags()'s own "order follows the input" contract.
+def _abi_sort_key(abi: str) -> tuple[int, ...]:
+    """Order `.mpy` ABI strings ("5", "6", "6.1", ..., "6.3") oldest-first,
+    the same numeric-tuple approach `_tag_sort_key()` uses for tags --
+    plain string comparison gets "6" < "6.1" right by luck (a shorter
+    string is a prefix of a longer one here) but would get "6.10" wrong
+    against "6.2", so it is not trusted even though today's real values
+    happen to work either way.
+    """
+    return tuple(int(p) for p in abi.split("."))
+
+
+def known_abis() -> list[str]:
+    """Every distinct `.mpy` ABI this project has verified against a real
+    MicroPython tag, oldest first -- the natmod version axis' own static
+    domain (record 0052, A2). There is no `micropython`/`mpy-abi` config
+    key stating it any more; `build`/`skip` narrow it by matching
+    identifiers, exactly the way `archs` already narrows `NATMOD_ARCHS`.
+    """
+    return sorted(set(MPY_ABI.values()), key=_abi_sort_key)
+
+
+def newest_known_abi() -> str:
+    """The numerically newest entry in known_abis() -- what an
+    unconfigured `build` selector narrows a natmod invocation to by
+    default (record 0052, A2), so a bare config keeps building only the
+    newest ABI instead of every one this project has ever verified.
+    Replaces `DEFAULT_MICROPYTHON`'s old role for natmod specifically: a
+    derived value that follows `resources/build-platforms.toml`'s own
+    refreshes rather than a literal tag string needing a manual bump on
+    every release (usermod's own `DEFAULT_MICROPYTHON` is unaffected --
+    A2 is natmod-only).
+    """
+    return max(known_abis(), key=_abi_sort_key)
+
+
+def all_tag_groups() -> list[tuple[str, str]]:
+    """One (tag, abi) pair per known_abis() entry, each resolved to its
+    own newest known tag via newest_tag_for_abi() -- the full natmod
+    version-axis domain `Options.targets()`/`all_targets()` cross with
+    `archs` before `build`/`skip` narrow the result by identifier.
+    Replaces `resolve_micropython_tags()`/`resolve_abi_selector()`, both
+    of which took a user-declared tag/ABI list that no longer exists as a
+    config key -- there is nothing left to validate or dedupe here that
+    known_abis() has not already done once, up front.
     """
     result = []
-    for abi in abis:
+    for abi in known_abis():
         tag = newest_tag_for_abi(abi)
-        if tag is None:
-            known = sorted(set(MPY_ABI.values()))
-            raise UnknownAbiError(
-                f"unknown .mpy ABI {abi!r} -- no known MicroPython tag "
-                f"produces it. Known ABIs: {', '.join(known)}"
-            )
+        assert tag is not None, f"{abi!r} came from MPY_ABI itself"
         result.append((tag, abi))
     return result
 
@@ -243,7 +263,6 @@ class Target:
     """One build: an identifier plus the axes it decodes back into."""
 
     abi: str  # "6.3"
-    mode: str  # "natmod"
     arch: str  # "armv7emsp"
     # The MicroPython tag actually fetched and built to produce this target
     # -- not part of the identifier (that's ABI, the compatibility axis),
@@ -260,13 +279,17 @@ class Target:
     @property
     def identifier(self) -> str:
         # Shaped after cibuildwheel's cp311-manylinux_x86_64, i.e.
-        # {ABI}-{platform}_{arch}, with '-' throughout so that both
-        # "mpy6.3-*" and "*-armv7em*" are useful globs. arch_flags, when
-        # present, is an opaque `+0x..` suffix rather than named flags: it
-        # would otherwise have to stay in lockstep with RV32_ARCH_FLAGS to
-        # remain accurate, and the identifier must still mean the same thing
-        # if that table grows a flag this build predates.
-        base = f"mpy{self.abi}-{self.mode}-{self.arch}"
+        # {ABI}-{platform}_{arch} -- but with no literal "natmod" segment
+        # (record 0052, A2): natmod is now one platform among six sharing
+        # this exact identifier shape (`.port` below), not a special mode
+        # this string needs to spell out, and dropping it is what lets
+        # "mpy6.3-*" and "*-armv7em*" both stay useful, minimal globs.
+        # arch_flags, when present, is an opaque `+0x..` suffix rather than
+        # named flags: it would otherwise have to stay in lockstep with
+        # RV32_ARCH_FLAGS to remain accurate, and the identifier must still
+        # mean the same thing if that table grows a flag this build
+        # predates.
+        base = f"mpy{self.abi}-{self.arch}"
         if self.arch_flags:
             base += f"+0x{self.arch_flags:x}"
         return base
@@ -276,16 +299,32 @@ class Target:
         # Always "natmod" -- natmod is a platform among six now (record
         # 0051 points 4/6), so Target needs the same `.port` UsermodTarget
         # already has, for Phase G's own per-matched-platform override
-        # validation (natmod/options.py's build_options()). `self.mode` is
-        # always the literal string "natmod" too (natmod_targets() sets
-        # it), but that field names what it decodes back into an
-        # identifier segment, not what a caller asking "which platform" is
-        # actually after -- a distinct property keeps those two questions
-        # from silently meaning the same thing by accident.
+        # validation (natmod/options.py's build_options()). Since A2
+        # dropped the literal word from the identifier itself, this is now
+        # the *only* place "natmod" appears on a Target at all.
         return "natmod"
 
     def __str__(self) -> str:
         return self.identifier
+
+
+def validate_archs_recognized(archs: list[str]) -> None:
+    """Raise `UnknownArchError` for any arch `dynruntime.mk` has never
+    heard of at all, at any tag -- a typo, as opposed to a real arch a
+    specific tag's own source tree does not have (see `natmod_targets()`'s
+    own docstring for that distinction). Shared so `Options.targets()`/
+    `all_targets()` (record 0052, A2) can validate `self.archs` once,
+    globally, *before* filtering it per tag against `archs_available_for()`
+    -- filtering first would silently swallow a genuine typo instead of
+    ever reaching `natmod_targets()`'s own check, since a nonexistent arch
+    is never "available" for any tag either.
+    """
+    unrecognized = [a for a in archs if a not in NATMOD_ARCH_NATIVE_CODE]
+    if unrecognized:
+        raise UnknownArchError(
+            f"unknown natmod arch(es): {', '.join(sorted(unrecognized))}. "
+            f"py/dynruntime.mk supports: {', '.join(NATMOD_ARCHS)}"
+        )
 
 
 def natmod_targets(
@@ -311,12 +350,7 @@ def natmod_targets(
     Both raise the same `UnknownArchError` a caller already has to catch
     (no new exception type), just with a message naming the real reason.
     """
-    unrecognized = [a for a in archs if a not in NATMOD_ARCH_NATIVE_CODE]
-    if unrecognized:
-        raise UnknownArchError(
-            f"unknown natmod arch(es): {', '.join(sorted(unrecognized))}. "
-            f"py/dynruntime.mk supports: {', '.join(NATMOD_ARCHS)}"
-        )
+    validate_archs_recognized(archs)
     available = _TAG_ARCHS.get(tag, frozenset())
     unavailable = [a for a in archs if a not in available]
     if unavailable:
@@ -332,11 +366,11 @@ def natmod_targets(
             continue
         if a == "rv32imc":
             targets += [
-                Target(abi=abi, mode="natmod", arch=a, tag=tag, arch_flags=flags)
+                Target(abi=abi, arch=a, tag=tag, arch_flags=flags)
                 for flags in arch_flags
             ]
         else:
-            targets.append(Target(abi=abi, mode="natmod", arch=a, tag=tag))
+            targets.append(Target(abi=abi, arch=a, tag=tag))
     return targets
 
 

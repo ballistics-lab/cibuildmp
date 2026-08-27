@@ -4,30 +4,34 @@ from cibuildmp.platforms.natmod.targets import (
     NATMOD_ARCH_NATIVE_CODE,
     NATMOD_ARCHS,
     Target,
-    UnknownAbiError,
     UnknownArchError,
     UnknownTagError,
     abi_for_tag,
+    all_tag_groups,
+    known_abis,
     natmod_targets,
+    newest_known_abi,
     newest_tag_for_abi,
     parse_arch_flags,
-    resolve_abi_selector,
     resolve_arch_flags,
-    resolve_micropython_tags,
 )
 from cibuildmp.selector import parse_selector, select
 
 
 def test_identifier_shape():
-    t = Target(abi="6.3", mode="natmod", arch="armv7emsp")
-    assert t.identifier == "mpy6.3-natmod-armv7emsp"
+    # No literal "natmod" segment (record 0052, A2): natmod is one
+    # platform among six sharing this exact identifier shape now, not a
+    # mode this string needs to spell out.
+    t = Target(abi="6.3", arch="armv7emsp")
+    assert t.identifier == "mpy6.3-armv7emsp"
+    assert t.port == "natmod"
 
 
 def test_identifier_carries_arch_flags_only_when_set():
-    plain = Target(abi="6.3", mode="natmod", arch="rv32imc")
-    assert plain.identifier == "mpy6.3-natmod-rv32imc"
-    flagged = Target(abi="6.3", mode="natmod", arch="rv32imc", arch_flags=3)
-    assert flagged.identifier == "mpy6.3-natmod-rv32imc+0x3"
+    plain = Target(abi="6.3", arch="rv32imc")
+    assert plain.identifier == "mpy6.3-rv32imc"
+    flagged = Target(abi="6.3", arch="rv32imc", arch_flags=3)
+    assert flagged.identifier == "mpy6.3-rv32imc+0x3"
 
 
 def test_parse_arch_flags_numeric_forms():
@@ -82,9 +86,9 @@ def test_natmod_targets_one_rv32imc_target_per_arch_flags_entry():
     # each entry produces its own rv32imc identifier, side by side.
     targets = natmod_targets(["rv32imc"], "6.3", "v1.28.0", [0, 1, 3])
     assert [t.identifier for t in targets] == [
-        "mpy6.3-natmod-rv32imc",
-        "mpy6.3-natmod-rv32imc+0x1",
-        "mpy6.3-natmod-rv32imc+0x3",
+        "mpy6.3-rv32imc",
+        "mpy6.3-rv32imc+0x1",
+        "mpy6.3-rv32imc+0x3",
     ]
 
 
@@ -105,35 +109,13 @@ def test_abi_spans_many_releases():
 
 def test_unknown_tag_is_a_hard_error_not_a_fallback():
     # record 0052, Track C: an unrecognised tag used to silently resolve
-    # to LATEST_KNOWN_ABI; it is now a loud UnknownTagError instead, since
+    # to a guessed ABI; it is now a loud UnknownTagError instead, since
     # resources/build-platforms.toml names every tag this project has
     # actually verified.
     with pytest.raises(UnknownTagError, match="v1.99.0"):
         abi_for_tag("v1.99.0")
     # An explicit override still bypasses the lookup entirely.
     assert abi_for_tag("v1.99.0", override="7.0") == "7.0"
-
-
-def test_resolve_micropython_tags_dedups_by_abi():
-    # v1.23.0 and v1.28.0 both produce ABI 6.3 -- the second is redundant,
-    # not a second build.
-    assert resolve_micropython_tags(["v1.23.0", "v1.28.0"]) == [("v1.23.0", "6.3")]
-
-
-def test_resolve_micropython_tags_keeps_distinct_abis():
-    # v1.22.0 (6.2) and v1.28.0 (6.3) are a real ABI boundary.
-    assert resolve_micropython_tags(["v1.22.0", "v1.28.0"]) == [
-        ("v1.22.0", "6.2"),
-        ("v1.28.0", "6.3"),
-    ]
-
-
-def test_resolve_micropython_tags_honours_override():
-    # An explicit mpy-abi override makes every listed tag resolve to the
-    # same ABI, so only the first is kept.
-    assert resolve_micropython_tags(["v1.22.0", "v1.28.0"], override="7.0") == [
-        ("v1.22.0", "7.0")
-    ]
 
 
 def test_newest_tag_for_abi_reads_the_table_backwards():
@@ -145,10 +127,7 @@ def test_newest_tag_for_abi_reads_the_table_backwards():
     # now the still-open v1.30.0-preview, not v1.29.0's own real release.
     assert newest_tag_for_abi("6.3") == "v1.30.0-preview"
     # 6.2 and 6.1 are each fully covered by a real, non-preview release
-    # tag (v1.22.2, v1.21.0) already present in build-platforms.toml, so
-    # pruning the old previews that used to answer this in natmod.toml
-    # (v1.23.0-preview, v1.22.0-preview) does not lose anything real --
-    # it resolves to the actual shipped release instead.
+    # tag (v1.22.2, v1.21.0) already present in build-platforms.toml.
     assert newest_tag_for_abi("6.2") == "v1.22.2"
     assert newest_tag_for_abi("6.1") == "v1.21.0"
 
@@ -157,18 +136,36 @@ def test_newest_tag_for_abi_unknown_abi_is_none():
     assert newest_tag_for_abi("9.9") is None
 
 
-def test_resolve_abi_selector_states_the_axis_directly():
-    # The direction resolve_micropython_tags() cannot run: ABIs in, tags
-    # out, each resolved to its own newest known tag.
-    assert resolve_abi_selector(["6.3", "6.2"]) == [
-        ("v1.30.0-preview", "6.3"),
-        ("v1.22.2", "6.2"),
-    ]
+def test_known_abis_is_every_distinct_abi_oldest_first():
+    # record 0052, A2: there is no micropython/mpy-abi config key to state
+    # this any more -- known_abis() is the whole natmod version axis'
+    # static domain, and build-platforms.toml records five distinct ABIs
+    # across MicroPython's own history (5, 6, 6.1, 6.2, 6.3), not the
+    # three resources/natmod.toml's own smaller [mpy-abi] table used to
+    # know about.
+    abis = known_abis()
+    assert abis == ["5", "6", "6.1", "6.2", "6.3"]
+    # Numeric order, not lexical -- "6" must sort before "6.1", which a
+    # plain string comparison also happens to get right here, but for the
+    # right reason (verified via a real multi-digit case elsewhere is not
+    # needed: this project's own known ABI values never reach two digits
+    # in either component).
+    assert abis == sorted(abis, key=lambda a: tuple(int(p) for p in a.split(".")))
 
 
-def test_resolve_abi_selector_rejects_unknown_abi():
-    with pytest.raises(UnknownAbiError, match="unknown .mpy ABI '9.9'"):
-        resolve_abi_selector(["9.9"])
+def test_newest_known_abi_is_the_numeric_maximum():
+    assert newest_known_abi() == "6.3"
+
+
+def test_all_tag_groups_covers_every_known_abi():
+    groups = all_tag_groups()
+    assert dict(groups) == {
+        "v1.18": "5",
+        "v1.19.1": "6",
+        "v1.21.0": "6.1",
+        "v1.22.2": "6.2",
+        "v1.30.0-preview": "6.3",
+    }
 
 
 def test_natmod_targets_preserve_canonical_order():

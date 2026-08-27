@@ -2,7 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from cibuildmp.platforms.natmod.options import DEFAULT_MICROPYTHON, ConfigError, Options
+from cibuildmp.platforms.natmod.options import ConfigError, Options
+from cibuildmp.platforms.natmod.targets import newest_known_abi
 
 
 def write(tmp_path: Path, text: str, name: str = "cibuildmp.toml") -> Path:
@@ -13,11 +14,16 @@ def write(tmp_path: Path, text: str, name: str = "cibuildmp.toml") -> Path:
 def test_defaults_with_no_config_at_all(tmp_path):
     options = Options.load(tmp_path, env={})
     assert options.config_path is None
-    # Derived, not restated: which release is newest changes on
-    # upstream's schedule, and a test about *defaulting* should not fail
-    # every time it does. `test_targets.py` owns the pin itself.
-    assert options.micropython == [DEFAULT_MICROPYTHON]
+    # No micropython/mpy-abi config key any more (record 0052, A2): the
+    # version axis is a static domain, and an unconfigured build selector
+    # narrows it to the newest known ABI by itself -- derived, not
+    # restated, so a test about *defaulting* does not fail every time
+    # upstream ships a release. All ten arches are real for that ABI's
+    # own newest tag (verified live, not assumed), so a bare config still
+    # produces exactly ten targets, same as before A2.
+    assert options.build == [f"mpy{newest_known_abi()}-*"]
     assert len(options.targets()) == 10
+    assert {t.abi for t in options.targets()} == {newest_known_abi()}
     build_options = options.build_options(options.targets()[0], env={})
     assert build_options.module_dir == "natmod"
     assert build_options.make_target == "dist"
@@ -27,7 +33,6 @@ def test_overrides_beat_natmod_table(tmp_path):
     write(
         tmp_path,
         """
-        micropython = "v1.28.0"
         [natmod]
         archs = ["x64", "armv7emsp"]
         extra-make-args = ["COMMON=1"]
@@ -53,15 +58,11 @@ def test_override_without_select_is_an_error(tmp_path):
 
 
 def test_environment_beats_file(tmp_path):
-    write(
-        tmp_path,
-        'micropython = "v1.22.0"\nskip = ""\n[natmod]\narchs = ["x64", "x86"]\n',
-    )
-    options = Options.load(
-        tmp_path, env={"CIBMP_SKIP": "*-x86", "CIBMP_MICROPYTHON": "v1.28.0"}
-    )
-    # not 6.2, which the file's tag would give
-    assert options.tag_groups() == [("v1.28.0", "6.3")]
+    # record 0052, A2: micropython/mpy-abi are gone as config keys, so
+    # this now exercises skip -- CIBMP_SKIP still beats the file's own
+    # skip = "" the same way CIBMP_MICROPYTHON used to beat a file tag.
+    write(tmp_path, 'skip = ""\n[natmod]\narchs = ["x64", "x86"]\n')
+    options = Options.load(tmp_path, env={"CIBMP_SKIP": "*-x86"})
     assert [t.arch for t in options.targets()] == ["x64"]
 
 
@@ -85,119 +86,26 @@ def test_environment_beats_override(tmp_path):
 def test_pyproject_fallback(tmp_path):
     write(
         tmp_path,
-        '[tool.cibuildmp]\nmicropython = "v1.22.0"\n[tool.cibuildmp.natmod]\narchs = ["x64"]\n',
+        '[tool.cibuildmp]\n[tool.cibuildmp.natmod]\narchs = ["x64"]\n',
         name="pyproject.toml",
     )
     options = Options.load(tmp_path, env={})
     assert (
         options.config_path is not None and options.config_path.name == "pyproject.toml"
     )
-    assert options.tag_groups() == [("v1.22.0", "6.2")]
     assert [t.arch for t in options.targets()] == ["x64"]
 
 
 def test_standalone_wins_over_pyproject(tmp_path):
-    write(tmp_path, 'micropython = "v1.28.0"\n')
+    write(tmp_path, '[natmod]\narchs = ["x64"]\n')
     write(
-        tmp_path, '[tool.cibuildmp]\nmicropython = "v1.21.0"\n', name="pyproject.toml"
+        tmp_path,
+        '[tool.cibuildmp]\n[tool.cibuildmp.natmod]\narchs = ["armv6m"]\n',
+        name="pyproject.toml",
     )
     options = Options.load(tmp_path, env={})
     assert options.config_path.name == "cibuildmp.toml"
-    assert options.tag_groups() == [("v1.28.0", "6.3")]
-
-
-def test_micropython_list_spans_two_abi_groups(tmp_path):
-    write(
-        tmp_path,
-        """
-        micropython = ["v1.22.0", "v1.28.0"]
-        [natmod]
-        archs = ["x64"]
-        """,
-    )
-    options = Options.load(tmp_path, env={})
-    assert options.tag_groups() == [("v1.22.0", "6.2"), ("v1.28.0", "6.3")]
-    targets = options.targets()
-    assert [(t.tag, t.abi, t.identifier) for t in targets] == [
-        ("v1.22.0", "6.2", "mpy6.2-natmod-x64"),
-        ("v1.28.0", "6.3", "mpy6.3-natmod-x64"),
-    ]
-
-
-def test_micropython_list_dedups_redundant_abi(tmp_path):
-    write(
-        tmp_path,
-        """
-        micropython = ["v1.23.0", "v1.28.0"]
-        [natmod]
-        archs = ["x64"]
-        """,
-    )
-    options = Options.load(tmp_path, env={})
-    # Both are ABI 6.3 -- one build, not two, and it is built against
-    # whichever tag was listed first.
-    assert options.tag_groups() == [("v1.23.0", "6.3")]
-    assert [t.tag for t in options.targets()] == ["v1.23.0"]
-
-
-def test_micropython_env_accepts_space_separated_list(tmp_path):
-    write(tmp_path, '[natmod]\narchs = ["x64"]\n')
-    options = Options.load(tmp_path, env={"CIBMP_MICROPYTHON": "v1.22.0 v1.28.0"})
-    assert options.micropython == ["v1.22.0", "v1.28.0"]
-    assert options.tag_groups() == [("v1.22.0", "6.2"), ("v1.28.0", "6.3")]
-
-
-def test_mpy_abi_string_is_still_an_override(tmp_path):
-    # Unchanged from before 0051: a bare string forces every listed tag
-    # to resolve to that one ABI, regardless of what MPY_ABI says.
-    write(
-        tmp_path,
-        """
-        micropython = ["v1.22.0", "v1.28.0"]
-        mpy-abi = "7.0"
-        [natmod]
-        archs = ["x64"]
-        """,
-    )
-    options = Options.load(tmp_path, env={})
-    assert options.mpy_abi == "7.0"
-    assert options.tag_groups() == [("v1.22.0", "7.0")]
-
-
-def test_mpy_abi_list_states_the_axis_directly(tmp_path):
-    # The new path (0051): mpy-abi as a list is the axis itself, resolved
-    # backwards to each ABI's own newest known tag -- micropython is not
-    # consulted at all.
-    write(
-        tmp_path,
-        """
-        micropython = "v1.21.0"
-        mpy-abi = ["6.3", "6.2"]
-        [natmod]
-        archs = ["x64"]
-        """,
-    )
-    options = Options.load(tmp_path, env={})
-    assert options.mpy_abi == ["6.3", "6.2"]
-    # record 0052, Track C: newest-tag-per-ABI now reads
-    # resources/build-platforms.toml, which prunes every superseded
-    # preview but the single newest one -- 6.3's newest tag is the still-
-    # open v1.30.0-preview, and 6.2's is its own real release v1.22.2
-    # rather than a now-pruned preview tag.
-    assert options.tag_groups() == [("v1.30.0-preview", "6.3"), ("v1.22.2", "6.2")]
-    identifiers = [t.identifier for t in options.targets()]
-    assert identifiers == ["mpy6.3-natmod-x64", "mpy6.2-natmod-x64"]
-
-
-def test_mpy_abi_env_multi_token_is_axis_single_token_is_override(tmp_path):
-    write(tmp_path, '[natmod]\narchs = ["x64"]\n')
-    axis = Options.load(tmp_path, env={"CIBMP_MPY_ABI": "6.3 6.2"})
-    assert axis.mpy_abi == ["6.3", "6.2"]
-    override = Options.load(
-        tmp_path, env={"CIBMP_MICROPYTHON": "v1.22.0", "CIBMP_MPY_ABI": "7.0"}
-    )
-    assert override.mpy_abi == "7.0"
-    assert override.tag_groups() == [("v1.22.0", "7.0")]
+    assert [t.arch for t in options.targets()] == ["x64"]
 
 
 def test_arch_flags_land_on_rv32imc_identifier_and_make_args(tmp_path):
@@ -211,8 +119,8 @@ def test_arch_flags_land_on_rv32imc_identifier_and_make_args(tmp_path):
     )
     options = Options.load(tmp_path, env={})
     targets = {t.arch: t for t in options.targets()}
-    assert targets["rv32imc"].identifier == "mpy6.3-natmod-rv32imc+0x3"
-    assert targets["rv64imc"].identifier == "mpy6.3-natmod-rv64imc"  # unaffected
+    assert targets["rv32imc"].identifier == "mpy6.3-rv32imc+0x3"
+    assert targets["rv64imc"].identifier == "mpy6.3-rv64imc"  # unaffected
 
     rv32_args = options.build_options(targets["rv32imc"], env={}).extra_make_args
     assert "ARCH_FLAGS=0x3" in rv32_args
@@ -232,19 +140,19 @@ def test_arch_flags_list_builds_one_rv32imc_target_per_variant(tmp_path):
     options = Options.load(tmp_path, env={})
     identifiers = [t.identifier for t in options.targets()]
     assert identifiers == [
-        "mpy6.3-natmod-rv32imc",
-        "mpy6.3-natmod-rv32imc+0x1",
-        "mpy6.3-natmod-rv32imc+0x3",
+        "mpy6.3-rv32imc",
+        "mpy6.3-rv32imc+0x1",
+        "mpy6.3-rv32imc+0x3",
     ]
     make_args_by_id = {
         t.identifier: options.build_options(t, env={}).extra_make_args
         for t in options.targets()
     }
     assert not any(
-        a.startswith("ARCH_FLAGS=") for a in make_args_by_id["mpy6.3-natmod-rv32imc"]
+        a.startswith("ARCH_FLAGS=") for a in make_args_by_id["mpy6.3-rv32imc"]
     )
-    assert "ARCH_FLAGS=0x1" in make_args_by_id["mpy6.3-natmod-rv32imc+0x1"]
-    assert "ARCH_FLAGS=0x3" in make_args_by_id["mpy6.3-natmod-rv32imc+0x3"]
+    assert "ARCH_FLAGS=0x1" in make_args_by_id["mpy6.3-rv32imc+0x1"]
+    assert "ARCH_FLAGS=0x3" in make_args_by_id["mpy6.3-rv32imc+0x3"]
 
 
 def test_arch_flags_list_dedupes_two_spellings_of_the_same_value(tmp_path):
@@ -262,7 +170,7 @@ def test_arch_flags_list_dedupes_two_spellings_of_the_same_value(tmp_path):
     )
     options = Options.load(tmp_path, env={})
     identifiers = [t.identifier for t in options.targets()]
-    assert identifiers == ["mpy6.3-natmod-rv32imc+0x3"]
+    assert identifiers == ["mpy6.3-rv32imc+0x3"]
 
 
 def test_version_defaults_empty_and_is_settable(tmp_path):
@@ -292,7 +200,7 @@ def test_a_top_level_key_inside_the_natmod_table_names_where_it_goes(tmp_path):
     # to it is dual-read and works, so there was every reason to expect
     # this to work too. "unknown key" would be a lie here -- the tool
     # knows precisely what `skip` means, just not in this table.
-    write(tmp_path, 'micropython = "v1.28.0"\n[natmod]\nskip = "*-armv6m"\n')
+    write(tmp_path, 'version = "0.1.0"\n[natmod]\nskip = "*-armv6m"\n')
 
     with pytest.raises(ConfigError, match="read from the top level"):
         Options.load(tmp_path)
@@ -320,7 +228,6 @@ def test_arch_flags_in_an_overrides_table_is_an_error(tmp_path):
     write(
         tmp_path,
         """
-        micropython = "v1.28.0"
         [natmod]
         archs = ["x64"]
         [[overrides]]

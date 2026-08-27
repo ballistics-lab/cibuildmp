@@ -20,16 +20,16 @@ def test_parse_selector_accepts_both_forms():
 
 
 def test_matches_plain_fnmatch():
-    assert matches("mpy6.3-natmod-x64", ["mpy6.3-*"])
-    assert not matches("mpy6.3-natmod-x64", ["mpy6.2-*"])
+    assert matches("mpy6.3-x64", ["mpy6.3-*"])
+    assert not matches("mpy6.3-x64", ["mpy6.2-*"])
 
 
 def test_matches_expands_braces():
     # The gap 0051 flagged against upstream's own bracex-based
     # selector_matches(): cp{36,37}-* matching either cp36-* or cp37-*.
-    assert matches("mpy6.3-natmod-x64", ["*-{x64,x86}"])
-    assert matches("mpy6.3-natmod-x86", ["*-{x64,x86}"])
-    assert not matches("mpy6.3-natmod-armv6m", ["*-{x64,x86}"])
+    assert matches("mpy6.3-x64", ["*-{x64,x86}"])
+    assert matches("mpy6.3-x86", ["*-{x64,x86}"])
+    assert not matches("mpy6.3-armv6m", ["*-{x64,x86}"])
 
 
 def test_matches_expands_braces_with_more_than_two_options():
@@ -38,9 +38,9 @@ def test_matches_expands_braces_with_more_than_two_options():
 
 
 def test_matches_handles_two_brace_groups_in_one_pattern():
-    assert matches("mpy6.3-natmod-x64", ["mpy{6.2,6.3}-natmod-{x64,x86}"])
-    assert matches("mpy6.2-natmod-x86", ["mpy{6.2,6.3}-natmod-{x64,x86}"])
-    assert not matches("mpy6.1-natmod-x86", ["mpy{6.2,6.3}-natmod-{x64,x86}"])
+    assert matches("mpy6.3-x64", ["mpy{6.2,6.3}-{x64,x86}"])
+    assert matches("mpy6.2-x86", ["mpy{6.2,6.3}-{x64,x86}"])
+    assert not matches("mpy6.1-x86", ["mpy{6.2,6.3}-{x64,x86}"])
 
 
 def test_matches_pattern_with_no_braces_is_unaffected():
@@ -52,7 +52,7 @@ def test_matches_unterminated_brace_is_left_alone():
     # No closing "}" -- treated as a literal pattern rather than raising,
     # the same "fail where it did" rule targets.py's own axis-value
     # handling already follows for an unrecognised value.
-    assert not matches("mpy6.3-natmod-x64", ["mpy{6.3-natmod-x64"])
+    assert not matches("mpy6.3-x64", ["mpy{6.3-natmod-x64"])
 
 
 def test_select_globs():
@@ -77,8 +77,8 @@ def test_select_generic_over_any_identifier_bearing_type():
     from cibuildmp.platforms.natmod.targets import Target
     from cibuildmp.platforms.usermod.targets import UsermodTarget
 
-    natmod_targets = [Target(abi="6.3", mode="natmod", arch="x64")]
-    assert select(natmod_targets, "*", "")[0].identifier == "mpy6.3-natmod-x64"
+    natmod_targets = [Target(abi="6.3", arch="x64")]
+    assert select(natmod_targets, "*", "")[0].identifier == "mpy6.3-x64"
 
     usermod_targets = [UsermodTarget(port="qemu", tag="v1.29.0")]
     assert select(usermod_targets, "*", "")[0].identifier == "v1.29.0-qemu"

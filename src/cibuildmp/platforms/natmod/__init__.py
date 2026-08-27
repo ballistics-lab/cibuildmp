@@ -75,10 +75,12 @@ def build_all(options: Options, targets: list[Target]) -> int:
     forces a fan-out. Callers who want one anyway (failure isolation,
     wall-clock) opt in with --only.
 
-    Grouped by MicroPython tag (**D13**): almost always one group, since
-    that is the common case, but `tag_groups()` can hand back more than one
-    when `micropython` spans an ABI boundary, and each needs its own
-    checkout and its own mpy-cross.
+    Grouped by MicroPython tag (**D13**): one group per distinct ABI the
+    already-selected `targets` actually span -- almost always one, since
+    `build`'s own default (record 0052, A2) narrows to the newest known
+    ABI unless a config's own `build`/`skip` opens it up wider, but never
+    fewer groups than the selection genuinely spans, and each needs its
+    own checkout and its own mpy-cross.
     """
     resolved = [options.build_options(t) for t in targets]
     total = len(resolved)
@@ -108,7 +110,11 @@ def build_all(options: Options, targets: list[Target]) -> int:
     # arches' compilers under exactly the names dynruntime.mk expects,
     # so there is nothing to probe, nothing to download and no `CROSS=`
     # override to add.
-    tags = ", ".join(tag for tag, _abi in options.tag_groups())
+    # The tags this specific selection actually spans, not tag_groups()'s
+    # own full domain (record 0052, A2 -- that now always lists every
+    # known ABI, most of which build/skip has already narrowed away by
+    # the time targets reaches here).
+    tags = ", ".join(dict.fromkeys(bo.target.tag for bo in resolved))
     print(f"\ncibuildmp: {total} target(s) against MicroPython {tags}")
     for index, build_options in enumerate(resolved, 1):
         print("  " + _plan_line(index, total, build_options))
@@ -148,9 +154,8 @@ def build_all(options: Options, targets: list[Target]) -> int:
         if actual_abi != abi:
             raise SourceError(
                 f"MicroPython {tag} has .mpy ABI {actual_abi}, but the "
-                f"identifiers were built assuming {abi}. Set `mpy-abi = "
-                f'"{actual_abi}"` in the config, or refresh the stale entry '
-                f"with bin/refresh_natmod_archs.py {tag}."
+                f"identifiers were built assuming {abi} -- refresh the stale "
+                f"entry with bin/refresh_natmod_archs.py {tag}."
             )
 
         print(f"\ncibuildmp: building {len(group)} target(s) for MicroPython {tag}")
@@ -287,7 +292,9 @@ def run(
 
     if args.dry_run:
         total = len(targets)
-        tags = ", ".join(tag for tag, _abi in options.tag_groups())
+        # Same reasoning as build()'s own tags line: this selection's own
+        # tags, not tag_groups()'s full domain.
+        tags = ", ".join(dict.fromkeys(t.tag for t in targets))
         print(f"cibuildmp: {total} target(s) against MicroPython {tags}")
         try:
             for index, target in enumerate(targets, 1):

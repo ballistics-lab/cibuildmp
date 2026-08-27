@@ -45,6 +45,14 @@
 # fix (mpy-cross is a host build, not a cross-compile), so this CI stays on
 # one tag; D13's multi-tag path is covered by tests/test_options.py and
 # tests/test_targets.py instead.
+#
+# `micropython` below only pins usermod's own three active ports now
+# (record 0052, A2 -- natmod has no version config key at all any more).
+# [natmod]'s own side of this same file auto-resolves to the newest tag
+# resources/build-platforms.toml records for the newest known ABI, which
+# can be a still-open preview and will drift forward as that table is
+# refreshed -- there is currently no way to pin natmod to this exact tag
+# explicitly, a known, undesigned gap.
 
 micropython = "v1.29.0"
 # Genuinely shared across every active usermod port below -- natmod's

@@ -16,7 +16,7 @@ class FakeResult:
 
 def test_noop_when_github_step_summary_unset(monkeypatch, tmp_path):
     monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
-    result = FakeResult("mpy6.3-natmod-x64", tmp_path / "out.mpy", 229)
+    result = FakeResult("mpy6.3-x64", tmp_path / "out.mpy", 229)
 
     # No exception, and nothing written anywhere -- there is nowhere to write.
     write_step_summary([result], 1.5)
@@ -26,16 +26,16 @@ def test_writes_a_markdown_table_when_set(monkeypatch, tmp_path):
     summary_path = tmp_path / "summary.md"
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_path))
     results = [
-        FakeResult("mpy6.3-natmod-x64", Path("/out/template-x64.mpy"), 229),
-        FakeResult("mpy6.3-natmod-x86", Path("/out/template-x86.mpy"), 260),
+        FakeResult("mpy6.3-x64", Path("/out/template-x64.mpy"), 229),
+        FakeResult("mpy6.3-x86", Path("/out/template-x86.mpy"), 260),
     ]
 
     write_step_summary(results, 2.7)
 
     text = summary_path.read_text()
     assert "2 target(s) built in 2.7s" in text
-    assert "| `mpy6.3-natmod-x64` | `template-x64.mpy` | 229 bytes |" in text
-    assert "| `mpy6.3-natmod-x86` | `template-x86.mpy` | 260 bytes |" in text
+    assert "| `mpy6.3-x64` | `template-x64.mpy` | 229 bytes |" in text
+    assert "| `mpy6.3-x86` | `template-x86.mpy` | 260 bytes |" in text
 
 
 def test_appends_rather_than_overwrites(monkeypatch, tmp_path):
