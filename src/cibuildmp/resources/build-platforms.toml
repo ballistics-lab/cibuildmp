@@ -3147,12 +3147,12 @@ identifier_format = "{tag}-alif-{board}"
 artifacts_dir_name = "{name}-{ver}-{identifier}"
 post_checkout = "make -C mpy-cross && make -C ports/alif BOARD={board} submodules"
 identifiers = [
-    { tag = "v1.26.0", board = "ALIF_ENSEMBLE", mcu = "AE722F80F55D5XX", product = "Ensemble E7 DevKit", vendor = "Alif Semiconductor", variants = [], identifier = "v1.26.0-alif-ALIF_ENSEMBLE" },
-    { tag = "v1.26.1", board = "ALIF_ENSEMBLE", mcu = "AE722F80F55D5XX", product = "Ensemble E7 DevKit", vendor = "Alif Semiconductor", variants = [], identifier = "v1.26.1-alif-ALIF_ENSEMBLE" },
-    { tag = "v1.27.0", board = "ALIF_ENSEMBLE", mcu = "AE722F80F55D5XX", product = "Ensemble E7 DevKit", vendor = "Alif Semiconductor", variants = [], identifier = "v1.27.0-alif-ALIF_ENSEMBLE" },
-    { tag = "v1.28.0", board = "ALIF_ENSEMBLE", mcu = "AE722F80F55D5XX", product = "Ensemble E7 DevKit", vendor = "Alif Semiconductor", variants = [], identifier = "v1.28.0-alif-ALIF_ENSEMBLE" },
-    { tag = "v1.29.0", board = "ALIF_ENSEMBLE", mcu = "AE722F80F55D5XX", product = "Ensemble E7 DevKit", vendor = "Alif Semiconductor", variants = [], identifier = "v1.29.0-alif-ALIF_ENSEMBLE" },
-    { tag = "v1.30.0-preview", board = "ALIF_ENSEMBLE", mcu = "AE722F80F55D5XX", product = "Ensemble E7 DevKit", vendor = "Alif Semiconductor", variants = [], identifier = "v1.30.0-preview-alif-ALIF_ENSEMBLE" },
+    { tag = "v1.26.0", board = "ALIF_ENSEMBLE", mcu = "AE722F80F55D5XX", product = "Ensemble E7 DevKit", vendor = "Alif Semiconductor", toolchain_version = "13.3.Rel1", variants = [], identifier = "v1.26.0-alif-ALIF_ENSEMBLE" },
+    { tag = "v1.26.1", board = "ALIF_ENSEMBLE", mcu = "AE722F80F55D5XX", product = "Ensemble E7 DevKit", vendor = "Alif Semiconductor", toolchain_version = "13.3.Rel1", variants = [], identifier = "v1.26.1-alif-ALIF_ENSEMBLE" },
+    { tag = "v1.27.0", board = "ALIF_ENSEMBLE", mcu = "AE722F80F55D5XX", product = "Ensemble E7 DevKit", vendor = "Alif Semiconductor", toolchain_version = "13.3.Rel1", variants = [], identifier = "v1.27.0-alif-ALIF_ENSEMBLE" },
+    { tag = "v1.28.0", board = "ALIF_ENSEMBLE", mcu = "AE722F80F55D5XX", product = "Ensemble E7 DevKit", vendor = "Alif Semiconductor", toolchain_version = "13.3.Rel1", variants = [], identifier = "v1.28.0-alif-ALIF_ENSEMBLE" },
+    { tag = "v1.29.0", board = "ALIF_ENSEMBLE", mcu = "AE722F80F55D5XX", product = "Ensemble E7 DevKit", vendor = "Alif Semiconductor", toolchain_version = "13.3.Rel1", variants = [], identifier = "v1.29.0-alif-ALIF_ENSEMBLE" },
+    { tag = "v1.30.0-preview", board = "ALIF_ENSEMBLE", mcu = "AE722F80F55D5XX", product = "Ensemble E7 DevKit", vendor = "Alif Semiconductor", toolchain_version = "13.3.Rel1", variants = [], identifier = "v1.30.0-preview-alif-ALIF_ENSEMBLE" },
 ]
 
 # ports/esp8266/boards/*/board.json arrived at v1.18 -- v1.12..v1.17
