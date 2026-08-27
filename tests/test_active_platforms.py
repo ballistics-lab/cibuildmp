@@ -58,7 +58,9 @@ def test_legacy_usermod_ports_key_is_rejected():
     # shared defaults, sibling to [natmod], not a selector), but the old
     # `ports = [...]` selector it used to carry is still gone -- this is
     # the one thing inside it that remains a loud, specific error.
-    with pytest.raises(ConfigError, match=r"\[usermod\] ports = \[\.\.\.\] no longer exists"):
+    with pytest.raises(
+        ConfigError, match=r"\[usermod\] ports = \[\.\.\.\] no longer exists"
+    ):
         active_platforms({"usermod": {"ports": ["unix"]}}, None)
 
 
@@ -66,7 +68,9 @@ def test_legacy_usermod_ports_key_is_rejected_even_with_explicit_platform():
     # The config itself is broken regardless of what --platform says --
     # this is not a "which platform" question, it is "this config still
     # uses the old shape".
-    with pytest.raises(ConfigError, match=r"\[usermod\] ports = \[\.\.\.\] no longer exists"):
+    with pytest.raises(
+        ConfigError, match=r"\[usermod\] ports = \[\.\.\.\] no longer exists"
+    ):
         active_platforms({"usermod": {"ports": ["unix"]}}, ["natmod"])
 
 

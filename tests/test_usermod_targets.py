@@ -40,7 +40,9 @@ def test_identifier_leads_with_the_tag_when_present():
     # 0051: the compatibility axis usermod was missing entirely -- leads
     # the identifier, the same position natmod's own `mpy6.3-` slot holds.
     assert (
-        UsermodTarget(port="unix", arch="manylinux_2_28_x86_64", tag="v1.29.0").identifier
+        UsermodTarget(
+            port="unix", arch="manylinux_2_28_x86_64", tag="v1.29.0"
+        ).identifier
         == "v1.29.0-unix-manylinux_2_28_x86_64"
     )
     assert UsermodTarget(port="qemu", tag="v1.29.0").identifier == "v1.29.0-qemu"

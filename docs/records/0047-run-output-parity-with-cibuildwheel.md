@@ -37,9 +37,12 @@ Read from `cibuildwheel/logger.py` on `main`, not recalled:
 
 ```python
 FOLD_PATTERNS = {
-    "azure":  ("##[group]{name}",                                "##[endgroup]"),
-    "travis": ("travis_fold:start:{identifier}\n{name}",          "travis_fold:end:{identifier}"),
-    "github": ("::group::{name}",                                 "::endgroup::{name}"),
+    "azure": ("##[group]{name}", "##[endgroup]"),
+    "travis": (
+        "travis_fold:start:{identifier}\n{name}",
+        "travis_fold:end:{identifier}",
+    ),
+    "github": ("::group::{name}", "::endgroup::{name}"),
 }
 ```
 
@@ -47,7 +50,9 @@ FOLD_PATTERNS = {
 print(f"{c.bold}{c.blue}Building {identifier} wheel{c.end}")
 print(f"{description}")
 ...
-print(f"{c.green}{s.done} {c.end}{self.active_build_identifier} finished in {duration_str}")
+print(
+    f"{c.green}{s.done} {c.end}{self.active_build_identifier} finished in {duration_str}"
+)
 ...
 print(f"{c.green}{s.done} {c.end}{duration:.2f}s".rjust(78))
 self._start_fold_group(f"{n_wheels} wheel{s} produced in {duration_str}")

@@ -103,9 +103,7 @@ def test_select_excludes_an_unenabled_group_even_though_build_matches():
 
 def test_select_reaches_the_group_once_enabled():
     targets = [_Fake(i) for i in ("v1-unix-x86_64", "v1-unix-riscv64")]
-    result = select(
-        targets, "*", "", enable=frozenset({"exotic"}), groups=_GROUPS
-    )
+    result = select(targets, "*", "", enable=frozenset({"exotic"}), groups=_GROUPS)
     assert [t.identifier for t in result] == ["v1-unix-x86_64", "v1-unix-riscv64"]
 
 

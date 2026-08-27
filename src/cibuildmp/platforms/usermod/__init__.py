@@ -54,7 +54,9 @@ def _plan_line(index: int, total: int, target: UsermodTarget) -> str:
     return f"{counter} {target.identifier}"
 
 
-def validate_family_table(raw: dict[str, Any], *, error: type[Exception] = UsermodConfigError) -> None:
+def validate_family_table(
+    raw: dict[str, Any], *, error: type[Exception] = UsermodConfigError
+) -> None:
     """Part of the `PlatformModule` contract (`platforms/__init__.py`'s
     own docstring has the full reasoning) -- validates `[usermod]`
     unconditionally, before it is known whether any usermod port ends up

@@ -126,7 +126,9 @@ def suggest(name: str, known: frozenset[str]) -> str | None:
     return matches[0] if matches else None
 
 
-def check_known_keys(table: Mapping[str, Any], known: frozenset[str], *, where: str) -> None:
+def check_known_keys(
+    table: Mapping[str, Any], known: frozenset[str], *, where: str
+) -> None:
     """Reject any key in `table` that is not in `known` anywhere -- the
     one placement-independent error the cascade still needs: a key no
     platform's schema recognises at all is a typo, not a location choice.

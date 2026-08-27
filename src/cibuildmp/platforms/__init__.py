@@ -87,11 +87,23 @@ class PlatformModule(Protocol):
     """
 
     def resolve_options(
-        self, args: Any, package_dir: Any, config_file: Any, preread: Any, *, ports: list[str]
+        self,
+        args: Any,
+        package_dir: Any,
+        config_file: Any,
+        preread: Any,
+        *,
+        ports: list[str],
     ) -> Any: ...
 
     def run(
-        self, args: Any, package_dir: Any, config_file: Any, preread: Any, *, ports: list[str]
+        self,
+        args: Any,
+        package_dir: Any,
+        config_file: Any,
+        preread: Any,
+        *,
+        ports: list[str],
     ) -> int: ...
 
     def validate_family_table(self, raw: dict, *, error: type[Exception]) -> None: ...

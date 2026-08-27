@@ -184,7 +184,9 @@ def build_all(options: Options, targets: list[Target]) -> int:
     return 0
 
 
-def validate_family_table(raw: dict[str, Any], *, error: type[Exception] = ConfigError) -> None:
+def validate_family_table(
+    raw: dict[str, Any], *, error: type[Exception] = ConfigError
+) -> None:
     """No-op -- part of the `PlatformModule` contract (`platforms/__init__.py`'s
     own docstring has the full reasoning), satisfied trivially here:
     natmod's one platform already *is* its only family, so there is no

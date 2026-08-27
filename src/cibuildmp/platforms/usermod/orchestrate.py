@@ -101,7 +101,9 @@ def _port_build_options(
     # unchanged for Make ports, `/micropython.cmake` appended for CMake
     # ports -- kept under its own name so the two are never conflated.
     module_root = (package_dir / build_options.user_c_modules).resolve()
-    resolved_user_c_modules = portinfo.resolve_user_c_modules(port, module_root.as_posix())
+    resolved_user_c_modules = portinfo.resolve_user_c_modules(
+        port, module_root.as_posix()
+    )
 
     module_manifest = (
         (package_dir / build_options.manifest).resolve().as_posix()

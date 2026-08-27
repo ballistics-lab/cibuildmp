@@ -80,8 +80,17 @@ def clone_sparse(tag: str, port: str, dest: Path) -> None:
     """
     subprocess.run(
         [
-            "git", "clone", "--quiet", "--depth", "1", "--branch", tag,
-            "--filter=blob:none", "--sparse", REPO_URL, str(dest),
+            "git",
+            "clone",
+            "--quiet",
+            "--depth",
+            "1",
+            "--branch",
+            tag,
+            "--filter=blob:none",
+            "--sparse",
+            REPO_URL,
+            str(dest),
         ],
         check=True,
     )
@@ -94,7 +103,9 @@ def clone_sparse(tag: str, port: str, dest: Path) -> None:
 def commit_date(dest: Path) -> str:
     out = subprocess.run(
         ["git", "-C", str(dest), "log", "-1", "--format=%cI"],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     return out.stdout.strip()[:10]
 
@@ -102,7 +113,9 @@ def commit_date(dest: Path) -> str:
 def commit_sha(dest: Path) -> str:
     out = subprocess.run(
         ["git", "-C", str(dest), "rev-parse", "HEAD"],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     return out.stdout.strip()
 
@@ -169,14 +182,20 @@ def _toml_value(value: object) -> str:
 
 
 def _inline_row(row: dict) -> str:
-    parts = [f"{key} = {_toml_value(value)}" for key, value in row.items() if value not in (None, "")]
+    parts = [
+        f"{key} = {_toml_value(value)}"
+        for key, value in row.items()
+        if value not in (None, "")
+    ]
     return "{ " + ", ".join(parts) + " }"
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("port", help="usermod port to walk, e.g. esp32, rp2")
-    parser.add_argument("tags", nargs="+", help="MicroPython tags to walk, e.g. v1.20.0 v1.29.0")
+    parser.add_argument(
+        "tags", nargs="+", help="MicroPython tags to walk, e.g. v1.20.0 v1.29.0"
+    )
     parser.add_argument(
         "--workdir",
         type=Path,

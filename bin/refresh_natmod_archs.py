@@ -267,15 +267,18 @@ def identifiers(token: str | None):
 
         for item in info["archs"]:
             identifier = f"mpy{info['mpy']}-{tag_name}-{item['arch']}"
-            yield tag_info, {
-                "tag": tag_name,
-                "mpy": info["mpy"],
-                "arch": item["arch"],
-                "arch_code": item["arch_code"],
-                "arch_flags": item["arch_flags"],
-                "cross": item["cross"],
-                "identifier": identifier,
-            }
+            yield (
+                tag_info,
+                {
+                    "tag": tag_name,
+                    "mpy": info["mpy"],
+                    "arch": item["arch"],
+                    "arch_code": item["arch_code"],
+                    "arch_flags": item["arch_flags"],
+                    "cross": item["cross"],
+                    "identifier": identifier,
+                },
+            )
 
 
 def _toml_str(value: str) -> str:
@@ -316,7 +319,11 @@ def _toml_value(value: object) -> str:
 def _inline_row(row: dict) -> str:
     # None means "not extracted for this row" -- the key is left out
     # entirely, never written as a fabricated null (TOML has none).
-    parts = [f"{key} = {_toml_value(value)}" for key, value in row.items() if value is not None]
+    parts = [
+        f"{key} = {_toml_value(value)}"
+        for key, value in row.items()
+        if value is not None
+    ]
     return "{ " + ", ".join(parts) + " }"
 
 
@@ -353,7 +360,9 @@ def main() -> int:
     # per-tag fact about which flags are *expressible* at all (which
     # cibuildmp does not itself request by default), not a naming axis
     # for the rows themselves -- see identifiers()'s own docstring.
-    rv32imc_tags = list(dict.fromkeys(row["tag"] for row in rows if row["arch"] == "rv32imc"))
+    rv32imc_tags = list(
+        dict.fromkeys(row["tag"] for row in rows if row["arch"] == "rv32imc")
+    )
     if rv32imc_tags:
         print()
         print("[natmod.rv32imc-extensions]")

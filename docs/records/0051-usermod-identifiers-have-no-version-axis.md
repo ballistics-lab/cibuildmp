@@ -44,7 +44,7 @@ platform tag and says nothing about which MicroPython it *is*.
 derived from them and deduped:
 
 ```python
-resolve_micropython_tags(tags, override)   # tags in, one (tag, abi) per ABI out
+resolve_micropython_tags(tags, override)  # tags in, one (tag, abi) per ABI out
 ```
 
 So to build for ABI 6.2 you must already know which release carried it. The
@@ -74,8 +74,8 @@ config naming two tags silently builds one. The truncation is not laziness; it
 is the only thing standing between that config and silent data loss:
 
 ```python
-micropython: str                                 # a single tag
-identifier = f"{port}-{arch}"                    # no version component
+micropython: str  # a single tag
+identifier = f"{port}-{arch}"  # no version component
 identifier_dir = output_dir / target.identifier  # so two tags share one directory
 ```
 
@@ -1003,6 +1003,7 @@ The corrected design, in `platforms/__init__.py`:
 class PlatformModule(Protocol):
     def resolve_options(self, args, package_dir, config_file, preread, *, ports): ...
     def run(self, args, package_dir, config_file, preread, *, ports): ...
+
 
 PLATFORM_FAMILY: dict[str, PlatformModule] = {
     "natmod": natmod,

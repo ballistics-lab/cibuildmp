@@ -371,7 +371,9 @@ def _run_multi_platform(
         # "not a known identifier" error below.
 
     if args.print_build_identifiers:
-        return _print_build_identifiers(args, package_dir, config_file, preread, platforms)
+        return _print_build_identifiers(
+            args, package_dir, config_file, preread, platforms
+        )
 
     rc = 0
     for family, ports in _group_by_family(platforms).items():
@@ -454,4 +456,6 @@ def main(argv: list[str] | None = None) -> int:
             args, args.package_dir, args.config_file, preread, ports=platforms
         )
 
-    return _run_multi_platform(args, args.package_dir, args.config_file, preread, platforms)
+    return _run_multi_platform(
+        args, args.package_dir, args.config_file, preread, platforms
+    )

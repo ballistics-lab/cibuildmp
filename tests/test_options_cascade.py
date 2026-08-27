@@ -14,19 +14,25 @@ from cibuildmp.options import (
 
 
 def test_resolve_cascade_last_none_layer_wins():
-    assert resolve_cascade(
-        ("default", InheritRule.NONE),
-        ("global", InheritRule.NONE),
-        ("platform", InheritRule.NONE),
-    ) == "platform"
+    assert (
+        resolve_cascade(
+            ("default", InheritRule.NONE),
+            ("global", InheritRule.NONE),
+            ("platform", InheritRule.NONE),
+        )
+        == "platform"
+    )
 
 
 def test_resolve_cascade_skips_none_values():
-    assert resolve_cascade(
-        ("default", InheritRule.NONE),
-        (None, InheritRule.NONE),
-        (None, InheritRule.NONE),
-    ) == "default"
+    assert (
+        resolve_cascade(
+            ("default", InheritRule.NONE),
+            (None, InheritRule.NONE),
+            (None, InheritRule.NONE),
+        )
+        == "default"
+    )
 
 
 def test_resolve_cascade_all_none_values_returns_none():

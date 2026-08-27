@@ -32,16 +32,18 @@ def opt(key, default=None):
     if env_value is not None:
         return env_value
     return raw.get(key, default)
+
+
 ...
-build=parse_selector(opt("build", "*")),
-skip=parse_selector(opt("skip", "")),
+build = (parse_selector(opt("build", "*")),)
+skip = (parse_selector(opt("skip", "")),)
 ```
 
 `usermod/options.py` reads the **mode table**:
 
 ```python
-build=parse_selector(usermod.get("build", "*")),
-skip=parse_selector(usermod.get("skip", "")),
+build = (parse_selector(usermod.get("build", "*")),)
+skip = (parse_selector(usermod.get("skip", "")),)
 ```
 
 Neither is unreasonable alone. Together they are a trap, and one line above the
