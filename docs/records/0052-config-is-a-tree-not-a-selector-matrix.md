@@ -896,53 +896,56 @@ version and board axes are built on (see "Identifier grammar" above);
 shape corrected directly against a real reference, not designed from
 scratch.**
 
-**CLAUDE.md's own first rule, applied here directly, twice over — first
-by reading the real file, second by not over-applying what it teaches**:
-cibuildwheel ships a real `cibuildwheel/resources/build-platforms.toml`
-— read directly this session, not recalled, after an early draft here
-got the shape wrong. Its own structure is a flat `python_configurations
-= [{identifier, version, url, sha256}, ...]` list per platform — and
-*why* is the actual lesson, not the flatness itself: PyPy exists for
-`x86_64`/`aarch64`/`i686` but not `ppc64le`/`s390x`/`armv7l`/`riscv64`
-(visible directly in the real file, not derivable from a formula), and
-each `(python, platform)` cell carries its own download URL and hash
-that cannot be factored out of the axes either. **The lesson is "never
-let an invalid combination become writable/computable" — cibuildwheel
-achieves that by flattening, because its own domain has no depth beyond
-platform -> config list to flatten *from*.** cibuildmp's own domain does
-have that depth (this record's own central argument), so the fix a real,
-live-verified invalid-combination bug needed (below) is not flattening
-to cibuildwheel's own row shape — a first attempt at exactly that was
-tried here and corrected right back — but scoping each axis to the
-correct *tree node*, so the same guarantee (no invalid combination is
-writable) holds through nesting instead of through flatness.
+**CLAUDE.md's own first rule, applied here directly, three times over —
+read the real file; over-corrected toward its literal flat shape; landed
+on the actual lesson underneath both attempts.** cibuildwheel ships a
+real `cibuildwheel/resources/build-platforms.toml` — read directly this
+session, not recalled. Its own structure is a flat `python_configurations
+= [{identifier, version, url, sha256}, ...]` list per platform. The real
+lesson is **fact-first, not axis-first: never store an assumed
+combination, only a verified one** — cibuildwheel gets there by
+flattening (no tree depth exists to organize by instead); a first
+attempt here copied the flat row shape directly, which was itself
+corrected back toward this record's own tree argument (one `archs` list
+per ABI node) — **which turned out to still be axis-first, just one
+level less wrong**: it silently assumed every tag *within* one ABI group
+shares the same arch support, an assumption checked for exactly two of
+23 tags (`v1.20.0`, `v1.23.0-preview`) and extrapolated across the rest.
+**Landed shape: one row per independently-verified `(tag, arch[,
+arch_flags])` fact**, `family`/`port`/`board` stated explicitly on every
+row (self-describing outside its own nesting, not only implied by table
+position) — `mpy6.3-v1.28.0-x64` and `mpy6.3-v1.29.0-x64` are two
+distinct rows despite sharing ABI 6.3, because both are independently
+real. This *is* still a tree at the top level (`[natmod]`,
+`[usermod.unix]`, `[usermod.esp32.boards.<name>]` — not one
+undifferentiated cibuildwheel-style list mixing every family together);
+the correction is that each leaf's own contents are flat, verified rows,
+not a further-abstracted axis list that can silently assume homogeneity
+it was never checked for. `identifier` here is the fact table's own key
+(tag included) — not the same string as the selector-facing output
+identifier (`mpy6.3-x64`, tag excluded, decided earlier in this record);
+one addresses a verified fact, the other addresses a compatibility class
+several facts can share.
 
-Applying the real criterion per axis, checked directly, not assumed:
+Applying this per axis, checked directly, not assumed:
 
 - **`boards` (qemu), `archs` (unix/windows)** — no per-cell data, no
-  cross-axis validity question either (nothing else these are crossed
-  against could invalidate a combination); stay bare lists, unaffected
-  by anything below.
-- **natmod's own `archs` moves from one global list to a per-ABI-node
-  list — the tree, not a flat table, is what makes the invalid
-  combination unwritable.** Verified live, not assumed: cloned `v1.20.0`
-  (ABI 6.1) and `v1.23.0-preview` (ABI 6.2) and grepped each one's own
-  `py/dynruntime.mk` directly — neither has an `rv32imc`/`rv64imc` branch
-  at all; RISC-V natmod support only exists from ABI 6.3 onward. A single
-  top-level `archs` list crossed against `[mpy-abi]` at runtime would
-  happily generate `mpy6.1-rv32imc`, an identifier naming a target that
-  cannot be built. Decided shape: `[natmod."6.1"]`/`[natmod."6.2"]` each
-  carry their own `archs` (eight entries, no RISC-V); `[natmod."6.3"]`
-  carries its own (all ten) — three real tree nodes, each individually
-  accurate, not one list plus a separate validity rule to remember to
-  apply. `[natmod."6.3".arch-flags.rv32imc]` nests one level further for
-  the same reason `arch_flags` was already correctly scoped to one arch
-  (D15) — now also scoped to the one ABI that actually has it. Refreshed
-  by walking each known tag's own checked-out `dynruntime.mk` once at
-  maintainer-script time — the same "verify by inspecting a real checkout
-  once, cache the result" pattern `[mpy-abi]` itself already follows.
+  cross-axis validity question checked or found; stay bare lists.
+  Genuinely unaffected, not merely unexamined — worth a real pass before
+  implementation, not assumed safe by analogy to natmod's own mistake.
+- **natmod's own version×arch space — one row per verified `(tag, arch[,
+  arch_flags])`.** Verified live for two tags only this session
+  (`v1.20.0`: 8 arches, no RISC-V; `v1.23.0-preview`: same 8, `xtensawin`
+  present) — the other 21 known tags are **not** independently
+  reverified and must not be assumed to match; the maintainer-refresh
+  script walks every one of `ports/esp32`-style directly, not two
+  samples generalized. `arch_flags` compounds onto the same row shape
+  (one row per `arch_flags` value actually valid for that specific
+  `(tag, arch)` pair), not a separately-scoped sub-table.
 - **`[mpy-abi]` (tag -> abi)** — already exactly the flat-map-of-real-facts
-  shape this lesson calls for; unchanged.
+  shape this lesson calls for; unchanged, and still the source `family =
+  "natmod"` rows above derive their own `abi` field from (one lookup per
+  tag, not duplicated data).
 - **`pinned_docker_images.toml` (arch -> image)** — same, already correct,
   unchanged.
 - **`esp32`'s (and `zephyr`'s) own boards — genuinely need real nesting,
@@ -954,7 +957,14 @@ Applying the real criterion per axis, checked directly, not assumed:
   `usermod -> esp32 -> <board> -> <variant>`, one level deeper than this
   record's own earlier sketches assumed. `[usermod.esp32.boards.<name>]`
   needs to be a real table per board, not a list entry, carrying at least
-  `mcu` and its own `variants` list.
+  `mcu` and its own `variants` list, plus `family`/`port`/`board`
+  restated explicitly for the same self-describing-outside-nesting
+  reason the natmod rows above carry theirs. Pulled live against a real
+  checkout this session, not placeholders — `ESP32_GENERIC`
+  (`mcu = "esp32"`, `variants = ["D2WD", "SPIRAM", "UNICORE", "OTA"]`)
+  and `ESP32_GENERIC_S3` (`mcu = "esp32s3"`,
+  `variants = ["SPIRAM_OCT"]`), both read directly from their own
+  real `ports/esp32/boards/<name>/board.json`.
 
 Refreshed by a maintainer-run script (not part of any build invocation)
 that clones MicroPython once, walks `ports/esp32/boards/*/board.json` via
