@@ -12,13 +12,13 @@ verified (tag, arch) pair it actually found.
 
     bin/refresh_natmod_archs.py > /tmp/natmod-archs.toml
 
-Output is `[natmod]` / `identifiers = [ {...}, {...}, ... ]`, one compact
-inline table per row -- the shape record 0052 (Track A6) sketched for
-`resources/build-platforms.toml`. This script does not write that file
-itself: A6 is not landed yet (no such resource exists in this repo), so
-piping stdout there would be inventing the file's contents as a side
-effect of an unrelated commit. Redirect and review by hand until A6
-actually lands.
+Output is a `[tags]` table (tag -> {sha, date}, the pure per-tag facts
+`resources/build-platforms.toml` keeps in one shared place rather than
+repeated on every row that references a tag -- merge this into that
+file's own existing [tags] table rather than replacing it) followed by
+`[natmod]` / `identifiers = [ {...}, {...}, ... ]`, one compact inline
+table per row. This script does not write build-platforms.toml itself --
+redirect and review by hand.
 
 Two things every row is deliberately careful about, both found by hand
 this way rather than assumed:
@@ -37,9 +37,10 @@ this way rather than assumed:
   Neither is guessed from a neighboring tag or a different arch's row.
 
 Needs a GitHub token to avoid the unauthenticated API's 60-requests/hour
-limit (this makes roughly three requests per tag): set `GITHUB_TOKEN` in
-the environment, or run without one and expect to get rate-limited past
-~20 tags.
+limit (this makes roughly four requests per tag -- one more than before
+for the commit-date lookup [tags] needs, since the tags endpoint itself
+carries a sha but no date): set `GITHUB_TOKEN` in the environment, or run
+without one and expect to get rate-limited past ~15 tags.
 """
 
 from __future__ import annotations
@@ -111,6 +112,21 @@ def fetch_tags(token: str | None) -> list[dict]:
         raise RuntimeError(f"{url} -> HTTP {exc.code}") from exc
     except urllib.error.URLError as exc:
         raise RuntimeError(f"{url} -> {exc.reason}") from exc
+
+
+def fetch_commit_date(sha: str, token: str | None) -> str | None:
+    """YYYY-MM-DD for `sha`'s own commit date, or None if the API call
+    fails -- the tags endpoint itself carries no date, only a commit sha,
+    so this is one extra request per tag."""
+    url = f"{API_BASE}/commits/{sha}"
+    request = urllib.request.Request(url, headers=_headers(token, accept_json=True))
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            data = json.loads(response.read())
+    except (urllib.error.HTTPError, urllib.error.URLError):
+        return None
+    date = data.get("commit", {}).get("committer", {}).get("date")
+    return date[:10] if date else None
 
 
 def parse_arch_data(text: str) -> list[dict]:
@@ -199,6 +215,12 @@ def get_mpy_info(ref: str, token: str | None) -> dict | None:
 
 
 def identifiers(token: str | None):
+    """Yields (tag_info, row) pairs -- tag_info carries the tag's own sha
+    (for the caller to resolve a date from and place in [tags], shared
+    across every section rather than repeated per row: sha/date are pure
+    per-tag facts, never varying by arch within one tag). Each row itself
+    no longer carries sha -- [natmod]'s own rows read it back from [tags]
+    by tag name instead of repeating it."""
     for tag_info in fetch_tags(token):
         tag_name = tag_info["name"]
         sha = tag_info["commit"]["sha"]
@@ -209,10 +231,9 @@ def identifiers(token: str | None):
 
         for item in info["archs"]:
             identifier = f"mpy{info['mpy']}-{tag_name}-{item['arch']}"
-            yield {
+            yield tag_info, {
                 "tag": tag_name,
                 "mpy": info["mpy"],
-                "sha": sha,
                 "arch": item["arch"],
                 "arch_code": item["arch_code"],
                 "arch_flags": item["arch_flags"],
@@ -265,9 +286,27 @@ def _inline_row(row: dict) -> str:
 
 def main() -> int:
     token = os.environ.get("GITHUB_TOKEN")
+
+    rows = []
+    tags: dict[str, dict[str, str]] = {}
+    for tag_info, row in identifiers(token):
+        tag_name = tag_info["name"]
+        if tag_name not in tags:
+            sha = tag_info["commit"]["sha"]
+            date = fetch_commit_date(sha, token)
+            entry = {"sha": sha}
+            if date is not None:
+                entry["date"] = date
+            tags[tag_name] = entry
+        rows.append(row)
+
+    print("[tags]")
+    for tag_name, entry in tags.items():
+        print(f'"{tag_name}" = {_inline_row(entry)}')
+    print()
     print("[natmod]")
     print("identifiers = [")
-    for row in identifiers(token):
+    for row in rows:
         print("    " + _inline_row(row) + ",")
     print("]")
     return 0
