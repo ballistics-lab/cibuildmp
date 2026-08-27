@@ -761,7 +761,7 @@ identifiers = [
 [usermod.esp32]
 identifier_format = "{tag}-esp32-{board}"
 artifacts_dir_name = "{name}-{ver}-{identifier}[-{variant}]"
-pre_checkout = "git clone -b v5.5.1 --recursive https://github.com/espressif/esp-idf.git && cd esp-idf && ./install.sh esp32"
+pre_checkout = "git clone -b {idf_version} --recursive https://github.com/espressif/esp-idf.git && cd esp-idf && ./install.sh esp32"
 post_checkout = "idf.py -D UPDATE_SUBMODULES=1 reconfigure"
 identifiers = [
     { tag = "v1.20.0", idf_version = "v4.4", board = "ESP32_S2_WROVER", mcu = "esp32s2", product = "ESP32-S2 WROVER", vendor = "Espressif", variants = [], identifier = "v1.20.0-esp32-ESP32_S2_WROVER" },
