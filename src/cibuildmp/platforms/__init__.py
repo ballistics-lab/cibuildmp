@@ -1,5 +1,6 @@
-"""The family registry -- how `cli.py` finds the code that implements a
-given `--platform` name, without ever naming `natmod`/`usermod` itself.
+"""The family registry -- how `cli.py`'s own coordinator finds the code
+that implements each platform family, without ever branching on `natmod`/
+`usermod` by name.
 
 Phase H of record 0051 (the "the ports are the platforms" redesign)
 physically merged `natmod/` and `usermod/` under this package, mirroring
@@ -7,27 +8,23 @@ cibuildwheel's own `platforms/` tree. What is deliberately *not* mirrored
 is cibuildwheel's literal one-module-per-platform-name shape: cibuildmp's
 five usermod ports (`unix`/`windows`/`qemu`/`webassembly`/`esp32`) already
 share one real implementation (`usermod/build.py`'s own `_BUILD_FN` data
-table, `usermod/options.py`'s `SCHEMAS`, `usermod/targets.py`'s
-`_PORT_AXES` -- keyed dicts, not five independently-authored pipelines),
-so splitting them into five files would fight that structure for a shape
-cibuildmp does not actually have. `natmod` is the sixth name and the only
-one genuinely alone.
+table, `usermod/targets.py`'s own `all_usermod_targets()`, reading every
+port's own rows uniformly) -- keyed data, not five independently-authored
+pipelines. `natmod` is the sixth name and the only one genuinely alone.
 
-Two distinct modules cover six names today because two is how many
-genuinely distinct implementations exist -- not six, and not one. This
-registry is what lets `cli.py`'s own dispatch code stay ignorant of that
-number: it groups whatever platforms are active by which module
-implements them (`_group_by_family()`, in `cli.py`) and calls each module
-exactly once, uniformly, whether one platform is active or five. Adding a
-third family -- zephyr ([0022], deliberately not scheduled: a `west`+SDK
-provisioning story and a `.conf`/`.overlay` board convention unlike any of
-the current six), or any of upstream MicroPython's own ~20 real ports,
-most of which are genuinely distinct platforms rather than variations of
-the current six -- is one new module plus new entries here, zero changes
-to `cli.py`'s own dispatch code. That is the actual requirement this
-design exists to satisfy, corrected mid-design after an earlier
-two-hardcoded-branch sketch did not generalize past today's exact two
-implementations.
+There is no more per-platform *activation* at all (record 0052's own
+live-caught retraction, folded into the same round that removed `archs`/
+`boards` axis config): every family is always in scope, on every
+invocation -- `cli.py`'s own coordinator resolves both, unconditionally,
+and each family's own `build`/`skip` glob-matching against its own real
+identifiers is the only thing that decides what actually gets built. That
+collapses what `FAMILIES` needs to be: a fixed, two-element tuple, not a
+dict keyed by every platform name a `--platform` flag used to accept
+(`--platform` does not exist any more either). Adding a third family --
+zephyr ([0022], deliberately not scheduled), or any of upstream
+MicroPython's own ~20 real ports, most of which are genuinely distinct
+platforms rather than variations of the current six -- is one new module
+plus one new tuple entry, zero changes to `cli.py`'s own coordinator.
 """
 
 from __future__ import annotations
@@ -35,86 +32,76 @@ from __future__ import annotations
 from typing import Any, Protocol
 
 from . import natmod, usermod
-from .usermod.targets import KNOWN_PORTS
 
 
 class PlatformModule(Protocol):
     """Documentation only, not enforced through isinstance/runtime checks
     -- the same PEP 544 module-as-Protocol shape cibuildwheel's own
     `platforms/__init__.py` uses. Every family module exposes exactly
-    these three functions. `ports` is always the subset of that family's
-    own platform names active this invocation -- for `natmod`, always and
-    only `["natmod"]`, kept as a real parameter rather than a special case
-    so `cli.py`'s own dispatch loop never has to know natmod is different.
+    these five names.
 
-    `validate_family_table()` is the third function, added when usermod
-    gained a real family-level config tier (`[usermod]`, record 0051's
-    ninth addendum -- shared defaults for every port in the family, sibling
-    to `[natmod]`, not a selector). It exists specifically so `cli.py`
-    never has to name `usermod` to call its own validation: every
-    registered family gets called once, unconditionally, from
-    `active_platforms()`'s own preamble, *before* it is known which
-    platforms end up active this invocation -- a stale family table naming
-    a port that no longer selects anything (the old `[usermod] ports =
-    [...]`) must still be caught even when nothing else would ever load
-    that family's own config far enough to see it (record 0048's own bug
-    class: a misplaced/stale key silently doing nothing). `natmod`'s own
-    implementation is a no-op -- its one platform already *is* its only
-    family, so `[natmod]`'s own validation already happens inside
-    `resolve_options()`, with nothing extra for a separate family tier to
-    check. `error` is always the caller's `ConfigError` (natmod's own,
-    the class every other `active_platforms()`-time failure already
-    raises) -- not each family's native exception class, so `main()`'s
-    existing `except ConfigError` catch does not need widening for a
-    failure that happens before any family has been dispatched to.
+    `validate_family_table()` exists so `cli.py` never has to name
+    `usermod` to call its own validation: every registered family gets
+    called once, unconditionally, before any target resolution happens --
+    a stale family table (the old `[usermod] ports = [...]`) must still
+    be caught even on an invocation where this family's own `targets()`
+    would otherwise select nothing and never load its own config far
+    enough to see it (record 0048's own bug class: a misplaced/stale key
+    silently doing nothing). `natmod`'s own implementation is a no-op --
+    its one platform already *is* its only family, so there is no
+    separate family-level table for a stale key to hide in. `error` is
+    always the caller's `ConfigError` (natmod's own, the class every
+    other startup-time failure already raises) -- not each family's
+    native exception class, so `cli.py`'s own top-level `except
+    ConfigError` does not need widening for a failure that happens before
+    any family-specific resolution begins.
 
-    Exception handling is deliberately *not* part of this contract: each
-    family module fully owns catching, printing and returning 2 for its
-    own error hierarchy (`natmod.options.ConfigError` and friends vs.
-    `usermod.options.UsermodConfigError` and friends -- nothing catches
-    either polymorphically today, and unifying them would be a real,
-    separate redesign with no caller driving it). One rule every family
-    module's own `run()` must still uphold: a matched `[override]`
-    entry's key is only validated against the specific platform a target
-    resolves to once `build_options()` actually runs (Phase G's tier-2
-    validation) -- so any dry-run/preview code path that calls
+    `resolve_options()` loads config and applies this family's own
+    CLI overrides (`--build`/`--skip`, `--output-dir` for natmod);
+    `.targets()` on the result raises `LOAD_ERRORS` (a module-level
+    tuple, not part of the Protocol itself -- exception handling is
+    deliberately *not* unified, see below) if the config is broken in
+    a way `resolve_options()` alone did not already catch.
+
+    `run_resolved()` is given an already-resolved, already-nonempty
+    target list -- `cli.py`'s own coordinator makes the joint "is
+    *everything*, across every family, empty" decision once, since a
+    per-family "no targets" check would misfire the instant a config only
+    configures one family's own `build`/`skip` (the ordinary case) and
+    leaves the other's naturally selecting nothing.
+
+    Exception handling is deliberately *not* unified across families:
+    each owns its own hierarchy (`natmod.options.ConfigError`/
+    `UnknownArchError`/... vs. `usermod.options.UsermodConfigError`/...) --
+    nothing catches either polymorphically, and unifying them would be a
+    real, separate redesign with no caller driving it. `LOAD_ERRORS`/
+    `BUILD_ERRORS` (module-level tuples, not part of this Protocol) are
+    what let `cli.py`'s own coordinator catch each family's own errors
+    without importing its exception classes by name. One rule every
+    family module's own `run_resolved()` must still uphold: a matched
+    `[override]` entry's key is only validated against the specific
+    platform a target resolves to once `build_options()` actually runs
+    (Phase G's tier-2 validation) -- so a `--dry-run` preview that calls
     `build_options()` per target needs its own `try/except` around that
     call, distinct from the outer `targets()`-level catch, or a config
     mistake that `targets()` could not have caught surfaces as a raw
-    traceback instead of a clean CLI error. `natmod`'s own `run()` already
-    has this; the next family module that grows a richer dry-run preview
+    traceback instead of a clean CLI error. `natmod`'s own `run_resolved()`
+    already has this; the next family module that grows a richer preview
     should not have to rediscover it by shipping the bug again.
     """
 
     def resolve_options(
-        self,
-        args: Any,
-        package_dir: Any,
-        config_file: Any,
-        preread: Any,
-        *,
-        ports: list[str],
+        self, args: Any, package_dir: Any, config_file: Any, preread: Any
     ) -> Any: ...
 
-    def run(
-        self,
-        args: Any,
-        package_dir: Any,
-        config_file: Any,
-        preread: Any,
-        *,
-        ports: list[str],
-    ) -> int: ...
+    def run_resolved(self, args: Any, options: Any, targets: list[Any]) -> int: ...
 
     def validate_family_table(self, raw: dict, *, error: type[Exception]) -> None: ...
 
 
-# Every name --platform accepts, mapped to the module that actually
-# implements it. Built from KNOWN_PORTS rather than hand-listed a second
-# time next to cli.py's own ALL_PLATFORMS -- two hand-maintained lists of
-# the same six names is exactly the kind of drift record 0048's own bug
-# class was about.
-PLATFORM_FAMILY: dict[str, PlatformModule] = {
-    "natmod": natmod,
-    **{port: usermod for port in KNOWN_PORTS},
-}
+# The two family implementations, always both resolved -- there is no
+# platform-name-keyed registry any more (nothing looks one up by name:
+# `--platform`/`--only` do not exist, and every real identifier already
+# carries which family it belongs to, via each Target's/UsermodTarget's
+# own `.port`).
+FAMILIES: tuple[PlatformModule, ...] = (natmod, usermod)

@@ -3,7 +3,10 @@ from pathlib import Path
 import pytest
 
 from cibuildmp.platforms.natmod.options import ConfigError, Options
-from cibuildmp.platforms.natmod.targets import newest_known_abi
+from cibuildmp.platforms.natmod.targets import (
+    newest_known_abi,
+    newest_stable_tag_for_abi,
+)
 
 # There is no `archs` config key any more (record 0052's own live-caught
 # correction: it duplicated exactly what a `build`/`skip` glob over the
@@ -12,6 +15,11 @@ from cibuildmp.platforms.natmod.targets import newest_known_abi
 # `build`, prefixed with the current default ABI so a config that doesn't
 # care about spanning more than one ABI still resolves deterministically.
 ABI = newest_known_abi()
+# The tag build_for()'s own unpinned build glob actually resolves to --
+# narrow_to_newest_tag() prefers a stable release over a preview sharing
+# the same ABI now (record 0052's own live-caught correction), not just
+# whichever tag is numerically newest.
+STABLE_TAG = newest_stable_tag_for_abi(ABI)
 
 
 def build_for(*archs: str) -> str:
@@ -32,14 +40,20 @@ def write(tmp_path: Path, text: str, name: str = "cibuildmp.toml") -> Path:
 def test_defaults_with_no_config_at_all(tmp_path):
     options = Options.load(tmp_path, env={})
     assert options.config_path is None
-    # No micropython/mpy-abi config key any more (record 0052, A2): the
-    # version axis is a static domain, and an unconfigured build selector
-    # narrows it to the newest known ABI by itself -- derived, not
-    # restated, so a test about *defaulting* does not fail every time
-    # upstream ships a release. All ten arches are real for that ABI's
-    # own newest tag (verified live, not assumed), so a bare config still
-    # produces exactly ten targets, same as before A2.
-    assert options.build == [f"mpy{newest_known_abi()}-*"]
+    # No implicit default build value at all (record 0052's own
+    # live-caught correction): an unconfigured build selects nothing, not
+    # "the newest known ABI" -- a config states what it wants, explicitly,
+    # via a glob, or gets nothing built.
+    assert options.build == []
+    assert options.targets() == []
+
+
+def test_a_build_glob_narrowing_to_the_newest_abi_produces_ten_targets(tmp_path):
+    # All ten arches are real for the newest known ABI's own newest tag
+    # (verified live, not assumed).
+    write(tmp_path, f'build = "mpy{newest_known_abi()}-*"\n')
+    options = Options.load(tmp_path, env={})
+
     assert len(options.targets()) == 10
     assert {t.abi for t in options.targets()} == {newest_known_abi()}
     build_options = options.build_options(options.targets()[0], env={})
@@ -135,10 +149,8 @@ def test_arch_flags_land_on_rv32imc_identifier_and_make_args(tmp_path):
     )
     options = Options.load(tmp_path, env={})
     targets = {t.arch: t for t in options.targets()}
-    assert targets["rv32imc"].identifier == "mpy6.3-v1.30.0-preview-rv32imc+0x3"
-    assert (
-        targets["rv64imc"].identifier == "mpy6.3-v1.30.0-preview-rv64imc"
-    )  # unaffected
+    assert targets["rv32imc"].identifier == f"mpy6.3-{STABLE_TAG}-rv32imc+0x3"
+    assert targets["rv64imc"].identifier == f"mpy6.3-{STABLE_TAG}-rv64imc"  # unaffected
 
     rv32_args = options.build_options(targets["rv32imc"], env={}).extra_make_args
     assert "ARCH_FLAGS=0x3" in rv32_args
@@ -157,9 +169,9 @@ def test_arch_flags_list_builds_one_rv32imc_target_per_variant(tmp_path):
     options = Options.load(tmp_path, env={})
     identifiers = [t.identifier for t in options.targets()]
     assert identifiers == [
-        "mpy6.3-v1.30.0-preview-rv32imc",
-        "mpy6.3-v1.30.0-preview-rv32imc+0x1",
-        "mpy6.3-v1.30.0-preview-rv32imc+0x3",
+        f"mpy6.3-{STABLE_TAG}-rv32imc",
+        f"mpy6.3-{STABLE_TAG}-rv32imc+0x1",
+        f"mpy6.3-{STABLE_TAG}-rv32imc+0x3",
     ]
     make_args_by_id = {
         t.identifier: options.build_options(t, env={}).extra_make_args
@@ -167,10 +179,10 @@ def test_arch_flags_list_builds_one_rv32imc_target_per_variant(tmp_path):
     }
     assert not any(
         a.startswith("ARCH_FLAGS=")
-        for a in make_args_by_id["mpy6.3-v1.30.0-preview-rv32imc"]
+        for a in make_args_by_id[f"mpy6.3-{STABLE_TAG}-rv32imc"]
     )
-    assert "ARCH_FLAGS=0x1" in make_args_by_id["mpy6.3-v1.30.0-preview-rv32imc+0x1"]
-    assert "ARCH_FLAGS=0x3" in make_args_by_id["mpy6.3-v1.30.0-preview-rv32imc+0x3"]
+    assert "ARCH_FLAGS=0x1" in make_args_by_id[f"mpy6.3-{STABLE_TAG}-rv32imc+0x1"]
+    assert "ARCH_FLAGS=0x3" in make_args_by_id[f"mpy6.3-{STABLE_TAG}-rv32imc+0x3"]
 
 
 def test_arch_flags_list_dedupes_two_spellings_of_the_same_value(tmp_path):
@@ -187,7 +199,7 @@ def test_arch_flags_list_dedupes_two_spellings_of_the_same_value(tmp_path):
     )
     options = Options.load(tmp_path, env={})
     identifiers = [t.identifier for t in options.targets()]
-    assert identifiers == ["mpy6.3-v1.30.0-preview-rv32imc+0x3"]
+    assert identifiers == [f"mpy6.3-{STABLE_TAG}-rv32imc+0x3"]
 
 
 def test_version_defaults_empty_and_is_settable(tmp_path):
@@ -218,32 +230,22 @@ def test_extra_files_from_publish_table(tmp_path):
     assert options.extra_files() == ["src/facade.py", "src/ffi.py"]
 
 
-def test_a_top_level_key_inside_the_natmod_table_names_where_it_goes(tmp_path):
-    # `version` is truly top-level-only, same as every other generic key
-    # -- "unknown key" would be a lie here, the tool knows precisely what
-    # `version` means, just not in this table.
-    write(tmp_path, 'version = "0.1.0"\n[natmod]\nname = "x"\nversion = "0.2.0"\n')
+def test_natmod_table_no_longer_exists(tmp_path):
+    # [natmod] used to gate activation and, before that, carry its own
+    # settable keys -- neither concept survives (record 0052's own
+    # live-caught retraction, folded into the same round that removed
+    # table-presence activation entirely). A config still writing it gets
+    # a specific error naming the real replacement.
+    write(tmp_path, '[natmod]\nname = "x"\n')
 
-    with pytest.raises(ConfigError, match="read from the top level"):
+    with pytest.raises(ConfigError, match=r"\[natmod\] no longer exists"):
         Options.load(tmp_path)
 
 
-def test_build_skip_inside_the_natmod_table_is_an_error(tmp_path):
-    # record 0052's own live-caught correction, retracting the earlier
-    # "per-platform build/skip" addendum this test used to cover:
-    # [natmod] build/skip was always exactly a sufficiently-scoped
-    # top-level pattern restated, so it is a loud, specific "move it to
-    # the top level" error now, the same as any other generic key.
-    write(tmp_path, 'skip = "*-armv6m"\n[natmod]\nskip = ""\n')
+def test_natmod_table_present_but_empty_is_still_rejected(tmp_path):
+    write(tmp_path, "[natmod]\n")
 
-    with pytest.raises(ConfigError, match="read from the top level"):
-        Options.load(tmp_path, env={})
-
-
-def test_an_unknown_key_in_the_natmod_table_is_an_error(tmp_path):
-    write(tmp_path, '[natmod]\nmodule-dr = "natmod"\n')
-
-    with pytest.raises(ConfigError, match="unknown key `module-dr`"):
+    with pytest.raises(ConfigError, match=r"\[natmod\] no longer exists"):
         Options.load(tmp_path)
 
 
@@ -252,9 +254,12 @@ def test_archs_is_gone_as_a_config_key(tmp_path):
     # rows by .arch alone, before build/skip ever ran -- exactly what a
     # build/skip glob over the identifier already expresses directly
     # (e.g. build = "*-x64"), so it is removed rather than kept dual-read.
+    # There is no [natmod] table left to write it inside any more either,
+    # so this is now caught by that table's own rejection, not a
+    # dedicated per-key error.
     write(tmp_path, '[natmod]\narchs = ["x64"]\n')
 
-    with pytest.raises(ConfigError, match="unknown key `archs`"):
+    with pytest.raises(ConfigError, match=r"\[natmod\] no longer exists"):
         Options.load(tmp_path)
 
 

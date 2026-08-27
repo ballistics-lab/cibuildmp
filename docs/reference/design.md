@@ -129,57 +129,104 @@ The floor is *inside* the identifier here, unlike cibuildwheel's own
 `cp313-manylinux_x86_64`, because cibuildmp curates exactly one floor per
 architecture and offers no knob to choose another.
 
-Landed as of [0051]'s Phases F, G, H and I (see that record's own
-fourth/fifth/seventh/eighth addenda): `--platform` names one or more of
-six platforms (`natmod`, `unix`, `windows`, `qemu`, `webassembly`,
-`esp32`) rather than a build mode, the way upstream's own `--platform`
-names an OS, and the config tree matches — `[unix]`/`[esp32]` sibling to
-`[natmod]`, no more `[usermod.<port>]` nesting and no more `ports =
-[...]` list, table presence alone selects a platform.
-`cibuildmp/options.py`'s cascade-based option resolution (`default →
-global → platform table → environment → CLI`, matching upstream's own
-`Options.get()`) is wired into both `cibuildmp/platforms/natmod/options.py`
-and `cibuildmp/platforms/usermod/options.py`, for the base four layers
-*and* for `[override]`/`inherit` now — one shared top-level `[override]`
-table, keyed directly by its own glob (`[override."*-armv7emsp"]`, no
-separate `select =` field — a deliberate simplification over
-cibuildwheel's own `[[tool.cibuildwheel.overrides]]` array-of-tables
-shape, decided live 2026-08-27: this project's own overrides are already
-a flat glob-matched space, so the glob can simply *be* the table's own
-name, and declaration order — which `tomllib` preserves — is what already
-decided precedence), validated loosely (valid on some platform) at
-parse time and strictly (valid on the *matched* identifier's own
-platform) at build time, `inherit = {extra-make-args =
-"append"|"prepend"|"none"}` layered in via `Options.get()`'s own
-`extra_layers`. `natmod`/`usermod` are physically under
-`cibuildmp/platforms/` too (Phase H), each a `PlatformModule`
-(`resolve_options()`/`run()`) that `cli.py`'s own dispatch reaches only
-through a `PLATFORM_FAMILY` registry — it never names either module
-directly, so a future platform family (zephyr, [0022]) costs one new
-module plus registry entries, not a `cli.py` change.
+Landed as of [0051]'s Phases F, G, H and I, then substantially retracted
+by [0052]'s own live-caught corrections (see that record's own
+addenda): **there is no per-platform activation concept left at all.**
+`--platform`, `CIBMP_PLATFORM`, `--only`, `--enable`/`GROUPS`, and
+`--archs`'s `auto`/`native`/`all` keyword vocabulary are all gone — every
+platform (natmod, and every usermod port) is always in scope, every
+invocation, and `build`/`skip` glob-matching each platform's own real
+identifiers is the only thing that decides what actually gets built. An
+unconfigured `build` selects nothing at all, from any platform — the
+zero-config default used to mean "natmod, narrowed to the newest known
+ABI"; it now means nothing is built until a config says what it wants,
+explicitly, via a glob. `--build`/`--skip` on the CLI (and
+`CIBMP_BUILD`/`CIBMP_SKIP`) replace `--only`/`--platform`: name a glob
+specific enough to match one identifier for "build exactly this one
+thing", or list several to spread work across a CI matrix by hand — there
+is no more keyword vocabulary computing that for you.
 
-`[usermod]` itself came back after Phase I landed, the same day, in a
-same-day design discussion this record's ninth addendum covers in full:
-not the pre-Phase-F selector (`ports = [...]`, nested port sub-tables —
-both still gone, both still loud errors), but a genuine third cascade
-tier — `default → global → family → platform → env → CLI` — shared
-defaults for every active usermod port at once, sibling to `[natmod]`,
-validated by every registered family unconditionally
-(`platforms.PlatformModule.validate_family_table()`, called from
-`cli.py`'s own `active_platforms()` before any platform is known to be
-active, so a stale family table is still caught even when nothing else
-would ever load that far). `natmod`'s own implementation is a no-op —
-one platform is already its only family. The same design pass renamed
-usermod's own `module-dir` to `user-c-modules` (natmod's own stays
-`module-dir`, untouched — the two names collided despite meaning
-different things to different downstream consumers, record 0051's sixth
-addendum) and changed its default from `"usermod"` to `"."`, the broader
-glob that also matches every real consuming project's own hand-written
-choice.
+`[natmod]`/`[unix]`/`[windows]`/`[qemu]`/`[webassembly]`/`[esp32]` do not
+exist as config tables at all any more — each one used to gate
+activation (table presence as selection) and, before that, to carry a
+per-platform axis (`archs =`/`boards =`). Both concepts are retracted:
+every real `(platform, tag, arch/board)` combination is read directly
+from `resources/build-platforms.toml` as a candidate row, always, the
+identical model natmod's own arch axis already had before this round
+(record 0052's own Track C) — `natmod_all_targets()`/
+`all_usermod_targets()` are now the *only* place that enumerates what
+exists; `build`/`skip` narrow it, nothing else does. `[usermod]` is not
+one of the retired six — it survives, unaffected, as shared defaults for
+every usermod port at once (`user-c-modules`/`manifest`/
+`extra-make-args`/`build`/`skip`), sibling to the bare top level rather
+than a selector of any kind (record 0051's ninth addendum, kept at the
+user's own explicit insistence through every later round of retraction —
+see below).
+
+`cibuildmp/options.py`'s cascade-based option resolution (`default →
+global → family → environment → CLI`) is wired into both
+`cibuildmp/platforms/natmod/options.py` and
+`cibuildmp/platforms/usermod/options.py`, for the base layers *and* for
+`[override]`/`inherit` — one shared top-level `[override]` table, keyed
+directly by its own glob (`[override."*-armv7emsp"]`, no separate
+`select =` field — a deliberate simplification over cibuildwheel's own
+`[[tool.cibuildwheel.overrides]]` array-of-tables shape, decided live
+2026-08-27: this project's own overrides are already a flat glob-matched
+space, so the glob can simply *be* the table's own name, and declaration
+order — which `tomllib` preserves — is what already decided precedence),
+validated loosely (valid on some platform) at parse time and strictly
+(valid on the *matched* identifier's own platform) at build time,
+`inherit = {extra-make-args = "append"|"prepend"|"none"}` layered in via
+`Options.get()`'s own `extra_layers`. `natmod`/`usermod` are physically
+under `cibuildmp/platforms/` (Phase H), each a `PlatformModule`
+(`resolve_options()`/`run_resolved()`) that `cli.py`'s own coordinator
+reaches through a fixed `FAMILIES` tuple — it never names either module
+directly, so a future platform family (zephyr, [0022]) costs one new
+module plus one tuple entry, not a `cli.py` change. Since both families
+are now always resolved together, `cli.py`'s coordinator does the "no
+targets selected" check jointly, once, across every family's own
+selected targets — one family selecting nothing while another selects
+something is the ordinary case (a config that only configures one
+family's own `build`), not a per-family error.
+
+`build`/`skip`/`[override]` being shared, top-level config now (instead
+of scoped by table presence) reopened a reachability question record
+0052's own task #66 had left deliberately unresolved: a pattern meant
+only for natmod (`build = "mpy6.3-*"`) must not read as a mistake just
+because it matches nothing among usermod's own identifiers, and vice
+versa. Fixed properly this round, not deferred again:
+`Options.targets()`/`UsermodOptions.targets()` both take an optional
+`foreign_identifiers` sequence, and `cli.py`'s own coordinator supplies
+each family with every *other* active family's own `all_targets()`
+identifiers before either does its own reachability audit — natmod still
+never imports usermod (the established one-way dependency), it just
+receives what it needs as a parameter from the one caller that already
+sees every family.
+
+The same live-caught round also corrected `narrow_to_newest_tag()`
+(what an unpinned `build` glob resolves an ABI to, for natmod): a stable
+release now always outranks a preview sharing the same ABI, even a
+numerically older one, so an unpinned glob never silently lands on an
+in-progress preview tag just because it happens to be the newest thing
+verified for that ABI.
+
+`[usermod]` itself sits one cascade tier above the bare top level —
+`default → global → [usermod] → env → CLI`, resolved through the same
+`Options` class natmod's own keys use, natmod's own instance simply never
+given a family table since it has no sibling platforms to share defaults
+with. Its own settable option keys (`user-c-modules`/`manifest`/
+`extra-make-args`/`build`/`skip` — `user-c-modules` renamed from
+`module-dir`, since that name collided with natmod's own key of the same
+name meaning something different, see [0051]'s sixth addendum) were kept
+through every later retraction at the user's own explicit insistence:
+unlike a per-platform table, `[usermod]` is not a selection mechanism (it
+gates nothing), only a value-holding tier, the same category as any other
+global option.
 
 [0043]: ../records/0043-unix-adopts-cibuildwheel-native-image-model.md
 [0044]: ../records/0044-unix-native-images-landed.md
 [0051]: ../records/0051-usermod-identifiers-have-no-version-axis.md
+[0052]: ../records/0052-config-is-a-tree-not-a-selector-matrix.md
 
 <!-- migrated verbatim from docs/BACKLOG.md lines 477-518 (Config schema) -->
 
@@ -188,19 +235,16 @@ choice.
 ```toml
 # cibuildmp.toml — repo root
 
-micropython = "v1.29.0"       # usermod only ([0052], A2): release tag(s) to
-                              # build against -- also accepts a list (D13):
-                              # ["v1.22.0", "v1.29.0"]. This list is the
-                              # leading axis; every listed tag builds, output
-                              # kept apart by identifier ([0051]). natmod has
-                              # no version config key at all any more -- its
-                              # own version axis is the static domain of
-                              # every real (tag, arch) row
-                              # resources/build-platforms.toml has verified,
-                              # narrowed by build/skip glob-matching directly
-                              # against those rows' own identifiers.
 output-dir = "mpyhouse"       # output-dir/<identifier>/ per target (D14)
-build = "*"                   # glob(s) over identifiers, space-separated
+build = ""                    # glob(s) over identifiers, space-separated --
+                              # NOTHING builds until this names something.
+                              # There is no version/tag config key at all
+                              # any more, for either family: every real
+                              # (tag, arch/board) row resources/
+                              # build-platforms.toml has verified is a
+                              # candidate, always, narrowed by build/skip
+                              # glob-matching directly against each row's
+                              # own real identifier.
 skip = ""
 name = ""                     # ([0052], A3) project identity for artifact
                               # filenames -- {name}-{version}-{identifier}
@@ -218,19 +262,28 @@ version = ""                 # ([0052], A3 extended this to usermod too;
                               # package.json yet for natmod, and no version
                               # segment in the filename for either family
 
-[natmod]
-# No `archs` key -- it is not a config concept any more (record 0052's
-# own live-caught correction: it duplicated exactly what a build/skip
-# glob over the identifier already expresses, e.g. build = "*-x64").
-# Left unset, every arch dynruntime.mk supports builds by default.
+# natmod's own keys -- no [natmod] table to hold them in any more (record
+# 0052's own live-caught retraction: neither activation nor a settable
+# schema of its own survives on it), so they live at the bare top level
+# like every other global option. natmod-only by name, but there is no
+# ambiguity about where they apply: usermod reads no key under any of
+# these names at all.
 module-dir = "natmod"         # dir containing the Makefile
 make-target = "dist"
-extra-make-args = []
+extra-make-args = []          # shared by name/meaning with usermod's own
 pre-build-command = ""        # run in module-dir after mpy-cross, before make
                               # (a7p: "make fetch-nanopb")
 arch-flags = ""               # rv32imc only, e.g. "zba,zcmp" (D15) -- part
                               # of that arch's identifier, so this cannot be
                               # set per-[override], only here
+
+# usermod's own shared-across-every-port defaults -- not a selector (every
+# port is always in scope regardless of this table's own presence), one
+# cascade tier above the bare top level. user-c-modules/manifest are
+# usermod-only by name (natmod has no such keys at all).
+[usermod]
+user-c-modules = "."
+manifest = "usermod/manifest.py"
 
 [publish]
 extra-files = []              # copied into every identifier's own directory,
@@ -259,74 +312,62 @@ once the glob has actually matched a real target — `natmod`-only
 identifiers is still a loud, specific error, not silently ignored.
 
 Every option is overridable by environment variable, `CIBMP_`-prefixed and
-screaming-snake-cased: `CIBMP_BUILD`, `CIBMP_SKIP`, `CIBMP_MICROPYTHON`,
-`CIBMP_OUTPUT_DIR`, `CIBMP_EXTRA_MAKE_ARGS`, `CIBMP_NAME`, `CIBMP_VERSION`,
-`CIBMP_ARCH_FLAGS`, … Precedence, lowest to highest: defaults → config
-file → `[override]` matching the identifier → environment → CLI flags.
+screaming-snake-cased: `CIBMP_BUILD`, `CIBMP_SKIP`, `CIBMP_OUTPUT_DIR`,
+`CIBMP_EXTRA_MAKE_ARGS`, `CIBMP_NAME`, `CIBMP_VERSION`, `CIBMP_ARCH_FLAGS`,
+… — and `build`/`skip` also by `--build`/`--skip` directly on the CLI, the
+replacement for the old `--only`/`--platform`/`--archs`. Precedence,
+lowest to highest: defaults → config file → `[override]` matching the
+identifier → environment → CLI flags.
 
 **Where a key goes is part of the schema, and getting it wrong is an
-error** ([0048], generalised into a cascade by [0051]'s own Phase F). The
-keys above the first table header — `micropython` (usermod only since
-[0052]'s A2 removed natmod's own use of it), `output-dir`, `build`, `skip`,
-`name`, `version`, `micropython-submodules`, `enable` — are invocation-wide
-and are read **only** from the top level, across every platform (`mpy-abi` is gone
-entirely, not merely relocated — writing it anywhere is now a plain unknown-
-key error). Writing one inside `[natmod]` or a usermod port's own table
-fails with a message naming where it belongs; so does any key that table's
-own schema does not read at all (a typo, or an `arch-flags` inside
-`[override]`). Until [0048] every one of those was silently ignored,
-which meant a misplaced `skip` produced a successful build of something
-you had asked not to build; the check itself moved from a fixed
-per-table-shape partition to a per-platform-schema one under [0051]'s own
-cascade, but the guarantee is the same. `build`/`skip`/`arch-flags` remain
-a deliberate exception: natmod reads them from the top level *or*
-`[natmod]`, and both work, so neither is silent — under the cascade this
-is simply the general case (global default, platform-specific override),
-not a special-cased set of keys. `archs` used to be part of that set too;
-it is gone now, as a config concept entirely (record 0052's own
-live-caught correction) — narrowing to a specific arch is a `build`/`skip`
-glob's job now, the same job it already had for every other axis.
+error** ([0048], generalised into a cascade by [0051]'s own Phase F, then
+simplified further by [0052]'s own retraction of every per-platform
+table). The keys above the first table header — `output-dir`, `build`,
+`skip`, `name`, `version`, `micropython-submodules` — are invocation-wide
+and are read **only** from the top level (`micropython`/`mpy-abi` are
+gone entirely, not merely relocated — writing either anywhere is now a
+plain unknown-key error). Writing a generic key inside `[usermod]` (its
+own one remaining table) still fails with a message naming where it
+belongs; so does any key `[usermod]`'s own schema does not read at all
+(a typo, or `arch-flags`, which only natmod reads). Until [0048] every
+one of those was silently ignored, which meant a misplaced `skip`
+produced a successful build of something you had asked not to build; the
+check has moved twice since (a fixed per-table-shape partition, then a
+per-platform cascade, now a two-tier global/`[usermod]`-family split),
+but the guarantee is the same.
 
 [0048]: ../records/0048-build-skip-live-in-opposite-tables.md
 
-Usermod's own per-port config shape is documented in [0023] rather than
-transcribed here — it is a genuinely different shape (no ABI axis, a
-per-port arch/board axis instead), not a variant of the table above. As of
-[0051]'s Phase F, every usermod port is its own top-level table —
-`[unix]`, `[windows]`, `[qemu]`, `[webassembly]`, `[esp32]` — sibling to
-`[natmod]`; there is no more `ports = [...]` list (a port's own table
-presence is what selects it, the same rule `[natmod]`'s presence has
-always followed). `[usermod]` itself came back after Phase I (the
-ninth addendum), but not as an umbrella over the five port tables and
-not a selector — a sixth sibling table, sitting one cascade tier above
-them, holding shared defaults for whichever ports are active. Its own
-three settable option keys (`user-c-modules`/`manifest`/`extra-make-args`
-— `user-c-modules` renamed from `module-dir`, since that name collided
-with natmod's own key of the same name meaning something different, see
-[0051]'s sixth addendum) are genuinely global-with-family-with-
-per-platform-override now: `default → global → [usermod] → [<port>] →
-env → CLI`, resolved through the same `Options` class natmod's own four
-keys use, natmod's own instance simply never given a family table since
-it has no sibling ports to share defaults with. `[override]` is shared
-with natmod as of Phase G (see above) — the old, short-lived
-`[[usermod-overrides]]` name (Phase F's rename of the even older nested
-`[[usermod.overrides]]`) is gone; there is exactly one top-level
-`[override]` table now, for every platform.
+Usermod's own real identifier space is documented in [0023] rather than
+transcribed here — it is a genuinely different shape from natmod's
+(`{tag}-{arch}` for `unix`/`windows`/`webassembly`, `{tag}-{port}-{board}`
+for `qemu`/`esp32`; see the README's own "Identifiers and selectors"
+section for the full table), not a variant of the example above. There is
+no per-port config table at all any more (`[unix]`, `[esp32]`, ... —
+[0051]'s Phase F introduced them, [0052]'s own live-caught retraction
+removed them again along with the `archs =`/`boards =` axis config they
+carried): every real `(port, tag, arch/board)` row is a candidate always,
+narrowed only by `build`/`skip`. `[usermod]` survives as shared defaults
+for every port at once — it was never a selector, so none of that
+retraction touched it (record 0051's ninth addendum, kept at the user's
+own explicit insistence through every later round).
 
-**Opt-in groups** ([0051] point 8, upstream's own `EnableGroup`): `enable`
-(config key, top-level, space-separated string or list; `--enable`,
-repeatable, on the CLI) names groups a bare `build = "*"` should reach
-anyway. Only usermod defines any today —
-`usermod.targets.GROUPS["unix-emulated-everywhere"]` covers
-`ppc64le`/`s390x`/`riscv64`, both libcs, glob-matched rather than
-enumerated. A target matching an unenabled group is excluded before
-`build`/`skip` is even checked (`cibuildmp.selector.select()`), so it
-cannot be worked around by naming it in `build` — only `enable` reaches it.
-This is also what finally answers the six emulated-everywhere `unix`
-cells' own "in the axis or not" question: they are in `default_axis_values
-("unix")` now (equal to `all_axis_values("unix")` in full), and it is the
-group, not axis membership, that still keeps a plain `[unix]` config at
-nine cells by default.
+**Opt-in groups and host-convenience keywords are both gone** ([0051]
+point 8 added `enable`/`GROUPS` and record 0049 added `--archs auto`/
+`native`/`all`; [0052]'s own live-caught retraction removed both, in the
+same round that removed table-presence activation). Everything either
+one could reach, an ordinary `build`/`skip` glob against the real
+identifier already reaches directly — the six `unix`
+ppc64le/s390x/riscv64 cells (both libcs) that `enable` used to gate are
+reached (or excluded) the same way every other cell is, e.g.
+`skip = "*_ppc64le *_s390x *_riscv64"` to exclude them, or naming them
+directly in `build` to reach them. `auto`/`native`/`all` computed "what
+runs natively on this machine" from `platform.machine()` at CLI-parse
+time; a CI matrix now spells that out per runner by hand instead (see
+`.github/workflows/build-examples.yml`'s own `build-usermod` job for a
+worked example) — the README's own identifier reference plus a config's
+own comments are meant to carry that teaching burden now, not a keyword
+vocabulary the tool computes for you.
 
 <!-- migrated verbatim from docs/BACKLOG.md lines 519-546 (Toolchain map) -->
 

@@ -1,30 +1,32 @@
-"""usermod: board-based ports (rp2, esp32, stm32, ...) plus unix/windows/
-webassembly's variant axis. See docs/BACKLOG.md, "Later -- usermod".
+"""usermod: `unix`/`windows`/`qemu`/`webassembly`/`esp32` -- the five
+usermod ports with a real `build_<port>()` driver in `usermod/build.py`.
+See docs/BACKLOG.md, "Later -- usermod".
 
-Also usermod's own half of the CLI dispatch. `cli.py`'s `main()` calls into
-`run()` for every usermod port active this invocation (`cli.py`'s own
-`active_platforms()`), mirroring the natmod flow --dry-run/--only/
---print-build-identifiers/--allow-empty/build --
-but driven by `UsermodOptions`/`orchestrate.build()` instead of
-`options.Options`/`build.build_target()`. Kept in its own module rather
-than inlined into `cli.py` so that file does not grow a second,
-differently-shaped copy of the same dispatch logic.
+Also usermod's own half of the CLI dispatch (Phase H, record 0051; the
+`--platform`/`--only`/`--archs`/`--enable` retraction folded into this
+same round). `cli.py`'s own coordinator always resolves this family
+alongside natmod's, every invocation -- there is no more activation
+concept (table presence, `--platform`) narrowing which ports are in
+scope; `all_usermod_targets()` (`targets.py`) already enumerates every
+real row every port has, and `build`/`skip` glob-matching the identifier
+is the only thing left that decides what actually gets built. Driven by
+`UsermodOptions`/`orchestrate.build()` instead of `options.Options`/
+`build.build_target()`. Kept in its own module rather than inlined into
+`cli.py` so that file does not grow a second, differently-shaped copy of
+the same dispatch logic.
 
-Not wired here, deliberately, same as `usermod/options.py`'s and
-`usermod/orchestrate.py`'s own docstrings already flag:
-- `--toolchain` is natmod-specific and stays that way: toolchain
-  resolution always goes through whatever each `build_<port>()` already
-  does internally, with no `auto`/`host`/`download` override.
+`--toolchain` is natmod-specific and stays that way: toolchain resolution
+always goes through whatever each `build_<port>()` already does
+internally, with no `auto`/`host`/`download` override.
 
-`--archs` *was* on that list and no longer is (record 0049). It is how
-work is spread across runners now that cibuildmp generates no matrix and
-picks no host: `auto`/`native`/`all` beside explicit names, applied to
-every selected port with an `archs` axis.
-
-`--enable` is also wired here (record 0051 point 8): unioned into
-`options.enable` before `options.targets()` resolves, the same
-post-load-mutation shape `--archs` already has. natmod's own `run()`
-never reads it -- no groups exist there yet.
+`--archs auto`/`native`/`all` (record 0049) and `--enable`/`GROUPS`
+(record 0051 point 8) are both retracted, live, in the same session that
+removed `archs`/`boards` axis config and table-presence activation: both
+were host- or opt-in-convenience layers sitting on top of an axis concept
+that no longer exists. Everything either one could reach, an ordinary
+`build`/`skip` glob against the real identifier (or an
+`[override."<glob>"]` entry) already reaches directly -- see the README
+for the full identifier list and glob syntax.
 """
 
 from __future__ import annotations
@@ -39,13 +41,26 @@ from ...stepsummary import write_step_summary
 from . import orchestrate
 from .build import UsermodBuildError
 from .options import UsermodConfigError, UsermodOptions, check_usermod_family_table
-from .targets import (
-    ARCH_KEYWORDS,
-    UnknownAxisError,
-    UnknownPortError,
-    UsermodTarget,
-    all_usermod_targets,
-    axis_key,
+from .targets import UsermodTarget
+
+# Every exception UsermodOptions.load()/.targets() can raise -- what
+# cli.py's own coordinator catches around "load config, resolve targets"
+# for this family, uniformly with natmod's own equivalent tuple. Declared
+# here, not re-derived at each call site, so the two stay in sync by
+# construction rather than by convention.
+LOAD_ERRORS: tuple[type[Exception], ...] = (UsermodConfigError,)
+
+# Every exception a real build (or the per-target build_options()
+# resolution a --dry-run preview also runs) can raise -- UsermodConfigError
+# belongs here as much as the build-specific two: a matched [override]
+# entry's own key is only checked against the matched identifier's own
+# platform once a target actually resolves (Phase G's tier-2 validation),
+# so an error LOAD_ERRORS's own targets() catch could not have caught is a
+# real possibility on the very first target either path resolves.
+BUILD_ERRORS: tuple[type[Exception], ...] = (
+    SourceError,
+    UsermodBuildError,
+    UsermodConfigError,
 )
 
 
@@ -59,13 +74,10 @@ def validate_family_table(
 ) -> None:
     """Part of the `PlatformModule` contract (`platforms/__init__.py`'s
     own docstring has the full reasoning) -- validates `[usermod]`
-    unconditionally, before it is known whether any usermod port ends up
-    active this invocation, so a stale `[usermod] ports = [...]` is
-    caught even when nothing else would ever load usermod's own config
-    far enough to see it. Thin wrapper: `check_usermod_family_table()`
-    does the real work, and is also called again, independently, by
-    `UsermodOptions.load()` itself for callers that bypass `cli.py`
-    entirely (most tests)."""
+    unconditionally, on every invocation. Thin wrapper:
+    `check_usermod_family_table()` does the real work, and is also called
+    again, independently, by `UsermodOptions.load()` itself for callers
+    that bypass `cli.py` entirely (most tests)."""
     check_usermod_family_table(raw, error=error)
 
 
@@ -74,24 +86,51 @@ def resolve_options(
     package_dir: Path,
     config_file: Path | None,
     preread: tuple[Path | None, dict[str, Any]],
-    *,
-    ports: list[str],
 ) -> UsermodOptions:
-    """Load config and apply the one CLI override every caller needs --
-    extracted because `cli.py`'s own `_print_build_identifiers()` and this
-    module's `run()` each applied `--enable` the same way independently
-    (Phase H). `--archs` is deliberately *not* folded in here: `run()`
-    below applies it through a per-port branch (an `archs`-axis port gets
-    the literal value, a board-keyed port only the auto/native/all
-    keywords) that `cli.py`'s own multi-platform paths have never
-    replicated -- preserved exactly as it was, not silently widened.
-    """
-    options = UsermodOptions.load(
-        package_dir, config_file, preread=preread, ports=ports
-    )
-    if args.enable:
-        options.enable = options.enable | frozenset(args.enable)
+    """Load config and apply the CLI `--build`/`--skip` overrides every
+    caller needs -- the same shape `natmod/__init__.py`'s own
+    `resolve_options()` has."""
+    options = UsermodOptions.load(package_dir, config_file, preread=preread)
+    if args.build is not None:
+        options.build = args.build.split()
+    if args.skip is not None:
+        options.skip = args.skip.split()
     return options
+
+
+def run_resolved(
+    args: Any, options: UsermodOptions, targets: list[UsermodTarget]
+) -> int:
+    """`--dry-run`/build for an already-resolved, already-nonempty target
+    list -- the part of `run()` below that is genuinely usermod-specific.
+    Loading, target resolution, `--print-build-identifiers` and the
+    joint "no targets selected" decision all moved to `cli.py`'s own
+    coordinator (Phase J), since none of those can be decided per family
+    any more once every family is always in scope."""
+    total = len(targets)
+    if args.dry_run:
+        print(f"cibuildmp: {total} usermod target(s)")
+        for index, target in enumerate(targets, 1):
+            print("  " + _plan_line(index, total, target))
+        return 0
+
+    print(f"cibuildmp: {total} usermod target(s)")
+    try:
+        results = orchestrate.build(options, targets)
+    except BUILD_ERRORS as exc:
+        if args.debug_traceback:
+            raise
+        print(f"cibuildmp: error: {exc}", file=sys.stderr)
+        return 2
+
+    total_duration = sum(r.duration for r in results)
+    print(
+        f"\ncibuildmp: {len(results)} usermod target(s) built in {total_duration:.1f}s"
+    )
+    for result in results:
+        print(f"  {result.identifier}: {result.output.name} ({result.size} bytes)")
+    write_step_summary(results, total_duration)
+    return 0
 
 
 def run(
@@ -99,69 +138,22 @@ def run(
     package_dir: Path,
     config_file: Path | None,
     preread: tuple[Path | None, dict[str, Any]],
-    *,
-    ports: list[str],
 ) -> int:
+    """Full single-family flow: resolve, select targets,
+    `--print-build-identifiers`/no-targets-selected/`run_resolved()`. Used
+    directly by tests and any other caller that wants usermod alone
+    without going through `cli.py`'s own coordinator, which instead calls
+    `resolve_options()`/`run_resolved()` separately so it can merge this
+    family's own targets with natmod's before making either of those two
+    decisions."""
     try:
-        options = resolve_options(args, package_dir, config_file, preread, ports=ports)
-        if args.archs is not None:
-            values = [a.strip() for a in args.archs.split(",") if a.strip()]
-            keywords = [v for v in values if v in ARCH_KEYWORDS]
-            # **Keywords reach every port; explicit names only reach the
-            # ports an arch list can mean something to.** An earlier cut
-            # applied the whole flag only to `archs`-keyed ports, which
-            # silently exempted `webassembly`, `qemu` and `esp32` from
-            # `auto` -- and their images are `linux/amd64`, so on an
-            # arm64 runner `auto` kept selecting work that runs emulated,
-            # which is the one thing `auto` exists to avoid. It cost a
-            # real CI run: `webassembly` built three times, twice by
-            # `auto` on both runners and once by the job that tests it
-            # emulated on purpose.
-            #
-            # An explicit `manylinux_2_28_s390x` still has no meaning for
-            # a board-keyed port, so those keep only the keywords --
-            # `--archs auto,manylinux_2_28_s390x` reads as "what runs
-            # here, plus that one cell" without turning the extra name
-            # into an unknown board.
-            for port in options.ports:
-                if axis_key(port) == "archs":
-                    options.axis_overrides[port] = values
-                elif keywords:
-                    options.axis_overrides[port] = keywords
+        options = resolve_options(args, package_dir, config_file, preread)
         targets = options.targets()
-    # UsermodConfigError belongs here as much as the other two and was
-    # simply never added: until record 0048 it had one raise site (a
-    # `[usermod.<port>]` table for a port with no axis yet), so nobody
-    # had hit it from the CLI and it surfaced as a raw traceback. It has
-    # several raise sites now -- every misplaced or misspelt key -- and a
-    # config mistake is the most ordinary error this tool has.
-    except (UnknownPortError, UnknownAxisError, UsermodConfigError) as exc:
+    except LOAD_ERRORS as exc:
         if args.debug_traceback:
             raise
         print(f"cibuildmp: error: {exc}", file=sys.stderr)
         return 2
-
-    if args.only is not None:
-        # **0045**: resolved against every identifier that exists, not the
-        # ones this config selects -- and bypassing `build`/`skip`
-        # entirely, which is what this flag's own help has always claimed
-        # and did not do. `options.targets()` above has already applied
-        # them, so filtering *that* could never override anything.
-        #
-        # cibuildwheel's own shape: its `--only` takes `choices` from
-        # `read_all_configs()` and its help says "Overrides
-        # CIBW_BUILD/CIBW_SKIP". "Your config does not select that" is not
-        # an answer the flag should be able to give.
-        known = all_usermod_targets(options.micropython)
-        targets = [t for t in known if t.identifier == args.only]
-        if not targets:
-            print(
-                f"cibuildmp: error: --only {args.only!r} is not a known usermod "
-                f"identifier. Known: "
-                f"{', '.join(t.identifier for t in known)}",
-                file=sys.stderr,
-            )
-            return 2
 
     if args.print_build_identifiers:
         identifiers = [t.identifier for t in targets]
@@ -183,39 +175,4 @@ def run(
         )
         return 2
 
-    total = len(targets)
-    if args.dry_run:
-        print(
-            f"cibuildmp: {total} usermod target(s) against MicroPython "
-            f"{', '.join(options.micropython)}"
-        )
-        for index, target in enumerate(targets, 1):
-            print("  " + _plan_line(index, total, target))
-        return 0
-
-    print(
-        f"cibuildmp: {total} usermod target(s) against MicroPython "
-        f"{', '.join(options.micropython)}"
-    )
-    try:
-        results = orchestrate.build(options, targets)
-    # UsermodConfigError belongs here too, for the same reason build_options()
-    # itself can raise it: a matched [override] entry's own key is only
-    # checked against the matched identifier's own platform once a target
-    # actually resolves (Phase G's tier-2 validation, natmod/options.py's
-    # check_keys() call inside UsermodOptions.build_options()) --
-    # options.targets() above cannot have caught it.
-    except (SourceError, UsermodBuildError, UsermodConfigError) as exc:
-        if args.debug_traceback:
-            raise
-        print(f"cibuildmp: error: {exc}", file=sys.stderr)
-        return 2
-
-    total_duration = sum(r.duration for r in results)
-    print(
-        f"\ncibuildmp: {len(results)} usermod target(s) built in {total_duration:.1f}s"
-    )
-    for result in results:
-        print(f"  {result.identifier}: {result.output.name} ({result.size} bytes)")
-    write_step_summary(results, total_duration)
-    return 0
+    return run_resolved(args, options, targets)

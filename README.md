@@ -37,11 +37,17 @@ is implemented so far.
 
 ```console
 $ cibuildmp --dry-run
-cibuildmp: 10 target(s) against MicroPython v1.30.0-preview
-  [ 1/10] mpy6.3-x86                   make -C natmod ARCH=x86 dist
-  [ 2/10] mpy6.3-x64                   make -C natmod ARCH=x64 dist
+cibuildmp: error: no targets selected. Pass --allow-empty if that is expected.
+$ cibuildmp --build "mpy6.3-*" --dry-run
+cibuildmp: 10 target(s) against MicroPython v1.29.0
+  [ 1/10] mpy6.3-v1.29.0-x86           make -C natmod ARCH=x86 dist
+  [ 2/10] mpy6.3-v1.29.0-x64           make -C natmod ARCH=x64 dist
   ...
 ```
+
+An unconfigured `build` selects nothing at all, from any platform -- see
+[Identifiers and selectors](#identifiers-and-selectors) below for the full
+real identifier list and glob syntax.
 
 Drop `--dry-run` and it builds for real: each target lands in its own
 `output-dir/<identifier>/` directory (`mpyhouse/mpy6.3-x64/`, …)
@@ -66,8 +72,8 @@ $ docker run --rm -it \
 The cache volume matters: without it, every run re-downloads every
 toolchain and re-fetches MicroPython from scratch. Drop `--dry-run` for
 a real build the same way as above; anything after `cibuildmp` in the
-`docker run` line is passed straight through as CLI arguments (`--only
-<identifier>`, `--archs x64,x86`, …).
+`docker run` line is passed straight through as CLI arguments (`--build
+"mpy6.3-*-x64"`, `--skip "*-armv6m"`, …).
 
 The image (`Dockerfile`, Ubuntu 24.04) installs only what `cibuildmp`
 cannot self-provision — every other toolchain (`arm-none-eabi-`,
@@ -219,8 +225,8 @@ those stay in the consuming repo.
 `dynruntime.mk`'s `BUILD` variable by `$(ARCH)` --
 `BUILD = .obj/$(ARCH)` before the `include`, kept outside `build/` so it
 does not collide with the `dist` output the CLI globs for (see
-`examples/template/natmod/Makefile`). `cibuildmp` with no `--only` runs
-every target sequentially in one `natmod/` tree (**D9**), and
+`examples/template/natmod/Makefile`). `cibuildmp` runs every selected
+target sequentially in one `natmod/` tree (**D9**), and
 `dynruntime.mk` defaults `BUILD ?= build` unscoped, so without this a
 second `ARCH=` in the same invocation finds the previous arch's own
 object files "up to date" (same path, source unchanged) and skips
@@ -244,6 +250,73 @@ None of this cares what produced the `.c` files `SRC` lists --
 `wasm2c` in a Makefile rule before the same `dynruntime.mk` flow takes
 over, and needs nothing from `cibuildmp` beyond `module-dir = "."` and an
 `extra-make-args` entry for its own `APP=` variable.
+
+## Identifiers and selectors
+
+Every buildable thing -- one natmod arch, one usermod port/board/arch cell
+-- has a real, stable **identifier**, read straight from
+`resources/build-platforms.toml` (never guessed or reconstructed from a
+format string). `build`/`skip` (config, `CIBMP_BUILD`/`CIBMP_SKIP` env
+vars, or `--build`/`--skip` on the CLI) are space-separated glob patterns
+matched against these identifiers, `skip` applied after `build`; an
+`[override."<glob>"]` table applies option overrides to whichever
+identifiers match its own glob. There is no other selection mechanism --
+no per-platform table, no `--platform`/`--only` flag, no `auto`/`native`/
+`all` keyword vocabulary, no opt-in group. **An unconfigured `build`
+selects nothing at all, from any platform.**
+
+Identifier shapes, one per platform:
+
+| Platform               | Shape                        | Example                            |
+| ----------------------- | ----------------------------- | ----------------------------------- |
+| natmod                  | `mpy{abi}-{tag}-{arch}`       | `mpy6.3-v1.29.0-armv7emsp`          |
+| usermod `unix`          | `{tag}-{arch}`                 | `v1.29.0-manylinux_2_28_x86_64`     |
+| usermod `windows`       | `{tag}-{arch}`                 | `v1.29.0-win_amd64`                 |
+| usermod `webassembly`   | `{tag}-{arch}`                 | `v1.29.0-wasm32`                    |
+| usermod `qemu`          | `{tag}-qemu-{board}`           | `v1.24.0-qemu-MICROBIT`             |
+| usermod `esp32`         | `{tag}-esp32-{board}`          | `v1.29.0-esp32-ESP32_GENERIC`       |
+
+Note the shape genuinely differs per usermod port: `unix`/`windows`/
+`webassembly` carry no port name at all in the identifier -- only
+`qemu`/`esp32` do. Getting this wrong by hand-constructing an identifier
+from a guessed format is exactly the mistake this section exists to
+prevent; every real identifier for every tag/arch/board combination this
+project has verified is one line in `resources/build-platforms.toml`, and
+`--print-build-identifiers --json` against a broad `build` glob is the
+fastest way to see the real list for yourself:
+
+```console
+$ cibuildmp --build "mpy6.3-* v1.29.0-manylinux* v1.29.0-esp32-*" \
+    --print-build-identifiers
+```
+
+Selector examples:
+
+```toml
+build = "mpy6.3-*"                        # every arch, one natmod ABI, newest verified tag
+build = "mpy6.2-* mpy6.3-*"                # two ABIs in one invocation
+build = "v1.29.0-manylinux*"               # every native unix cell, one tag
+skip  = "*_ppc64le *_s390x *_riscv64"      # drop the emulated-everywhere cells
+build = "v1.29.0-esp32-ESP32_GENERIC"      # exactly one board
+
+[override."*-armv7emsp"]
+extra-make-args = ["MP_BCLIBC_PRECISION=single"]
+```
+
+`{...,...}` brace expansion works inside a single pattern
+(`build = "*-{x64,armv6m}"`), matching shell glob syntax. A `build`/
+`skip` pattern that can never match *any* real identifier (a typo, an
+arch/board this project has never verified) is a load-time error, not a
+silent no-op -- the same guarantee a misplaced config key gets.
+
+When a `build` glob never names a specific MicroPython tag (no
+`vX.Y.Z`-shaped substring in any of its patterns), natmod narrows the
+match to the newest tag this project has verified as *stable* for that
+ABI, preferring a real release over a preview sharing the same ABI even
+when the preview is numerically newer -- name a tag explicitly
+(`mpy6.3-v1.29.0-*`) to pin one yourself. Usermod has no equivalent
+narrowing: every real `(port, tag, arch/board)` row already carries an
+explicit, distinct tag, so there is nothing left to disambiguate.
 
 ## Target support
 
@@ -278,24 +351,23 @@ build-driver layer (`docs/BACKLOG.md`'s **M6**–**M9**) — live-verified
 against a real MicroPython checkout, including a real custom
 `USER_C_MODULES` module for every ✅ row.
 
-**Wired into the `cibuildmp` CLI**: every usermod port is its own
-top-level table in `cibuildmp.toml` — `[unix]`, `[windows]`, `[qemu]`,
-`[webassembly]`, `[esp32]`, sibling to `[natmod]`, each with its own real
-axis (`archs` for `unix`/`windows`, `boards` for `esp32`) — auto-detected
-by table presence the same way `[natmod]` already is, and writing a
-table (even an empty one) is what selects it. More than one platform
-table, `[natmod]` included, can build in a single invocation with no
-flag at all (record 0051's Phase F); `--platform`/`CIBMP_PLATFORM` is an
-optional filter over all six platform names, not a mode selector, the
-way upstream's own `--platform` names an OS. Verified live end to end,
-not just against the hermetic suite: a real `[unix]` config with a real
+**Wired into the `cibuildmp` CLI**: every platform (natmod, and every
+usermod port) is always in scope, every invocation -- there is no
+`[natmod]`/`[unix]`/`[windows]`/`[qemu]`/`[webassembly]`/`[esp32]` table
+at all, and no `--platform`/`CIBMP_PLATFORM` flag to select one. `build`/
+`skip` (config, `CIBMP_BUILD`/`CIBMP_SKIP`, or `--build`/`--skip` on the
+CLI) glob-match the real identifier directly and are the only thing that
+decides what actually gets built -- see
+[Identifiers and selectors](#identifiers-and-selectors) below for the
+full real identifier list and glob syntax. Verified live end to end, not
+just against the hermetic suite: a real usermod config with a real
 custom C module, run through the actual `cibuildmp` CLI (no mocking),
-produced a genuine linked `unix-manylinux_2_28_x86_64` binary that runs
-and actually calls into that module.
+produced a genuine linked `manylinux_2_28_x86_64` binary that runs and
+actually calls into that module.
 See `docs/BACKLOG.md`'s **D23**/**M9b** for the full design (identifier
 scheme, why there's no `package.json` for usermod output) and record
-0051 for the config-tree shape, the shared `[override]`/`inherit`
-(now merged with natmod's own), and the `platforms/` package layout.
+0051/0052 for the config model's own history, the shared `[override]`/
+`inherit`, and the `platforms/` package layout.
 `extra-files` (natmod's own `[publish]` mechanism) is still not wired
 for usermod.
 

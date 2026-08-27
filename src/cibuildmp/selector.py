@@ -81,34 +81,34 @@ def select(
     targets: list[T],
     build: str | list[str],
     skip: str | list[str],
-    *,
-    enable: frozenset[str] = frozenset(),
-    groups: dict[str, list[str]] | None = None,
 ) -> list[T]:
     """Apply build/skip globs, skip last -- same order as cibuildwheel.
 
-    `groups`/`enable` (**0051** point 8, upstream's own `EnableGroup`): a
-    group is a named set of glob patterns a mode supplies as data -- this
-    module knows nothing about what a group means, the same "mechanism
-    shared, data per-mode" split the rest of this file already holds to.
-    A target matching an unenabled group's patterns is dropped *before*
-    build/skip is even checked, so `build = "*"` alone can never reach
-    it -- matching upstream's own `BuildSelector.__call__`, which checks
-    `EnableGroup` membership first and lets it outrank `build`/`skip`.
-    Callers that pass no `groups` (every one before this record) get
-    identical behaviour to before it.
+    No implicit "*" fallback for an unconfigured build -- a real,
+    live-caught correction: this was the actual mechanism behind "an
+    empty config still builds everything," and the whole point of
+    removing every implicit default elsewhere (archs, platform tables,
+    ...) is that a config now says what it wants, explicitly, via a
+    glob, or gets nothing. An empty build_patterns list matches()
+    correctly returns False for every identifier.
+
+    No `enable`/`groups` opt-in-group layer any more either (record
+    0051 point 8 introduced it, retracted live in the same session that
+    removed `archs`/`platform_tables`/table-presence activation): a
+    named group of patterns was itself exactly the kind of second,
+    parallel selection mechanism this whole retraction keeps arguing
+    against -- everything a group could reach, an ordinary `build`/
+    `skip` glob already reaches directly against the real identifier,
+    with no separate vocabulary to document or opt into. Callers that
+    want the six emulated-everywhere `unix` cells write
+    `build = "*_{ppc64le,s390x,riscv64}"` (or add it to whatever glob
+    they already have) instead of `--enable unix-emulated-everywhere`.
     """
-    build_patterns = parse_selector(build) or ["*"]
+    build_patterns = parse_selector(build)
     skip_patterns = parse_selector(skip)
-    result = []
-    for t in targets:
-        if groups and any(
-            name not in enable and matches(t.identifier, patterns)
-            for name, patterns in groups.items()
-        ):
-            continue
-        if matches(t.identifier, build_patterns) and not matches(
-            t.identifier, skip_patterns
-        ):
-            result.append(t)
-    return result
+    return [
+        t
+        for t in targets
+        if matches(t.identifier, build_patterns)
+        and not matches(t.identifier, skip_patterns)
+    ]

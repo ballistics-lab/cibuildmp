@@ -1,18 +1,21 @@
 """natmod: the platform family for `dynruntime.mk`-based native modules --
 one build per ARCH, no MicroPython port build of its own.
 
-Also natmod's own half of CLI dispatch (Phase H, record 0051): this
-module implements the `PlatformModule` contract every entry in
-`platforms.PLATFORM_FAMILY` satisfies -- `resolve_options()` (load config,
-apply CLI overrides) and `run()` (the actual `--dry-run`/`--only`/
-`--print-build-identifiers`/`--allow-empty`/build dispatch). `cli.py`'s
-own `main()` never calls into this module by name: it looks natmod up in
-`PLATFORM_FAMILY` like every other platform and calls the same two
-functions, uniformly. `build_all()` lives here too -- everything
-downstream of "this invocation is a natmod build". What stays in `cli.py`
-is only what is genuinely shared across every family: the one argument
-parser, `active_platforms()`, and the cache-clean/config-read/platform-
-resolve preamble that has to run before any family can be chosen.
+Also natmod's own half of CLI dispatch (Phase H, record 0051; the
+`--platform`/`--only`/`--archs` retraction folded into this same round).
+This module implements the `PlatformModule` contract every entry in
+`platforms.FAMILIES` satisfies -- `resolve_options()` (load config, apply
+CLI overrides) and `run_resolved()` (the actual `--dry-run`/build
+dispatch, given an already-resolved, already-nonempty target list).
+`cli.py`'s own coordinator always resolves this family alongside
+usermod's, every invocation -- there is no more activation concept
+narrowing whether natmod is in scope; `build`/`skip` glob-matching the
+identifier is the only thing that decides what actually gets built.
+`build_all()` lives here too -- everything downstream of "this invocation
+is a natmod build". What stays in `cli.py` is only what is genuinely
+shared across every family: the one argument parser and the
+cache-clean/config-read preamble that has to run before any family can be
+resolved.
 """
 
 from __future__ import annotations
@@ -191,11 +194,23 @@ def validate_family_table(
     """No-op -- part of the `PlatformModule` contract (`platforms/__init__.py`'s
     own docstring has the full reasoning), satisfied trivially here:
     natmod's one platform already *is* its only family, so there is no
-    separate family-level table (no `[natmod-family]` alongside
-    `[natmod]`) for a stale/misplaced key to hide in. `[natmod]`'s own
-    keys are validated where they always have been, inside
-    `resolve_options()` below."""
+    separate family-level table for a stale/misplaced key to hide in."""
     return
+
+
+# Every exception Options.load()/.targets() can raise -- what cli.py's own
+# coordinator catches around "load config, resolve targets" for this
+# family, uniformly with usermod's own equivalent tuple.
+LOAD_ERRORS: tuple[type[Exception], ...] = (
+    ConfigError,
+    UnknownArchError,
+    UnknownTagError,
+    SourceError,
+)
+
+# Every exception a real build (or the per-target build_options()
+# resolution a --dry-run preview also runs) can raise.
+BUILD_ERRORS: tuple[type[Exception], ...] = (ConfigError, SourceError, BuildError)
 
 
 def resolve_options(
@@ -203,39 +218,64 @@ def resolve_options(
     package_dir: Path,
     config_file: Path | None,
     preread: tuple[Path | None, dict[str, Any]],
-    *,
-    ports: list[str],
 ) -> Options:
-    """Load config and apply every CLI override that both `run()` and
-    `cli.py`'s own `--print-build-identifiers`/`--only` narrowing need --
-    previously duplicated between the two (`cli.py`'s own
-    `_print_build_identifiers()` and this module's `run()`, both applying
-    `--output-dir` the same way, Phase H).
-
-    `--archs` is *not* handled here any more -- there is no `options.archs`
-    field left to mutate (record 0052's own live-caught correction:
-    `archs` duplicated exactly what `build`/`skip` glob-matching against
-    the identifier already expresses, e.g. `build = "*-x64"`, and was
-    removed as a config concept entirely). natmod still recognises the
-    flag -- silently ignoring it would be exactly the "misplaced key does
-    nothing" bug class 0048 exists to prevent -- and raises a specific
-    `ConfigError` naming the replacement, same as any other retired
-    config surface in this project.
-    """
-    assert ports == ["natmod"], (
-        f"natmod is always exactly one platform, got ports={ports!r}"
-    )
+    """Load config and apply every CLI override `run_resolved()` and
+    `cli.py`'s own `--print-build-identifiers` need -- `--output-dir` and
+    `--build`/`--skip`, the same shape `usermod/__init__.py`'s own
+    `resolve_options()` has."""
     options = Options.load(package_dir, config_file, preread=preread)
     if args.output_dir is not None:
         options.output_dir = args.output_dir
-    if args.archs is not None:
-        raise ConfigError(
-            "--archs no longer applies to natmod -- archs is not a config "
-            "concept here any more, only build/skip glob-matching against "
-            'the identifier is (e.g. build = "*-x64", or '
-            "CIBMP_BUILD=*-x64). --archs still works for usermod ports."
-        )
+    if args.build is not None:
+        options.build = args.build.split()
+    if args.skip is not None:
+        options.skip = args.skip.split()
     return options
+
+
+def run_resolved(args: Any, options: Options, targets: list[Target]) -> int:
+    """`--dry-run`/build for an already-resolved, already-nonempty target
+    list -- the part of `run()` below that is genuinely natmod-specific.
+    Loading, target resolution, `--print-build-identifiers` and the
+    joint "no targets selected" decision all moved to `cli.py`'s own
+    coordinator (Phase J), since none of those can be decided per family
+    any more once every family is always in scope.
+
+    No unknown-tag warning here (record 0052, Track C): every tag
+    `targets` could possibly carry already passed through `abi_for_tag()`
+    inside `options.targets()`, which raises `UnknownTagError` -- caught
+    by whichever caller resolved `targets` -- instead of silently falling
+    back to a guessed ABI. Reaching this function means every tag in play
+    is a real, recorded fact.
+    """
+    if args.dry_run:
+        total = len(targets)
+        # This selection's own tags, not tag_groups()'s full domain.
+        tags = ", ".join(dict.fromkeys(t.tag for t in targets))
+        print(f"cibuildmp: {total} target(s) against MicroPython {tags}")
+        try:
+            for index, target in enumerate(targets, 1):
+                print("  " + _plan_line(index, total, options.build_options(target)))
+        except ConfigError as exc:
+            # build_options() can still raise here -- a matched
+            # [override] entry's own key is only checked against the
+            # matched identifier's own platform once a target is actually
+            # resolved (Phase G's tier-2 validation), so an error that
+            # `targets()` above could not have caught is a real
+            # possibility on the very first target this loop resolves.
+            if args.debug_traceback:
+                raise
+            print(f"cibuildmp: error: {exc}", file=sys.stderr)
+            return 2
+        return 0
+
+    try:
+        return build_all(options, targets)
+    except BUILD_ERRORS as exc:
+        if args.debug_traceback:
+            raise
+        print(f"cibuildmp: error: {exc}", file=sys.stderr)
+        return 2
 
 
 def run(
@@ -243,37 +283,22 @@ def run(
     package_dir: Path,
     config_file: Path | None,
     preread: tuple[Path | None, dict[str, Any]],
-    *,
-    ports: list[str],
 ) -> int:
+    """Full single-family flow: resolve, select targets,
+    `--print-build-identifiers`/no-targets-selected/`run_resolved()`. Used
+    directly by tests and any other caller that wants natmod alone
+    without going through `cli.py`'s own coordinator, which instead calls
+    `resolve_options()`/`run_resolved()` separately so it can merge this
+    family's own targets with usermod's before making either of those two
+    decisions."""
     try:
-        options = resolve_options(args, package_dir, config_file, preread, ports=ports)
+        options = resolve_options(args, package_dir, config_file, preread)
         targets = options.targets()
-    except (ConfigError, UnknownArchError, UnknownTagError, SourceError) as exc:
+    except LOAD_ERRORS as exc:
         if args.debug_traceback:
             raise
         print(f"cibuildmp: error: {exc}", file=sys.stderr)
         return 2
-
-    if args.only is not None:
-        # --only overrides archs/build/skip and is resolved against every
-        # identifier this config can name, not the ones it selects
-        # (**0045**). The comment that used to sit here claimed exactly
-        # this as already-matching cibuildwheel semantics, and it was not:
-        # `options.targets()` above has already applied `build`/`skip`, so
-        # filtering *that* list could never override them, and a target
-        # dropped by `skip` was gone before this line ran. A divergence
-        # documented as parity is worse than an open one.
-        known = options.all_targets()
-        targets = [t for t in known if t.identifier == args.only]
-        if not targets:
-            print(
-                f"cibuildmp: error: --only {args.only!r} is not a known "
-                f"identifier. Known: "
-                f"{', '.join(t.identifier for t in known)}",
-                file=sys.stderr,
-            )
-            return 2
 
     if args.print_build_identifiers:
         identifiers = [t.identifier for t in targets]
@@ -295,39 +320,4 @@ def run(
         )
         return 2
 
-    # No unknown-tag warning here any more (record 0052, Track C): every
-    # tag `targets` above could possibly carry already passed through
-    # `abi_for_tag()` inside `options.targets()`, which now raises
-    # `UnknownTagError` -- caught above -- instead of silently falling
-    # back to a guessed ABI. Reaching this line means every tag in play
-    # is a real, recorded fact.
-
-    if args.dry_run:
-        total = len(targets)
-        # Same reasoning as build()'s own tags line: this selection's own
-        # tags, not tag_groups()'s full domain.
-        tags = ", ".join(dict.fromkeys(t.tag for t in targets))
-        print(f"cibuildmp: {total} target(s) against MicroPython {tags}")
-        try:
-            for index, target in enumerate(targets, 1):
-                print("  " + _plan_line(index, total, options.build_options(target)))
-        except ConfigError as exc:
-            # build_options() can still raise here -- a matched
-            # [override] entry's own key is only checked against the
-            # matched identifier's own platform once a target is actually
-            # resolved (Phase G's tier-2 validation), so an error that
-            # `targets()` above could not have caught is a real
-            # possibility on the very first target this loop resolves.
-            if args.debug_traceback:
-                raise
-            print(f"cibuildmp: error: {exc}", file=sys.stderr)
-            return 2
-        return 0
-
-    try:
-        return build_all(options, targets)
-    except (ConfigError, SourceError, BuildError) as exc:
-        if args.debug_traceback:
-            raise
-        print(f"cibuildmp: error: {exc}", file=sys.stderr)
-        return 2
+    return run_resolved(args, options, targets)

@@ -3,7 +3,6 @@ from pathlib import Path
 import pytest
 
 from cibuildmp import dockerrun
-from cibuildmp.platforms.natmod.options import DEFAULT_MICROPYTHON
 from cibuildmp.platforms.usermod import build as build_module
 from cibuildmp.platforms.usermod.options import UsermodOptions
 from cibuildmp.platforms.usermod.orchestrate import _dest_name, build, build_one
@@ -56,7 +55,7 @@ def make_module_dir(package_dir: Path, name: str = "usermod") -> None:
 def test_build_one_unix_writes_into_output_dir_identifier(tmp_path, monkeypatch):
     package_dir = tmp_path / "pkg"
     make_module_dir(package_dir)
-    write_config(package_dir, "[unix]\n")
+    write_config(package_dir, "")
     options = UsermodOptions.load(package_dir)
     options.output_dir = tmp_path / "mpyhouse"
 
@@ -116,7 +115,7 @@ def test_build_one_threads_name_and_version_into_the_output_filename(
 ):
     package_dir = tmp_path / "pkg"
     make_module_dir(package_dir)
-    write_config(package_dir, 'name = "mylib"\nversion = "1.2.0"\n[unix]\n')
+    write_config(package_dir, 'name = "mylib"\nversion = "1.2.0"\n')
     options = UsermodOptions.load(package_dir)
     options.output_dir = tmp_path / "mpyhouse"
 
@@ -148,7 +147,7 @@ def test_build_one_qemu_uses_default_board_not_empty_string(tmp_path, monkeypatc
     # "MPS2_AN385" default with an empty string.
     package_dir = tmp_path / "pkg"
     make_module_dir(package_dir)
-    write_config(package_dir, "[qemu]\n")
+    write_config(package_dir, "")
     options = UsermodOptions.load(package_dir)
     options.output_dir = tmp_path / "mpyhouse"
 
@@ -255,7 +254,7 @@ def test_build_one_esp32_passes_board_through(tmp_path, monkeypatch):
 def test_build_fetches_micropython_and_skips_the_host_mpy_cross(tmp_path, monkeypatch):
     package_dir = tmp_path / "pkg"
     make_module_dir(package_dir)
-    write_config(package_dir, "[unix]\n")
+    write_config(package_dir, "")
     options = UsermodOptions.load(package_dir)
     options.output_dir = tmp_path / "mpyhouse"
 
@@ -277,12 +276,7 @@ def test_build_fetches_micropython_and_skips_the_host_mpy_cross(tmp_path, monkey
     )
 
     def fake_run(cmd, **kwargs):
-        build_dir = (
-            mpy_dir
-            / "ports"
-            / "unix"
-            / f"build-{DEFAULT_MICROPYTHON}-unix-manylinux_2_28_x86_64"
-        )
+        build_dir = mpy_dir / "ports" / "unix" / "build-v1.29.0-manylinux_2_28_x86_64"
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
 
@@ -290,20 +284,16 @@ def test_build_fetches_micropython_and_skips_the_host_mpy_cross(tmp_path, monkey
 
     results = build(
         options,
-        [
-            UsermodTarget(
-                port="unix", arch="manylinux_2_28_x86_64", tag=DEFAULT_MICROPYTHON
-            )
-        ],
+        [UsermodTarget(port="unix", arch="manylinux_2_28_x86_64", tag="v1.29.0")],
     )
 
     # No host mpy-cross for a `unix` target: record 0044 gave it
     # `container_mpy_cross()`, because a host-built one cannot run inside
     # an image of another architecture or another libc. Only `qemu`
     # still reaches the host copy.
-    assert calls == [("fetch", DEFAULT_MICROPYTHON)]
+    assert calls == [("fetch", "v1.29.0")]
     assert len(results) == 1
-    assert results[0].identifier == f"{DEFAULT_MICROPYTHON}-unix-manylinux_2_28_x86_64"
+    assert results[0].identifier == "v1.29.0-manylinux_2_28_x86_64"
 
 
 def test_build_groups_by_tag_and_fetches_once_per_group(tmp_path, monkeypatch):
@@ -313,7 +303,7 @@ def test_build_groups_by_tag_and_fetches_once_per_group(tmp_path, monkeypatch):
     # not once per target in it (mirrors natmod's own cli.build()).
     package_dir = tmp_path / "pkg"
     make_module_dir(package_dir)
-    write_config(package_dir, "[unix]\n")
+    write_config(package_dir, "")
     options = UsermodOptions.load(package_dir)
     options.output_dir = tmp_path / "mpyhouse"
 
@@ -355,8 +345,8 @@ def test_build_groups_by_tag_and_fetches_once_per_group(tmp_path, monkeypatch):
     assert calls == [("fetch", "v1.28.0"), ("fetch", "v1.29.0")]
     identifiers = {r.identifier for r in results}
     assert identifiers == {
-        "v1.28.0-unix-manylinux_2_28_x86_64",
-        "v1.29.0-unix-manylinux_2_28_x86_64",
+        "v1.28.0-manylinux_2_28_x86_64",
+        "v1.29.0-manylinux_2_28_x86_64",
     }
     output_dirs = {r.output.parent for r in results}
     assert (
@@ -375,7 +365,7 @@ def test_build_one_resolves_relative_output_dir_against_package_dir(
     # the bug (Path("x") / "/abs" == "/abs" regardless of the left side).
     package_dir = tmp_path / "pkg"
     make_module_dir(package_dir)
-    write_config(package_dir, "[unix]\n")
+    write_config(package_dir, "")
     options = UsermodOptions.load(package_dir)
     options.output_dir = Path("mpyhouse")  # relative, the real default
 
@@ -406,7 +396,7 @@ def test_build_one_preserves_executable_bit(tmp_path, monkeypatch):
     # build's output IS meant to be run.
     package_dir = tmp_path / "pkg"
     make_module_dir(package_dir)
-    write_config(package_dir, "[unix]\n")
+    write_config(package_dir, "")
     options = UsermodOptions.load(package_dir)
     options.output_dir = tmp_path / "mpyhouse"
 

@@ -1,8 +1,13 @@
 """Config loading and option resolution.
 
 Precedence, lowest to highest:
-    defaults -> global config -> platform config -> matching [override]
-    -> environment -> CLI
+    defaults -> global config -> matching [override] -> environment -> CLI
+
+There is no "platform config" tier any more (every platform table --
+`[natmod]`, `[unix]`, ... -- is retired: neither activation nor a
+settable schema of its own survives on any of them). Every option key is
+either genuinely global (read once for the whole invocation) or resolved
+per matched target through `[override]`.
 
 Config lives in cibuildmp.toml at the package root, with the same tree
 accepted under [tool.cibuildmp] in pyproject.toml for the rare MicroPython
@@ -14,7 +19,7 @@ from __future__ import annotations
 import os
 import shlex
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -32,21 +37,12 @@ from .targets import (
     Target,
     narrow_to_newest_tag,
     natmod_all_targets,
-    newest_known_abi,
     resolve_arch_flags,
     selector_names_a_tag,
 )
 
 CONFIG_FILENAME = "cibuildmp.toml"
 
-# Still natmod's own constant (usermod/options.py imports it too, for its
-# own unrelated `micropython` key -- A2 is natmod-only) but no longer read
-# by natmod's own load() below: the version axis has no config key any
-# more, and `newest_known_abi()` -- derived from resources/build-
-# platforms.toml, not a literal string needing a manual bump on every
-# MicroPython release -- is what an unconfigured natmod `build` selector
-# narrows to instead (record 0052, A2).
-DEFAULT_MICROPYTHON = "v1.29.0"
 DEFAULT_OUTPUT_DIR = "mpyhouse"
 DEFAULT_MODULE_DIR = "natmod"
 DEFAULT_MAKE_TARGET = "dist"
@@ -56,50 +52,30 @@ class ConfigError(Exception):
     pass
 
 
-# ── option schemas (Phase F, record 0051 points 4/6) ───────────────────
+# ── option schemas ────────────────────────────────────────────────────
 #
 # Record 0048 fixed "a key placed in the wrong table is silently ignored"
 # by giving every key exactly one correct location and erroring on every
-# other (`TOP_LEVEL_ONLY_KEYS`, `NATMOD_TABLE_KEYS`, `check_table_keys()`).
-# The cascade this phase built to generalise that
-# (`default -> global -> platform -> env`, `cibuildmp/options.py`) still
-# exists, but its own `platform` tier is gone (record 0052's own
-# live-caught correction, argued in full where `platform_tables` used to
-# be defined in `cibuildmp/options.py`): `[unix] key = "..."` was always
-# exactly `[override."*-{manylinux,musllinux}*"] key = "..."` restated,
-# since every platform's own real identifier already carries a unique
-# marker a glob can address directly, and a second way to say the same
-# thing is the thing this whole record keeps arguing against. What is
-# left is simpler than the phase this comment used to describe: every
-# option key is either genuinely global (`GENERIC_KEYS` below, resolved
-# once for the whole invocation, no platform table can override it) or
-# resolved per matched target through `[override]` (`build_options()`'s
-# own tier-2 check) -- there is no third, per-platform-table place left
-# for either kind to live, so `[natmod]` itself no longer has a schema of
-# its own at all (`NATMOD_SCHEMA` below is empty).
-#
-# `enable` stays generic (top-level/global only, no per-platform meaning
-# -- an invocation-wide identifier filter) even though only usermod
-# defines any groups today, for the same reason it was in
-# `TOP_LEVEL_ONLY_KEYS` before: a config surface with nothing to gate
-# would be speculative, but listing the key means a misplaced `enable`
-# inside `[natmod]` still gets a clear error instead of silently doing
-# nothing.
+# other. Every option key that ever had a per-platform table to live in
+# (`[natmod]`, `[unix]`, ...) no longer has one at all -- table-presence
+# activation and every per-platform schema tier were both retracted, live,
+# once every real identifier already carried a marker a `build`/`skip`
+# glob or an `[override."<glob>"]` entry could address directly, making a
+# second, table-scoped way to say the same thing redundant. What is left
+# is exactly two places any option key can mean something: genuinely
+# global (`GENERIC_KEYS` below, resolved once for the whole invocation)
+# or resolved per matched target through `[override]`
+# (`build_options()`'s own tier-2 check, `OVERRIDE_UNION_KEYS` below).
+# `[natmod]` is rejected outright by `read_config()`'s own caller
+# (`cli.py`'s `_reject_platform_tables()`) before any of this ever runs;
+# `Options.load()` below still checks for it directly too, for a caller
+# that bypasses `cli.py` entirely (most tests).
 GENERIC_KEYS: frozenset[str] = frozenset(
     {
-        "micropython",
         "output-dir",
         "name",
         "version",
         "micropython-submodules",
-        "enable",
-        # `build`/`skip` used to have their own dedicated per-platform
-        # schema entry (the "per-platform build/skip" addendum); back to
-        # generic-only now, the same retraction `archs` already got --
-        # `[unix] build = "..."` is exactly a sufficiently-scoped global
-        # `build` pattern restated (unix's own identifiers already carry
-        # `manylinux`/`musllinux` as a stable marker no other platform's
-        # own identifiers share).
         "build",
         "skip",
         # Shared by name and meaning between natmod and every usermod
@@ -108,28 +84,6 @@ GENERIC_KEYS: frozenset[str] = frozenset(
         "extra-make-args",
     }
 )
-
-# Natmod-only keys that are now generic (global-only, or per-target via
-# `[override]`) but would mean nothing to check_keys()'s other caller
-# (usermod's own per-port tables) -- kept separate from GENERIC_KEYS so a
-# `module-dir` typo'd inside `[unix]` still gets "unknown key", not a
-# misleading "move it to the top level" pointing at a key usermod does
-# not read under that name at all (it has its own `user-c-modules`,
-# record 0051's sixth addendum). Passed as check_keys()'s own
-# `extra_generic` for natmod's one remaining call site below.
-NATMOD_ONLY_GENERIC_KEYS: frozenset[str] = frozenset(
-    {"arch-flags", "module-dir", "make-target", "pre-build-command"}
-)
-
-# `[natmod]` itself has no schema of its own left at all -- every key
-# that used to live here (`build`/`skip`/`arch-flags`/`module-dir`/
-# `make-target`/`extra-make-args`/`pre-build-command`) is either
-# genuinely global now (`GENERIC_KEYS`/`NATMOD_ONLY_GENERIC_KEYS`) or
-# per-target via `[override]`. `[natmod]`'s own presence still matters
-# (it is what activates natmod alongside other platforms in one
-# invocation, `cli.py`'s own `active_platforms()`), it just no longer
-# carries any settable value of its own.
-NATMOD_SCHEMA: frozenset[str] = frozenset()
 
 # ── merged [override] (Phase G) ──────────────────────────────────────
 #
@@ -186,31 +140,23 @@ def check_keys(
     *,
     where: str,
     error: type[Exception] = ConfigError,
-    extra_generic: frozenset[str] = frozenset(),
 ) -> None:
     """Reject a key this table does not read -- the cascade-era
     replacement for record 0048's own `check_table_keys()`. Shared with
-    `usermod/options.py`, which passes its own per-port schema and
-    `UsermodConfigError`.
+    `usermod/options.py`, which passes its own `USERMOD_PLATFORM_KEYS`
+    schema and `UsermodConfigError`.
 
-    A key that belongs to `GENERIC_KEYS | extra_generic` (read from the
-    top level, for every platform, always) gets its own message naming
-    where it should go, because "unknown key 'skip'" would be actively
-    misleading about a key the tool very much knows. `extra_generic` lets
-    one caller recognise keys that are generic *to it* but meaningless
-    to the other caller (e.g. natmod's own `module-dir` -- usermod reads
-    no such key under that name at all, so folding it into the truly
-    shared `GENERIC_KEYS` would misdirect a usermod config's own typo
-    with a "move it to the top level" hint that is not even true there).
-    Anything else unknown to `known` is a genuine typo, with a
-    `difflib`-suggested close match when one exists (the same library
-    upstream's own `_validate_global_option()` uses).
+    A key that belongs to `GENERIC_KEYS` (read from the top level,
+    always) gets its own message naming where it should go, because
+    "unknown key 'skip'" would be actively misleading about a key the
+    tool very much knows. Anything else unknown to `known` is a genuine
+    typo, with a `difflib`-suggested close match when one exists (the
+    same library upstream's own `_validate_global_option()` uses).
     """
-    generic = GENERIC_KEYS | extra_generic
     for key in table:
         if key in known:
             continue
-        if key in generic:
+        if key in GENERIC_KEYS:
             raise error(
                 f"{where}: `{key}` is read from the top level of the config, "
                 f"not from {where} -- move it above the {where} line. It "
@@ -336,7 +282,7 @@ class BuildOptions:
         return self.target.identifier
 
 
-def check_reachable(cfg: Options) -> None:
+def check_reachable(cfg: Options, *, foreign_identifiers: Sequence[str] = ()) -> None:
     """Pre-build reachability audit -- the missing other half of
     `build.verify_output()`'s post-build check (record 0052, A5): every
     selector a config writes must be *capable* of matching something,
@@ -352,11 +298,25 @@ def check_reachable(cfg: Options) -> None:
     misplaced key; this is the same guarantee one level down, at the
     selector-string level instead of the key-name level.
 
+    `build`/`skip`/`[override]` are shared, top-level config now (every
+    per-platform table is retired) -- a pattern one of them names can
+    legitimately be meant for usermod alone (`build = "*manylinux*"` with
+    natmod also in scope) or natmod alone, and neither is a mistake just
+    because it matches nothing on *this* family's own identifiers.
+    `foreign_identifiers` is `cli.py`'s own coordinator supplying every
+    other active family's own `all_targets()` identifiers, widening what
+    counts as "reachable" to the true combined domain -- this module must
+    never import `usermod/options.py` to compute that itself (the
+    established one-way dependency direction), so a caller that already
+    sees every family has to hand it in. Empty by default for a direct,
+    natmod-only caller (most tests), matching this check's own pre-retraction
+    behaviour exactly.
+
     `check_selector_reachable()` (`cibuildmp/options.py`) is the shared
     mechanism, reused unchanged by `usermod/options.py`'s own
     `check_reachable()`.
     """
-    identifiers = [t.identifier for t in cfg.all_targets()]
+    identifiers = [t.identifier for t in cfg.all_targets()] + list(foreign_identifiers)
     check_selector_reachable(cfg.build, "build", identifiers, error=ConfigError)
     check_selector_reachable(cfg.skip, "skip", identifiers, error=ConfigError)
     for override in cfg.overrides:
@@ -390,7 +350,7 @@ class Options:
     # resolution of module-dir/make-target/extra-make-args/
     # pre-build-command -- env excluded here (build_options() checks the
     # environment itself, after overrides, matching the precedence it has
-    # always had), platform_tables={"natmod": <the [natmod] table>}.
+    # always had).
     _cascade_file: OptionCascade = field(repr=False, compare=False)
 
     # ── Loading ───────────────────────────────────────────────────────────
@@ -404,31 +364,38 @@ class Options:
         preread: tuple[Path | None, dict[str, Any]] | None = None,
     ) -> Options:
         """`preread`, when given, is `(config_path, raw)` the caller
-        already got from `read_config()` -- `cli.py`'s own platform-
-        detection peek has to read the file once to decide which
-        platforms are active (usermod/options.py's `UsermodOptions.load()`
-        takes the same parameter, for the same reason), so this avoids
-        reading and parsing the same TOML file a second time on the
-        natmod path.
+        already got from `read_config()` -- `cli.py`'s own coordinator
+        reads the file once and hands the same `raw` dict to both this
+        module's own `load()` and `usermod/options.py`'s
+        `UsermodOptions.load()`, so this avoids parsing the same TOML file
+        twice.
         """
         environ: Mapping[str, str] = os.environ if env is None else env
         config_path, raw = (
             preread if preread is not None else read_config(package_dir, config_file)
         )
 
-        natmod_table = dict(raw.get("natmod") or {})
+        # `[natmod]` no longer exists as a config table at all -- it used
+        # to gate whether natmod was active in an invocation, and before
+        # that carried its own settable keys; both concepts are retracted
+        # (every family is always in scope now, and every option that
+        # used to live here moved to the bare top level or [override]).
+        # `cli.py`'s own `_reject_platform_tables()` already rejects it
+        # before this ever runs for a caller going through `main()`; this
+        # direct check is what still catches it for a caller (most tests)
+        # that constructs `Options.load()` on its own.
+        if "natmod" in raw:
+            raise ConfigError(
+                "[natmod] no longer exists -- every platform is always in "
+                "scope now, selected purely by build/skip glob-matching "
+                "its own real identifiers (see the README for the full "
+                "identifier list). Move any module-dir/make-target/"
+                "extra-make-args/pre-build-command/arch-flags value to the "
+                "top level."
+            )
+
         overrides = load_overrides(raw)
         publish = dict(raw.get("publish") or {})
-
-        # [natmod] itself has no settable keys of its own left at all --
-        # this only checks that nothing is written inside it (presence is
-        # still meaningful, for platform activation; content is not).
-        check_keys(
-            natmod_table,
-            NATMOD_SCHEMA,
-            where="[natmod]",
-            extra_generic=NATMOD_ONLY_GENERIC_KEYS,
-        )
 
         cascade_env = OptionCascade(global_table=raw, env=environ)
         cascade_file = OptionCascade(global_table=raw, env={})
@@ -467,17 +434,17 @@ class Options:
         # No `micropython`/`mpy-abi` config key any more (record 0052, A2):
         # the version axis is a statically known domain (`all_tag_groups()`,
         # `targets.py`), narrowed by `build`/`skip` matching identifiers,
-        # exactly like arch narrowing now is too. An unconfigured `build`
-        # selector still keeps today's narrow default -- only the newest
-        # known ABI, every arch -- by defaulting to
-        # `f"mpy{newest_known_abi()}-*"` instead of `"*"`; an explicit
-        # `build = "*"` (or `"mpy6.2-*"`, etc.) opens it up wider. This
-        # pattern deliberately names no tag: `targets()`'s own
-        # `narrow_to_newest_tag()` is what then picks the newest tag per
-        # arch for it, the same rule any other tag-less pattern gets --
-        # not a special case baked into the default string itself.
-        default_build = f"mpy{newest_known_abi()}-*"
-
+        # exactly like arch narrowing now is too.
+        #
+        # No implicit default `build` value at all any more either (record
+        # 0052's own live-caught correction, retracting this comment's own
+        # earlier "narrows to the newest known ABI" default): an
+        # unconfigured `build` now selects nothing, the same way
+        # `selector.select()`'s own removed `or ["*"]` fallback no longer
+        # silently opens every config up. A config states what it wants,
+        # explicitly, via a glob -- `build = "mpy6.3-*"` for "the current
+        # release, every arch" -- or gets nothing built.
+        #
         # `build`/`skip` are global-only again too, for their TOML
         # placement (the retraction of the "per-platform build/skip"
         # addendum -- `cibuildmp/options.py`'s own `Options` docstring has
@@ -489,7 +456,7 @@ class Options:
         # `CIBMP_BUILD_NATMOD`/`CIBMP_SKIP_NATMOD` -- a real, distinct,
         # per-invocation capability no global TOML pattern can substitute
         # for, since it needs no config-file edit at all.
-        build_value = cascade_env.get("build", platform="natmod", default=default_build)
+        build_value = cascade_env.get("build", platform="natmod", default="")
         skip_value = cascade_env.get("skip", platform="natmod", default="")
 
         return cls(
@@ -517,8 +484,15 @@ class Options:
         else meant to install regardless of target arch (**D14**)."""
         return _as_list(self.publish.get("extra-files"), "extra-files")
 
-    def targets(self) -> list[Target]:
+    def targets(self, *, foreign_identifiers: Sequence[str] = ()) -> list[Target]:
         """Every target this config selects.
+
+        `foreign_identifiers`: every other active platform family's own
+        `all_targets()` identifiers, widening the reachability audit below
+        to the true combined domain -- see `check_reachable()`'s own
+        docstring. `cli.py`'s own coordinator always supplies this; a
+        direct, natmod-only caller (most tests) gets today's exact
+        pre-retraction behaviour by leaving it empty.
 
         Built directly from every real `(tag, arch)` row in
         `build-platforms.toml` (`natmod_all_targets()`) -- `build`/`skip`
@@ -560,7 +534,7 @@ class Options:
         pre-build reachability audit for free, not just the ones that
         remember to ask for it.
         """
-        check_reachable(self)
+        check_reachable(self, foreign_identifiers=foreign_identifiers)
         arch_flags = resolve_arch_flags("rv32imc", self.arch_flags)
         candidates = natmod_all_targets(arch_flags)
         selected = select(candidates, self.build, self.skip)

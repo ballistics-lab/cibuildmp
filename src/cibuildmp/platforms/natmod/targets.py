@@ -221,15 +221,14 @@ def known_abis() -> list[str]:
 
 
 def newest_known_abi() -> str:
-    """The numerically newest entry in known_abis() -- what an
-    unconfigured `build` selector narrows a natmod invocation to by
-    default (record 0052, A2), so a bare config keeps building only the
-    newest ABI instead of every one this project has ever verified.
-    Replaces `DEFAULT_MICROPYTHON`'s old role for natmod specifically: a
-    derived value that follows `resources/build-platforms.toml`'s own
-    refreshes rather than a literal tag string needing a manual bump on
-    every release (usermod's own `DEFAULT_MICROPYTHON` is unaffected --
-    A2 is natmod-only).
+    """The numerically newest entry in known_abis() -- what a `build`
+    glob names when it wants "the current release" without pinning a
+    literal tag (`mpy{newest_known_abi()}-*`), a derived value that
+    follows `resources/build-platforms.toml`'s own refreshes rather than
+    a literal tag string needing a manual bump on every release. There is
+    no implicit default `build` narrows to on its own any more (record
+    0052's own live-caught correction): an unconfigured `build` selects
+    nothing at all, not "the newest known ABI."
     """
     return max(known_abis(), key=_abi_sort_key)
 
@@ -364,12 +363,43 @@ def selector_names_a_tag(patterns: Sequence[str]) -> bool:
     return any(_TAG_SHAPE.search(p) for p in patterns)
 
 
+def _is_stable_release(tag: str) -> bool:
+    """A real release tag, not a preview (e.g. `v1.30.0-preview`) -- the
+    same suffix `_tag_sort_key()` already parses out, named here for its
+    own meaning rather than its own sort-order role."""
+    return "-" not in tag.removeprefix("v")
+
+
+def newest_stable_tag_for_abi(abi: str) -> str | None:
+    """Like `newest_tag_for_abi()`, but skipping preview tags whenever a
+    real release is also known for this ABI -- what `narrow_to_newest_tag()`
+    resolves an unpinned `build` glob to. Only ever returns a preview tag
+    when every tag this project has verified for `abi` is one (an ABI
+    walked so far only against an in-progress preview)."""
+    candidates = [tag for tag, a in MPY_ABI.items() if a == abi]
+    if not candidates:
+        return None
+    stable = [t for t in candidates if _is_stable_release(t)]
+    return max(stable or candidates, key=_tag_sort_key)
+
+
 def narrow_to_newest_tag(targets: Sequence[Target]) -> list[Target]:
     """One `Target` per distinct `(abi, arch, arch_flags)`, keeping
     whichever candidate carries the newest `tag` -- what a `build`
     pattern that never names a tag (`selector_names_a_tag()` false) means
     by "give me this arch", now that tag is part of the identifier and
     several real tags can otherwise match one arch at once.
+
+    A stable release always beats a preview sharing the same group, even
+    a numerically older one -- a config that never pins a tag lands on
+    whichever release this project has most recently *verified as
+    stable* for that arch, not on whatever preview happens to be newest
+    (live-caught: `v1.30.0-preview` outranking `v1.29.0` by version
+    number alone put an unstable, still-open tag in the driver's seat of
+    every unpinned `build` glob). Only falls back to a preview when it is
+    the only candidate a given `(abi, arch, arch_flags)` group has at
+    all -- an ABI verified so far only against an in-progress preview
+    still has to resolve to *something*.
     """
     best: dict[tuple[str, str, int], Target] = {}
     order: list[tuple[str, str, int]] = []
@@ -378,7 +408,14 @@ def narrow_to_newest_tag(targets: Sequence[Target]) -> list[Target]:
         if key not in best:
             order.append(key)
             best[key] = t
-        elif _tag_sort_key(t.tag) > _tag_sort_key(best[key].tag):
+            continue
+        current = best[key]
+        t_stable = _is_stable_release(t.tag)
+        current_stable = _is_stable_release(current.tag)
+        if t_stable != current_stable:
+            if t_stable:
+                best[key] = t
+        elif _tag_sort_key(t.tag) > _tag_sort_key(current.tag):
             best[key] = t
     return [best[k] for k in order]
 

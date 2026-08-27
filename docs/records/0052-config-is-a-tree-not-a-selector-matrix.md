@@ -2320,4 +2320,332 @@ same treatment `test_archs_is_gone_as_a_config_key` already got one addendum up.
 Full suite green (421 passed, two fewer than before -- two now-inverted-premise
 tests replacing, not joining, the ones they superseded), ruff and pyright clean.
 
+## Addendum, 2026-08-27 -- table-presence activation, `--platform`/`--only`/
+`--archs`'s `auto`/`native`/`all`, and `enable`/`GROUPS` all retracted in one
+round; Track C's own Phase C2 (usermod real rows) finally lands; the
+cross-family reachability gap (task #66's own residual half) fully closed;
+zero-config now genuinely builds nothing; `--build`/`--skip` added to the CLI
+
+The single largest round this record has seen, and the one that finally
+answers the question its own title asks: **cibuildmp's config is not a
+selector matrix, and by the end of this round it stops pretending to be
+one anywhere at all.** Every remaining structural element that let a
+config *select which platforms are in scope* -- `[natmod]`/`[unix]`/
+`[windows]`/`[qemu]`/`[webassembly]`/`[esp32]` as tables, `--platform`/
+`CIBMP_PLATFORM`, `--only`, `--archs auto`/`native`/`all`, `enable`/
+`GROUPS` -- is retracted, live, in one continuous session, each step
+confirmed explicitly before being built rather than assumed. What
+remains, stated in full: **`build`/`skip` glob-matching a real
+identifier, `[usermod]`'s own shared defaults, global option keys, and
+`[override."<glob>"]`. Nothing else.**
+
+**Trigger.** The user pointed at this repo's own root `cibuildmp.toml`'s
+`[natmod] archs = [...]` block -- the same shape [0052]'s own earlier
+addendum had already found and deleted once for natmod specifically --
+and asked directly whether the whole table-presence-activation model
+should go the same way `archs`/`platform_tables` already had: "Я просто
+думаю взагалі обійтись без каскадів коли достатньо лише глоб і
+оверрайдів" (musing, not yet a directive), then, after the zero-config
+question was settled explicitly ("має ПЕРЕСТАТИ будувати щось за
+замовчуванням... так пустий конфіг не білдить НІЧОГО взагалі"),
+confirmed the full scope directly: "Конфіг НЕ МАЄ більше [unix] без
+всяких axis, є лише глоби і оверрайди - все елементарно", "--archs
+auto/native/all - нахрін не треба", and, closing the loop on my own
+open design question about `GROUPS`/`--enable`: "Без ніяких додаткових
+механізмів, --build/--skip + global keys + override.glob keys".
+
+### Zero-config builds nothing
+
+`selector.select()`'s own `build_patterns = parse_selector(build) or
+["*"]` fallback -- the actual mechanism behind "an empty config still
+builds everything" -- is gone: `parse_selector(build)` alone, an empty
+list, and `matches()`'s own `any(...)` over it correctly returns
+`False`. Both `Options.load()` (natmod) and `UsermodOptions.load()`
+(usermod) resolve `build`/`skip` with `default=""` now, not a computed
+"narrow to the newest known ABI" (natmod) or `"*"` (usermod, pre-existing
+from before this record). This is the single root-cause line; everything
+else in this addendum either depends on it or follows from removing the
+same "give the user something sensible with no config" instinct
+elsewhere.
+
+### Every per-platform table retracted; candidates = every real row, always
+
+`[natmod]` carried zero settable keys already (a previous addendum
+emptied `NATMOD_SCHEMA`); its only remaining job was activation. That
+job is gone too -- `Options.load()` now rejects `[natmod]` outright with
+a `ConfigError` naming the real replacement, and `cli.py`'s own
+`_validate_top_level_tables()` catches it even earlier, before any
+family-specific loading runs. `[unix]`/`[windows]`/`[qemu]`/
+`[webassembly]`/`[esp32]` are retracted the same way, for the same
+reason: once every real `(port, tag, arch/board)` combination is read
+directly from `resources/build-platforms.toml` as a candidate row,
+*always*, a per-port table has nothing left to select or configure --
+its own axis (`archs =`/`boards =`) duplicated exactly what a `build`/
+`skip` glob over the real identifier already expresses, the identical
+argument that already killed natmod's own `archs` key one addendum
+earlier, now applied to every remaining table at once. `[usermod]` is
+**not** one of the six -- it survives, unaffected, as usermod's own
+shared-defaults tier (record 0051's ninth addendum, reaffirmed through
+every round of retraction this record has produced): it gates nothing,
+so nothing about this round's own reasoning touches it.
+
+This closes **Track C's own Phase C2**, open since this record's very
+first version: usermod gets the identical real-row model natmod's own
+Phase C1 already had. `cibuildmp/platforms/usermod/targets.py` is
+rewritten around `all_usermod_targets()`, one `UsermodTarget` per real
+row in `resources/build-platforms.toml["usermod"][port]["identifiers"]`
+for every port in the newly-constant `KNOWN_PORTS = ("unix", "windows",
+"qemu", "webassembly", "esp32")` -- the five with a real `build_<port>()`
+driver; the other ten ports the same resource file already has verified
+rows for (`rp2`, `mimxrt`, `samd`, `stm32`, `psoc-edge`, `alif`,
+`esp8266`, `cc3200`, `renesas-ra`, `nrf`) are a separate, much larger
+piece of unstarted work -- writing each one's own build pipeline -- not
+a config-surface gap this round could close by itself (the user's own
+words, mid-session: "Набагато важливішим і складнішим буде дописати
+решту білд пайплайні для всього списку фактів"). `_PORT_AXES`,
+`archs =`/`boards =` config, `axis_key()`/`all_axis_values()`/
+`default_axis_values()`/`parse_axis_values()`, `GROUPS`, `ARCH_KEYWORDS`
+and every keyword-expansion helper (`host_arch()`, `resolve_axis_keyword()`,
+`_NATIVE_SIBLINGS`, `_MACHINE_ALIASES`, `_ARCH_OCI_PLATFORMS`) are all
+deleted outright, not deprecated.
+
+**A real, live-caught fact this rewrite surfaced, previously tracked
+only as tracker item #54's own unread note:** `resources/build-platforms.
+toml`'s own `identifier_format` is not uniform across usermod ports.
+`unix`/`windows`/`webassembly` carry no port name at all
+(`"{tag}-{arch}"`, e.g. `v1.20.0-manylinux_2_28_x86_64`); `qemu`/`esp32`
+do (`"{tag}-{port}-{board}"`, e.g. `v1.24.0-qemu-MICROBIT`). The
+pre-rewrite `UsermodTarget.identifier` property unconditionally built
+`f"{tag}-{port}-{arch}"` -- meaning every `unix`/`windows`/`webassembly`
+identifier this project ever printed, matched, or built against was
+wrong relative to the file's own recorded ground truth (`unix-manylinux_
+2_28_x86_64` instead of the real `manylinux_2_28_x86_64`), silently, the
+whole time. Fixed the identical way natmod's own analogous bug was fixed
+two addenda ago: `UsermodTarget.identifier` now looks its value up from
+a real `(port, tag, arch/board) -> identifier` table built straight from
+the resource file, for every tagged target -- never reconstructed by an
+f-string. A hand-built, tag-less `UsermodTarget` (most existing
+build/orchestrate tests, which are about build mechanics rather than
+real-row verification) still falls back to the old `{port}-{arch}`
+shape, which is what let the large majority of `tests/
+test_usermod_orchestrate.py` pass completely unchanged.
+
+Usermod needs no `narrow_to_newest_tag()` equivalent, unlike natmod:
+natmod's identifier leads with an ABI that several distinct MicroPython
+tags can share, so an ABI-only glob needs disambiguating; a usermod
+identifier's own leading tag already names one exact release with
+nothing left to disambiguate (`unix`/`windows`/`webassembly`) or is
+matched against a real, explicit `(tag, board)` pair directly (`qemu`/
+`esp32`). The `micropython = [...]` config key -- usermod's own
+tag-list axis, closed for truncation by record 0051 -- is retracted for
+the same reason `archs` was: candidates are every real row, always;
+`build`/`skip` glob-matching the tag is what narrows them now, mirroring
+natmod's own A2 retraction exactly. `DEFAULT_MICROPYTHON` becomes dead
+code in `natmod/options.py` (it was already unused there since A2; this
+removes its last real consumer) and is deleted.
+
+### `--platform`/`--only`/`--archs auto`/`native`/`all`/`--enable` all removed from the CLI
+
+`cli.py` loses `active_platforms()`, `_parse_platform_names()`,
+`ALL_PLATFORMS`, `_reject_unknown_tables()`, and the `--platform`/
+`--only`/`--enable`/`--archs` argparse entries -- every one of them
+existed to resolve or narrow which platforms were in scope, a question
+that no longer has a nontrivial answer (every platform always is).
+`platforms/__init__.py`'s `PLATFORM_FAMILY: dict[str, PlatformModule]`
+(keyed by six platform names, for `--platform` lookups) becomes
+`FAMILIES: tuple[PlatformModule, ...] = (natmod, usermod)` -- a fixed,
+two-element tuple, since there is no longer any name to look one up by.
+Both family modules lose their own `ports: list[str]` parameter on
+`resolve_options()`/`run()` for the identical reason (natmod's own
+`ports` was always `["natmod"]`; usermod's is always the constant
+`KNOWN_PORTS`).
+
+`--build`/`--skip` are new CLI flags, replacing `--only`/`--platform` as
+the "build exactly this one thing" / "spread work across a CI matrix by
+hand" mechanism: same glob syntax as the config's own `build`/`skip`,
+applied as a straight override of `options.build`/`options.skip` inside
+each family's own `resolve_options()`, after `.load()`. `--archs` (with
+its `auto`/`native`/`all` keyword vocabulary, record 0049's own answer
+to "how does cibuildmp spread work across CI runners without generating
+a matrix") and `--enable` (record 0051 point 8's own `GROUPS` opt-in
+mechanism) are removed outright, not folded into `--build`/`--skip`:
+everything either one could reach, an ordinary `build`/`skip` glob
+against the real identifier already reaches directly, and a named-group
+opt-in is exactly the kind of second, parallel selection mechanism this
+whole round's own argument keeps landing on. `selector.select()` drops
+its own `enable`/`groups` parameters entirely as a result -- the
+mechanism this record's own predecessor (record 0051 point 8) added is
+now fully retracted, not merely unused.
+
+**A genuinely new capability was required, not just a subtraction, to
+make this land without a UX regression:** every family is now always
+resolved, every invocation -- `cli.py`'s own `_resolve_all()` calls
+`resolve_options()`+`.targets()` for every entry in `FAMILIES`
+unconditionally, no longer gated by which tables a config happens to
+write. The old per-family "no targets selected -> error" check, which
+used to make sense because a family only ran when its own table said to,
+would misfire constantly under this model: a config that only ever
+configures natmod's own `build` (the ordinary case) would leave
+usermod's own `build`/`skip` unset, which now, correctly, selects
+nothing from usermod -- and reporting that as an error would make every
+single-family config need `--allow-empty` to work at all. Fixed by
+moving the "nothing at all was selected" decision to `cli.py`'s own
+coordinator, checked **once**, jointly, across every family's own
+selected-target count; a family with zero selected targets while another
+has some is silently skipped in the real-build/`--dry-run` dispatch loop
+that follows, not reported as its own error. Each family module's own
+`run()` (still the full single-family flow, used directly by tests) is
+split into `resolve_options()` (unchanged shape) + a new `run_resolved()`
+(the `--dry-run`/build tail, given an already-nonempty target list) so
+`cli.py`'s coordinator can call the latter directly without re-deriving
+the "no targets" check per family. Each module also now exports
+`LOAD_ERRORS`/`BUILD_ERRORS` tuples so the coordinator can catch each
+family's own exception hierarchy by name without importing either
+module's exception classes directly -- exception handling stays
+deliberately un-unified across families (documented, unchanged reasoning
+from `platforms/__init__.py`'s own docstring), this is only how the
+*coordinator* participates in that split.
+
+### The cross-family reachability gap (task #66) closed, both directions, for real
+
+Every previous addendum in this record left half of this gap open,
+explicitly, because closing the natmod-side half would have needed
+natmod to import usermod -- a one-way dependency this project has never
+crossed. That constraint still holds; what changed is *where* the fix
+lives. `Options.targets()` (natmod) and `UsermodOptions.targets()`
+(usermod) both gained an optional `foreign_identifiers: Sequence[str]`
+parameter, threaded into `check_reachable()`'s own widened domain for
+`build`/`skip`/`[override]` reachability. `cli.py`'s own `_resolve_all()`
+-- since it already sees every family, being the sole caller with that
+vantage point -- resolves every family's own `all_targets()` first, in
+a separate pass, then calls each family's own `.targets(foreign_identifiers
+=<every other family's own identifiers>)` in a second pass. Natmod never
+imports usermod; it simply receives what it needs as a parameter from
+the one caller positioned to supply it. Usermod's own pre-existing
+`_foreign_override_identifiers()` (the reload-based widening this record's
+own earlier addendum built for a *direct*, cli.py-bypassing caller) is
+kept, unioned with the explicit parameter rather than replaced by it, so
+a standalone `UsermodOptions.load()` caller (most tests) keeps its exact
+prior widening for free.
+
+This was not a nice-to-have found in review -- it was a **hard
+regression this round's own live smoke test hit immediately**: with
+`build`/`skip` global and every family always resolved, `build =
+"mpy6.3-*-x64"` alone (an entirely ordinary, natmod-only config) failed
+outright with `[unix] build: 'mpy6.3-*-x64' matches no known identifier`,
+since unix's own `check_reachable()` had no way to know the pattern was
+never meant for it. Every previous addendum's framing of this gap as "a
+real, separately-tracked, deliberately-scoped-out issue" stops being
+accurate the moment table-presence activation is gone: what used to be
+an edge case (both families explicitly activated in one config, a real
+but uncommon shape) becomes the universal case (both families are always
+"activated"), so the fix that was deferred three times in a row became
+load-bearing on the very first manual smoke test this round ran.
+
+### `narrow_to_newest_tag()`: a stable release now always beats a preview sharing the same ABI
+
+A separate, later live finding, also user-driven: with the zero-default
+retraction meaning an unpinned `build = "mpy6.3-*"`-style glob is now
+the *only* way most configs will ever resolve a tag, which tag it
+resolves to matters more than it used to. `newest_tag_for_abi("6.3")`
+(and, through it, the pre-existing `narrow_to_newest_tag()`) picked
+`v1.30.0-preview` over `v1.29.0` purely by version-number recency --
+correct as "the newest thing", wrong as "the newest thing safe to build
+against by default": a preview tag is, definitionally, less verified
+than a real release sharing the same ABI, and `--archs auto`'s own
+removal (see above) means there is no longer a keyword-driven fallback
+path that would have made this less consequential. `narrow_to_newest_tag()`
+now prefers a stable release over a preview within the same `(abi, arch,
+arch_flags)` group, even a numerically older one, only falling back to a
+preview when a given group has no stable candidate at all (an ABI walked
+so far only against an in-progress preview). `newest_tag_for_abi()`
+itself is unchanged -- still the true newest, preview included -- since
+it answers a different question (`all_tag_groups()`'s own domain
+enumeration) that this correction does not touch; a new
+`newest_stable_tag_for_abi()` is the one that mirrors the corrected
+`narrow_to_newest_tag()` behaviour, exported for tests and any future
+caller that needs "what would an unpinned build glob actually resolve
+to" without duplicating the preference logic. Decided live via
+`AskUserQuestion` after the user raised the concern directly and I
+proposed the narrower fix (skip previews when a stable alternative
+exists) over the broader one floated first (always prefer the oldest
+known tag) -- the user's own reasoning ("dynruntime важливіший і
+автовибір тегу може не спрацювати") was about *tag stability*
+specifically, which the narrower fix addresses without giving up "the
+current release" as the ordinary-case default the way an oldest-tag rule
+would.
+
+### TOML migrations and CI wiring
+
+Every live config this repo owns is migrated in the same round, not
+left for a follow-up: the root `cibuildmp.toml` (reference example --
+`build = "mpy6.3-*"` replaces the old implicit default, `[natmod]`'s own
+keys promoted to the top level), `examples/template/cibuildmp.toml` (one
+`build` glob spanning natmod's own ten arches plus real unix/windows/
+webassembly cells, `micropython = "v1.29.0"` removed, `skip` excluding
+the six emulated-everywhere cells explicitly now that `GROUPS` cannot do
+it implicitly), and `examples/wasm2mpy/cibuildmp.toml` (`[natmod] archs
+= [...]` becomes a flat `build` glob, pinned to a literal stable tag
+rather than a bare ABI wildcard -- a second, independent application of
+the same stable-over-preview reasoning above, since `mpy6.3-*` would
+otherwise have let this dynruntime-sensitive integration test drift onto
+`v1.30.0-preview` unnoticed). `action.yml`'s own `only`/`archs` inputs
+become `build`/`skip`, mapped straight to the CLI flags of the same
+name. `.github/workflows/build-examples.yml`'s `CIBMP_PLATFORM=natmod`/
+`=unix,webassembly,windows` env vars and `archs: auto`/`only: <name>`
+action inputs are replaced with explicit, per-runner `build` globs (one
+matrix leg's own native cells spelled out by hand, since there is no
+more keyword vocabulary computing them) -- verified live, not just
+read: every rewritten config's own `--print-build-identifiers --json`
+output checked directly against the exact identifier set the old
+mechanism used to produce.
+
+### Ripple and verification
+
+Every test file touching `[natmod]`/`[unix]`/`[esp32]`/etc. tables,
+`archs=`/`boards=`/`micropython=` config, `--platform`/`--only`/
+`--enable`/`--archs`, or `GROUPS`/`ARCH_KEYWORDS` needed rewriting:
+`tests/test_active_platforms.py` deleted outright (its entire subject,
+`active_platforms()`, no longer exists); `tests/test_cli_multi_platform.py`
+renamed to `tests/test_cli_multi_family.py` and rewritten around the new
+always-both-families model; `tests/test_usermod_targets.py`,
+`tests/test_usermod_options.py` rewritten around real rows and build-glob
+narrowing; `tests/test_cli.py`, `tests/test_overrides.py`,
+`tests/test_options.py`, `tests/test_selector.py` fixed for zero-default,
+`[natmod]` rejection, the retired `enable`/`groups` `select()` parameters,
+and the stable-tag preference; `tests/test_usermod_orchestrate.py` needed
+only two identifier-format fixes (tagged `UsermodTarget` construction),
+confirming the "hand-built, tag-less falls back to the old shape"
+compatibility choice did its job.
+
+Full suite green (357 passed), ruff and pyright clean. Live smoke-tested
+directly, not just via the hermetic suite: zero-config both dry-run and
+`--print-build-identifiers` correctly report "no targets selected"/empty
+output; a natmod-only `build` glob resolves and dry-runs correctly
+without touching usermod; a combined natmod+usermod `build` glob in one
+invocation resolves both families' own identifiers with no reachability
+false positive (the exact regression described above, re-verified fixed
+after the `foreign_identifiers` change); `--build`/`--skip` CLI overrides
+work standalone and in combination; every migrated example config
+(`examples/template`, `examples/wasm2mpy`, root `cibuildmp.toml`)
+resolves its own real identifier set correctly, including both
+`build-examples.yml` matrix legs' own per-runner `build` glob.
+
+**Explicitly out of scope for this round, left as tracker items:** the
+ten usermod ports `resources/build-platforms.toml` already has verified
+rows for but no real `build_<port>()` driver -- flagged by the user
+directly as the genuinely larger remaining piece of work, not touched
+here; and A6's own docker-image-resolver redesign.
+
+**Decided, not implemented:** the "defaults themselves as a built-in
+lowest-priority `[override."*"]` entry" idea, floated earlier in the same
+conversation that produced this whole round, is rejected outright by the
+user's own explicit call once the rest of this round had landed --
+"defaults як `[override."*"]` - зайве" (redundant/unnecessary). `default=`
+stays a real, distinct parameter on `Options.get()`, not folded into the
+override mechanism. Closing this is what lets [0052]'s own status move
+past "the divergence itself is argued and decided, with unresolved
+sub-questions" -- only A6 and the unwired usermod ports remain open, and
+neither is a config-*shape* question this record's own title is about.
+
 [0051]: 0051-usermod-identifiers-have-no-version-axis.md

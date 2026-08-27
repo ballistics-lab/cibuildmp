@@ -9,14 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **`build`/`skip` are settable per platform now, not just at the top
-  level.** `[natmod] build = "..."`, `[usermod] skip = "..."` (usermod's
-  own family-wide default), and `[unix]`/`[esp32]`/etc.'s own `build`/
-  `skip` are all legal now, more-specific-wins -- matching upstream
-  cibuildwheel's own `[tool.cibuildwheel.<platform>] build = "..."`
-  shape, confirmed directly against real `cibuildwheel/options.py` before
-  building this. Previously `build`/`skip` could only be written once, at
-  the top level, for the whole invocation. Record 0052's own addendum.
+- **Every per-platform table, and every activation/keyword mechanism
+  riding on it, is retracted -- config is purely `build`/`skip`
+  glob-matching a real identifier now, plus `[override]`.** This
+  supersedes several bullets further down this same Unreleased section
+  (per-platform `build`/`skip`, `--platform`/`CIBMP_PLATFORM`,
+  `--enable`/opt-in groups, `--archs auto`/`native`/`all`) -- none of
+  those ever shipped, so this is the net, current behaviour, not an
+  additional change layered on top. `[natmod]`/`[unix]`/`[windows]`/
+  `[qemu]`/`[webassembly]`/`[esp32]` do not exist as config tables at
+  all any more: every platform is always in scope, on every invocation,
+  and `build`/`skip` (config, `CIBMP_BUILD`/`CIBMP_SKIP`, or the new
+  `--build`/`--skip` CLI flags) glob-matching each platform's own real
+  identifier is the only thing that decides what actually gets built.
+  **Breaking, and deliberate: an unconfigured `build` now selects
+  nothing at all, from any platform** -- the old zero-config default
+  ("natmod, narrowed to the newest known ABI") is gone; a config states
+  what it wants, explicitly, via a glob, or nothing builds.
+  `--platform`/`CIBMP_PLATFORM`/`--only` are removed from the CLI;
+  `--build`/`--skip` replace `--only` (name a glob specific enough to
+  match one identifier for "build exactly this one thing"). `--archs`'s
+  own `auto`/`native`/`all` host-convenience keyword vocabulary and
+  `--enable`/`enable`/`GROUPS` (the `unix-emulated-everywhere` opt-in
+  group) are both removed outright -- everything either reached, an
+  ordinary `build`/`skip` glob against the real identifier already
+  reaches directly. `[usermod]` is unaffected by any of this -- it was
+  never a selector, only a shared-defaults tier for usermod's own ports,
+  and stays exactly that. Usermod also gains the identical real-row
+  candidate model natmod already had (every real `(port, tag,
+  arch/board)` row `resources/build-platforms.toml` has verified is a
+  candidate, always) -- fixing a real, previously-silent bug along the
+  way: `unix`/`windows`/`webassembly` identifiers never actually carried
+  the port name at all (`v1.29.0-manylinux_2_28_x86_64`, not
+  `v1.29.0-unix-manylinux_2_28_x86_64`), which every earlier build of
+  this identifier had gotten wrong. See the README's own "Identifiers
+  and selectors" section for the full real identifier list and glob
+  syntax. Record 0052's own addenda.
 - **New `name`/`version` config keys give built artifacts real project
   identity.** Both are read from the top level, for every platform.
   `version` already existed for natmod (writing it into each identifier's

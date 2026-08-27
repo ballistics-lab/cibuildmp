@@ -17,23 +17,21 @@
 # pyproject.toml — it is not their convention — hence the standalone file.)
 #
 # Every option below is overridable by a CIBMP_-prefixed environment
-# variable (CIBMP_BUILD, CIBMP_SKIP, CIBMP_MICROPYTHON, CIBMP_OUTPUT_DIR,
-# CIBMP_EXTRA_MAKE_ARGS, ...). Precedence, lowest to highest:
+# variable (CIBMP_BUILD, CIBMP_SKIP, CIBMP_OUTPUT_DIR,
+# CIBMP_EXTRA_MAKE_ARGS, ...), and `build`/`skip` by --build/--skip on the
+# CLI too. Precedence, lowest to highest:
 #   defaults -> this file -> matching [override] -> environment -> CLI
+#
+# There is no per-platform table at all any more -- no [natmod], no
+# [unix]/[windows]/[qemu]/[webassembly]/[esp32]. Every platform is always
+# in scope; every option key below lives at the bare top level (or, for a
+# usermod-only default shared across every port, inside [usermod] -- see
+# examples/template/cibuildmp.toml). What actually gets built is decided
+# purely by `build`/`skip` glob-matching the real identifier, or by a
+# specific `[override."<glob>"]` entry. An unconfigured `build` selects
+# nothing at all, from any platform -- there is no implicit default.
 
 # ── Global ────────────────────────────────────────────────────────────────
-# No micropython/mpy-abi key here (record 0052, A2 -- this repo has no
-# usermod module either, so there is genuinely nothing left in [Global]
-# that would pin a release tag for natmod): the .mpy ABI axis is a
-# statically known domain now, resources/build-platforms.toml recording
-# every ABI this project has actually verified against a real MicroPython
-# tag, each resolved to its own newest known tag automatically. An
-# unconfigured `build` selector below narrows it to the single newest known
-# ABI by itself; naming an older one explicitly (`build = "mpy6.2-*"`) opens
-# it up instead of pinning a tag directly -- there is currently no way to
-# pin an explicit tag for a given ABI, a known, undesigned gap.
-# (`micropython` stays a real key for usermod's own [[unix]]/[esp32]/...
-# tables, unrelated to natmod -- see examples/template/cibuildmp.toml.)
 
 # Where built .mpy files are collected. cibuildwheel's "wheelhouse".
 output-dir = "mpyhouse"
@@ -50,16 +48,18 @@ output-dir = "mpyhouse"
 
 # ── Build selectors ───────────────────────────────────────────────────────
 # Globs over the flat build identifier, which is shaped after
-# cibuildwheel's cp311-manylinux_x86_64 = {ABI}_{arch} -- no literal
-# "natmod" segment (record 0052, A2): natmod is one platform among six
-# sharing this same identifier shape now, not a mode spelled into the
-# string.
+# cibuildwheel's cp311-manylinux_x86_64 = {ABI}_{arch} for natmod -- no
+# literal "natmod" segment (record 0052, A2): natmod is one platform among
+# several sharing this same identifier shape now, not a mode spelled into
+# the string. See the README's own identifier reference for every
+# platform's own shape (natmod's `mpy{abi}-{tag}-{arch}`; usermod's differs
+# per port -- some carry no port name at all).
 #
-#     mpy6.3-x64
-#     mpy6.3-armv7emsp
+#     mpy6.3-v1.29.0-x64
+#     mpy6.3-v1.29.0-armv7emsp
 #
 # Space-separated, `skip` applied after `build`. Examples:
-#     build = "mpy6.3-*"          # everything at this ABI (today's default)
+#     build = "mpy6.3-*"          # everything at this ABI, every tag it maps to
 #     build = "mpy6.2-* mpy6.3-*" # two ABIs in one invocation
 #     build = "*-armv7em*"        # both Cortex-M4F/M7 variants
 #     skip  = "*-xtensawin"       # temporarily drop one arch
@@ -69,13 +69,7 @@ output-dir = "mpyhouse"
 # ...ARMV7EMDP are distinct values, selected from __ARM_FP in
 # py/persistentcode.h). A project-level precision define is an override, not
 # an axis — see [override] below.
-#
-# Left unset here on purpose: an unconfigured `build` already narrows to
-# the single newest known ABI (record 0052, A2), which is the sensible
-# default for a project like this one that only wants its current release
-# built. Writing `build = "*"` explicitly would widen it to every ABI
-# resources/build-platforms.toml has ever verified, back to MicroPython
-# v1.12 -- rarely what a real project wants.
+build = "mpy6.3-*"
 skip = ""
 
 # ── natmod: one build per dynruntime.mk ARCH ──────────────────────────────
@@ -84,15 +78,15 @@ skip = ""
 # What cibuildmp owns is everything around it — fetching MicroPython,
 # building mpy-cross, resolving the cross toolchain per arch, installing
 # mpy_ld.py's host deps, and collecting the outputs.
-[natmod]
-# No `archs` key here (record 0052's own live-caught correction): it used
-# to filter candidate rows by `.arch` alone, before `build`/`skip` ever
-# ran -- exactly what a `build`/`skip` glob over the identifier already
-# expresses directly (e.g. `build = "*-x64"`, see the build selectors
-# section above). Left unset, every arch dynruntime.mk supports builds by
-# default. No aarch64 among them: dynruntime.mk has no ARCH=aarch64
-# branch at all as of MicroPython v1.28, so natmod cannot target it --
-# cover it via usermod instead.
+#
+# Every key below used to live inside a [natmod] table; that table is
+# retired (record 0052's own live-caught retraction: it carried no
+# settable content of its own once every key here moved to global-only,
+# and no activation meaning either, once every platform became always in
+# scope). These are natmod-only keys, but they live at the bare top level
+# like every other global option -- natmod is the only reader of any of
+# them under these names, so there is nothing ambiguous about where they
+# apply.
 
 module-dir = "natmod"       # directory containing the Makefile.
                             # a7p passes "micropython/natmod".
@@ -121,19 +115,15 @@ extra-make-args = ["MP_BCLIBC_PRECISION=single"]
 
 # usermod itself is fully implemented -- this repo's own cibuildmp.toml
 # just doesn't build a usermod module, so nothing above uses it. A real,
-# live usermod config -- [unix]/[windows]/[qemu]/[webassembly]/[esp32],
-# each its own top-level table sibling to [natmod] above (Phase F, record
-# 0051 points 4/6), e.g.:
+# live usermod config narrows `build`/`skip` to real unix/windows/qemu/
+# webassembly/esp32 identifiers -- there is no per-port table at all any
+# more (`unix`'s own real identifiers already carry `manylinux`/
+# `musllinux` as a marker a glob can address directly), e.g.:
 #
-#     [unix]
-#     archs = ["x64", "x86", "aarch64", "armhf", "mipsel"]
+#     build = "mpy6.3-* v1.29.0-manylinux* v1.29.0-esp32-*"
 #
-#     [esp32]
-#     boards = ["ESP32_GENERIC"]
-#
-# -- is examples/template/cibuildmp.toml, not sketched here.
-# ("rp2040" was never a real port -- targets.py's own KNOWN_PORTS has no
-# such name; esp32 above is the closest board-axis port that exists.)
+# -- see examples/template/cibuildmp.toml for a real, live usermod config
+# and the README for the full real identifier list.
 #
 # ── Not implemented yet ───────────────────────────────────────────────────
 # Sketched here so the intended shape is on record, but genuinely NOT
@@ -141,13 +131,11 @@ extra-make-args = ["MP_BCLIBC_PRECISION=single"]
 # nothing below has a config surface at all yet. Do not rely on any of it.
 # See docs/BACKLOG.md.
 #
-#     [webassembly]
 #     variant = "pyscript"     # standard's ASYNCIFY is broken on modern
 #                               # emsdk -- WebassemblyBuildOptions has a
 #                               # variant field with this exact default,
 #                               # but no config key reads into it yet
 #
-#     [esp32]
 #     idf-target = "esp32"     # chip family, deliberately separate from
 #                               # board, but not a real key either
 #     idf-ver = "v5.5.1"

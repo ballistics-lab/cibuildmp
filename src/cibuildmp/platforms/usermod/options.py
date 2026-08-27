@@ -1,18 +1,25 @@
-"""Usermod config loading: every port's own top-level table (`[unix]`,
-`[windows]`, `[qemu]`, `[webassembly]`, `[esp32]`), sibling to `[natmod]`,
-read the same cascade way `natmod/options.py` reads `[natmod]` (Phase F,
-record 0051 points 4/6) -- but genuinely a separate tree, not a second
-copy-paste of `Options`: usermod's own axes (which ports, which per-port
-arch/board) don't fit natmod's single flat `archs` list at all.
+"""Usermod config loading. `[unix]`/`[windows]`/`[qemu]`/`[webassembly]`/
+`[esp32]` do not exist as config tables at all any more -- every one of
+them used to carry a per-port axis (`archs =`/`boards =`) and, before
+that, to gate whether the port was active in the first place (table
+presence as activation). Both concepts are retracted, live, in the same
+session that removed natmod's own `archs` and the `platform_tables`
+cascade tier: every port is always in scope, and `all_usermod_targets()`
+(`targets.py`) already enumerates every real `(port, tag, arch/board)`
+row `resources/build-platforms.toml` has -- there is nothing left for a
+per-port table to select or configure. `cli.py`'s own
+`_reject_platform_tables()` turns a config still writing one of these six
+names into a loud, specific error before this module ever sees it.
 
-`[usermod]` itself no longer exists as a concept -- every port table
-used to nest under it (`[usermod.<port>]`) and carry a `ports = [...]`
-list; now table presence alone selects a port, exactly the rule
-`[natmod]`'s own presence has always followed. `cli.py`'s
-`_reject_legacy_usermod_table()` is what turns a lingering `[usermod]`
-into a loud, specific error before this module ever sees the config.
+`[usermod]` is not one of the six -- it survives, unaffected by any of
+this, as shared defaults for every usermod port at once (`user-c-modules`/
+`manifest`/`extra-make-args`/`build`/`skip`), sibling to the bare top
+level rather than a selector of any kind (record 0051's ninth addendum,
+kept at the user's own explicit insistence through every later round of
+retraction: it is a value-holding table, the same category as "global
+keys", not a selection mechanism).
 
-`[override]` is shared with natmod now (Phase G, record 0051's third
+`[override]` is shared with natmod (Phase G, record 0051's third
 addendum) -- `natmod/options.py`'s own `load_overrides()` parses and
 loosely validates the merged, top-level list once; each of natmod's and
 this module's own `build_options()` does its own *strict*,
@@ -25,10 +32,9 @@ Deliberately narrower than `natmod/options.py`'s own `Options` still: no
 config-surface-less) yet.
 
 `user-c-modules`/`manifest`/`extra-make-args` are genuinely global-with-
-per-platform-override now (Phase F): resolved per target through the
-same `cibuildmp.options.Options` cascade `natmod/options.py` uses, not
-eagerly-resolved scalar fields shared by every selected port
-unconditionally the way they were before this phase.
+`[usermod]`-level-override: resolved per target through the same
+`cibuildmp.options.Options` cascade `natmod/options.py` uses, not
+eagerly-resolved scalar fields.
 
 No `package.json` here at all: usermod output is a full port binary meant
 to be flashed or run directly, not a `.mpy` `mip.install()` target -- D14's
@@ -45,7 +51,7 @@ from __future__ import annotations
 
 import os
 import shlex
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -58,7 +64,6 @@ from ...options import (
 )
 from ...selector import parse_selector, select
 from ..natmod.options import (
-    DEFAULT_MICROPYTHON,
     DEFAULT_OUTPUT_DIR,
     check_keys,
     load_overrides,
@@ -66,14 +71,7 @@ from ..natmod.options import (
 )
 from ..natmod.options import ConfigError as NatmodConfigError
 from ..natmod.options import Options as NatmodOptions
-from .targets import (
-    GROUPS,
-    KNOWN_PORTS,
-    UsermodTarget,
-    all_usermod_targets,
-    axis_key,
-    usermod_targets,
-)
+from .targets import KNOWN_PORTS, UsermodTarget, all_usermod_targets
 
 # "." (the project root), not a literal "usermod" subdirectory --
 # record 0051's own sixth/ninth addenda. Broader, not narrower: py.mk's
@@ -88,9 +86,8 @@ from .targets import (
 # usermod) that the narrower default's own bind-mount could not reach.
 DEFAULT_USER_C_MODULES = "."
 
-# Keys shared across every usermod port's own table -- the platform-
-# specific axis key (`archs`/`boards`, from `axis_key(port)`) is added
-# per port in `_port_schema()` below. `user-c-modules`, not `module-dir`
+# The three per-target option keys usermod's own `[override]` entries and
+# `[usermod]` family table both read. `user-c-modules`, not `module-dir`
 # -- natmod's own `module-dir` names the directory `make -C` runs in
 # directly (it must contain that project's own Makefile); this key's
 # value is instead forwarded as `USER_C_MODULES=` into the *MicroPython
@@ -118,31 +115,17 @@ USERMOD_PORT_BASE: frozenset[str] = frozenset(
 # both sides.
 USERMOD_ONLY_GENERIC_KEYS: frozenset[str] = frozenset({"user-c-modules", "manifest"})
 
-# `[usermod]` (the family table) still carries `user-c-modules`/
-# `manifest`/`extra-make-args`/`build`/`skip` as shared defaults for every
-# active port at once -- that tier was never in question (record 0051's
-# ninth addendum, kept at the user's own explicit insistence). What is
-# gone is the *per-port* table's own copy of the same settability
-# (`[unix] build = "..."`, `[esp32] user-c-modules = "..."`) -- record
-# 0052's own live-caught correction: a per-port table was always exactly
-# a sufficiently-scoped global (or `[usermod]`-family) value restated,
-# since every port's own real identifier already carries a marker a glob
-# can address directly. `SCHEMAS[port]` below reflects that: a port's own
-# table now carries nothing but its own axis key.
+# `[usermod]` (the family table) carries `user-c-modules`/`manifest`/
+# `extra-make-args`/`build`/`skip` as shared defaults for every port at
+# once -- that tier was never in question (record 0051's ninth addendum,
+# kept at the user's own explicit insistence through every later round of
+# retraction). There is no *per-port* table left to carry a narrower copy
+# of the same settability at all any more (`[unix]`, `[esp32]`, ... do not
+# exist as config tables) -- every port's own real identifier already
+# carries a marker a `build`/`skip` glob or an `[override."<glob>"]` entry
+# can address directly, so a per-port table was always exactly that,
+# restated.
 USERMOD_PLATFORM_KEYS: frozenset[str] = USERMOD_PORT_BASE | {"build", "skip"}
-
-
-def _port_schema(port: str) -> frozenset[str]:
-    key = axis_key(port)
-    return frozenset({key}) if key else frozenset()
-
-
-# port name -> that port's own option-key schema, for `check_keys()`'s
-# per-port-table validation -- just the port's own axis key now (`archs`/
-# `boards`), nothing else: every other key that used to live here moved
-# to global-only/`[usermod]`-family/`[override]` (see `USERMOD_PLATFORM_KEYS`'s
-# own comment above).
-SCHEMAS: dict[str, frozenset[str]] = {port: _port_schema(port) for port in KNOWN_PORTS}
 
 __all__ = [
     "UsermodBuildOptions",
@@ -158,49 +141,54 @@ class UsermodConfigError(Exception):
 def check_usermod_family_table(
     raw: Mapping[str, Any], *, error: type[Exception] = UsermodConfigError
 ) -> dict[str, Any]:
-    """Parse and validate `[usermod]` -- shared defaults for all five
-    usermod ports at once (record 0051's ninth addendum), sibling to
-    `[natmod]`, not a container over `[unix]`/`[esp32]`/etc. and not a
-    selector: which ports are active is still table presence alone
-    (Phase F), unchanged by this table's own presence or absence.
+    """Parse and validate `[usermod]` -- shared defaults for every usermod
+    port at once (record 0051's ninth addendum), sibling to the bare top
+    level. Not a container over `[unix]`/`[esp32]`/etc. (those tables do
+    not exist at all any more) and not a selector of any kind: every port
+    is always in scope, glob-matched by `build`/`skip` against its own
+    real identifiers -- `all_usermod_targets()` (`targets.py`) already
+    enumerates every one of them.
 
-    Two failure shapes get distinct treatment. The pre-Phase-F shape --
+    Two failure shapes get distinct treatment. The pre-retraction shape --
     `ports = [...]`, or a nested `[usermod.<port>]` sub-table TOML parses
-    as a dict value here -- means this config has not migrated at all,
-    and gets a dedicated, specific message pointing at the real shape,
-    the same courtesy `cli.py`'s own (now-removed) blanket `[usermod]`
-    rejection used to give. Anything else unknown to `USERMOD_PLATFORM_KEYS`
-    (a typo, a per-port axis key like `archs` written here instead of in
-    its own port table) falls through to the ordinary `check_keys()`
-    error.
+    as a dict value here -- means this config predates the current model
+    entirely, and gets a dedicated, specific message naming the real
+    replacement rather than a bare "unknown key". Anything else unknown to
+    `USERMOD_PLATFORM_KEYS` (a typo) falls through to the ordinary
+    `check_keys()` error.
 
-    Exported (not `_`-private) because `cli.py`'s own `active_platforms()`
-    calls this unconditionally, before it is known whether any usermod
-    port is even active -- a config whose *only* usermod content is a
-    stale `[usermod] ports = [...]` selects zero usermod ports under the
-    new presence rule, so nothing would otherwise ever call into this
-    module far enough to catch it, and the config would silently just
-    build natmod alone (record 0048's own bug class). `UsermodOptions.load()`
-    below calls this again for direct callers that bypass `cli.py`
-    entirely (most tests) -- cheap, no I/O, not the "parsing the file
-    twice" `read_config()`'s own `preread` already avoids.
+    Exported (not `_`-private) because `cli.py`'s own
+    `_reject_platform_tables()` calls this unconditionally, on every
+    invocation -- unlike the retired table-presence model, every usermod
+    port is always considered now, so there is no "usermod never even
+    loads far enough to see this" case left to guard against the way
+    there used to be (record 0048's own bug class); this early call is
+    kept anyway so a config mistake here is reported before any of the
+    heavier per-family resolution work runs. `UsermodOptions.load()` below
+    calls this again for direct callers that bypass `cli.py` entirely
+    (most tests) -- cheap, no I/O, not the "parsing the file twice"
+    `read_config()`'s own `preread` already avoids.
     """
     table = dict(raw.get("usermod") or {})
     if "ports" in table:
         raise error(
-            "[usermod] ports = [...] no longer exists. Which usermod ports "
-            "are active is table presence now -- write [unix], [windows], "
-            "[qemu], [webassembly], [esp32] directly, sibling to [usermod] "
-            "and [natmod]. [usermod] itself only holds shared defaults for "
-            "every active port now (user-c-modules/manifest/"
-            "extra-make-args), not a port list."
+            "[usermod] ports = [...] no longer exists. Every usermod port "
+            "is always in scope now -- there is no [unix]/[esp32]/etc. "
+            "table to select one, and no port list to write here either. "
+            "[usermod] itself only holds shared defaults (build/skip, "
+            "user-c-modules/manifest/extra-make-args) for every port at "
+            "once; narrow which targets actually build with a build/skip "
+            'glob (e.g. build = "*manylinux*") or an '
+            '[override."<glob>"] entry.'
         )
     nested = sorted(k for k, v in table.items() if isinstance(v, dict))
     if nested:
         raise error(
             f"[usermod.{nested[0]}] no longer exists -- there is no more "
-            f"nesting under [usermod]. Write [{nested[0]}] as its own "
-            "top-level table, sibling to [usermod] and [natmod]."
+            f"nesting under [usermod], and [{nested[0]}] does not exist as "
+            "its own top-level table either. Move any option value to the "
+            "top level, or into [usermod] for a usermod-wide default, and "
+            "narrow with a build/skip glob or [override] instead."
         )
     check_keys(table, USERMOD_PLATFORM_KEYS, where="[usermod]", error=error)
     return table
@@ -218,10 +206,7 @@ def _as_list_or_str(value: Any, key: str) -> list[str]:
     """Like `_as_list()`, but a string is shell-split rather than
     rejected -- for `build_options()`'s own per-target resolution, where
     a value can come from the environment (always a string) as well as
-    the file, the same shape natmod's own `_as_list` already has. Every
-    other `_as_list()` call site here stays strict: `ports`/axis values
-    coming from the file as a bare string is a real config mistake worth
-    catching, not something the environment layer needs to produce."""
+    the file, the same shape natmod's own `_as_list` already has."""
     if isinstance(value, str):
         return shlex.split(value)
     return _as_list(value, key)
@@ -256,11 +241,13 @@ def _foreign_override_identifiers(cfg: UsermodOptions) -> list[str]:
     """`[override]` is shared with natmod (Phase G) -- an entry meant
     only for natmod (`select = "*-armv7emsp"`, an arch identifier no
     usermod port ever produces) must not fail *this* family's own
-    reachability audit just because natmod itself is not part of this
-    invocation (task #66, reported live against the root `cibuildmp.toml`:
-    `cibuildmp --dry-run --platform unix` rejected exactly that override
-    as unreachable, even though it is entirely valid natmod config this
-    invocation simply never loads).
+    reachability audit just because a *direct*, usermod-only caller
+    (bypassing `cli.py`, as most tests do) never loads natmod's own
+    config at all (task #66, first reported live against the root
+    `cibuildmp.toml` back when `--platform` could still scope one family
+    out of an invocation -- `cli.py` itself now always resolves both
+    families, so this widening only still matters for a standalone
+    `UsermodOptions.load()` caller).
 
     `usermod/options.py` already imports from `natmod/options.py` (the
     established one-way direction -- natmod must never import usermod
@@ -291,42 +278,53 @@ def _foreign_override_identifiers(cfg: UsermodOptions) -> list[str]:
         return []
 
 
-def check_reachable(cfg: UsermodOptions) -> None:
+def check_reachable(
+    cfg: UsermodOptions, *, foreign_identifiers: Sequence[str] = ()
+) -> None:
     """Pre-build reachability audit -- the usermod half of record 0052's
     A5 (see `natmod/options.py`'s own `check_reachable()` for the full
     reasoning, unchanged here): every `build`/`skip`/`[override]`
     `select` pattern must be capable of matching at least one identifier
-    in `all_targets()` (every known port, this config's own configured
-    `micropython` tags), checked before `targets()`'s own `build`/`skip`
-    narrowing -- which legitimately reaching zero *selected* targets (a
-    deliberate `skip = "*"`) must stay a valid, ordinary outcome, never
-    confused with a pattern that could never have matched anything at
-    all.
+    in `all_targets()` (every known port, every real tag
+    `build-platforms.toml` has ever walked), checked before `targets()`'s
+    own `build`/`skip` narrowing -- which legitimately reaching zero
+    *selected* targets (a deliberate `skip = "*"`) must stay a valid,
+    ordinary outcome, never confused with a pattern that could never have
+    matched anything at all.
 
-    Each active port's own `build`/`skip` -- **only when `[<port>]` itself
+    `build`/`skip`/`[override]` are shared, top-level config now (every
+    per-platform table is retired) -- a pattern can legitimately be meant
+    for natmod alone (`build = "mpy6.3-*"` with a usermod port also in
+    scope), and that must not read as a mistake just because it matches
+    nothing among usermod's own identifiers. `foreign_identifiers` is
+    `cli.py`'s own coordinator supplying natmod's (and any other active
+    family's) own `all_targets()` identifiers; `_foreign_override_identifiers()`
+    is this module's own independent way of getting the same thing for a
+    direct, usermod-only caller (bypassing `cli.py`, as most tests do) --
+    both are combined below rather than one replacing the other, since a
+    real caller only ever supplies one of the two.
+
+    Each port's own `build`/`skip` -- **only when a per-platform
+    environment override (`CIBMP_BUILD_<PORT>`/`CIBMP_SKIP_<PORT>`)
     actually sets one** -- is checked a second time, scoped to *that
-    port's own* identifiers: unlike the shared `[override]` list
-    (widened below via `_foreign_override_identifiers()`), a value
-    written directly inside a port's own table is unambiguous by
-    construction. Deliberately skipped when the port sets neither:
+    port's own* identifiers (not widened): an env-var value scoped to one
+    port is unambiguous by construction, unlike the shared `build`/`skip`/
+    `[override]` above. Deliberately skipped when the port sets neither:
     `cfg._port_build_skip(port)` then falls back to `cfg.build`/
-    `cfg.skip`, which may itself be a `[usermod]`-level (family-wide)
-    pattern meaning "every port, some of which are not this one"
-    (`skip = "*-webassembly"` legitimately matches nothing among
-    `[unix]`'s own identifiers) -- re-checking it against one port's own
-    narrow subset would be a false positive, not a stricter check; the
-    equality test below is what tells "this port genuinely set its own
-    value" apart from "this is only the inherited default resolving here
-    too."
-
-    `[override]` reachability is checked against usermod's own
-    identifiers *plus* natmod's (task #66) -- an override entirely valid
-    for the other, currently-inactive family must not be flagged here.
+    `cfg.skip`, which may itself be a family-wide pattern meaning "every
+    port, some of which are not this one" (`skip = "*wasm*"` legitimately
+    matches nothing among `unix`'s own identifiers) -- re-checking it
+    against one port's own narrow subset would be a false positive, not a
+    stricter check; the equality test below is what tells "this port
+    genuinely has its own env override" apart from "this is only the
+    inherited default resolving here too."
     """
     all_targets = cfg.all_targets()
     identifiers = [t.identifier for t in all_targets]
-    check_selector_reachable(cfg.build, "build", identifiers, error=UsermodConfigError)
-    check_selector_reachable(cfg.skip, "skip", identifiers, error=UsermodConfigError)
+    foreign = list(foreign_identifiers) + _foreign_override_identifiers(cfg)
+    combined = identifiers + foreign
+    check_selector_reachable(cfg.build, "build", combined, error=UsermodConfigError)
+    check_selector_reachable(cfg.skip, "skip", combined, error=UsermodConfigError)
     for port in cfg.ports:
         port_build, port_skip = cfg._port_build_skip(port)
         port_identifiers = [t.identifier for t in all_targets if t.port == port]
@@ -341,59 +339,49 @@ def check_reachable(cfg: UsermodOptions) -> None:
             check_selector_reachable(
                 port_skip, f"[{port}] skip", port_identifiers, error=UsermodConfigError
             )
-    if cfg.overrides:
-        override_identifiers = identifiers + _foreign_override_identifiers(cfg)
-        for override in cfg.overrides:
-            selector = override.get("select")
-            if selector is None:
-                continue  # a missing select is its own, separate error elsewhere
-            check_selector_reachable(
-                parse_selector(selector),
-                f'[override."{selector}"]',
-                override_identifiers,
-                error=UsermodConfigError,
-            )
+    for override in cfg.overrides:
+        selector = override.get("select")
+        if selector is None:
+            continue  # a missing select is its own, separate error elsewhere
+        check_selector_reachable(
+            parse_selector(selector),
+            f'[override."{selector}"]',
+            combined,
+            error=UsermodConfigError,
+        )
 
 
 @dataclass
 class UsermodOptions:
-    """Every active usermod port's config, before it is narrowed to a
-    single target."""
+    """Every usermod port's config, before it is narrowed to a single
+    target. Every port in `KNOWN_PORTS` is always in scope -- there is no
+    activation concept left to narrow `ports` below that constant."""
 
     package_dir: Path
     config_path: Path | None
-    micropython: list[str]
     output_dir: Path
     ports: list[str]
     build: list[str]
     skip: list[str]
     name: str
     version: str
-    axis_overrides: dict[str, list[str]]
     # The shared, top-level [override] list (0051 point 7, merged with
-    # natmod's own in Phase G) -- not axis_overrides above (which
-    # port/arch a config selects), per-target *option* overrides layered
-    # over user-c-modules/manifest/extra-make-args, the same "file -> matching
-    # override (each with its own inherit rule) -> environment" shape
-    # natmod's own Options.build_options() already has.
+    # natmod's own in Phase G) -- per-target *option* overrides layered
+    # over user-c-modules/manifest/extra-make-args, the same "file ->
+    # matching override (each with its own inherit rule) -> environment"
+    # shape natmod's own Options.build_options() already has.
     overrides: list[dict[str, Any]] = field(default_factory=list)
-    # Names in GROUPS (0051 point 8) that build = "*" should reach anyway
-    # -- e.g. enable = ["unix-emulated-everywhere"]. Validated against
-    # GROUPS.keys() in targets(), not at load() time, since CLI --enable
-    # (usermod/cli.py) still needs to union into this after load().
-    enable: frozenset[str] = frozenset()
     # The cascade instance backing build_options()'s own per-target
     # resolution of user-c-modules/manifest/extra-make-args -- env excluded
     # here (build_options() checks the environment itself, after
-    # overrides, matching the precedence it has always had),
-    # platform_tables keyed by port name.
+    # overrides, matching the precedence it has always had).
     _cascade: OptionCascade = field(default=None, repr=False, compare=False)  # type: ignore[assignment]
     # A second instance over the same tables, env included -- build/skip's
     # own per-port resolution (targets() below, record 0052's own
     # per-platform build/skip addendum) has no per-target opt() closure of
     # its own the way build_options() does, so it reads straight through a
     # real env-aware cascade instead, the same way natmod/options.py's own
-    # cascade_env already does for archs/build/skip.
+    # cascade_env already does for build/skip.
     _cascade_env: OptionCascade = field(default=None, repr=False, compare=False)  # type: ignore[assignment]
 
     @classmethod
@@ -402,27 +390,16 @@ class UsermodOptions:
         package_dir: Path,
         config_file: Path | None = None,
         preread: tuple[Path | None, dict[str, Any]] | None = None,
-        ports: list[str] | None = None,
     ) -> UsermodOptions:
         """`preread`, when given, is `(config_path, raw)` the caller
-        already got from `read_config()` -- `cli.py`'s own platform-
-        detection peek has to read the file once to decide which
-        platforms are active, so this avoids reading and parsing the
+        already got from `read_config()` -- `cli.py` already reads the
+        file once for `natmod`'s own load too, so this avoids parsing the
         same TOML file a second time.
-
-        `ports`, when given, is the list of usermod ports `cli.py`'s own
-        `active_platforms()` already resolved for this invocation (every
-        `[<port>]` table present, or an explicit `--platform` filter).
-        When `None` -- a direct caller bypassing `cli.py`, as most tests
-        do -- it is derived the same way, straight from table presence.
         """
         if preread is None:
             config_path, raw = read_config(package_dir, config_file)
         else:
             config_path, raw = preread
-
-        if ports is None:
-            ports = [p for p in KNOWN_PORTS if p in raw]
 
         # Environment beats the file for the two genuinely shared
         # top-level keys, the same way `natmod/options.py`'s own `opt()`
@@ -433,42 +410,7 @@ class UsermodOptions:
                 return env_value
             return raw.get(key, default)
 
-        # micropython is a genuinely shared top-level key, and a real list
-        # (**0051**): usermod's identifier gained a leading tag slot
-        # specifically so more than one release can be selected in one
-        # invocation without one overwriting another's output. Accepts
-        # the same shapes natmod's own list-valued options do: a TOML
-        # list, or a string (file or environment) split on whitespace.
-        micropython_value = opt("micropython", DEFAULT_MICROPYTHON)
-        if isinstance(micropython_value, list):
-            micropython = [str(v) for v in micropython_value] or [DEFAULT_MICROPYTHON]
-        else:
-            micropython = str(micropython_value).split() or [DEFAULT_MICROPYTHON]
-
         family_table = check_usermod_family_table(raw, error=UsermodConfigError)
-
-        axis_overrides: dict[str, list[str]] = {}
-        for port in ports:
-            port_table = dict(raw.get(port) or {})
-            # A port's own table has nothing left in it but its own axis
-            # key (`archs`/`boards`) -- every option key that used to be
-            # legal here (`user-c-modules`/`manifest`/`extra-make-args`/
-            # `build`/`skip`) moved to global-only/`[usermod]`-family/
-            # `[override]` (record 0052's own live-caught correction,
-            # `USERMOD_PLATFORM_KEYS`'s own comment above has the
-            # argument). `extra_generic` is what turns a stray
-            # `[unix] user-c-modules = "..."` into a specific "move it to
-            # the top level" message instead of a bare "unknown key".
-            check_keys(
-                port_table,
-                SCHEMAS[port],
-                where=f"[{port}]",
-                error=UsermodConfigError,
-                extra_generic=USERMOD_ONLY_GENERIC_KEYS,
-            )
-            key = axis_key(port)
-            if key is not None and key in port_table:
-                axis_overrides[port] = _as_list(port_table[key], f"{port}.{key}")
 
         cascade = OptionCascade(global_table=raw, family_table=family_table, env={})
         # Env-aware sibling of `cascade` above -- build/skip's own
@@ -483,84 +425,93 @@ class UsermodOptions:
         # `self.build`/`self.skip` are the global+family-resolved
         # baseline -- `family_table.get()` is consulted by `.get()`
         # regardless of whether `platform=` is passed, so `[usermod]`'s
-        # own build/skip already applies here, before any one port's own
-        # table narrows it further in targets().
-        build_value = cascade_env.get("build", default="*")
+        # own build/skip already applies here. No implicit "*" default any
+        # more (record 0052's own live-caught correction): an unconfigured
+        # build selects nothing, the same retraction natmod's own default
+        # got.
+        build_value = cascade_env.get("build", default="")
         skip_value = cascade_env.get("skip", default="")
 
         return cls(
             package_dir=package_dir,
             config_path=config_path,
-            micropython=micropython,
             output_dir=Path(str(opt("output-dir", DEFAULT_OUTPUT_DIR))),
-            ports=ports,
+            ports=list(KNOWN_PORTS),
             build=parse_selector(build_value),
             skip=parse_selector(skip_value),
             name=str(opt("name", "")),
             version=str(opt("version", "")),
-            axis_overrides=axis_overrides,
             overrides=overrides,
-            enable=frozenset(parse_selector(opt("enable"))),
             _cascade=cascade,
             _cascade_env=cascade_env,
         )
 
     def _port_build_skip(self, port: str) -> tuple[list[str], list[str]]:
         """This port's own `build`/`skip` -- `self.build`/`self.skip` (the
-        global+family-resolved baseline) unless a per-platform environment
-        override (`CIBMP_BUILD_<PORT>`/`CIBMP_SKIP_<PORT>`) is set. No
-        `[port]`-table tier any more (record 0052's own live-caught
-        correction, retracting the earlier "per-platform build/skip"
-        addendum): `[unix] build = "..."` was always exactly a
-        sufficiently-scoped global `build` pattern restated, since unix's
-        own real identifiers already carry `manylinux`/`musllinux` as a
-        marker no other platform's own identifiers share. The env-var
-        tier survives -- a real, distinct capability (a one-off CI
-        override with no config-file edit), not a TOML duplication of
-        anything a glob already expresses."""
-        build = parse_selector(
-            self._cascade_env.get("build", platform=port, default=self.build)
-        )
-        skip = parse_selector(
-            self._cascade_env.get("skip", platform=port, default=self.skip)
-        )
+        global+family-resolved baseline, already reflecting `--build`/
+        `--skip` CLI overrides applied after `load()`) unless a
+        per-platform environment override (`CIBMP_BUILD_<PORT>`/
+        `CIBMP_SKIP_<PORT>`) is set. No `[port]`-table tier any more
+        (record 0052's own live-caught correction, retracting the earlier
+        "per-platform build/skip" addendum): `[unix] build = "..."` was
+        always exactly a sufficiently-scoped global `build` pattern
+        restated, since unix's own real identifiers already carry
+        `manylinux`/`musllinux` as a marker no other platform's own
+        identifiers share. The env-var tier survives -- a real, distinct
+        capability (a one-off CI override with no config-file edit), not
+        a TOML duplication of anything a glob already expresses.
+
+        Reads the env var directly rather than through
+        `self._cascade_env.get(..., default=self.build)`: that cascade
+        call re-derives its own "no env override" fallback from the raw
+        file/family tables it was built from, which -- once `self.build`
+        has been reassigned after `load()` (`resolve_options()`'s own
+        `--build`/`--skip` handling) -- disagrees with the value actually
+        meant to apply. Reading the env var alone and falling back to the
+        already-fully-resolved `self.build` sidesteps that staleness
+        entirely.
+        """
+        env = self._cascade_env.env
+        build_key = f"CIBMP_BUILD_{port.upper()}"
+        skip_key = f"CIBMP_SKIP_{port.upper()}"
+        build = parse_selector(env[build_key]) if build_key in env else self.build
+        skip = parse_selector(env[skip_key]) if skip_key in env else self.skip
         return build, skip
 
-    def targets(self) -> list[UsermodTarget]:
-        unknown = self.enable - GROUPS.keys()
-        if unknown:
-            raise UsermodConfigError(
-                f"enable: unknown group(s) {', '.join(sorted(unknown))}. Known: "
-                f"{', '.join(sorted(GROUPS))}"
-            )
-        check_reachable(self)
-        all_targets = usermod_targets(self.micropython, self.ports, self.axis_overrides)
-        # build/skip resolve per port now, not once globally -- selecting
-        # per port-group and reassembling in all_targets' own original
-        # order (tag-outer, port-inner) rather than concatenating groups,
-        # which would reorder every multi-tag, multi-port config's own
-        # output.
+    def targets(
+        self, *, foreign_identifiers: Sequence[str] = ()
+    ) -> list[UsermodTarget]:
+        """`foreign_identifiers`: every other active platform family's own
+        `all_targets()` identifiers, widening the reachability audit below
+        to the true combined domain -- see `check_reachable()`'s own
+        docstring. `cli.py`'s own coordinator always supplies this; a
+        direct caller bypassing `cli.py` (most tests) gets the same
+        widening anyway, from this module's own `_foreign_override_identifiers()`.
+        """
+        check_reachable(self, foreign_identifiers=foreign_identifiers)
+        all_targets = all_usermod_targets()
+        # build/skip resolve per port -- selecting per port-group and
+        # reassembling in all_targets' own original order (port-outer,
+        # per-port row order) rather than concatenating groups, which
+        # would reorder every multi-port config's own output.
         selected: list[UsermodTarget] = []
         for port in self.ports:
             build, skip = self._port_build_skip(port)
             group = [t for t in all_targets if t.port == port]
-            selected.extend(
-                select(group, build, skip, enable=self.enable, groups=GROUPS)
-            )
+            selected.extend(select(group, build, skip))
         position = {t: i for i, t in enumerate(all_targets)}
         return sorted(selected, key=lambda t: position[t])
 
     def all_targets(self) -> list[UsermodTarget]:
         """Every identifier this config can name, across every known port
-        -- what `--only` resolves against (**0045**), independent of
-        `ports`/axis-overrides/`build`/`skip`. A thin wrapper around the
-        free function of the same job (`all_usermod_targets()`) added so
-        `cli.py`'s own dispatch can call `resolve_options(...).all_targets()`
-        the same way for every family (Phase H) -- mirrors natmod's own
+        -- independent of `build`/`skip`. A thin wrapper around the free
+        function of the same job (`all_usermod_targets()`) so `cli.py`'s
+        own dispatch can call `resolve_options(...).all_targets()` the
+        same way for every family -- mirrors natmod's own
         `Options.all_targets()` method, which had no free-function
         equivalent to begin with.
         """
-        return all_usermod_targets(self.micropython)
+        return all_usermod_targets()
 
     def build_options(
         self, target: UsermodTarget, env: Mapping[str, str] | None = None

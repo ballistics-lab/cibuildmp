@@ -48,12 +48,10 @@ def test_one_shared_override_reaches_both_natmod_and_a_usermod_port(tmp_path):
     # the universal "*" entry so file order still layers append on top.
     #
     # Targets are constructed directly rather than resolved through
-    # .targets() -- natmod's own reachability audit has no way to widen
-    # its domain with usermod's own identifiers without importing it back
-    # (a one-way dependency this project keeps deliberately), so a
-    # unix-only override selector genuinely is unreachable *from natmod's
-    # own side*, a real, separately-tracked, still-open gap (record
-    # 0052's own addendum on task #66) -- not what this test is about.
+    # .targets() -- build_options() alone is what this test is about, not
+    # the reachability audit (covered separately, and now genuinely fixed
+    # both directions via .targets()'s own foreign_identifiers, since
+    # cli.py always resolves both families together).
     write(
         tmp_path,
         """
@@ -76,7 +74,7 @@ def test_one_shared_override_reaches_both_natmod_and_a_usermod_port(tmp_path):
         "EXTRA=1",
     ]
 
-    usermod_options = UsermodOptions.load(tmp_path, ports=["unix"])
+    usermod_options = UsermodOptions.load(tmp_path)
     usermod_target = UsermodTarget(
         port="unix", arch="manylinux_2_28_x86_64", tag="v1.29.0"
     )
@@ -93,8 +91,12 @@ def test_natmod_only_override_key_rejected_for_a_usermod_target(tmp_path):
     # direct regression test for "runtime per-matched-platform validation"
     # not silently readmitting record 0048's own bug class under the
     # cascade.
-    write(tmp_path, '[unix]\n\n[override."*"]\nmake-target = "dist"\n')
-    options = UsermodOptions.load(tmp_path, ports=["unix"])
+    write(
+        tmp_path,
+        'build = "v1.29.0-manylinux_2_28_x86_64"\n\n'
+        '[override."*"]\nmake-target = "dist"\n',
+    )
+    options = UsermodOptions.load(tmp_path)
 
     with pytest.raises(UsermodConfigError, match="unknown key `make-target`"):
         options.build_options(options.targets()[0])
@@ -105,7 +107,8 @@ def test_usermod_only_override_key_rejected_for_a_natmod_target(tmp_path):
     # passes tier-1, but is not natmod's to read.
     write(
         tmp_path,
-        '[natmod]\n\n[override."*"]\nmanifest = "x.py"\n',
+        f'build = "mpy6.3-{newest_tag_for_abi("6.3")}-x64"\n\n'
+        '[override."*"]\nmanifest = "x.py"\n',
     )
     options = Options.load(tmp_path, env={})
 
@@ -117,13 +120,14 @@ def test_tier_2_rejection_is_a_clean_cli_error_not_a_traceback(tmp_path, capsys)
     # Regression, found via live testing: build_options() can raise
     # ConfigError/UsermodConfigError for a tier-2 mismatch on the very
     # first target a --dry-run or real build loop resolves -- a path
-    # neither natmod/cli.py's nor usermod/cli.py's own try/except around
-    # Options.load()/targets() covers, since load()/targets() cannot see
-    # this error (it only surfaces once a specific target is resolved).
-    # Both call sites (the --dry-run loop, and the real build wrapper)
-    # needed their own ConfigError/UsermodConfigError handling added.
+    # neither family's own try/except around Options.load()/targets()
+    # covers, since load()/targets() cannot see this error (it only
+    # surfaces once a specific target is resolved). Both call sites (the
+    # --dry-run loop, and the real build wrapper) needed their own
+    # ConfigError/UsermodConfigError handling added.
     (tmp_path / "cibuildmp.toml").write_text(
-        '[natmod]\n\n[override."*"]\nmanifest = "x.py"\n'
+        f'build = "mpy6.3-{newest_tag_for_abi("6.3")}-x64"\n\n'
+        '[override."*"]\nmanifest = "x.py"\n'
     )
 
     assert main([str(tmp_path), "--dry-run"]) == 2
@@ -136,23 +140,17 @@ def test_arch_flags_still_rejected_in_the_merged_overrides_natmod(tmp_path):
     # Regression: the merge must not have widened OVERRIDE_UNION_KEYS to
     # readmit arch-flags, resolved once for the whole config and never
     # per target -- exactly the shape record 0048 is about.
-    write(
-        tmp_path,
-        '[natmod]\n[unix]\n\n[override."*"]\narch-flags = "rv32imc"\n',
-    )
+    write(tmp_path, '[override."*"]\narch-flags = "rv32imc"\n')
 
     with pytest.raises(ConfigError, match=r'\[override\."\*"\]: unknown key'):
         Options.load(tmp_path, env={})
 
 
 def test_arch_flags_still_rejected_in_the_merged_overrides_usermod(tmp_path):
-    write(
-        tmp_path,
-        '[natmod]\n[unix]\n\n[override."*"]\narch-flags = "rv32imc"\n',
-    )
+    write(tmp_path, '[override."*"]\narch-flags = "rv32imc"\n')
 
     with pytest.raises(UsermodConfigError, match=r'\[override\."\*"\]: unknown key'):
-        UsermodOptions.load(tmp_path, ports=["unix"])
+        UsermodOptions.load(tmp_path)
 
 
 def test_inherit_on_a_scalar_key_is_a_parse_time_error_natmod(tmp_path):
@@ -160,8 +158,7 @@ def test_inherit_on_a_scalar_key_is_a_parse_time_error_natmod(tmp_path):
     # later matches -- caught at load(), not deferred to build_options().
     write(
         tmp_path,
-        '[natmod]\n\n[override."*"]\n'
-        'module-dir = "x"\ninherit = {module-dir = "append"}\n',
+        '[override."*"]\nmodule-dir = "x"\ninherit = {module-dir = "append"}\n',
     )
 
     with pytest.raises(ConfigError, match="inherit only applies to list-valued"):
@@ -171,18 +168,17 @@ def test_inherit_on_a_scalar_key_is_a_parse_time_error_natmod(tmp_path):
 def test_inherit_on_a_scalar_key_is_a_parse_time_error_usermod(tmp_path):
     write(
         tmp_path,
-        '[unix]\n\n[override."*"]\n'
-        'module-dir = "x"\ninherit = {module-dir = "append"}\n',
+        '[override."*"]\nmodule-dir = "x"\ninherit = {module-dir = "append"}\n',
     )
 
     with pytest.raises(UsermodConfigError, match="inherit only applies to list-valued"):
-        UsermodOptions.load(tmp_path, ports=["unix"])
+        UsermodOptions.load(tmp_path)
 
 
 def test_inherit_unknown_rule_is_a_parse_time_error(tmp_path):
     write(
         tmp_path,
-        '[natmod]\n\n[override."*"]\n'
+        '[override."*"]\n'
         'extra-make-args = ["X=1"]\ninherit = {extra-make-args = "sideways"}\n',
     )
 
@@ -193,12 +189,13 @@ def test_inherit_unknown_rule_is_a_parse_time_error(tmp_path):
 def test_inherit_prepend(tmp_path):
     write(
         tmp_path,
-        """
+        f"""
+        build = "mpy6.3-{newest_tag_for_abi("6.3")}-x64"
         extra-make-args = ["BASE=1"]
 
         [override."*"]
         extra-make-args = ["FIRST=1"]
-        inherit = {extra-make-args = "prepend"}
+        inherit = {{extra-make-args = "prepend"}}
         """,
     )
     options = Options.load(tmp_path, env={})
