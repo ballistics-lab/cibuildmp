@@ -154,11 +154,20 @@ def parse_cross_prefixes(text: str) -> dict[str, str]:
     `ifeq ($(ARCH),<name>)` / `else ifeq ($(ARCH),<name>)` branches, each
     holding its own `CROSS = ...` line. Purely textual split on the
     branches themselves, independent of persistentcode.h's enum order.
+
+    The value can be genuinely empty -- x86/x64 build with the host's own
+    gcc, no prefix (`CROSS =`, confirmed live against v1.20.0) -- so the
+    match is anchored to one line (`[ \\t]`, not `\\s`, around `=`) rather
+    than `\\s*(\\S+)`, which would silently skip the blank line and slurp
+    the next line's first token (`CFLAGS` from the following line) as the
+    "prefix" instead. An empty match still means "found, and it's empty",
+    kept as `""`, not the same as absent (a tag with no dynruntime.mk at
+    all, or no branch for that arch) which stays out of the map entirely.
     """
     cross_map: dict[str, str] = {}
     parts = re.split(r"(?:else\s+)?ifeq\s*\(\$\(ARCH\),\s*(\w+)\)", text)
     for name, body in zip(parts[1::2], parts[2::2]):
-        match = re.search(r"CROSS\s*=\s*(\S+)", body)
+        match = re.search(r"^CROSS[ \t]*=[ \t]*(\S*)[ \t]*$", body, re.MULTILINE)
         if match:
             cross_map[name] = match.group(1)
     return cross_map
