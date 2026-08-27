@@ -300,9 +300,23 @@ def check_reachable(cfg: UsermodOptions) -> None:
     confused with a pattern that could never have matched anything at
     all.
     """
-    identifiers = [t.identifier for t in cfg.all_targets()]
+    all_targets = cfg.all_targets()
+    identifiers = [t.identifier for t in all_targets]
     check_selector_reachable(cfg.build, "build", identifiers, error=UsermodConfigError)
     check_selector_reachable(cfg.skip, "skip", identifiers, error=UsermodConfigError)
+    # tree_paths=: select gained tree-path matching under B2/B4.3, so a
+    # select = "usermod.esp32.*"-shaped override (matches nothing as an
+    # identifier glob) must not be flagged unreachable when it is
+    # legitimately reachable through the other mode build/skip never use.
+    # Narrower than the real board catalog today -- all_targets()'s own
+    # esp32 entries are still only the single unconfigured default
+    # (Track C Phase C2, not started, is what widens this the same way
+    # it already did for natmod) -- so a select naming one specific,
+    # real, uncommon board directly (not a `*`-shaped glob reaching the
+    # default) can still read as unreachable here even though B4.2
+    # already validates that same name as a real config board. A known,
+    # deliberate gap this phase does not close, not silently papered over.
+    tree_paths = {t.tree_path for t in all_targets}
     for index, override in enumerate(cfg.overrides, 1):
         selector = override.get("select")
         if selector is None:
@@ -311,6 +325,7 @@ def check_reachable(cfg: UsermodOptions) -> None:
             parse_selector(selector),
             f"[[overrides]] #{index}",
             identifiers,
+            tree_paths=tree_paths,
             error=UsermodConfigError,
         )
 
@@ -488,8 +503,16 @@ class UsermodOptions:
         Phase G)."""
         environ: Mapping[str, str] = os.environ if env is None else env
 
+        # tree_path=target.tree_path: "usermod.<port>", or
+        # "usermod.<port>.<arch>" for a tree-addressed port with a real
+        # board value (record 0052, Track B, B4.3) -- select =
+        # "usermod.esp32.*" now reaches every esp32 board target
+        # additively, alongside identifier matching.
         matching = matching_overrides(
-            self.overrides, target.identifier, error=UsermodConfigError
+            self.overrides,
+            target.identifier,
+            tree_path=target.tree_path,
+            error=UsermodConfigError,
         )
         for override in matching:
             option_keys = {

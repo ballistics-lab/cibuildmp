@@ -1884,4 +1884,69 @@ tree-path-or-identifier `select` mode) is next.
 [0038]: 0038-m5-adopt-in-three-repos.md
 [0045]: 0045-only-is-a-filter-not-a-forced-identifier.md
 [0048]: 0048-build-skip-live-in-opposite-tables.md
+## Addendum, 2026-08-27 — B4.3 landed: `[[overrides]]`'s own `select` matches by tree path
+too, additively; a correction to this record's own B0–B3 review pass
+
+**`matching_overrides()` (`cibuildmp/options.py`) gains `tree_path: str | None`, matched
+additively (OR) alongside `identifier`, exactly per B2's own design and this record's own
+review-pass clarifications** (a single full-path match, not a per-ancestor loop; additive,
+not a fallback priority; scoped to `[[overrides]]`'s own `select`, `build`/`skip`
+untouched). `UsermodTarget` gains a `.tree_path` property (`"usermod.<port>"`, or
+`"usermod.<port>.<arch>"` for a tree-addressed port with a real axis value); natmod's own
+tree path is always exactly `target.port` (`"natmod"`), needing no new property at all.
+Both `build_options()` call sites pass it through. Live-verified before landing, not merely
+unit-tested: every real `select` value in this repo's own `cibuildmp.toml` and every test
+fixture (`"*"`, `"*-armv7emsp"`, `"*-aarch64"`, `"*-notaport"`, `"*-manylinux_2_28_x86_64"`)
+re-checked directly against real tree-path strings -- none accidentally gains a new match,
+confirming B4.3's own "additive, no risk to any existing config" claim still holds today,
+not just when the record was first drafted.
+
+**A correction to this same record's own B0–B3 review pass, caught by writing the tests, not
+by rereading the review prose again**: that pass claimed "A5's already-landed
+`check_reachable()` ... needs no change under B2 at all," reasoning only about `build`/
+`skip`. It missed that `check_reachable()` *also* checks every `[[overrides]]` table's own
+`select` against `identifiers` -- and once `select` could legitimately match only via
+tree-path (`select = "natmod"`, `select = "usermod.esp32.*"`), that check started rejecting
+a perfectly valid, reachable pattern as "matches no known identifier," caught immediately by
+the first real test written against the new mode. Fixed the same session, not left for a
+later phase: `check_selector_reachable()` gains its own `tree_paths: Iterable[str] | None`,
+additive the same way `matching_overrides()`'s own `tree_path` is; both `check_reachable()`
+implementations (natmod's, usermod's) now pass `{t.port for t in all_targets}` /
+`{t.tree_path for t in all_targets}` alongside `identifiers`, only for the override-`select`
+loop -- `build`/`skip` still never receive it, unchanged. Recorded here rather than silently
+folded into the same diff as if it had been foreseen, since it was not.
+
+**A known, deliberate residual gap, found live while smoke-testing rather than guessed at in
+advance**: `all_targets()`'s own esp32 domain is still only the single unconfigured default
+board (`ESP32_GENERIC` -- Track C Phase C2, not started, is what widens this the same way
+Phase C1 already did for natmod). A `select` naming one specific, real, uncommon board
+directly by tree path (`select = "usermod.esp32.ESP32_GENERIC_S3"`, no wildcard) can still
+fail this reachability check today even though B4.2 already validates that exact board name
+as real config input the moment it is written as `[esp32.ESP32_GENERIC_S3]` -- confirmed
+live: a wildcard pattern (`select = "usermod.esp32.*"`) reaches the narrow default and
+passes; the same board named directly does not. Not fixed here -- fixing it properly means
+widening the reachability domain itself, Phase C2's own job, not a workaround bolted onto
+B4.3. Documented in code (`usermod/options.py`'s own `check_reachable()`) so it is not
+rediscovered as a surprise.
+
+**A second, separate, genuinely pre-existing bug, found live while smoke-testing a mixed
+natmod+usermod config and confirmed to predate this whole session's work, not introduced by
+it**: `[[overrides]]` has been one shared, top-level list since Phase G ([0051]'s own third
+addendum) -- every family's own `Options`/`UsermodOptions` reads the identical list, and A5's
+`check_reachable()` checks *every* override in it against *that one family's own* identifiers,
+with no awareness that an override might legitimately be meant for a different family
+entirely. Reproduced with plain identifier-only matching, no tree-path involved at all:
+`[[overrides]] select = "*-armv7emsp"` (a natmod-only arch suffix) in a config that also
+builds `[unix]` makes usermod's own `check_reachable()` reject the whole config, even though
+the override was never meant for usermod and natmod finds it perfectly reachable. This
+appears to have existed, live, since Phase G first landed the shared list -- A5 (which came
+later) never accounted for it. **Not fixed here**: out of B4.3's own scope, the right fix
+needs its own design (does reachability need the *union* of every active family's own domain
+per override, threaded across `Options`/`UsermodOptions` instances that today each only see
+their own `cfg`?) rather than a quick patch risking a worse regression. Flagged prominently,
+tracked as its own open item, not silently absorbed into this phase's diff.
+
+429 tests pass; ruff and pyright clean. B4.4 (`targets.py` changes -- which config node
+`build_options()` reads a board's own overrides from) is next.
+
 [0051]: 0051-usermod-identifiers-have-no-version-axis.md

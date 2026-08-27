@@ -275,3 +275,22 @@ def test_reachability_audit_allows_a_deliberate_skip_everything(tmp_path):
     # in the first place is an error.
     write(tmp_path, 'skip = "*"\n[natmod]\narchs = ["x64"]\n')
     assert Options.load(tmp_path).targets() == []
+
+
+def test_reachability_audit_accepts_a_select_reachable_only_via_tree_path(tmp_path):
+    # record 0052, Track B, B4.3: "natmod" matches no real identifier
+    # (mpy6.3-x64 never equals the bare string "natmod"), so this must
+    # not be flagged unreachable now that select gained a second,
+    # tree-path matching mode -- the regression this phase's own fix
+    # (check_selector_reachable()'s tree_paths=) is for.
+    write(
+        tmp_path,
+        """
+        [natmod]
+        archs = ["x64"]
+        [[overrides]]
+        select = "natmod"
+        extra-make-args = ["X=1"]
+        """,
+    )
+    assert Options.load(tmp_path).targets() != []

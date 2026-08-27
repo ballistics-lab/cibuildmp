@@ -299,9 +299,16 @@ def check_reachable(cfg: Options) -> None:
     mechanism, reused unchanged by `usermod/options.py`'s own
     `check_reachable()`.
     """
-    identifiers = [t.identifier for t in cfg.all_targets()]
+    all_targets = cfg.all_targets()
+    identifiers = [t.identifier for t in all_targets]
     check_selector_reachable(cfg.build, "build", identifiers, error=ConfigError)
     check_selector_reachable(cfg.skip, "skip", identifiers, error=ConfigError)
+    # tree_paths=: select gained tree-path matching under B2/B4.3 (always
+    # just {"natmod"} here -- natmod's own tree address never varies), so
+    # a select = "natmod" override (matches nothing as an identifier
+    # glob) must not be flagged unreachable when it is legitimately
+    # reachable through the other mode build/skip never use.
+    tree_paths = {t.port for t in all_targets}
     for index, override in enumerate(cfg.overrides, 1):
         selector = override.get("select")
         if selector is None:
@@ -310,6 +317,7 @@ def check_reachable(cfg: Options) -> None:
             parse_selector(selector),
             f"[[overrides]] #{index}",
             identifiers,
+            tree_paths=tree_paths,
             error=ConfigError,
         )
 
@@ -523,8 +531,13 @@ class Options:
         -> environment."""
         environ: Mapping[str, str] = os.environ if env is None else env
 
+        # tree_path=target.port: natmod's own tree address is always
+        # exactly "natmod" -- one segment, no family tier, no arch
+        # sub-node (record 0052, Track B, B4.3) -- a select = "natmod"
+        # override now reaches every natmod target regardless of arch/
+        # abi, additively alongside identifier matching.
         matching = matching_overrides(
-            self.overrides, target.identifier, error=ConfigError
+            self.overrides, target.identifier, tree_path=target.port, error=ConfigError
         )
         for override in matching:
             option_keys = {
