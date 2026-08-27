@@ -87,6 +87,7 @@
 
 
 [natmod]
+identifier_format = "mpy{mpy}-{tag}-{arch}"
 identifiers = [
     { tag = "v1.12", mpy = "5", arch = "x86", arch_code = 1, arch_flags = 0, cross = "", identifier = "mpy5-v1.12-x86" },
     { tag = "v1.12", mpy = "5", arch = "x64", arch_code = 2, arch_flags = 0, cross = "", identifier = "mpy5-v1.12-x64" },
