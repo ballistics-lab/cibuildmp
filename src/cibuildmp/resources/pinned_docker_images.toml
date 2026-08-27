@@ -188,27 +188,33 @@ manylinux_2_39 = "ghcr.io/ballistics-lab/manylinux_2_39_mipsel@sha256:740276d705
 # ten `dynruntime.mk` toolchains, for the reasons `natmod.Dockerfile`'s
 # own header gives.
 #
-# **Pushed by hand, not by `publish-docker-images.yml`** -- the second
-# time, after `windows` (record 0042). Worth the same note plus one the
-# first push earned: a hand-push carries no
-# `org.opencontainers.image.source` label, so GHCR created the package
-# unlinked from the repository and therefore **private**, and an
-# anonymous pull of this digest failed until the visibility was flipped
-# in the settings UI (there is no API for it -- publish-docker-images.yml
-# says so at length). `publish-docker-images.yml` grew an `only:` input
-# so that republishing one image is cheap enough that the hand path stops
-# being the tempting one.
+# **Republished by `publish-docker-images.yml` itself, finally** -- the
+# first two digests for this image were both pushed by hand (`docker
+# push`, not `docker/build-push-action`), which carries no
+# `org.opencontainers.image.source` label: GHCR created the package
+# unlinked from the repository, private until the visibility was flipped
+# by hand in the settings UI, and -- discovered only when this republish
+# was attempted -- **not linked for Actions write access either**, so
+# `publish-docker-images.yml`'s own `packages: write` token was denied
+# with `permission_denied: write_package` until the package was
+# connected to this repository and granted Write under "Manage Actions
+# access" (both settings-UI-only, no REST endpoint for either). This
+# digest is the first one that is a real, workflow-published OCI index
+# with provenance/attestation, not a bare manifest -- the actual
+# closing of record 0050's own "no CI run has ever exercised
+# natmod-in-a-container" gap.
 #
-# The digest is the image all ten `dynruntime.mk` arches were verified
-# against locally (record 0050), built with `--platform linux/amd64` so
-# the platform is stated rather than inherited from whichever machine
-# pushed. It is the *second* digest for this image: the first was built
-# before the tarball sha256 checks moved into the Dockerfile, which
-# changed the layer and therefore the digest without changing a byte of
-# what the image contains.
+# Content is unchanged from the second (hand-pushed) digest: all ten
+# `dynruntime.mk` arches still verify against it (record 0050),
+# `--platform linux/amd64` still stated explicitly rather than inherited
+# from whichever machine pushed. Only the publishing path changed, which
+# is why the digest itself changed even though no Dockerfile instruction
+# did -- `docker/build-push-action`'s own multi-platform/attestation
+# export produces a different digest than a plain `docker push` for
+# byte-identical build instructions.
 #
 # Local work still goes through `CIBMP_NATMOD_DOCKER_IMAGE=<local tag>`.
-natmod = "ghcr.io/ballistics-lab/natmod@sha256:3c3ddfce23137caae88b759acc1c49d52a4d300c9a12032343ef688420a64350"
+natmod = "ghcr.io/ballistics-lab/natmod@sha256:d3f6c4316db529a2f811a6388958e3e2e08d692e230a34a0f6249da82a6580f9"
 
 windows = "ghcr.io/ballistics-lab/windows@sha256:7caab34597a3cb2d9f4a412549d4a806134a17a1411aeb612ff61bbbcc151fcd"
 qemu = "ghcr.io/ballistics-lab/qemu@sha256:d0348b84cc684a45ca6f71e6475b5b1ea9fe73ceb6d242af028562795f944928"
