@@ -66,7 +66,9 @@ from ..natmod.options import (
 )
 from .targets import (
     GROUPS,
+    KNOWN_ESP32_BOARDS,
     KNOWN_PORTS,
+    TREE_ADDRESSED_AXIS_PORTS,
     UsermodTarget,
     all_usermod_targets,
     axis_key,
@@ -105,9 +107,69 @@ USERMOD_PORT_BASE: frozenset[str] = frozenset(
 )
 
 
+def _split_tree_addressed_port_table(
+    port: str,
+    port_table: dict[str, Any],
+    known_boards: frozenset[str],
+    *,
+    error: type[Exception],
+) -> tuple[dict[str, Any], list[str]]:
+    """Split a tree-addressed port's own table (record 0052, Track B,
+    B4.2 -- `esp32` today, `TREE_ADDRESSED_AXIS_PORTS`) into its scalar
+    option keys and its board sub-nodes: any key whose value is itself a
+    dict is a board's own presence, not an option --
+    `[esp32.ESP32_GENERIC_S3]`, not `boards = ["ESP32_GENERIC_S3"]`, the
+    same "table presence is the selector" rule every other platform
+    table already follows one level up. Returns
+    `(scalar_keys, sorted_board_names)`; each board's own name is checked
+    against `known_boards` (`resources/build-platforms.toml`'s own,
+    independently-verified board list -- loosely, not tag-gated, since
+    that is Track C Phase C2's own job) and its own inner table against
+    `USERMOD_PORT_BASE`, the same per-node option surface every other
+    tree node already has.
+
+    A literal `boards = [...]` key gets its own dedicated message (the
+    same courtesy `check_usermod_family_table()` already gives other
+    syntax migrations), not the generic "unknown key" `check_keys()`
+    would otherwise raise -- `boards` is not read from anywhere any
+    more, and silently ignoring it would recreate exactly the bug class
+    record 0048 exists to prevent.
+    """
+    if "boards" in port_table and not isinstance(port_table["boards"], dict):
+        raise error(
+            f"[{port}] boards = [...] no longer exists -- which boards are "
+            f"active is table presence now, the same rule every other "
+            f"platform's own presence already follows. Write "
+            f"[{port}.BOARD_NAME] directly, one table per board, sibling to "
+            f"[{port}] itself."
+        )
+    scalar_keys = {k: v for k, v in port_table.items() if not isinstance(v, dict)}
+    board_names = sorted(k for k, v in port_table.items() if isinstance(v, dict))
+    unknown = [b for b in board_names if b not in known_boards]
+    if unknown:
+        raise error(
+            f"[{port}.{unknown[0]}]: unrecognised board {unknown[0]!r} -- not "
+            f"in resources/build-platforms.toml's own {port} identifiers. A "
+            f"typo, or a real board this project has never verified."
+        )
+    for board in board_names:
+        check_keys(
+            port_table[board], USERMOD_PORT_BASE, where=f"[{port}.{board}]", error=error
+        )
+    return scalar_keys, board_names
+
+
 def _port_schema(port: str) -> frozenset[str]:
     key = axis_key(port)
-    return USERMOD_PORT_BASE | ({key} if key else frozenset())
+    if key is None or port in TREE_ADDRESSED_AXIS_PORTS:
+        # A tree-addressed port's own axis key (`esp32`'s `boards`) is not
+        # a literal scalar key any more (record 0052, Track B, B4.2) -- a
+        # board's own presence as a `[esp32.<name>]` sub-table is what
+        # selects it now, checked separately in `load()` below, not
+        # accepted here as "a known key" the way a flat list-valued axis
+        # still is for every other axis-bearing port.
+        return USERMOD_PORT_BASE
+    return USERMOD_PORT_BASE | {key}
 
 
 # port name -> that port's own option-key schema, for `check_keys()`'s
@@ -347,13 +409,29 @@ class UsermodOptions:
         axis_overrides: dict[str, list[str]] = {}
         for port in ports:
             port_table = dict(raw.get(port) or {})
-            check_keys(
-                port_table, SCHEMAS[port], where=f"[{port}]", error=UsermodConfigError
-            )
+            if port in TREE_ADDRESSED_AXIS_PORTS:
+                scalar_keys, board_names = _split_tree_addressed_port_table(
+                    port, port_table, KNOWN_ESP32_BOARDS, error=UsermodConfigError
+                )
+                check_keys(
+                    scalar_keys,
+                    SCHEMAS[port],
+                    where=f"[{port}]",
+                    error=UsermodConfigError,
+                )
+                if board_names:
+                    axis_overrides[port] = board_names
+            else:
+                check_keys(
+                    port_table,
+                    SCHEMAS[port],
+                    where=f"[{port}]",
+                    error=UsermodConfigError,
+                )
+                key = axis_key(port)
+                if key is not None and key in port_table:
+                    axis_overrides[port] = _as_list(port_table[key], f"{port}.{key}")
             tree["usermod"][port] = port_table
-            key = axis_key(port)
-            if key is not None and key in port_table:
-                axis_overrides[port] = _as_list(port_table[key], f"{port}.{key}")
 
         cascade = OptionCascade(global_table=raw, tree=tree, env={})
 

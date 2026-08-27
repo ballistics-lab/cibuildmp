@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import platform
 from dataclasses import dataclass
+from typing import Any
 
+from ...resources import build_platforms_data
 from .build import WINDOWS_ARCH_SETTINGS
 
 # port -> (config axis key, every axis value this project can currently
@@ -66,6 +68,35 @@ _PORT_AXES: dict[str, tuple[str | None, tuple[str, ...]]] = {
 }
 
 KNOWN_PORTS: tuple[str, ...] = tuple(_PORT_AXES)
+
+# Ports whose axis values are addressed by tree-node presence
+# (`[esp32.BOARD_NAME]`) rather than a flat list-valued config key
+# (record 0052, Track B, B4.2) -- `zephyr` ([0022], not started) will be
+# the second member once it exists. `axis_key(port)` below still names
+# `"boards"` for these ports -- `usermod_targets()`'s own "does this port
+# have an axis at all" check does not care how the axis is expressed --
+# but `_port_schema()` (`usermod/options.py`) must not accept it as a
+# literal scalar key any more, and `UsermodOptions.load()` computes the
+# resolved axis list from which board sub-tables are present, not from a
+# `boards = [...]` value. `qemu` also has a real `"boards"` axis but
+# stays a flat list, deliberately out of this set -- its own small,
+# closed board set (`VIRT_RV32`/`VIRT_RV64`/`MPS2_AN385`) was never the
+# gap this phase closes, unlike esp32's own 400+ independently-verified
+# rows in `resources/build-platforms.toml`.
+TREE_ADDRESSED_AXIS_PORTS: frozenset[str] = frozenset({"esp32"})
+
+# Every esp32 board `resources/build-platforms.toml` has independently
+# verified, across every MicroPython tag it has walked -- not tag-gated
+# here (a board existing for *some* tag but not the one(s) actually
+# selected is Track C Phase C2's own job, not started; this is
+# deliberately the loose "does this board exist at all" check B4.2's own
+# text asks for). Closes a real, live-verified gap: before this landed,
+# `boards = [...]`'s own values were never checked against anything --
+# any string at all became a `UsermodTarget`, board typos included.
+_ESP32_ROWS: list[dict[str, Any]] = build_platforms_data()["usermod"]["esp32"][
+    "identifiers"
+]
+KNOWN_ESP32_BOARDS: frozenset[str] = frozenset(row["board"] for row in _ESP32_ROWS)
 
 # ── opt-in groups (0051 point 8, upstream's own EnableGroup) ────────────
 #

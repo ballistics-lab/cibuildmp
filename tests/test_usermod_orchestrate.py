@@ -219,8 +219,7 @@ def test_build_one_esp32_passes_board_through(tmp_path, monkeypatch):
     write_config(
         package_dir,
         """
-        [esp32]
-        boards = ["ESP32_GENERIC_S3"]
+        [esp32.ESP32_GENERIC_S3]
         """,
     )
     options = UsermodOptions.load(package_dir)
