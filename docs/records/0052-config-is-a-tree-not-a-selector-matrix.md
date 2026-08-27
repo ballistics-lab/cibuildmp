@@ -934,14 +934,41 @@ Applying this per axis, checked directly, not assumed:
   Genuinely unaffected, not merely unexamined — worth a real pass before
   implementation, not assumed safe by analogy to natmod's own mistake.
 - **natmod's own version×arch space — one row per verified `(tag, arch[,
-  arch_flags])`.** Verified live for two tags only this session
-  (`v1.20.0`: 8 arches, no RISC-V; `v1.23.0-preview`: same 8, `xtensawin`
-  present) — the other 21 known tags are **not** independently
-  reverified and must not be assumed to match; the maintainer-refresh
-  script walks every one of `ports/esp32`-style directly, not two
-  samples generalized. `arch_flags` compounds onto the same row shape
-  (one row per `arch_flags` value actually valid for that specific
-  `(tag, arch)` pair), not a separately-scoped sub-table.
+  arch_flags])`. Since completed for real: all 22 known tags, not a
+  sample.** Cloned and grepped every one of them directly (not two
+  extrapolated to the rest) — 189 real rows, sent to the user as
+  `build-platforms.natmod-full.toml`. The result sharpens the bug this
+  section already found, one level further: `rv32imc` does not appear
+  until `v1.25.0` (not from the start of ABI 6.3, which begins at
+  `v1.23.0`) and `rv64imc` not until `v1.28.0` — so even a per-*ABI*-node
+  `archs` list (this section's own second, already-rejected position)
+  would have been wrong *within* ABI 6.3 itself, not only across ABI
+  boundaries. Per-tag rows are not a stricter-than-needed precaution;
+  they are the minimum granularity the real data actually has.
+  `arch_flags` compounds onto the same row shape (one row per
+  `arch_flags` value actually valid for that specific `(tag, arch)`
+  pair, not independently reverified per tag this pass — `RV32_ARCH_FLAGS`
+  itself, i.e. whether `zba`/`zcmp` were both available from `v1.25.0`
+  onward or introduced later, is flagged, not checked).
+- **`esp32`'s own board *count* per tag, checked across all 22 —
+  confirms the same instability far past one example, then a further,
+  sharper one: the naming scheme itself changed, not just which names
+  exist.** `ls ports/esp32/boards/` per tag: from 29 boards (`v1.24.1`)
+  to 81 (`v1.29.0`), no monotonic trend. Listed actual names for
+  `v1.20.0`/`v1.24.1`/`v1.28.0`/`v1.29.0` directly: `v1.20.0`'s own
+  boards are named `GENERIC`, `GENERIC_C3`, `GENERIC_S3` — no `ESP32_`
+  prefix at all — while `v1.24.1` onward uses `ESP32_GENERIC`,
+  `ESP32_GENERIC_C3`. A `board = "ESP32_GENERIC"` row for `v1.20.0`
+  would not merely be an unverified guess, it would be flatly wrong — no
+  board by that name exists in that tag's own checkout. **This closes
+  any remaining case for deriving board identity from a formula or a
+  recent tag's own vocabulary — the row for each tag has to come from
+  that tag's own real directory listing, individually, full stop.**
+  Full per-board enumeration (name + metadata × 22 tags) is hundreds of
+  individual `board.json` reads — genuinely refresh-script scope, a
+  mechanical, well-specified, high-volume task suited to automation, not
+  a single manual documentation pass; not attempted further here beyond
+  this confirmation and the earlier four-row slice.
 - **`[mpy-abi]` (tag -> abi)** — already exactly the flat-map-of-real-facts
   shape this lesson calls for; unchanged, and still the source `family =
   "natmod"` rows above derive their own `abi` field from (one lookup per
