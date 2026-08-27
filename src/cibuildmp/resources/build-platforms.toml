@@ -88,6 +88,7 @@
 
 [natmod]
 identifier_format = "mpy{mpy}-{tag}-{arch}"
+artifacts_dir_name = "{name}-{ver}-mpy{abi}-{arch}[+0x{arch_flags:x}]"
 identifiers = [
     { tag = "v1.12", mpy = "5", arch = "x86", arch_code = 1, arch_flags = 0, cross = "", identifier = "mpy5-v1.12-x86" },
     { tag = "v1.12", mpy = "5", arch = "x64", arch_code = 2, arch_flags = 0, cross = "", identifier = "mpy5-v1.12-x64" },
@@ -298,6 +299,7 @@ identifiers = [
 
 [usermod.unix]
 identifier_format = "{tag}-{arch}"
+artifacts_dir_name = "{name}-{ver}-{identifier}"
 identifiers = [
     { tag = "v1.20.0", arch = "manylinux_2_28_x86_64", identifier = "v1.20.0-manylinux_2_28_x86_64" },
     { tag = "v1.20.0", arch = "musllinux_1_2_x86_64", identifier = "v1.20.0-musllinux_1_2_x86_64" },
@@ -534,6 +536,7 @@ identifiers = [
 # cibuildmp supplies the whole cross-toolchain externally, unconditionally.
 [usermod.windows]
 identifier_format = "{tag}-{arch}"
+artifacts_dir_name = "{name}-{ver}-{identifier}"
 identifiers = [
     { tag = "v1.20.0", arch = "win32", cross = "i686-w64-mingw32-", identifier = "v1.20.0-win32" },
     { tag = "v1.20.0", arch = "win_amd64", cross = "x86_64-w64-mingw32-", identifier = "v1.20.0-win_amd64" },
@@ -615,6 +618,7 @@ identifiers = [
 # floor does -- it only shows up embedded in arch/identifier above.
 [usermod.webassembly]
 identifier_format = "{tag}-{arch}"
+artifacts_dir_name = "{name}-{ver}-{identifier}"
 identifiers = [
     { tag = "v1.20.0", arch = "pyemscripten_6_0_8_wasm32", identifier = "v1.20.0-pyemscripten_6_0_8_wasm32" },
     { tag = "v1.21.0", arch = "pyemscripten_6_0_8_wasm32", identifier = "v1.21.0-pyemscripten_6_0_8_wasm32" },
@@ -654,6 +658,7 @@ identifiers = [
 # QEMU_BOARD_CROSS doesn't even have an entry for today.
 [usermod.qemu]
 identifier_format = "{tag}-qemu-{board}"
+artifacts_dir_name = "{name}-{ver}-{identifier}"
 identifiers = [
     { tag = "v1.24.0", board = "MICROBIT", cross = "arm-none-eabi-", identifier = "v1.24.0-qemu-MICROBIT" },
     { tag = "v1.24.0", board = "MPS2_AN385", cross = "arm-none-eabi-", identifier = "v1.24.0-qemu-MPS2_AN385" },
@@ -750,6 +755,7 @@ identifiers = [
 # [usermod.qemu].
 [usermod.esp32]
 identifier_format = "{tag}-esp32-{board}"
+artifacts_dir_name = "{name}-{ver}-{identifier}[-{variant}]"
 identifiers = [
     { tag = "v1.20.0", idf_version = "v4.4", board = "ESP32_S2_WROVER", mcu = "esp32s2", product = "ESP32-S2 WROVER", vendor = "Espressif", variants = [], identifier = "v1.20.0-esp32-ESP32_S2_WROVER" },
     { tag = "v1.20.0", idf_version = "v4.0.2", board = "GENERIC", mcu = "esp32", product = "ESP32", vendor = "Espressif", variants = ["idf3"], identifier = "v1.20.0-esp32-GENERIC" },
@@ -1221,6 +1227,7 @@ identifiers = [
 # and resolves to no tag at all.
 [usermod.rp2]
 identifier_format = "{tag}-rp2-{board}"
+artifacts_dir_name = "{name}-{ver}-{identifier}[-{variant}]"
 identifiers = [
     { tag = "v1.20.0", board = "ADAFRUIT_FEATHER_RP2040", mcu = "rp2040", product = "Feather RP2040", vendor = "Adafruit", variants = [], identifier = "v1.20.0-rp2-ADAFRUIT_FEATHER_RP2040" },
     { tag = "v1.20.0", board = "ADAFRUIT_ITSYBITSY_RP2040", mcu = "rp2040", product = "ItsyBitsy RP2040", vendor = "Adafruit", variants = [], identifier = "v1.20.0-rp2-ADAFRUIT_ITSYBITSY_RP2040" },
@@ -1621,6 +1628,7 @@ identifiers = [
 # "2.3.0"-style label the way pico-sdk's pin had.)
 [usermod.mimxrt]
 identifier_format = "{tag}-mimxrt-{board}"
+artifacts_dir_name = "{name}-{ver}-{identifier}"
 identifiers = [
     { tag = "v1.20.0", board = "MIMXRT1010_EVK", mcu = "mimxrt", product = "MIMXRT1010_EVK", vendor = "NXP", variants = [], identifier = "v1.20.0-mimxrt-MIMXRT1010_EVK" },
     { tag = "v1.20.0", board = "MIMXRT1015_EVK", mcu = "mimxrt", product = "MIMXRT1015_EVK", vendor = "NXP", variants = [], identifier = "v1.20.0-mimxrt-MIMXRT1015_EVK" },
@@ -1839,6 +1847,7 @@ identifiers = [
 # checked live, so it was always a raw commit sha).
 [usermod.samd]
 identifier_format = "{tag}-samd-{board}"
+artifacts_dir_name = "{name}-{ver}-{identifier}[-{variant}]"
 identifiers = [
     { tag = "v1.20.0", board = "ADAFRUIT_FEATHER_M0_EXPRESS", mcu = "samd21", product = "Feather M0 Express", vendor = "Adafruit", variants = [], identifier = "v1.20.0-samd-ADAFRUIT_FEATHER_M0_EXPRESS" },
     { tag = "v1.20.0", board = "ADAFRUIT_FEATHER_M4_EXPRESS", mcu = "samd51", product = "Feather M4 Express", vendor = "Adafruit", variants = [], identifier = "v1.20.0-samd-ADAFRUIT_FEATHER_M4_EXPRESS" },
@@ -2079,6 +2088,7 @@ identifiers = [
 # .gitmodules directly.
 [usermod.stm32]
 identifier_format = "{tag}-stm32-{board}"
+artifacts_dir_name = "{name}-{ver}-{identifier}[-{variant}]"
 identifiers = [
     { tag = "v1.20.0", board = "ADAFRUIT_F405_EXPRESS", mcu = "stm32f4", product = "F405 Express", vendor = "Adafruit", variants = [], identifier = "v1.20.0-stm32-ADAFRUIT_F405_EXPRESS" },
     { tag = "v1.20.0", board = "ARDUINO_GIGA", mcu = "stm32h7", product = "Arduino Giga", vendor = "Arduino", variants = [], identifier = "v1.20.0-stm32-ARDUINO_GIGA" },
@@ -3106,6 +3116,7 @@ identifiers = [
 # tags.
 [usermod.psoc-edge]
 identifier_format = "{tag}-psoc-edge-{board}"
+artifacts_dir_name = "{name}-{ver}-{identifier}"
 identifiers = [
     { tag = "v1.29.0", board = "KIT_PSE84_AI", mcu = "PSE846GPS2DBZC4", product = "KIT_PSE84_AI", vendor = "Infineon Technologies", variants = [], identifier = "v1.29.0-psoc-edge-KIT_PSE84_AI" },
     { tag = "v1.30.0-preview", board = "KIT_PSE84_AI", mcu = "PSE846GPS2DBZC4", product = "KIT_PSE84_AI", vendor = "Infineon Technologies", variants = [], identifier = "v1.30.0-preview-psoc-edge-KIT_PSE84_AI" },
@@ -3120,6 +3131,7 @@ identifiers = [
 # unchanged across all six tags that have it.
 [usermod.alif]
 identifier_format = "{tag}-alif-{board}"
+artifacts_dir_name = "{name}-{ver}-{identifier}"
 identifiers = [
     { tag = "v1.26.0", board = "ALIF_ENSEMBLE", mcu = "AE722F80F55D5XX", product = "Ensemble E7 DevKit", vendor = "Alif Semiconductor", variants = [], identifier = "v1.26.0-alif-ALIF_ENSEMBLE" },
     { tag = "v1.26.1", board = "ALIF_ENSEMBLE", mcu = "AE722F80F55D5XX", product = "Ensemble E7 DevKit", vendor = "Alif Semiconductor", variants = [], identifier = "v1.26.1-alif-ALIF_ENSEMBLE" },
@@ -3144,6 +3156,7 @@ identifiers = [
 # observed changes to the same board's variant list over time.
 [usermod.esp8266]
 identifier_format = "{tag}-esp8266-{board}"
+artifacts_dir_name = "{name}-{ver}-{identifier}[-{variant}]"
 identifiers = [
     { tag = "v1.18", board = "GENERIC", mcu = "esp8266", product = "ESP8266 with 2MiB+ flash", vendor = "Espressif", variants = ["ota"], identifier = "v1.18-esp8266-GENERIC" },
     { tag = "v1.18", board = "GENERIC_1M", mcu = "esp8266", product = "ESP8266 with 1MiB flash", vendor = "Espressif", variants = [], identifier = "v1.18-esp8266-GENERIC_1M" },
@@ -3188,6 +3201,7 @@ identifiers = [
 # unchanged across all seventeen tags that have it.
 [usermod.cc3200]
 identifier_format = "{tag}-cc3200-{board}"
+artifacts_dir_name = "{name}-{ver}-{identifier}"
 identifiers = [
     { tag = "v1.18", board = "WIPY", mcu = "cc3200", product = "WiPy Module", vendor = "Pycom", variants = [], identifier = "v1.18-cc3200-WIPY" },
     { tag = "v1.19", board = "WIPY", mcu = "cc3200", product = "WiPy Module", vendor = "Pycom", variants = [], identifier = "v1.19-cc3200-WIPY" },
@@ -3232,6 +3246,7 @@ identifiers = [
 # the v1.21.0 rename above.
 [usermod.renesas-ra]
 identifier_format = "{tag}-renesas-ra-{board}"
+artifacts_dir_name = "{name}-{ver}-{identifier}"
 identifiers = [
     { tag = "v1.19", board = "RA4M1_CLICKER", mcu = "RA4M1", product = "Mikroe RA4M1 Clicker", vendor = "MikroElektronika", variants = [], identifier = "v1.19-renesas-ra-RA4M1_CLICKER" },
     { tag = "v1.19", board = "RA4M1_EK", mcu = "RA4M1", product = "EK-RA4M1", vendor = "Renesas Electronics", variants = [], identifier = "v1.19-renesas-ra-RA4M1_EK" },
@@ -3376,6 +3391,7 @@ identifiers = [
 # twelve.
 [usermod.nrf]
 identifier_format = "{tag}-nrf-{board}"
+artifacts_dir_name = "{name}-{ver}-{identifier}"
 identifiers = [
     { tag = "v1.18", board = "actinius_icarus", mcu = "nrf91", product = "actinius_icarus", vendor = "Actinius", variants = [], identifier = "v1.18-nrf-actinius_icarus" },
     { tag = "v1.18", board = "arduino_primo", mcu = "nrf52", product = "arduino_primo", variants = [], identifier = "v1.18-nrf-arduino_primo" },
