@@ -93,6 +93,7 @@ jobs:
       contents: read
       packages: write
     env:
+      # retry: natmod package connected to this repo in GHCR settings
       # Which single image a `push` event publishes -- edit this value
       # and push (a commit touching this file always matches `paths:`
       # above) to fire a specific image through the manual escape hatch
