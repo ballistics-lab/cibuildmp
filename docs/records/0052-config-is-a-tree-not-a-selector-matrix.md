@@ -1460,6 +1460,112 @@ images (`arm_embedded`, `riscv_embedded`, `xtensa_lx106`, `esp_idf` — sketched
 written), `qemu`'s move to per-board resolution, and whether `windows`'s single image is
 actually correct or itself needs splitting. No code for any of this has been written.
 
+## Track C (addendum, 2026-08-27) — `build-platforms.toml` becomes the packaged source of
+truth CLI/options/selector resolve against, replacing live discovery
+
+A6 built `build-platforms.toml` as a fact table; nothing in `src/` has read it back yet.
+Confirmed directly: `grep`ing every module under `src/` for `build_platforms`/
+`build-platforms` finds only `bin/refresh_natmod_archs.py`/`bin/refresh_usermod_boards.py`
+(which only *write* it) and this record's own prose. The real runtime today still uses
+two older, narrower sources this track supersedes:
+
+- **natmod**: `resources/natmod.toml`'s `[mpy-abi]` (tag -> abi, hand-curated, gaps filled
+  by `LATEST_KNOWN_ABI` for any unlisted tag) and a flat `[arch]` table `natmod/targets.py`
+  treats as available for *every* tag unconditionally — `NATMOD_ARCHS` is one 10-arch tuple
+  with no per-tag gating at all. This is the exact bug A6's own research already proved:
+  `rv32imc`/`rv64imc` do not exist for every ABI-6.3 tag, and today's code would not catch
+  a config asking for one anyway until a real build fails deep inside `dynruntime.mk`.
+- **usermod**: `usermod/boards.py`'s `Database` scans a *live checkout*'s real
+  `board.json` files — `--print-build-identifiers`, `--only` validation and even config
+  loading for a board.json-backed port cannot run at all without first fetching the
+  MicroPython tag in question. `build-platforms.toml`'s own `[usermod.<port>].identifiers`
+  rows are exactly this scan's own output, pre-run across every tag the refresh scripts
+  have walked — the whole reason A5's "pre-build audit... validates everything else
+  offline" note above named this table as what closes that gap.
+
+**Decided this session, each confirmed directly rather than assumed (the questions were
+asked because a wrong guess here would have meant discarding real implementation work,
+not because the answer was unclear which way this project leans):**
+
+1. **An unknown tag is a hard, loud error — no live-checkout fallback.** `"tag not in
+   build-platforms.toml -- refresh it first"`, naming `bin/refresh_natmod_archs.py`/
+   `bin/refresh_usermod_boards.py`. Corollary, confirmed directly rather than left
+   implicit: `LATEST_KNOWN_ABI`'s current silent-fallback behavior for any tag
+   `natmod.toml` doesn't list is *deleted*, not kept as a secondary fallback under the new
+   table — one unknown-tag policy, not two layered ones that could disagree.
+2. **A requested arch not available in the specific tag chosen to represent its ABI group
+   is also a hard error, not a smarter re-resolution — and needs no bespoke error path of
+   its own.** The real collision: `resolve_micropython_tags()` narrows a tag list to one
+   representative tag per distinct ABI (earliest match wins) — `rv32imc`'s own late
+   arrival within ABI 6.3 means `archs=["rv32imc"]` against an early-6.3 representative tag
+   would ask `natmod_targets()` to build an arch that tag's own source does not have.
+   Rejected: re-resolving the tag *per arch* within an ABI group (so one invocation could
+   silently fetch and build against several different tags that all happen to share one
+   ABI) — the representative tag stays exactly what `resolve_micropython_tags()` already
+   picks. Also rejected, on the user's own correction: a bespoke error naming which other
+   tag(s) would have worked. Simpler than that, and already the right shape: this is
+   ordinary selector validation, the same "you asked for something that does not exist
+   among known identifiers" case any typo'd identifier already produces — `natmod/
+   targets.py`'s own existing `UnknownArchError` (today only checking "is this arch one of
+   the ten `dynruntime.mk` knows at all") widens its check to "is this arch available for
+   *this specific tag*," reusing the one exception class and message shape that already
+   exists rather than adding a second one beside it.
+3. **`post_checkout`/`pre_checkout` stay documentation of a verified upstream fact, not
+   something executed as a shell string at build time.** Every existing build function in
+   this codebase (`usermod/build.py`'s `build_unix()`, `run_unix_deplibs()`; natmod's
+   `_run_in_image()`) constructs a typed `list[str]` command, never a shell string —
+   `dockerrun.run()` itself takes `command: list[str]`. Executing a stored one-liner
+   verbatim inside whichever container happens to be resolved would also reintroduce the
+   apt-vs-alpine collision this same session already found in `unix`'s own `pre_checkout`
+   (a single Debian-flavored string, while `unix`'s real container matrix spans dnf/apt/apk)
+   — a Python function that already knows which image it is running in has no such
+   problem, since it can name the right package manager instead of guessing one string
+   for all of them. These two fields' job stays what A6 already built them for: a verified
+   fact a maintainer reads while writing (or auditing) the real `build.py` step, not input
+   `cibuildmp` itself interprets.
+
+**Not yet decided, and not blocking Phase C1 below**: whether `resources/natmod.toml`'s
+`[mpy-abi]` table is fully superseded by `build-platforms.toml`'s own per-row `mpy` field
+(sample row: `{tag = "v1.12", mpy = "5", arch = "x86", ...}` — independently populated by
+the refresh script reading each real tag's `persistentcode.h`, not derived from
+`natmod.toml`, so the two could already disagree and neither has been diffed against the
+other this session) or kept as a second, narrower source for something Phase C1 turns out
+to still need. `[arch]` (native-code values, `dynruntime.mk`'s own `ARCH=` vocabulary) and
+`[arch-flags.rv32imc]` (`mpy_ld.py`'s `RV32_EXTENSIONS`) are tag-independent MicroPython
+source facts, not gated by tag at all, and stay exactly as they are — only the *tag-gating*
+question moves to `build-platforms.toml`.
+
+### Phase C1 — natmod (smallest, self-contained; this addendum's own next concrete step)
+
+- `resources.py`: new `build_platforms_data()` loader, same `@cache`/`files()` shape as
+  `natmod_data()`/`usermod_data()`.
+- `natmod/targets.py`: build a per-tag arch-availability index from
+  `build_platforms_data()["natmod"]["identifiers"]` (`{tag: frozenset(arch for row where
+  row["tag"] == tag)}`, plus the same table's own `arch_flags`/`arch_code`/`cross` per
+  `(tag, arch)` for anything that needs them). `abi_for_tag()` reads the same table's
+  `tag -> mpy` mapping and raises on an unknown tag (decision 1) instead of falling back
+  to `LATEST_KNOWN_ABI`, which is deleted. `natmod_targets()` gains a tag-availability
+  check per requested arch, raising on a mismatch per decision 2's exact wording above.
+- Tests: an early-ABI-6.3 tag + `archs=["rv32imc"]` must raise `UnknownArchError`, the
+  same class and shape a genuinely nonexistent arch already raises today — no new
+  exception type; a genuinely unknown tag (anything not in the table) must raise on
+  `abi_for_tag()` before any target is built; every existing `NATMOD_ARCHS`-based test
+  needs its fixture tag checked against the real table rather than assumed to still carry
+  every arch.
+- Not in this phase: usermod (`boards.py`/`_PORT_AXES`), `cli.py`, `selector.py` — selector
+  itself needs no change confirmed by re-reading it: it already matches against whatever
+  `Target` list a platform's own `targets()`/`all_targets()` produces, tag-agnostic by
+  construction, so this phase's only surface is where that list comes from.
+
+### Phase C2 — usermod (deferred until C1 lands and is verified; not designed in full here)
+
+Structurally the same replacement (`Database`'s live `board.json` scan ->
+`build_platforms_data()["usermod"][port]["identifiers"]`), but with a real, not-yet-solved
+wrinkle C1 does not have: what happens when `--only`/`--print-build-identifiers` is asked
+about a tag+port this table has never walked (a real gap, not the "wrong tag entirely"
+case decision 1 already covers) — same hard-error direction, in all likelihood, but worth
+confirming once C1 is landed and this phase is actually being scoped, not assumed here.
+
 [0001]: 0001-natmod-first.md
 [0004]: 0004-config-file-location.md
 [0005]: 0005-one-identifier-namespace.md
