@@ -1723,64 +1723,6 @@ question (boards: tree node replaces the list, not dual-addressable) was already
 earlier in this same record; the new `arch-flags`-per-node question above is the one
 addition this pass leaves open for B4 itself, not for a further review round.
 
-## Addendum, 2026-08-27 — B4.1 landed: the cascade class is one recursively-addressed tree
-
-`cibuildmp/options.py`'s `Options` (the cascade class, aliased `OptionCascade` by both
-platform modules) drops `family_table`/`platform_tables` as two separate dataclass fields,
-replaced by one `tree: Mapping[str, Any]` walked from `get()`'s own `platform` parameter --
-per B0's own proposal, verified sound in the B0–B3 review pass above, now actually built.
-
-**Signature decided by writing both real call sites first, per B4.1's own instruction, not
-guessed ahead of either existing** — `get()`'s `platform` parameter keeps its name and
-widens to accept `str | Sequence[str] | None` rather than gaining a new `path`-named
-parameter: natmod's own call sites (`platform="natmod"`, always one segment, no family tier
-of its own) needed zero changes at all -- every one of them still reads as a bare string
-today. Usermod's own single `.get()` call site (`build_options()`'s own `opt()` closure)
-changed from `platform=target.port` to `platform=("usermod", target.port)`, a 2-tuple --
-the smallest possible change reflecting that usermod, unlike natmod, genuinely has a family
-tier above its own platform level. This is exactly the "which shape keeps both callers
-simplest" answer B4.1's own text asked for, reached by writing both, not assumed in
-advance.
-
-**The tree shape itself**: `tree["usermod"]` plays the role the separate `family_table`
-field used to -- a dict holding both the family node's own scalar keys (`user-c-modules`,
-`manifest`, `extra-make-args`, set directly under `[usermod]`) *and*, as sibling keys, each
-active port's own nested table (`tree["usermod"]["unix"]`), the same shape a real nested
-`[usermod.unix]` TOML table would parse to. **The TOML file itself is not re-nested yet --
-that is B4.5's own job** -- `usermod/options.py`'s own `load()` still reads `raw.get(port)`
-for each still-flat top-level `[<port>]` table exactly as it did before this phase, and
-assembles the tree structure itself at load time; nothing about the file format changes
-until B4.5 actually flips it. `check_usermod_family_table()`'s own rejection of a literal
-`[usermod.<port>]` TOML table (a real, live error today, confirmed by reading it directly
-before starting this phase) is untouched -- that rejection is B4.2's/B4.5's own concern
-(schema validation and file migration), not B4.1's (the cascade mechanism itself), and nothing
-in this phase makes writing that syntax in a real config legal yet.
-
-**Env var behaviour, live-verified rather than assumed**: the per-platform environment
-override (`CIBMP_<KEY>_<PLATFORM>`) keys off the path's own *last* segment only, not every
-segment joined -- `CIBMP_ARCHS_NATMOD` and `CIBMP_EXTRA_MAKE_ARGS_UNIX` stay exactly the
-env var names they always were, confirmed with `CIBMP_ARCHS_NATMOD=x64` against a real
-`Options.load()` call, even though `unix`'s own path grew a leading `usermod` segment in
-front of it internally. Also live-verified against a real two-port config (`[usermod]
-manifest = "shared.py"`, `[unix] extra-make-args = [...]`, `[windows]` with no override of
-its own): `unix` correctly gets both the family default and its own override;
-`windows` correctly gets the family default alone, with an empty `extra-make-args` --
-proving the family-beats-global, platform-beats-family precedence survives the tree-walk
-rewrite unchanged, not merely asserted by the new unit tests.
-
-Two new tests in `tests/test_options_cascade.py` prove the walk generalises past what any
-real caller uses today: a three-segment path (`usermod.esp32.ESP32_GENERIC_S3`, board-shaped,
-B4.2's own future case) resolves correctly at every depth including a board falling through
-to its own port's default; a path that walks off the tree partway through (a port with no
-table of its own) contributes nothing further rather than erroring, the same silent-miss
-behaviour a single missing platform always had. The rest of that file's own `family_table`-
-specific tests were rewritten onto the new `tree=` shape, not deleted -- same coverage,
-new construction.
-
-420 tests pass; ruff and pyright clean. B4.2 (config loading -- each platform module's own
-`check_keys()`/`SCHEMAS` walk becoming recursive for board sub-nodes) is next, strictly
-after this phase per the record's own "Suggested landing order."
-
 [0001]: 0001-natmod-first.md
 [0004]: 0004-config-file-location.md
 [0005]: 0005-one-identifier-namespace.md

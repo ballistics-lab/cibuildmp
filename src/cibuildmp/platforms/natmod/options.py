@@ -334,7 +334,7 @@ class Options:
     # resolution of module-dir/make-target/extra-make-args/
     # pre-build-command -- env excluded here (build_options() checks the
     # environment itself, after overrides, matching the precedence it has
-    # always had), tree={"natmod": <the [natmod] table>}.
+    # always had), platform_tables={"natmod": <the [natmod] table>}.
     _cascade_file: OptionCascade = field(repr=False, compare=False)
 
     # ── Loading ───────────────────────────────────────────────────────────
@@ -366,9 +366,13 @@ class Options:
 
         check_keys(natmod_table, NATMOD_SCHEMA, where="[natmod]")
 
-        tree = {"natmod": natmod_table}
-        cascade_env = OptionCascade(global_table=raw, tree=tree, env=environ)
-        cascade_file = OptionCascade(global_table=raw, tree=tree, env={})
+        platform_tables = {"natmod": natmod_table}
+        cascade_env = OptionCascade(
+            global_table=raw, platform_tables=platform_tables, env=environ
+        )
+        cascade_file = OptionCascade(
+            global_table=raw, platform_tables=platform_tables, env={}
+        )
 
         def opt(key: str, default: Any = None) -> Any:
             # Environment beats the file for every global option. Keys are
