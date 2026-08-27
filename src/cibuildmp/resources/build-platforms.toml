@@ -589,56 +589,60 @@ identifiers = [
     { tag = "v1.30.0-preview", arch = "win_arm64", cross = "aarch64-w64-mingw32-", identifier = "v1.30.0-preview-win_arm64" },
 ]
 
-# arch is "pyemscripten_6_0_8_wasm32" -- the real wheel platform tag,
-# verified against packaging.tags._emscripten_platforms() itself (the
-# reference implementation pip resolves against, not cibuildwheel's own
-# "pyodide" tag, which is a different thing): it literally builds
-# `f"pyemscripten_{PYEMSCRIPTEN_PLATFORM_VERSION}_wasm32"`. Two earlier
-# guesses in this same table's history were both wrong -- "pyemscripten"
-# alone was dismissed as not real without checking `packaging` itself
-# (it is real, and is the correct prefix), and "emscripten_wasm32" was
-# invented as a compromise once "pyodide" was ruled out for meaning the
-# wrong thing (Pyodide's own CPython-in-wasm distribution, not what this
-# port builds -- verified live in cibuildwheel's own architecture.py/
-# logger.py, still true).
+# arch is plain "wasm32", not a versioned "pyemscripten_X_Y_Z_wasm32"
+# tag -- corrects this table's own earlier entry, which embedded emsdk's
+# own version into arch as if it were a stable, real fact. It is not:
+# tools/ci.sh, checked live at every tag this section covers (v1.20.0
+# through v1.30.0-preview), always runs `./emsdk install latest &&
+# ./emsdk activate latest` -- MicroPython's own CI has never pinned a
+# specific emsdk version, at any point in this table's whole tag range.
+# There is no stable per-tag (or global) version to embed here; the
+# earlier "6.0.8" value was this table's own prior Docker image pin
+# (docker/webassembly.Dockerfile), not an upstream fact -- citing this
+# project's own already-made implementation choice as if it were
+# something MicroPython itself declared, the same mistake already
+# corrected once this session for esp32's pre_checkout.
 #
-# The version segment is emsdk's own pinned "6.0.8" (docker/
-# webassembly.Dockerfile), dots replaced with underscores -- platform
-# tags don't carry literal dots (the same reason manylinux_2_28 is not
-# manylinux_2.28). Same value on every row (the toolchain pin is a global
-# constant here, not a per-tag fact -- see below), so this is a constant
-# component of the tag, not something that varies row to row the way
-# esp32's idf_version does.
+# This "always latest" policy is a real, documented liability, not a
+# harmless default: micropython#19380 (open) reports the `standard`
+# variant broken on modern Emscripten (>=3.1.68 / emsdk 6.0.1+) --
+# `library.js`'s wrong ccall ABI for mp_hal_get_interrupt_char (fixed,
+# micropython#19382, merged) and `api.js`'s missing `{async: true}` for
+# Asyncify-instrumented mp_js_do_exec (still open at the time this was
+# checked -- maintainers' own suggested workaround is the `pyscript`
+# variant instead, which sidesteps Asyncify entirely; a real fix needs
+# JSPI support, micropython#19594, not yet merged). Which emsdk version
+# actually builds a given MicroPython tag successfully is therefore a
+# real per-tag compatibility question this table does not yet answer --
+# genuinely open, not glossed over as "6.0.8 always works".
+#
+# emsdk is deliberately NOT baked into any Docker image as a fixed
+# version, unlike the arm-none-eabi-gcc-family images -- there is no
+# stable version to bake, per the above.
 #
 # `variant` ("pyscript", the only one build_webassembly() currently
 # produces) is NOT a row field here at all -- it's something the user
 # picks in their own config once it's a real config axis, not a fact
 # about what this table records being buildable.
-#
-# emsdk's own pinned version is not a *separate* row field either, unlike
-# unix's manylinux/musllinux glibc floor: it's one global toolchain pin
-# baked into a single Docker image and used identically for every tag,
-# not a consumer-facing ABI tier that varies per build the way a glibc
-# floor does -- it only shows up embedded in arch/identifier above.
 [usermod.webassembly]
 identifier_format = "{tag}-{arch}"
 artifacts_dir_name = "{name}-{ver}-{identifier}"
 identifiers = [
-    { tag = "v1.20.0", arch = "pyemscripten_6_0_8_wasm32", identifier = "v1.20.0-pyemscripten_6_0_8_wasm32" },
-    { tag = "v1.21.0", arch = "pyemscripten_6_0_8_wasm32", identifier = "v1.21.0-pyemscripten_6_0_8_wasm32" },
-    { tag = "v1.22.0", arch = "pyemscripten_6_0_8_wasm32", identifier = "v1.22.0-pyemscripten_6_0_8_wasm32" },
-    { tag = "v1.22.1", arch = "pyemscripten_6_0_8_wasm32", identifier = "v1.22.1-pyemscripten_6_0_8_wasm32" },
-    { tag = "v1.22.2", arch = "pyemscripten_6_0_8_wasm32", identifier = "v1.22.2-pyemscripten_6_0_8_wasm32" },
-    { tag = "v1.23.0", arch = "pyemscripten_6_0_8_wasm32", identifier = "v1.23.0-pyemscripten_6_0_8_wasm32" },
-    { tag = "v1.24.0", arch = "pyemscripten_6_0_8_wasm32", identifier = "v1.24.0-pyemscripten_6_0_8_wasm32" },
-    { tag = "v1.24.1", arch = "pyemscripten_6_0_8_wasm32", identifier = "v1.24.1-pyemscripten_6_0_8_wasm32" },
-    { tag = "v1.25.0", arch = "pyemscripten_6_0_8_wasm32", identifier = "v1.25.0-pyemscripten_6_0_8_wasm32" },
-    { tag = "v1.26.0", arch = "pyemscripten_6_0_8_wasm32", identifier = "v1.26.0-pyemscripten_6_0_8_wasm32" },
-    { tag = "v1.26.1", arch = "pyemscripten_6_0_8_wasm32", identifier = "v1.26.1-pyemscripten_6_0_8_wasm32" },
-    { tag = "v1.27.0", arch = "pyemscripten_6_0_8_wasm32", identifier = "v1.27.0-pyemscripten_6_0_8_wasm32" },
-    { tag = "v1.28.0", arch = "pyemscripten_6_0_8_wasm32", identifier = "v1.28.0-pyemscripten_6_0_8_wasm32" },
-    { tag = "v1.29.0", arch = "pyemscripten_6_0_8_wasm32", identifier = "v1.29.0-pyemscripten_6_0_8_wasm32" },
-    { tag = "v1.30.0-preview", arch = "pyemscripten_6_0_8_wasm32", identifier = "v1.30.0-preview-pyemscripten_6_0_8_wasm32" },
+    { tag = "v1.20.0", arch = "wasm32", identifier = "v1.20.0-wasm32" },
+    { tag = "v1.21.0", arch = "wasm32", identifier = "v1.21.0-wasm32" },
+    { tag = "v1.22.0", arch = "wasm32", identifier = "v1.22.0-wasm32" },
+    { tag = "v1.22.1", arch = "wasm32", identifier = "v1.22.1-wasm32" },
+    { tag = "v1.22.2", arch = "wasm32", identifier = "v1.22.2-wasm32" },
+    { tag = "v1.23.0", arch = "wasm32", identifier = "v1.23.0-wasm32" },
+    { tag = "v1.24.0", arch = "wasm32", identifier = "v1.24.0-wasm32" },
+    { tag = "v1.24.1", arch = "wasm32", identifier = "v1.24.1-wasm32" },
+    { tag = "v1.25.0", arch = "wasm32", identifier = "v1.25.0-wasm32" },
+    { tag = "v1.26.0", arch = "wasm32", identifier = "v1.26.0-wasm32" },
+    { tag = "v1.26.1", arch = "wasm32", identifier = "v1.26.1-wasm32" },
+    { tag = "v1.27.0", arch = "wasm32", identifier = "v1.27.0-wasm32" },
+    { tag = "v1.28.0", arch = "wasm32", identifier = "v1.28.0-wasm32" },
+    { tag = "v1.29.0", arch = "wasm32", identifier = "v1.29.0-wasm32" },
+    { tag = "v1.30.0-preview", arch = "wasm32", identifier = "v1.30.0-preview-wasm32" },
 ]
 
 # `ports/qemu` did not exist before v1.24.0 -- v1.20.0..v1.23.0 correctly
