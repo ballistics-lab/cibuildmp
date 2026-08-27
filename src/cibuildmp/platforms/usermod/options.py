@@ -283,8 +283,8 @@ class UsermodOptions:
     # The cascade instance backing build_options()'s own per-target
     # resolution of user-c-modules/manifest/extra-make-args -- env excluded
     # here (build_options() checks the environment itself, after
-    # overrides, matching the precedence it has always had),
-    # platform_tables keyed by port name.
+    # overrides, matching the precedence it has always had), tree =
+    # {"usermod": {**family-table-own-keys, <port>: <port table>, ...}}.
     _cascade: OptionCascade = field(default=None, repr=False, compare=False)  # type: ignore[assignment]
 
     @classmethod
@@ -338,24 +338,24 @@ class UsermodOptions:
 
         family_table = check_usermod_family_table(raw, error=UsermodConfigError)
 
-        platform_tables: dict[str, dict[str, Any]] = {}
+        # `tree["usermod"]` starts as the family node's own scalar values
+        # (`family_table`) and gains one sibling key per active port below
+        # -- the same shape a real nested `[usermod.<port>]` TOML table
+        # would parse to (record 0052, Track B, B4.1), even though the
+        # file itself still writes `[<port>]` flat until B4.5 migrates it.
+        tree: dict[str, Any] = {"usermod": dict(family_table)}
         axis_overrides: dict[str, list[str]] = {}
         for port in ports:
             port_table = dict(raw.get(port) or {})
             check_keys(
                 port_table, SCHEMAS[port], where=f"[{port}]", error=UsermodConfigError
             )
-            platform_tables[port] = port_table
+            tree["usermod"][port] = port_table
             key = axis_key(port)
             if key is not None and key in port_table:
                 axis_overrides[port] = _as_list(port_table[key], f"{port}.{key}")
 
-        cascade = OptionCascade(
-            global_table=raw,
-            family_table=family_table,
-            platform_tables=platform_tables,
-            env={},
-        )
+        cascade = OptionCascade(global_table=raw, tree=tree, env={})
 
         overrides = load_overrides(raw, error=UsermodConfigError)
 
@@ -430,7 +430,7 @@ class UsermodOptions:
                 return env_value
             return self._cascade.get(
                 key,
-                platform=target.port,
+                platform=("usermod", target.port),
                 default=default,
                 extra_layers=override_extra_layers(matching, key),
             )

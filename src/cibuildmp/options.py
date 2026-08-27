@@ -219,14 +219,29 @@ class Options:
     """One config's worth of cascade-resolvable option tables.
 
     `global_table` is the top-level config dict, meaningful to *every*
-    family (natmod included) -- `platform_tables` maps a platform name to
-    that platform's own sub-dict (e.g. `raw.get("unix")` once Phase F
-    flattens the config tree). `family_table` sits between the two: one
-    dict shared by every platform in *one* family and no other (record
-    0051's ninth addendum) -- usermod's own `[usermod]` table
-    (`user-c-modules`/`manifest`/`extra-make-args`, defaults for all five
-    ports at once), empty for natmod, whose one platform already *is* its
-    only family, so it has nothing a separate family tier would add.
+    family (natmod included) -- the tree's own root. `tree` is everything
+    below root, recursively addressed (record 0052, Track B, B0/B4.1):
+    `tree["usermod"]` is what used to be the separate `family_table`
+    (record 0051's ninth addendum) -- usermod's own `[usermod]` table,
+    `user-c-modules`/`manifest`/`extra-make-args` defaults for every port
+    at once -- and `tree["usermod"]["unix"]` is what used to be
+    `platform_tables["unix"]`, a real *sibling key inside that same dict*,
+    not a second field, the same way a real nested TOML table
+    (`[usermod.unix]`) would parse. `tree["natmod"]` is natmod's own
+    `[natmod]` table -- natmod has no family tier of its own (its one
+    platform already *is* its only family), so its own path is one
+    segment deep, not two. `get()`'s own `platform` parameter is a single
+    string (unchanged for natmod's own callers -- `"natmod"`, one
+    segment) or a tuple of segments walked root-to-leaf (`("usermod",
+    "unix")` today; `("usermod", "esp32", "SOME_BOARD")` once B4.2 wires
+    boards as tree nodes) -- deciding the exact signature by writing both
+    real call sites first, per B4.1's own instruction, is what settled on
+    reusing the existing `platform` name widened to accept either shape,
+    rather than a new `path`-named parameter: natmod's own call sites
+    (`platform="natmod"`) stay byte-identical, and usermod's one call site
+    that needs the new depth changes from a bare string to a 2-tuple, the
+    smallest change either caller needs.
+
     `env` is the environment mapping (`os.environ` by default, injectable
     so tests never touch the real process environment). Neither
     CLI-supplied values nor `[[overrides]]` matches live here -- both are
@@ -237,51 +252,59 @@ class Options:
     """
 
     global_table: Mapping[str, Any]
-    family_table: Mapping[str, Any] = field(default_factory=dict)
-    platform_tables: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+    tree: Mapping[str, Any] = field(default_factory=dict)
     env: Mapping[str, str] = field(default_factory=dict)
 
     def get(
         self,
         name: str,
         *,
-        platform: str | None = None,
+        platform: str | Sequence[str] | None = None,
         default: Any = None,
         env_plat: bool = True,
         extra_layers: Sequence[tuple[Any | None, str]] = (),
     ) -> Any:
-        """`default -> global -> family -> platform -> env ->
-        env(platform) -> extra_layers`, most-specific-wins. `extra_layers`
-        is where a caller threads in CLI-supplied values or matching
-        `[[overrides]]` entries (Phase G), each with its own inherit
-        rule -- this method does not know about either.
+        """`default -> global -> tree (root to leaf, one layer per path
+        segment) -> env -> env(leaf) -> extra_layers`, most-specific-wins.
+        `extra_layers` is where a caller threads in CLI-supplied values or
+        matching `[[overrides]]` entries (Phase G), each with its own
+        inherit rule -- this method does not know about either.
 
-        `family_table` sits strictly between `global` and `platform`:
-        more specific than "every platform's own default" (natmod never
-        sees it -- its own `Options` instance is always constructed with
-        an empty one), less specific than a value written directly in
-        one platform's own table. A caller with no real family tier
-        (natmod, or a direct test construction) passes nothing and gets
-        exactly today's four-layer behaviour -- an empty `Mapping.get()`
-        always contributes `None`, which `resolve_cascade()` skips.
+        `platform=None` (or an empty tuple) walks nothing beyond root --
+        exactly today's "no platform table for this platform" shape, an
+        empty `Mapping.get()` always contributing `None`, which
+        `resolve_cascade()` skips. `platform="natmod"` walks one segment
+        (`tree["natmod"]`); `platform=("usermod", "unix")` walks two
+        (`tree["usermod"]`, then `tree["usermod"]["unix"]`) -- a missing
+        segment anywhere along the walk contributes `{}` for every
+        segment from there on, the same silent-miss behaviour
+        `platform_tables.get(platform, {})` always had, generalised to
+        arbitrary depth rather than hardcoded to exactly one hop.
 
-        Env var names are `CIBMP_<KEY>` and, when `platform` is given and
-        `env_plat` is true, `CIBMP_<KEY>_<PLATFORM>` too -- upstream's own
-        two-tier `CIBW_<NAME>`/`CIBW_<NAME>_<PLATFORM>` shape.
+        Env var names are `CIBMP_<KEY>` and, when a path is given and
+        `env_plat` is true, `CIBMP_<KEY>_<LEAF>` too -- keyed by the
+        path's own last segment, not the whole joined path, so
+        `CIBMP_ARCHS_NATMOD`/`CIBMP_EXTRA_MAKE_ARGS_UNIX` stay exactly the
+        env var names they always were even though `unix`'s own path grew
+        a `usermod` segment in front of it; `CIBMP_EXTRA_MAKE_ARGS_
+        ESP32_GENERIC_S3`-shaped names are what a three-segment board path
+        would produce once one exists.
         """
         env_key = "CIBMP_" + name.replace("-", "_").upper()
         layers: list[tuple[Any | None, str]] = [
             (default, InheritRule.NONE),
             (self.global_table.get(name), InheritRule.NONE),
-            (self.family_table.get(name), InheritRule.NONE),
         ]
+        path: tuple[str, ...] = ()
         if platform is not None:
-            layers.append(
-                (self.platform_tables.get(platform, {}).get(name), InheritRule.NONE)
-            )
+            path = (platform,) if isinstance(platform, str) else tuple(platform)
+        node: Mapping[str, Any] = self.tree
+        for segment in path:
+            node = node.get(segment) or {}
+            layers.append((node.get(name), InheritRule.NONE))
         layers.append((self.env.get(env_key), InheritRule.NONE))
-        if platform is not None and env_plat:
-            plat_env_key = f"{env_key}_{platform.upper()}"
+        if path and env_plat:
+            plat_env_key = f"{env_key}_{path[-1].upper()}"
             layers.append((self.env.get(plat_env_key), InheritRule.NONE))
         layers.extend(extra_layers)
         return resolve_cascade(*layers)

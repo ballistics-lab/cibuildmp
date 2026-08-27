@@ -136,7 +136,7 @@ def test_options_get_global_beats_default():
 def test_options_get_platform_beats_global():
     options = Options(
         global_table={"archs": ["x64"]},
-        platform_tables={"unix": {"archs": ["aarch64"]}},
+        tree={"unix": {"archs": ["aarch64"]}},
     )
     assert options.get("archs", platform="unix") == ["aarch64"]
     # A different platform never sees unix's own table.
@@ -146,7 +146,7 @@ def test_options_get_platform_beats_global():
 def test_options_get_env_beats_platform():
     options = Options(
         global_table={},
-        platform_tables={"unix": {"archs": ["aarch64"]}},
+        tree={"unix": {"archs": ["aarch64"]}},
         env={"CIBMP_ARCHS": "x64,x86"},
     )
     assert options.get("archs", platform="unix") == "x64,x86"
@@ -179,39 +179,52 @@ def test_options_get_extra_layers_come_last_and_can_append():
 
 
 def test_options_get_no_platform_table_for_this_platform_is_fine():
-    options = Options(global_table={"archs": ["x64"]}, platform_tables={})
+    options = Options(global_table={"archs": ["x64"]}, tree={})
     assert options.get("archs", platform="unix") == ["x64"]
 
 
-# ── family_table (record 0051's ninth addendum) ──────────────────────────
+# ── multi-segment paths (record 0052, Track B, B0/B4.1) ──────────────────
+#
+# `tree["usermod"]` plays the role the separate `family_table` field used
+# to (record 0051's ninth addendum): a dict holding both the family
+# node's own scalar keys and, as sibling keys, each port's own nested
+# table -- the same shape a real `[usermod.<port>]` TOML table would
+# parse to, walked one path segment at a time rather than addressed by a
+# second dataclass field.
 
 
 def test_options_get_family_beats_global():
     options = Options(
         global_table={"user-c-modules": "global"},
-        family_table={"user-c-modules": "family"},
+        tree={"usermod": {"user-c-modules": "family"}},
     )
-    assert options.get("user-c-modules") == "family"
+    assert options.get("user-c-modules", platform="usermod") == "family"
 
 
 def test_options_get_platform_beats_family():
     options = Options(
         global_table={},
-        family_table={"user-c-modules": "family"},
-        platform_tables={"unix": {"user-c-modules": "unix-only"}},
+        tree={
+            "usermod": {
+                "user-c-modules": "family",
+                "unix": {"user-c-modules": "unix-only"},
+            }
+        },
     )
-    assert options.get("user-c-modules", platform="unix") == "unix-only"
+    assert options.get("user-c-modules", platform=("usermod", "unix")) == "unix-only"
     # A platform with no override of its own still falls through to the
     # family layer, not straight past it to global.
-    assert options.get("user-c-modules", platform="webassembly") == "family"
+    assert (
+        options.get("user-c-modules", platform=("usermod", "webassembly")) == "family"
+    )
 
 
 def test_options_get_no_family_table_is_fine():
-    # The default -- an Options instance with no family_table at all
-    # (natmod's own; a direct construction like every test above this
-    # point) behaves exactly as it did before this layer existed. An
-    # empty Mapping.get() always contributes None, which resolve_cascade()
-    # skips outright.
+    # The default -- an Options instance with no tree at all (natmod's
+    # own; a direct construction like every test above this point)
+    # behaves exactly as it did before this layer existed. An empty
+    # Mapping.get() always contributes None, which resolve_cascade() skips
+    # outright.
     options = Options(global_table={"archs": ["x64"]})
     assert options.get("archs", platform="natmod") == ["x64"]
 
@@ -219,7 +232,60 @@ def test_options_get_no_family_table_is_fine():
 def test_options_get_env_beats_family():
     options = Options(
         global_table={},
-        family_table={"user-c-modules": "family"},
+        tree={"usermod": {"user-c-modules": "family"}},
         env={"CIBMP_USER_C_MODULES": "from-env"},
     )
-    assert options.get("user-c-modules") == "from-env"
+    assert options.get("user-c-modules", platform="usermod") == "from-env"
+
+
+def test_options_get_three_segment_path_walks_every_node():
+    # The esp32-board-shaped case (record 0052, Track B, B4.2, not wired
+    # into any real caller yet) -- proof the walk generalises past the
+    # two-segment depth every real caller uses today, not just asserted
+    # by the record's own prose.
+    options = Options(
+        global_table={"extra-make-args": ["GLOBAL=1"]},
+        tree={
+            "usermod": {
+                "esp32": {
+                    "extra-make-args": ["PORT=1"],
+                    "ESP32_GENERIC_S3": {"extra-make-args": ["BOARD=1"]},
+                }
+            }
+        },
+    )
+    assert options.get("extra-make-args", platform=("usermod", "esp32")) == ["PORT=1"]
+    assert options.get(
+        "extra-make-args", platform=("usermod", "esp32", "ESP32_GENERIC_S3")
+    ) == ["BOARD=1"]
+    # A board with no override of its own falls through to the port
+    # layer, not straight past it to global.
+    assert options.get(
+        "extra-make-args", platform=("usermod", "esp32", "ESP32_GENERIC_C3")
+    ) == ["PORT=1"]
+
+
+def test_options_get_missing_middle_segment_contributes_nothing_further():
+    # A path that walks off the tree partway through (e.g. a port with no
+    # table of its own) contributes None for every remaining segment,
+    # the same silent-miss behaviour a single missing platform always had
+    # -- not an error, and not a reason to stop resolving earlier layers.
+    options = Options(
+        global_table={"archs": ["x64"]},
+        tree={"usermod": {}},
+    )
+    assert options.get(
+        "archs", platform=("usermod", "unix", "manylinux_2_28_x86_64")
+    ) == ["x64"]
+
+
+def test_options_get_platform_env_var_keys_off_the_last_segment_only():
+    # CIBMP_EXTRA_MAKE_ARGS_UNIX, not CIBMP_EXTRA_MAKE_ARGS_USERMOD_UNIX --
+    # the env var name a two-segment usermod path produces must stay
+    # exactly what a bare "unix" platform string already produced before
+    # usermod's own path grew a leading "usermod" segment.
+    options = Options(
+        global_table={},
+        env={"CIBMP_EXTRA_MAKE_ARGS_UNIX": "from-env"},
+    )
+    assert options.get("extra-make-args", platform=("usermod", "unix")) == "from-env"
