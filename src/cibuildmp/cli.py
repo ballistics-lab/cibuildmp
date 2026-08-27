@@ -390,8 +390,26 @@ def _clear_readonly_and_retry(func: Any, path: str, _exc: Any) -> None:
     `MICROPY_STANDALONE=1`) creates entries some platforms leave without
     the owner write bit, so a plain `os.unlink`/`os.rmdir` refuses with
     `PermissionError` even though this process owns the cache tree
-    outright and can simply reclaim write access first."""
-    os.chmod(path, stat.S_IWRITE | stat.S_IREAD | stat.S_IEXEC)
+    outright and can simply reclaim write access first.
+
+    An earlier version of this handler chmod'd only `path` itself and
+    still failed live in CI -- caught, not assumed fixed. Removing an
+    entry needs write+execute on the directory *containing* it, not on
+    the entry: `os.unlink(".../autom4te.cache/requests")` fails on
+    `autom4te.cache`'s own missing write bit, not on `requests`, which is
+    just a plain file. Chmodding both `path` and its parent, ignoring
+    whichever one does not apply (`os.chmod` on a file that already had
+    the right bits, or on a parent already writable, is a harmless no-op)
+    means this handler does not have to know which of shutil's own
+    internal calls (`unlink`, `rmdir`, `scandir`, ...) is retrying, only
+    that reclaiming access to both ends of the failing path is always
+    safe within a cache tree this process owns outright.
+    """
+    for target in (path, os.path.dirname(path)):
+        try:
+            os.chmod(target, stat.S_IWRITE | stat.S_IREAD | stat.S_IEXEC)
+        except OSError:
+            pass
     func(path)
 
 
