@@ -3159,3 +3159,38 @@ identifiers = [
     { tag = "v1.29.0", board = "ESP8266_GENERIC", mcu = "esp8266", product = "ESP8266", vendor = "Espressif", variants = ["FLASH_1M", "FLASH_2M_ROMFS", "FLASH_512K"], identifier = "v1.29.0-esp8266-ESP8266_GENERIC" },
     { tag = "v1.30.0-preview", board = "ESP8266_GENERIC", mcu = "esp8266", product = "ESP8266", vendor = "Espressif", variants = ["FLASH_1M", "FLASH_2M_ROMFS", "FLASH_512K"], identifier = "v1.30.0-preview-esp8266-ESP8266_GENERIC" },
 ]
+
+# ports/cc3200/boards/*/board.json arrived at v1.18, same boundary as
+# esp8266's own (404 at v1.17, 200 at v1.18 for WIPY/board.json, checked
+# live) -- v1.12..v1.17 correctly contribute zero rows for the same
+# "port existed, pre-board.json convention" reason already documented for
+# esp8266 and alif's own v1.25.0, not a "port didn't exist" absence.
+# Only one of cc3200's two real board directories is board.json-backed:
+# ports/cc3200/boards/LAUNCHXL/ exists across the entire range checked
+# here (has its own mpconfigboard.h/pins.csv at every tag from v1.18
+# through v1.30.0-preview) but has never once gained a board.json (404 at
+# every tag checked, including the newest) -- genuinely excluded from
+# this table by the same board.json-only rule the vendored Database
+# reader already applies everywhere else, not a scan gap. WIPY itself is
+# unchanged across all seventeen tags that have it.
+[usermod.cc3200]
+identifiers = [
+    { tag = "v1.18", board = "WIPY", mcu = "cc3200", product = "WiPy Module", vendor = "Pycom", variants = [], identifier = "v1.18-cc3200-WIPY" },
+    { tag = "v1.19", board = "WIPY", mcu = "cc3200", product = "WiPy Module", vendor = "Pycom", variants = [], identifier = "v1.19-cc3200-WIPY" },
+    { tag = "v1.19.1", board = "WIPY", mcu = "cc3200", product = "WiPy Module", vendor = "Pycom", variants = [], identifier = "v1.19.1-cc3200-WIPY" },
+    { tag = "v1.20.0", board = "WIPY", mcu = "cc3200", product = "WiPy Module", vendor = "Pycom", variants = [], identifier = "v1.20.0-cc3200-WIPY" },
+    { tag = "v1.21.0", board = "WIPY", mcu = "cc3200", product = "WiPy Module", vendor = "Pycom", variants = [], identifier = "v1.21.0-cc3200-WIPY" },
+    { tag = "v1.22.0", board = "WIPY", mcu = "cc3200", product = "WiPy Module", vendor = "Pycom", variants = [], identifier = "v1.22.0-cc3200-WIPY" },
+    { tag = "v1.22.1", board = "WIPY", mcu = "cc3200", product = "WiPy Module", vendor = "Pycom", variants = [], identifier = "v1.22.1-cc3200-WIPY" },
+    { tag = "v1.22.2", board = "WIPY", mcu = "cc3200", product = "WiPy Module", vendor = "Pycom", variants = [], identifier = "v1.22.2-cc3200-WIPY" },
+    { tag = "v1.23.0", board = "WIPY", mcu = "cc3200", product = "WiPy Module", vendor = "Pycom", variants = [], identifier = "v1.23.0-cc3200-WIPY" },
+    { tag = "v1.24.0", board = "WIPY", mcu = "cc3200", product = "WiPy Module", vendor = "Pycom", variants = [], identifier = "v1.24.0-cc3200-WIPY" },
+    { tag = "v1.24.1", board = "WIPY", mcu = "cc3200", product = "WiPy Module", vendor = "Pycom", variants = [], identifier = "v1.24.1-cc3200-WIPY" },
+    { tag = "v1.25.0", board = "WIPY", mcu = "cc3200", product = "WiPy Module", vendor = "Pycom", variants = [], identifier = "v1.25.0-cc3200-WIPY" },
+    { tag = "v1.26.0", board = "WIPY", mcu = "cc3200", product = "WiPy Module", vendor = "Pycom", variants = [], identifier = "v1.26.0-cc3200-WIPY" },
+    { tag = "v1.26.1", board = "WIPY", mcu = "cc3200", product = "WiPy Module", vendor = "Pycom", variants = [], identifier = "v1.26.1-cc3200-WIPY" },
+    { tag = "v1.27.0", board = "WIPY", mcu = "cc3200", product = "WiPy Module", vendor = "Pycom", variants = [], identifier = "v1.27.0-cc3200-WIPY" },
+    { tag = "v1.28.0", board = "WIPY", mcu = "cc3200", product = "WiPy Module", vendor = "Pycom", variants = [], identifier = "v1.28.0-cc3200-WIPY" },
+    { tag = "v1.29.0", board = "WIPY", mcu = "cc3200", product = "WiPy Module", vendor = "Pycom", variants = [], identifier = "v1.29.0-cc3200-WIPY" },
+    { tag = "v1.30.0-preview", board = "WIPY", mcu = "cc3200", product = "WiPy Module", vendor = "Pycom", variants = [], identifier = "v1.30.0-preview-cc3200-WIPY" },
+]
