@@ -208,6 +208,27 @@ ambiguity can only exist when the user *writes* two conflicting explicit
 pins, never as a side effect of list order, because there is no longer
 a list to order.
 
+**Corrected again, directly: `archs` crossed with ABI is not actually a
+safe cross-product — verified live, not assumed, and this is the same
+lesson A6's own cibuildwheel-reading below teaches, just not yet applied
+here when this paragraph was first written.** `rv32imc`/`rv64imc` do not
+exist in `py/dynruntime.mk` at all for ABI 6.1 or 6.2 — cloned `v1.20.0`
+(6.1) and `v1.23.0-preview` (6.2) directly and grepped their own
+`dynruntime.mk`: no `ARCH),rv32imc`/`ARCH),rv64imc` branch in either,
+RISC-V natmod support only exists from ABI 6.3 onward. So `archs` (a
+domain with no per-cell data on its own, correctly a bare list) still
+produces invalid combinations once crossed against ABI at runtime — the
+exact PyPy-on-`riscv64` mistake A6's own cibuildwheel reading warns
+against, just discovered here independently before that section was
+written, not after. **The fix is the same one A6 lands on for the whole
+resource: the natmod version×arch space is not computed at runtime from
+two independent lists, it is a flat, pre-verified list of
+`{identifier, abi, tag, arch}` facts** — `mpy6.3-x64` is in the list
+because it is real; `mpy6.1-rv32imc` is not, because it was checked and
+found not to exist, not because a formula happened to exclude it. See
+A6 below for the resource shape this settles on; this paragraph's own
+earlier "crossed at runtime" description above is superseded by it.
+
 **Usermod: the domain is every known tag (the same pin table's own 23
 keys, not collapsed — [0051]'s own point stands, every usermod tag is
 its own real target, nothing to collapse). Default = newest known tag
@@ -888,10 +909,33 @@ examples are about.
 
 Applying the real criterion per axis, checked directly, not assumed:
 
-- **`archs` (natmod), `boards` (qemu), `archs` (unix/windows)** — no
-  per-cell data beyond the name itself; a bare list stays correct, matches
-  cibuildwheel's own `MANYLINUX_ARCHS`/`MUSLLINUX_ARCHS` tuples (also
-  bare lists, verified earlier this session).
+- **`archs` (natmod) — corrected again, live, after first being called a
+  safe bare list: the axis itself has no per-cell data, but *crossing* it
+  against ABI is not automatically valid, and assuming otherwise was
+  itself a live-verified mistake** (below). `boards` (qemu), `archs`
+  (unix/windows) have no equivalent cross-axis validity question (qemu's
+  three boards and unix/windows's own archs are not further crossed
+  against anything else that could invalidate a combination) and stay
+  bare lists.
+- **natmod's own version×arch space is not a cross-product at all — it
+  is a flat, pre-verified list of `{identifier, abi, tag, arch}` facts,
+  the same shape cibuildwheel's own `python_configurations` uses, for the
+  same reason.** Verified live, not assumed: cloned `v1.20.0` (ABI 6.1)
+  and `v1.23.0-preview` (ABI 6.2) and grepped each one's own
+  `py/dynruntime.mk` directly — neither has an `rv32imc`/`rv64imc` branch
+  at all; RISC-V natmod support only exists from ABI 6.3 onward. So
+  `NATMOD_ARCHS` (today's 10 arches) is not uniformly valid across all 3
+  ABIs — crossing it against `[mpy-abi]` at runtime would happily
+  generate `mpy6.1-rv32imc`, an identifier naming a target that cannot be
+  built, exactly the PyPy-on-`riscv64` mistake cibuildwheel's own file
+  avoids by enumerating instead of computing. `arch_flags` (rv32imc-only)
+  compounds onto this the same way — a flat list entry per real
+  `(abi, arch, arch_flags)` combination, not three independently-crossed
+  axes. Refreshed by walking each known tag's own checked-out
+  `dynruntime.mk` (or `mpy_ld.py`'s own arch table) once, at maintainer-
+  script time — the same "verify by building/inspecting a real checkout
+  once, cache the result" pattern `[mpy-abi]` itself already follows for
+  the ABI mapping.
 - **`[mpy-abi]` (tag -> abi)** — already exactly the flat-map-of-real-facts
   shape this lesson calls for; unchanged.
 - **`pinned_docker_images.toml` (arch -> image)** — same, already correct,
