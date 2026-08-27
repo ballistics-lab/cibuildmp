@@ -69,6 +69,20 @@ mpy6.3-x64
   `arch-flags` is set (**D15**): `mpy6.3-rv32imc+0x3`. Absent for every
   other arch and for `rv32imc` with no `arch-flags` configured.
 
+`arch_flags = 0` (the unconfigured default) is not merely "no flags set" —
+it is a named compatibility class, the `abi3`-equivalent broad/portable
+build ([0052], A4). `py/persistentcode.c`'s own install-time check is a
+subset test, `(arch_flags & device_extensions) != arch_flags`, i.e. "does
+this device support every extension this .mpy was built assuming" — a
+`.mpy` built with `arch_flags = 0` asks for nothing extra and therefore
+passes that check on every rv32imc device, while one built with a specific
+flag set only runs on devices that declare a superset. `natmod/build.py`'s
+`verify_output()` docstring already documents the mirror side of this same
+asymmetry (an *exact* match is required between what the linker actually
+encoded and what the target's own config asked for — that check has
+nothing to do with whether some other device could also run the file);
+this paragraph is the mip/install-time half.
+
 No separate float/precision field. Precision is already encoded in the arch
 itself (`MP_NATIVE_ARCH_ARMV7EMSP` vs `…ARMV7EMDP` are distinct values, and
 `MPY_FEATURE_ARCH` is selected from `__ARM_FP` at compile time). bclibc's
