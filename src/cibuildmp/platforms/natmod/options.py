@@ -29,14 +29,12 @@ from ...options import (
 from ...options import Options as OptionCascade
 from ...selector import parse_selector, select
 from .targets import (
-    NATMOD_ARCHS,
     Target,
     narrow_to_newest_tag,
     natmod_all_targets,
     newest_known_abi,
     resolve_arch_flags,
     selector_names_a_tag,
-    validate_archs_recognized,
 )
 
 CONFIG_FILENAME = "cibuildmp.toml"
@@ -89,7 +87,7 @@ class ConfigError(Exception):
 # inside `[tool.cibuildwheel.<platform>]`; cibuildmp's own `GENERIC_KEYS`
 # mechanism had forced them to the top level only since [0048], a real
 # divergence found only by comparing against the real source rather than
-# recalling it. They now belong to the same category `archs`/
+# recalling it. They now belong to the same category `arch-flags`/
 # `extra-make-args` already occupy: dual-read via the cascade, listed in
 # each platform's own schema (`NATMOD_SCHEMA` below,
 # `USERMOD_PORT_BASE` in `usermod/options.py`) rather than in this
@@ -106,13 +104,13 @@ GENERIC_KEYS: frozenset[str] = frozenset(
 )
 
 # Keys `[natmod]` itself, or the top level as natmod's own default, may
-# carry: `build`/`skip` and the two dual-read axis keys, plus the four
+# carry: `build`/`skip`, the one dual-read axis key (`arch-flags` --
+# `archs` is gone as a config concept entirely, see below), plus the four
 # per-target ones `build_options()`'s own `opt()` layers over.
 NATMOD_SCHEMA: frozenset[str] = frozenset(
     {
         "build",
         "skip",
-        "archs",
         "arch-flags",
         "module-dir",
         "make-target",
@@ -323,7 +321,7 @@ def check_reachable(cfg: Options) -> None:
     `build.verify_output()`'s post-build check (record 0052, A5): every
     selector a config writes must be *capable* of matching something,
     checked against `all_targets()` (the full, unfiltered identifier
-    space cfg's own `archs`/every known ABI can ever produce), never
+    space every known arch and ABI can ever produce), never
     against `targets()`'s own already-filtered result -- `build`/`skip`
     legitimately narrowing a real domain down to zero selected targets
     (a deliberate `skip = "*"`) is an ordinary, valid outcome and must
@@ -362,7 +360,6 @@ class Options:
     output_dir: Path
     build: list[str]
     skip: list[str]
-    archs: list[str]
     micropython_submodules: list[str]
     arch_flags: list[str]
     name: str
@@ -422,25 +419,31 @@ class Options:
                 return env_value
             return raw.get(key, default)
 
-        # `archs`/`arch-flags` go through the real cascade now rather than
-        # the old `opt(key) or natmod.get(key) or default` chain -- same
+        # `arch-flags` goes through the real cascade now rather than the
+        # old `opt(key) or natmod.get(key) or default` chain -- same
         # dual-read guarantee (both placements work), but platform now
         # beats global (matching upstream's own more-specific-wins rule,
         # and every other cascade-resolved key in this file) rather than
-        # the old, incidental "top level beats [natmod]" order. Also
-        # gains a `CIBMP_ARCHS_NATMOD`-style per-platform env override for
-        # free.
-        archs_value = cascade_env.get(
-            "archs", platform="natmod", default=list(NATMOD_ARCHS)
-        )
+        # the old, incidental "top level beats [natmod]" order.
+        #
+        # No `archs` config key at all any more -- it filtered candidate
+        # rows by `.arch` alone, *before* `build`/`skip` ever ran, and
+        # every real use of it is exactly what a `build`/`skip` glob
+        # already expresses directly against the identifier (`*-x64`,
+        # `mpy6.3-*-{x64,x86}`, ...): a second, parallel selection
+        # mechanism duplicating the one this project already trusts to
+        # match against real facts, not a distinct axis. Removed rather
+        # than deprecated (record 0052's own live-caught correction) --
+        # writing `archs = [...]` in `[natmod]` is now a plain unknown-key
+        # error, naming `build`/`skip` as the replacement.
         arch_flags_value = cascade_env.get("arch-flags", platform="natmod", default=[])
 
         # No `micropython`/`mpy-abi` config key any more (record 0052, A2):
         # the version axis is a statically known domain (`all_tag_groups()`,
         # `targets.py`), narrowed by `build`/`skip` matching identifiers,
-        # exactly like `archs` already narrows `NATMOD_ARCHS`. An
-        # unconfigured `build` selector still keeps today's narrow default
-        # -- only the newest known ABI -- by defaulting to
+        # exactly like arch narrowing now is too. An unconfigured `build`
+        # selector still keeps today's narrow default -- only the newest
+        # known ABI, every arch -- by defaulting to
         # `f"mpy{newest_known_abi()}-*"` instead of `"*"`; an explicit
         # `build = "*"` (or `"mpy6.2-*"`, etc.) opens it up wider. This
         # pattern deliberately names no tag: `targets()`'s own
@@ -452,8 +455,8 @@ class Options:
         # Through the real cascade now, not the ad-hoc opt() chain --
         # `[natmod] build = "..."` is legal now too (per-platform
         # build/skip, record 0052's own addendum), platform beating
-        # global the same way `archs` already does. Natmod only ever has
-        # one platform, so this changes nothing about the *resolved
+        # global the same way `arch-flags` already does. Natmod only ever
+        # has one platform, so this changes nothing about the *resolved
         # value* for a config that never writes `build`/`skip` inside
         # `[natmod]` -- only what becomes legal to write there.
         build_value = cascade_env.get("build", platform="natmod", default=default_build)
@@ -465,7 +468,6 @@ class Options:
             output_dir=Path(str(opt("output-dir", DEFAULT_OUTPUT_DIR))),
             build=parse_selector(build_value),
             skip=parse_selector(skip_value),
-            archs=_as_list(archs_value, "archs"),
             micropython_submodules=_as_list(
                 opt("micropython-submodules"), "micropython-submodules"
             ),
@@ -489,13 +491,15 @@ class Options:
         """Every target this config selects.
 
         Built directly from every real `(tag, arch)` row in
-        `build-platforms.toml` (`natmod_all_targets()`) -- matched against
-        `self.archs`, then `build`/`skip` glob-matched against each row's
-        own real identifier. No separate "is this arch available for this
-        tag" table is consulted anywhere in this path: a row existing at
-        all already says so, and filtering an already-existence-checked
-        list can never re-admit a combination the file never verified
-        (matched against cibuildwheel's own real
+        `build-platforms.toml` (`natmod_all_targets()`) -- `build`/`skip`
+        glob-matched against each row's own real identifier, with no
+        separate arch pre-filter (there is no `self.archs` any more: it
+        duplicated exactly what a `build`/`skip` glob over the identifier
+        already expresses, e.g. `*-x64`). No separate "is this arch
+        available for this tag" table is consulted anywhere in this path
+        either: a row existing at all already says so, and filtering an
+        already-existence-checked list can never re-admit a combination
+        the file never verified (matched against cibuildwheel's own real
         `get_python_configurations()`, which does exactly this: filter a
         literal row list by `build_selector`, no parallel availability
         table at all).
@@ -527,24 +531,22 @@ class Options:
         remember to ask for it.
         """
         check_reachable(self)
-        validate_archs_recognized(self.archs)
         arch_flags = resolve_arch_flags("rv32imc", self.arch_flags)
-        candidates = [t for t in natmod_all_targets(arch_flags) if t.arch in self.archs]
+        candidates = natmod_all_targets(arch_flags)
         selected = select(candidates, self.build, self.skip)
         if not selector_names_a_tag(self.build):
             selected = narrow_to_newest_tag(selected)
         return selected
 
     def all_targets(self) -> list[Target]:
-        """Every identifier this config can name, ignoring `archs`,
-        `build` and `skip` -- what `--only` resolves against (**0045**).
+        """Every identifier this config can name, ignoring `build` and
+        `skip` -- what `--only` resolves against (**0045**).
 
         Upstream's `--only` takes its `choices` from `read_all_configs()`,
         i.e. from what exists rather than from what is selected -- and so
         does this now, directly: `natmod_all_targets()` *is* every real
-        row, with no narrowing at all. `archs`/`build`/`skip` are
-        selection, not existence, and stay out, matching `targets()`'s
-        own contract.
+        row, with no narrowing at all. `build`/`skip` are selection, not
+        existence, and stay out, matching `targets()`'s own contract.
 
         `arch_flags` stays for the same reason it did before this
         rewrite: **D15** made a `+0x..` suffix part of the identifier, and

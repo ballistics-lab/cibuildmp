@@ -32,7 +32,7 @@ from ...sources import (
 from ...stepsummary import write_step_summary
 from .build import BuildError, BuildResult, build_target
 from .options import BuildOptions, ConfigError, Options
-from .targets import NATMOD_ARCHS, Target, UnknownArchError, UnknownTagError
+from .targets import Target, UnknownArchError, UnknownTagError
 
 
 def _plan_line(index: int, total: int, options: BuildOptions) -> str:
@@ -210,7 +210,17 @@ def resolve_options(
     `cli.py`'s own `--print-build-identifiers`/`--only` narrowing need --
     previously duplicated between the two (`cli.py`'s own
     `_print_build_identifiers()` and this module's `run()`, both applying
-    `--output-dir`/`--archs` the same way, Phase H).
+    `--output-dir` the same way, Phase H).
+
+    `--archs` is *not* handled here any more -- there is no `options.archs`
+    field left to mutate (record 0052's own live-caught correction:
+    `archs` duplicated exactly what `build`/`skip` glob-matching against
+    the identifier already expresses, e.g. `build = "*-x64"`, and was
+    removed as a config concept entirely). natmod still recognises the
+    flag -- silently ignoring it would be exactly the "misplaced key does
+    nothing" bug class 0048 exists to prevent -- and raises a specific
+    `ConfigError` naming the replacement, same as any other retired
+    config surface in this project.
     """
     assert ports == ["natmod"], (
         f"natmod is always exactly one platform, got ports={ports!r}"
@@ -219,10 +229,11 @@ def resolve_options(
     if args.output_dir is not None:
         options.output_dir = args.output_dir
     if args.archs is not None:
-        options.archs = (
-            list(NATMOD_ARCHS)
-            if args.archs.strip() == "all"
-            else [a.strip() for a in args.archs.split(",") if a.strip()]
+        raise ConfigError(
+            "--archs no longer applies to natmod -- archs is not a config "
+            "concept here any more, only build/skip glob-matching against "
+            'the identifier is (e.g. build = "*-x64", or '
+            "CIBMP_BUILD=*-x64). --archs still works for usermod ports."
         )
     return options
 

@@ -241,6 +241,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **`archs` is gone as a natmod config key entirely.** It filtered
+  candidate rows by `.arch` alone, *before* `build`/`skip` ever ran --
+  duplicating exactly what a `build`/`skip` glob over the identifier
+  already expresses directly (`build = "*-x64"`, or `"mpy6.3-*-x64"` to
+  also pin the ABI). Raised live against the root `cibuildmp.toml`'s own
+  `[natmod] archs = [...]` line, which turned out to name every real
+  natmod arch verbatim -- the config's own default, spelled out in full,
+  narrowing nothing at all. Removed outright rather than kept dual-read:
+  writing `archs = [...]` in `[natmod]` is now a plain "unknown key"
+  error naming `build`/`skip` as the replacement. `--archs` on the CLI
+  now raises a specific, actionable error when passed for a natmod
+  invocation -- there is no `--build`/`--skip` CLI flag to fall back on,
+  and no single, generally-correct way to translate an arbitrary arch
+  list into a `build`/`skip` glob rewrite on top of whatever `build`
+  pattern a config already has, so this is an honest capability loss
+  rather than a fragile synthesized one. `--archs` is unaffected for
+  usermod ports. Record 0052's own newest addendum.
 - **`--toolchain`, and the toolchain resolver behind it.** Every question it
   answered -- is a compiler for this arch here, where is one fetched from, does
   its prefix match what `dynruntime.mk` hardcodes -- is answered by the natmod

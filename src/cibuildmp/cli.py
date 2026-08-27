@@ -88,13 +88,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--archs",
         default=None,
         help="Comma-separated list of architectures to build, overriding the "
-        "config's own. usermod also accepts the words auto, native and all: "
-        "native is this machine's own architecture, auto adds the 32-bit "
-        "sibling it can run directly, all is every cell. natmod accepts only "
-        "all -- every natmod arch is a cross-compile, so none of them depends "
-        "on what this machine is. Nothing is unbuildable either way: a "
-        "non-native cell builds under emulation, this only picks what to "
-        "build here.",
+        "config's own -- usermod only (also accepts the words auto, native "
+        "and all: native is this machine's own architecture, auto adds the "
+        "32-bit sibling it can run directly, all is every cell; nothing is "
+        "unbuildable either way, a non-native cell just builds under "
+        "emulation). natmod has no archs config concept at all any more -- "
+        "use build/skip glob-matching against the identifier instead (e.g. "
+        'build = "*-x64"), or CIBMP_BUILD/CIBMP_SKIP.',
     )
     parser.add_argument(
         "--enable",

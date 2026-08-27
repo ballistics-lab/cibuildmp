@@ -5,6 +5,24 @@ import pytest
 from cibuildmp.platforms.natmod.options import ConfigError, Options
 from cibuildmp.platforms.natmod.targets import newest_known_abi
 
+# There is no `archs` config key any more (record 0052's own live-caught
+# correction: it duplicated exactly what a `build`/`skip` glob over the
+# identifier already expresses). Every fixture below that used to narrow
+# to a specific arch or set of arches via `archs = [...]` now does it via
+# `build`, prefixed with the current default ABI so a config that doesn't
+# care about spanning more than one ABI still resolves deterministically.
+ABI = newest_known_abi()
+
+
+def build_for(*archs: str) -> str:
+    # rv32imc may carry a +0x{flags} suffix (D15) -- a plain literal
+    # suffix match would miss it, so it alone gets a trailing wildcard;
+    # safe against every other arch name (none is its own prefix).
+    parts = [f"{a}*" if a == "rv32imc" else a for a in archs]
+    if len(parts) == 1:
+        return f'build = "mpy{ABI}-*-{parts[0]}"\n'
+    return f'build = "mpy{ABI}-*-{{{",".join(parts)}}}"\n'
+
 
 def write(tmp_path: Path, text: str, name: str = "cibuildmp.toml") -> Path:
     (tmp_path / name).write_text(text)
@@ -32,9 +50,9 @@ def test_defaults_with_no_config_at_all(tmp_path):
 def test_overrides_beat_natmod_table(tmp_path):
     write(
         tmp_path,
-        """
+        build_for("x64", "armv7emsp")
+        + """
         [natmod]
-        archs = ["x64", "armv7emsp"]
         extra-make-args = ["COMMON=1"]
 
         [override."*-armv7emsp"]
@@ -63,7 +81,7 @@ def test_environment_beats_file(tmp_path):
     # record 0052, A2: micropython/mpy-abi are gone as config keys, so
     # this now exercises skip -- CIBMP_SKIP still beats the file's own
     # skip = "" the same way CIBMP_MICROPYTHON used to beat a file tag.
-    write(tmp_path, 'skip = ""\n[natmod]\narchs = ["x64", "x86"]\n')
+    write(tmp_path, 'skip = ""\n' + build_for("x64", "x86"))
     options = Options.load(tmp_path, env={"CIBMP_SKIP": "*-x86"})
     assert [t.arch for t in options.targets()] == ["x64"]
 
@@ -71,10 +89,8 @@ def test_environment_beats_file(tmp_path):
 def test_environment_beats_override(tmp_path):
     write(
         tmp_path,
-        """
-        [natmod]
-        archs = ["armv7emsp"]
-
+        build_for("armv7emsp")
+        + """
         [override."*"]
         extra-make-args = ["FROM=override"]
         """,
@@ -88,7 +104,7 @@ def test_environment_beats_override(tmp_path):
 def test_pyproject_fallback(tmp_path):
     write(
         tmp_path,
-        '[tool.cibuildmp]\n[tool.cibuildmp.natmod]\narchs = ["x64"]\n',
+        "[tool.cibuildmp]\n" + build_for("x64"),
         name="pyproject.toml",
     )
     options = Options.load(tmp_path, env={})
@@ -99,10 +115,10 @@ def test_pyproject_fallback(tmp_path):
 
 
 def test_standalone_wins_over_pyproject(tmp_path):
-    write(tmp_path, '[natmod]\narchs = ["x64"]\n')
+    write(tmp_path, build_for("x64"))
     write(
         tmp_path,
-        '[tool.cibuildmp]\n[tool.cibuildmp.natmod]\narchs = ["armv6m"]\n',
+        "[tool.cibuildmp]\n" + build_for("armv6m"),
         name="pyproject.toml",
     )
     options = Options.load(tmp_path, env={})
@@ -113,9 +129,9 @@ def test_standalone_wins_over_pyproject(tmp_path):
 def test_arch_flags_land_on_rv32imc_identifier_and_make_args(tmp_path):
     write(
         tmp_path,
-        """
+        build_for("rv32imc", "rv64imc")
+        + """
         [natmod]
-        archs = ["rv32imc", "rv64imc"]
         arch-flags = "zba,zcmp"
         """,
     )
@@ -135,9 +151,9 @@ def test_arch_flags_land_on_rv32imc_identifier_and_make_args(tmp_path):
 def test_arch_flags_list_builds_one_rv32imc_target_per_variant(tmp_path):
     write(
         tmp_path,
-        """
+        build_for("rv32imc")
+        + """
         [natmod]
-        archs = ["rv32imc"]
         arch-flags = ["", "zba", "zba,zcmp"]
         """,
     )
@@ -167,9 +183,9 @@ def test_arch_flags_list_dedupes_two_spellings_of_the_same_value(tmp_path):
     # D13 exists to prevent for tags.
     write(
         tmp_path,
-        """
+        build_for("rv32imc")
+        + """
         [natmod]
-        archs = ["rv32imc"]
         arch-flags = ["0x3", "zba,zcmp"]
         """,
     )
@@ -179,7 +195,7 @@ def test_arch_flags_list_dedupes_two_spellings_of_the_same_value(tmp_path):
 
 
 def test_version_defaults_empty_and_is_settable(tmp_path):
-    write(tmp_path, '[natmod]\narchs = ["x64"]\n')
+    write(tmp_path, "")
     assert Options.load(tmp_path, env={}).version == ""
     versioned = Options.load(tmp_path, env={"CIBMP_VERSION": "0.3.0"})
     assert versioned.version == "0.3.0"
@@ -188,7 +204,7 @@ def test_version_defaults_empty_and_is_settable(tmp_path):
 def test_name_defaults_empty_and_is_settable(tmp_path):
     # record 0052, A3: `name`, alongside `version`, feeds output_name()'s
     # {name}-{version}- filename prefix.
-    write(tmp_path, '[natmod]\narchs = ["x64"]\n')
+    write(tmp_path, "")
     assert Options.load(tmp_path, env={}).name == ""
     named = Options.load(tmp_path, env={"CIBMP_NAME": "mylib"})
     assert named.name == "mylib"
@@ -198,8 +214,6 @@ def test_extra_files_from_publish_table(tmp_path):
     write(
         tmp_path,
         """
-        [natmod]
-        archs = ["x64"]
         [publish]
         extra-files = ["src/facade.py", "src/ffi.py"]
         """,
@@ -222,21 +236,20 @@ def test_a_top_level_key_inside_the_natmod_table_names_where_it_goes(tmp_path):
 def test_build_skip_inside_the_natmod_table_beat_the_top_level(tmp_path):
     # record 0052's own per-platform build/skip addendum: [natmod]'s own
     # build/skip is now legal, and more specific -- matching upstream's
-    # own [tool.cibuildwheel.<platform>] build/skip, and every other
-    # dual-read key `archs` already has here.
+    # own [tool.cibuildwheel.<platform>] build/skip.
     write(
         tmp_path,
-        """
-        skip = "*-armv6m"
+        'skip = "*-armv6m"\n'
+        + build_for("x64", "armv6m")
+        + """
         [natmod]
-        archs = ["x64", "armv6m"]
         skip = ""
         """,
     )
     options = Options.load(tmp_path, env={})
     identifiers = [t.identifier for t in options.targets()]
     # [natmod]'s own skip = "" beats the top-level skip = "*-armv6m" --
-    # more specific wins, exactly like archs already does.
+    # more specific wins, exactly like build already does.
     assert any(i.endswith("-armv6m") for i in identifiers)
 
 
@@ -247,12 +260,15 @@ def test_an_unknown_key_in_the_natmod_table_is_an_error(tmp_path):
         Options.load(tmp_path)
 
 
-def test_archs_stays_dual_read_and_is_not_flagged(tmp_path):
-    # Predates 0048 and is not the trap: both placements work, so neither
-    # is silent. Asserted so the new check does not quietly take it away.
+def test_archs_is_gone_as_a_config_key(tmp_path):
+    # record 0052's own live-caught correction: archs filtered candidate
+    # rows by .arch alone, before build/skip ever ran -- exactly what a
+    # build/skip glob over the identifier already expresses directly
+    # (e.g. build = "*-x64"), so it is removed rather than kept dual-read.
     write(tmp_path, '[natmod]\narchs = ["x64"]\n')
 
-    assert Options.load(tmp_path).archs == ["x64"]
+    with pytest.raises(ConfigError, match="unknown key `archs`"):
+        Options.load(tmp_path)
 
 
 def test_arch_flags_in_an_overrides_table_is_an_error(tmp_path):
@@ -262,9 +278,6 @@ def test_arch_flags_in_an_overrides_table_is_an_error(tmp_path):
     write(
         tmp_path,
         """
-        [natmod]
-        archs = ["x64"]
-
         [override."*"]
         arch-flags = "rv32imc"
         """,
@@ -282,9 +295,6 @@ def test_reachability_audit_rejects_an_override_select_that_can_never_match(tmp_
     write(
         tmp_path,
         """
-        [natmod]
-        archs = ["x64"]
-
         [override."*-aarch64"]
         extra-make-args = ["X=1"]
         """,
@@ -300,5 +310,5 @@ def test_reachability_audit_allows_a_deliberate_skip_everything(tmp_path):
     # real, reachable domain down to zero *selected* targets, which stays
     # entirely legitimate -- only a pattern that can never match anything
     # in the first place is an error.
-    write(tmp_path, 'skip = "*"\n[natmod]\narchs = ["x64"]\n')
+    write(tmp_path, 'skip = "*"\n')
     assert Options.load(tmp_path).targets() == []

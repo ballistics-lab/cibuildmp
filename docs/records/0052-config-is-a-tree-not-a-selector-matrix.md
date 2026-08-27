@@ -2137,4 +2137,97 @@ env={}).overrides` returns the same normalized shape as before, and
 `build_options()` for the `armv7emsp` target still resolves `MP_BCLIBC_PRECISION=single`
 correctly through it. Full suite green (423 passed), ruff and pyright clean.
 
+## Addendum, 2026-08-27 — `archs` is gone as a config concept entirely: it duplicated
+exactly what `build`/`skip` already expresses
+
+Raised live, prompted by the root `cibuildmp.toml`'s own `[natmod] archs = [...]`
+line: with every real natmod arch listed (all ten `dynruntime.mk` values), that line
+was the config's own default, spelled out in full, doing nothing at all -- the most
+literal possible demonstration of the user's own complaint. `archs` filtered
+`natmod_all_targets()`'s own candidate rows by `.arch` alone, **before** `build`/`skip`
+ever ran (`candidates = [t for t in natmod_all_targets(arch_flags) if t.arch in
+self.archs]`) -- a second, parallel selection mechanism narrowing exactly the same
+axis a `build`/`skip` glob over the identifier already reaches directly (`build =
+"*-x64"`, or `"mpy6.3-*-x64"` to also pin the ABI). Removed outright, not
+deprecated, the same treatment `collapse_newest_tag()` got two addenda up: a second
+way to say the same thing is the thing this record keeps arguing against, whichever
+direction it points.
+
+**Mechanically:** `Options.archs` (the field), `archs_value` (the cascade lookup in
+`load()`), `"archs"` from `NATMOD_SCHEMA`, and `validate_archs_recognized()`
+(`natmod/targets.py`, now dead -- its own job, catching an arch `dynruntime.mk` has
+never heard of, is already covered by `check_reachable()`'s existing "pattern matches
+no known identifier" audit, one level up at the selector-string level) are all gone.
+`targets()` now builds `candidates = natmod_all_targets(arch_flags)` directly, with
+no arch pre-filter at all -- `build`/`skip` are the only selection mechanism left,
+for every axis natmod has.
+
+**`--archs` on the CLI is natmod's one real, honest capability loss** -- there is no
+`--build`/`--skip` CLI flag to fall back on (only the config file and
+`CIBMP_BUILD`/`CIBMP_SKIP`), and no safe way to translate an arbitrary CLI arch list
+into an equivalent `build`/`skip` glob rewrite: the flag's own contract was to
+*replace* the archs axis wholesale while leaving `build`/`skip`'s own ABI/tag
+narrowing untouched, and mechanically reconstructing that as a glob transform on top
+of whatever `build` pattern a config already has (which may itself already carry an
+arch segment, brace groups, or no wildcard at all) has no single, generally-correct
+answer -- exactly the kind of clever synthesis this whole record keeps rejecting in
+favor of writing the glob directly. Rather than ship something fragile, natmod's own
+`resolve_options()` now raises a specific, actionable `ConfigError` naming the
+replacement (`build`/`skip`, or `CIBMP_BUILD`/`CIBMP_SKIP`) the moment `--archs` is
+passed for a natmod invocation -- loud, not silent, the same 0048-era guarantee
+every other retired config surface in this project gets. `--archs` is unaffected for
+usermod ports (`archs`/`boards` stay real per-port axis keys there, untouched by this
+addendum).
+
+**Ripple:** every fixture across `tests/test_options.py`, `tests/test_cli.py`,
+`tests/test_cli_multi_platform.py` and `tests/test_overrides.py` that used
+`[natmod] archs = [...]` as its minimal natmod config rewritten to a `build` glob
+instead (`mpy{abi}-*-{arch}`, brace-expanded for more than one arch; `rv32imc` gets a
+trailing wildcard to still reach its own `+0x..`-suffixed rows) -- most fixtures that
+only needed *some* deterministic natmod target dropped the arch narrowing
+entirely, since removing `archs` means nothing left to narrow by default either.
+`test_archs_stays_dual_read_and_is_not_flagged` (proving dual-read worked) is
+replaced outright by `test_archs_is_gone_as_a_config_key` (proving the opposite: it
+is now a loud "unknown key" error). `test_bad_arch_is_an_error` now exercises the
+reachability audit directly, with a real gotcha caught while writing it: a
+brace-expanded pattern (`"mpy6.3-*-{x64,aarch64}"`) is checked as **one** whole
+pattern string by `check_selector_reachable()`, and passes reachability on the `x64`
+alternative alone -- hiding the `aarch64` typo entirely. The fix is two
+space-separated patterns instead of one brace group, matching how
+`check_selector_reachable()` actually iterates `parse_selector()`'s own list.
+
+A second, unrelated gotcha surfaced fixing `tests/test_cli_multi_platform.py`:
+`build`/`skip` are dual-read (global default, per-platform override, more-specific-
+wins) across *every* active platform, natmod and usermod ports alike -- setting
+`build` at the bare top level to narrow natmod's own default to one arch silently
+became unix's own default `build` too, in every fixture spanning `[natmod]` +
+`[unix]` in one invocation, since unix's own cascade reads the same top-level key
+when its own `[unix]` table sets nothing. The fix is scoping the override inside
+`[natmod]` specifically, not the top level -- the same "more specific wins" rule
+`[natmod] build = "..."`/`[unix] build = "..."` already documents, just easy to
+forget when writing a fixture meant for one platform only.
+
+Two corrections to the previous addendum's own claims, from the same live
+conversation: "unix identifiers carry `-unix-` as a stable literal substring" is
+false -- the real, confirmed identifier is `v1.20.0-manylinux_2_28_x86_64` (no
+`unix` segment at all; the correct unique marker is `manylinux`/`musllinux`, unix's
+own libc tags). And "unix is special in having a marker at all" overstates it --
+every platform has its own (`win32` for windows, `webassembly` for wasm, the `mpy`
+prefix for natmod); unix is not an exception, its marker is just spelled
+differently than a literal port name.
+
+**Left open, raised in the same conversation, not yet acted on:** the same argument
+extends one level further, to the cascade's own `platform_tables` tier for the
+override-able option keys (`module-dir`/`make-target`/`extra-make-args`/
+`pre-build-command` for natmod; `user-c-modules`/`manifest`/`extra-make-args` for
+usermod ports) -- `[unix] user-c-modules = "..."` is exactly `[override."*-{manylinux,
+musllinux}*"] user-c-modules = "..."` restated, the identical "two ways to say the
+same thing" shape this whole addendum just removed for `archs`. Not designed or
+implemented yet -- the next piece of work this record's own thread points to.
+
+Full suite green (423 passed after the rewrite), ruff and pyright clean. Live
+smoke-tested against the real root `cibuildmp.toml` (now with no `archs` line at
+all) -- byte-identical ten-target `--dry-run` output before and after -- and against
+both `--archs`'s new failure mode for natmod and its unaffected usermod path.
+
 [0051]: 0051-usermod-identifiers-have-no-version-axis.md

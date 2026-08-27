@@ -85,11 +85,14 @@ skip = ""
 # building mpy-cross, resolving the cross toolchain per arch, installing
 # mpy_ld.py's host deps, and collecting the outputs.
 [natmod]
-archs = ["x64", "x86", "armv6m", "armv7m", "armv7emsp", "armv7emdp",
-         "rv32imc", "rv64imc", "xtensa", "xtensawin"]
-
-# No aarch64: dynruntime.mk has no ARCH=aarch64 branch at all as of
-# MicroPython v1.28, so natmod cannot target it. Cover it via usermod.
+# No `archs` key here (record 0052's own live-caught correction): it used
+# to filter candidate rows by `.arch` alone, before `build`/`skip` ever
+# ran -- exactly what a `build`/`skip` glob over the identifier already
+# expresses directly (e.g. `build = "*-x64"`, see the build selectors
+# section above). Left unset, every arch dynruntime.mk supports builds by
+# default. No aarch64 among them: dynruntime.mk has no ARCH=aarch64
+# branch at all as of MicroPython v1.28, so natmod cannot target it --
+# cover it via usermod instead.
 
 module-dir = "natmod"       # directory containing the Makefile.
                             # a7p passes "micropython/natmod".

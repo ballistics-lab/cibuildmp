@@ -65,18 +65,10 @@ micropython = "v1.29.0"
 manifest = "usermod/manifest.py"
 
 [natmod]
-archs = [
-    "x64",
-    "x86",
-    "armv6m",
-    "armv7m",
-    "armv7emsp",
-    "armv7emdp",
-    "rv32imc",
-    "rv64imc",
-    "xtensa",
-    "xtensawin",
-]
+# No `archs` key here -- it is not a config concept any more (record
+# 0052's own live-caught correction: it duplicated exactly what a
+# build/skip glob over the identifier already expresses). Left unset,
+# every arch dynruntime.mk supports builds by default.
 
 [publish]
 # facade.py is not part of natmod/'s own SRC, so dynruntime.mk never merges

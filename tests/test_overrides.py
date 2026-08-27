@@ -42,7 +42,6 @@ def test_one_shared_override_reaches_both_natmod_and_a_usermod_port(tmp_path):
         tmp_path,
         """
         [natmod]
-        archs = ["x64"]
         extra-make-args = ["N=1"]
 
         [unix]
@@ -88,7 +87,7 @@ def test_usermod_only_override_key_rejected_for_a_natmod_target(tmp_path):
     # passes tier-1, but is not natmod's to read.
     write(
         tmp_path,
-        '[natmod]\narchs = ["x64"]\n\n[override."*"]\nmanifest = "x.py"\n',
+        '[natmod]\n\n[override."*"]\nmanifest = "x.py"\n',
     )
     options = Options.load(tmp_path, env={})
 
@@ -106,7 +105,7 @@ def test_tier_2_rejection_is_a_clean_cli_error_not_a_traceback(tmp_path, capsys)
     # Both call sites (the --dry-run loop, and the real build wrapper)
     # needed their own ConfigError/UsermodConfigError handling added.
     (tmp_path / "cibuildmp.toml").write_text(
-        '[natmod]\narchs = ["x64"]\n\n[override."*"]\nmanifest = "x.py"\n'
+        '[natmod]\n\n[override."*"]\nmanifest = "x.py"\n'
     )
 
     assert main([str(tmp_path), "--dry-run"]) == 2
@@ -121,7 +120,7 @@ def test_arch_flags_still_rejected_in_the_merged_overrides_natmod(tmp_path):
     # per target -- exactly the shape record 0048 is about.
     write(
         tmp_path,
-        '[natmod]\narchs = ["x64"]\n[unix]\n\n[override."*"]\narch-flags = "rv32imc"\n',
+        '[natmod]\n[unix]\n\n[override."*"]\narch-flags = "rv32imc"\n',
     )
 
     with pytest.raises(ConfigError, match=r'\[override\."\*"\]: unknown key'):
@@ -131,7 +130,7 @@ def test_arch_flags_still_rejected_in_the_merged_overrides_natmod(tmp_path):
 def test_arch_flags_still_rejected_in_the_merged_overrides_usermod(tmp_path):
     write(
         tmp_path,
-        '[natmod]\narchs = ["x64"]\n[unix]\n\n[override."*"]\narch-flags = "rv32imc"\n',
+        '[natmod]\n[unix]\n\n[override."*"]\narch-flags = "rv32imc"\n',
     )
 
     with pytest.raises(UsermodConfigError, match=r'\[override\."\*"\]: unknown key'):
@@ -143,7 +142,7 @@ def test_inherit_on_a_scalar_key_is_a_parse_time_error_natmod(tmp_path):
     # later matches -- caught at load(), not deferred to build_options().
     write(
         tmp_path,
-        '[natmod]\narchs = ["x64"]\n\n[override."*"]\n'
+        '[natmod]\n\n[override."*"]\n'
         'module-dir = "x"\ninherit = {module-dir = "append"}\n',
     )
 
@@ -165,7 +164,7 @@ def test_inherit_on_a_scalar_key_is_a_parse_time_error_usermod(tmp_path):
 def test_inherit_unknown_rule_is_a_parse_time_error(tmp_path):
     write(
         tmp_path,
-        '[natmod]\narchs = ["x64"]\n\n[override."*"]\n'
+        '[natmod]\n\n[override."*"]\n'
         'extra-make-args = ["X=1"]\ninherit = {extra-make-args = "sideways"}\n',
     )
 
@@ -178,7 +177,6 @@ def test_inherit_prepend(tmp_path):
         tmp_path,
         """
         [natmod]
-        archs = ["x64"]
         extra-make-args = ["BASE=1"]
 
         [override."*"]

@@ -36,38 +36,51 @@ relationship `pypa/cibuildwheel@v3` has with `python -m cibuildwheel`).
 ## Identifier scheme
 
 Shaped after `cp311-manylinux_x86_64` = *{ABI}\_{arch}*, but with no literal
-mode segment (record [0052], Track A/A2):
+mode segment (record [0052], Track A/A2), and with the MicroPython tag as
+part of it — a live, user-caught correction of that same record's own
+earlier draft, which dropped the tag and had to collapse several real,
+distinct rows onto one identifier to compensate:
 
 ```
-mpy6.3-armv7emsp
-mpy6.3-x64
+mpy6.3-v1.30.0-preview-armv7emsp
+mpy6.3-v1.30.0-preview-x64
 ```
 
 - **`mpy6.3`** — the `.mpy` ABI: `MPY_VERSION`.`MPY_SUB_VERSION` from
   `py/persistentcode.h`. This is the correct compatibility axis, not the
-  MicroPython release tag: a native `.mpy` loads into any runtime with a
-  matching `MPY_VERSION`/`MPY_SUB_VERSION` pair, which spans several
-  releases.
+  MicroPython release tag by itself: a native `.mpy` loads into any runtime
+  with a matching `MPY_VERSION`/`MPY_SUB_VERSION` pair, which spans several
+  releases — but a real `(tag, arch)` row is still its own distinct fact
+  (a different checkout, different toolchain particulars), so the tag stays
+  part of the identifier rather than being collapsed away once one is
+  picked.
 
   There is no `micropython`/`mpy-abi` config key any more ([0052], A2): the
   version axis is a statically known domain — `resources/build-platforms.toml`
-  records every `.mpy` ABI this project has actually verified against a real
-  MicroPython tag (five today: `5`, `6`, `6.1`, `6.2`, `6.3`), each resolved
-  to its own newest known tag automatically. `build`/`skip` narrow that
-  domain by matching identifiers, exactly the way they already narrow
-  `archs`; a bare, unconfigured `build` selector narrows it further still, to
-  the single newest known ABI, so a zero-config invocation keeps building
-  only that one ABI rather than every one this project has ever verified.
-  There is currently no way to pin an explicit tag instead of the
-  auto-picked newest one for a given ABI — a real, open gap, not yet
-  designed.
+  records every real `(tag, arch)` row this project has actually verified
+  (five ABIs today: `5`, `6`, `6.1`, `6.2`, `6.3`, several tags each).
+  `build`/`skip` glob-match directly against these real identifiers; a
+  pattern that never names a tag-shaped substring
+  (`selector_names_a_tag()`) narrows to the single newest tag per arch
+  automatically (a bare, unconfigured `build` keeps a zero-config
+  invocation building only the current release, not every tag this
+  project has ever verified), while a pattern that does name one
+  (`build = "mpy6.3-v1.23.0-*"`) is trusted as-is, tag and all — the
+  "pin a specific tag" gap this section used to flag as undesigned is
+  closed by that same mechanism, not a separate config key.
 - No literal mode/platform segment — `natmod` is one platform among the
-  usermod ports too now ([0051]), all sharing this same *{ABI}\_{arch}*
-  shape rather than natmod alone spelling its own name into the string.
-- **arch** — one of `dynruntime.mk`'s ten `ARCH` values.
+  usermod ports too now ([0051]), all sharing this same tag-included
+  *{ABI}-{tag}-{arch}* shape rather than natmod alone spelling its own
+  name into the string.
+- **arch** — one of `dynruntime.mk`'s ten `ARCH` values. There is no
+  `archs` config key either (the same live correction, applied one axis
+  over): it filtered candidate rows by `.arch` alone, before `build`/`skip`
+  ever ran, duplicating exactly what a `build`/`skip` glob over the
+  identifier already expresses directly (`build = "*-x64"`).
 - **`+0x..`** (optional, `rv32imc` only) — `arch_flags`, present only when
-  `arch-flags` is set (**D15**): `mpy6.3-rv32imc+0x3`. Absent for every
-  other arch and for `rv32imc` with no `arch-flags` configured.
+  `arch-flags` is set (**D15**): `mpy6.3-v1.30.0-preview-rv32imc+0x3`.
+  Absent for every other arch and for `rv32imc` with no `arch-flags`
+  configured.
 
 `arch_flags = 0` (the unconfigured default) is not merely "no flags set" —
 it is a named compatibility class, the `abi3`-equivalent broad/portable
@@ -182,9 +195,10 @@ micropython = "v1.29.0"       # usermod only ([0052], A2): release tag(s) to
                               # kept apart by identifier ([0051]). natmod has
                               # no version config key at all any more -- its
                               # own version axis is the static domain of
-                              # every `.mpy` ABI resources/build-platforms.toml
-                              # has verified, narrowed by build/skip matching
-                              # identifiers exactly like archs already is.
+                              # every real (tag, arch) row
+                              # resources/build-platforms.toml has verified,
+                              # narrowed by build/skip glob-matching directly
+                              # against those rows' own identifiers.
 output-dir = "mpyhouse"       # output-dir/<identifier>/ per target (D14)
 build = "*"                   # glob(s) over identifiers, space-separated
 skip = ""
@@ -205,8 +219,10 @@ version = ""                 # ([0052], A3 extended this to usermod too;
                               # segment in the filename for either family
 
 [natmod]
-archs = ["x64", "x86", "armv6m", "armv7m", "armv7emsp", "armv7emdp",
-         "rv32imc", "rv64imc", "xtensa", "xtensawin"]
+# No `archs` key -- it is not a config concept any more (record 0052's
+# own live-caught correction: it duplicated exactly what a build/skip
+# glob over the identifier already expresses, e.g. build = "*-x64").
+# Left unset, every arch dynruntime.mk supports builds by default.
 module-dir = "natmod"         # dir containing the Makefile
 make-target = "dist"
 extra-make-args = []
@@ -262,11 +278,14 @@ own schema does not read at all (a typo, or an `arch-flags` inside
 which meant a misplaced `skip` produced a successful build of something
 you had asked not to build; the check itself moved from a fixed
 per-table-shape partition to a per-platform-schema one under [0051]'s own
-cascade, but the guarantee is the same. `archs`/`arch-flags` remain the one
-deliberate exception: natmod reads them from the top level *or* `[natmod]`,
-and both work, so neither is silent — under the cascade this is simply the
-general case (global default, platform-specific override), not a
-special-cased pair of keys.
+cascade, but the guarantee is the same. `build`/`skip`/`arch-flags` remain
+a deliberate exception: natmod reads them from the top level *or*
+`[natmod]`, and both work, so neither is silent — under the cascade this
+is simply the general case (global default, platform-specific override),
+not a special-cased set of keys. `archs` used to be part of that set too;
+it is gone now, as a config concept entirely (record 0052's own
+live-caught correction) — narrowing to a specific arch is a `build`/`skip`
+glob's job now, the same job it already had for every other axis.
 
 [0048]: ../records/0048-build-skip-live-in-opposite-tables.md
 

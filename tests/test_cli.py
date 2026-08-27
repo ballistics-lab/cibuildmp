@@ -6,13 +6,7 @@ from pathlib import Path
 from cibuildmp.cli import main
 from cibuildmp.platforms import natmod as natmod_cli
 from cibuildmp.platforms.natmod.build import BuildResult
-from cibuildmp.platforms.natmod.targets import newest_tag_for_abi
-
-
-def write(tmp_path, text):
-    (tmp_path / "cibuildmp.toml").write_text(text)
-    return str(tmp_path)
-
+from cibuildmp.platforms.natmod.targets import newest_known_abi, newest_tag_for_abi
 
 # No `micropython =` key any more (record 0052, A2): the version axis is a
 # static domain, narrowed by `build`/`skip` matching identifiers -- an
@@ -20,9 +14,20 @@ def write(tmp_path, text):
 # so this config's own real, resolved tag is whatever
 # newest_tag_for_abi("6.3") currently says, not a literal string pinned
 # here that would go stale on its own schedule.
-CONFIG = """
-[natmod]
-archs = ["x64", "armv6m"]
+ABI = newest_known_abi()
+
+
+def write(tmp_path, text):
+    (tmp_path / "cibuildmp.toml").write_text(text)
+    return str(tmp_path)
+
+
+# No `archs` config key any more either (record 0052's own live-caught
+# correction): it duplicated exactly what a build/skip glob over the
+# identifier already expresses, so narrowing to x64/armv6m is spelled out
+# via `build` directly, still against the single newest known ABI.
+CONFIG = f"""
+build = "mpy{ABI}-*-{{x64,armv6m}}"
 """
 
 
@@ -60,9 +65,7 @@ def test_dry_run_spans_multiple_abis_via_build_selector(tmp_path, capsys):
     # elsewhere), each resolving to its own newest known tag rather than
     # a literal version string that would go stale on its own schedule.
     config = """
-    build = "mpy6.2-* mpy6.3-*"
-    [natmod]
-    archs = ["x64"]
+    build = "mpy6.2-*-x64 mpy6.3-*-x64"
     """
     assert main([write(tmp_path, config), "--dry-run"]) == 0
     out = capsys.readouterr().out
@@ -73,14 +76,12 @@ def test_dry_run_spans_multiple_abis_via_build_selector(tmp_path, capsys):
 
 
 def test_only_overrides_skip(tmp_path, capsys):
-    # `skip` goes **above** `[natmod]`, not appended to CONFIG. This test
-    # used to append it, which put it inside the `[natmod]` table -- where
-    # natmod never reads it (`opt()` resolves against the top level, while
-    # `archs` alone also falls back to `natmod.get("archs")`). The skip was
-    # therefore never applied and this case passed without testing
-    # anything. Found while writing 0045; the placement asymmetry itself is
-    # its own bug, see 0048.
-    config = 'skip = "*-armv6m"\n[natmod]\narchs = ["x64", "armv6m"]\n'
+    # `skip` used to go **above** `[natmod]`, not appended to CONFIG --
+    # this test used to append it, which put it inside the `[natmod]`
+    # table, a placement 0048 fixed. Kept top-level here still, now simply
+    # because that's where `build`/`skip` naturally sit in every other
+    # fixture in this file.
+    config = f'skip = "*-armv6m"\n{CONFIG}'
     tag = newest_tag_for_abi("6.3")
     argv = [write(tmp_path, config), "--only", f"mpy6.3-{tag}-armv6m", "--dry-run"]
     assert main(argv) == 0
@@ -130,7 +131,7 @@ def test_only_overrides_skip_for_print_build_identifiers(tmp_path, capsys):
     # live-caught correction) -- "*-x64" is the broad glob that reaches
     # every tag's own x64 row regardless of which one --only ends up
     # naming below, same as any other selector-narrowed set.
-    config = 'skip = "*-x64"\n[natmod]\narchs = ["x64", "armv6m"]\n'
+    config = f'skip = "*-x64"\n{CONFIG}'
     identifier = f"mpy6.3-{newest_tag_for_abi('6.3')}-x64"
     assert (
         main(
@@ -147,7 +148,14 @@ def test_only_overrides_skip_for_print_build_identifiers(tmp_path, capsys):
 
 
 def test_bad_arch_is_an_error(tmp_path, capsys):
-    config = '[natmod]\narchs = ["x64", "aarch64"]\n'
+    # No `archs` config key to validate any more -- the reachability
+    # audit already catches an arch dynruntime.mk has never heard of, the
+    # same way it catches any other pattern that can never match anything
+    # (record 0052, A5). Two space-separated patterns, not one brace
+    # group: a brace-expanded "*-{x64,aarch64}" is checked as one whole
+    # pattern string, and would pass reachability on the x64 alternative
+    # alone, hiding the aarch64 typo entirely.
+    config = f'build = "mpy{ABI}-*-x64 mpy{ABI}-*-aarch64"\n'
     assert main([write(tmp_path, config), "--print-build-identifiers"]) == 2
     assert "aarch64" in capsys.readouterr().err
 
@@ -162,7 +170,7 @@ def test_real_build_writes_github_step_summary_when_set(monkeypatch, tmp_path):
     # No toolchain resolution to mock any more: record 0049 deleted it
     # along with the bare-host path, so there is nothing between the CLI
     # and `build_target` but the container call `_stub_build` replaces.
-    config = '\n[natmod]\narchs = ["x64"]\n'
+    config = f'\nbuild = "mpy{ABI}-*-x64"\n'
     package_dir = Path(write(tmp_path, config))
 
     monkeypatch.setattr(

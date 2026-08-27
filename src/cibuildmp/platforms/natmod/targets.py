@@ -311,25 +311,6 @@ class Target:
         return self.identifier
 
 
-def validate_archs_recognized(archs: list[str]) -> None:
-    """Raise `UnknownArchError` for any arch `dynruntime.mk` has never
-    heard of at all, at any tag -- a typo, as opposed to a real arch a
-    specific tag's own source tree does not have (see `natmod_targets()`'s
-    own docstring for that distinction). Shared so `Options.targets()`/
-    `all_targets()` (record 0052, A2) can validate `self.archs` once,
-    globally, *before* filtering it per tag against `archs_available_for()`
-    -- filtering first would silently swallow a genuine typo instead of
-    ever reaching `natmod_targets()`'s own check, since a nonexistent arch
-    is never "available" for any tag either.
-    """
-    unrecognized = [a for a in archs if a not in NATMOD_ARCH_NATIVE_CODE]
-    if unrecognized:
-        raise UnknownArchError(
-            f"unknown natmod arch(es): {', '.join(sorted(unrecognized))}. "
-            f"py/dynruntime.mk supports: {', '.join(NATMOD_ARCHS)}"
-        )
-
-
 def natmod_all_targets(rv32imc_arch_flags: Sequence[int] = (0,)) -> list[Target]:
     """One `Target` per real `(tag, arch)` row in `build-platforms.toml`
     -- the raw fact list `Options.targets()`/`all_targets()` glob-match
