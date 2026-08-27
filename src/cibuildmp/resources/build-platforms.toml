@@ -3099,3 +3099,20 @@ identifiers = [
     { tag = "v1.29.0", board = "KIT_PSE84_AI", mcu = "PSE846GPS2DBZC4", product = "KIT_PSE84_AI", vendor = "Infineon Technologies", variants = [], identifier = "v1.29.0-psoc-edge-KIT_PSE84_AI" },
     { tag = "v1.30.0-preview", board = "KIT_PSE84_AI", mcu = "PSE846GPS2DBZC4", product = "KIT_PSE84_AI", vendor = "Infineon Technologies", variants = [], identifier = "v1.30.0-preview-psoc-edge-KIT_PSE84_AI" },
 ]
+
+# ports/alif did not exist before v1.26.0 -- v1.20.0..v1.24.1 correctly
+# contribute zero rows because the port didn't exist at all (checked live,
+# not inferred); v1.25.0 is a real, distinct case: the port already
+# existed there but with zero board.json files yet, also verified live,
+# also zero rows -- a different reason for the same absence, not
+# collapsed into one. Exactly one board known so far (ALIF_ENSEMBLE),
+# unchanged across all six tags that have it.
+[usermod.alif]
+identifiers = [
+    { tag = "v1.26.0", board = "ALIF_ENSEMBLE", mcu = "AE722F80F55D5XX", product = "Ensemble E7 DevKit", vendor = "Alif Semiconductor", variants = [], identifier = "v1.26.0-alif-ALIF_ENSEMBLE" },
+    { tag = "v1.26.1", board = "ALIF_ENSEMBLE", mcu = "AE722F80F55D5XX", product = "Ensemble E7 DevKit", vendor = "Alif Semiconductor", variants = [], identifier = "v1.26.1-alif-ALIF_ENSEMBLE" },
+    { tag = "v1.27.0", board = "ALIF_ENSEMBLE", mcu = "AE722F80F55D5XX", product = "Ensemble E7 DevKit", vendor = "Alif Semiconductor", variants = [], identifier = "v1.27.0-alif-ALIF_ENSEMBLE" },
+    { tag = "v1.28.0", board = "ALIF_ENSEMBLE", mcu = "AE722F80F55D5XX", product = "Ensemble E7 DevKit", vendor = "Alif Semiconductor", variants = [], identifier = "v1.28.0-alif-ALIF_ENSEMBLE" },
+    { tag = "v1.29.0", board = "ALIF_ENSEMBLE", mcu = "AE722F80F55D5XX", product = "Ensemble E7 DevKit", vendor = "Alif Semiconductor", variants = [], identifier = "v1.29.0-alif-ALIF_ENSEMBLE" },
+    { tag = "v1.30.0-preview", board = "ALIF_ENSEMBLE", mcu = "AE722F80F55D5XX", product = "Ensemble E7 DevKit", vendor = "Alif Semiconductor", variants = [], identifier = "v1.30.0-preview-alif-ALIF_ENSEMBLE" },
+]
