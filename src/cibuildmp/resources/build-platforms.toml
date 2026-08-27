@@ -296,6 +296,7 @@ identifiers = [
 ]
 
 [usermod.unix]
+identifier_format = "{tag}-{arch}"
 identifiers = [
     { tag = "v1.20.0", arch = "manylinux_2_28_x86_64", identifier = "v1.20.0-manylinux_2_28_x86_64" },
     { tag = "v1.20.0", arch = "musllinux_1_2_x86_64", identifier = "v1.20.0-musllinux_1_2_x86_64" },
@@ -531,6 +532,7 @@ identifiers = [
 # ports/windows/Makefile itself sets no CROSS_COMPILE/ARCH branches --
 # cibuildmp supplies the whole cross-toolchain externally, unconditionally.
 [usermod.windows]
+identifier_format = "{tag}-{arch}"
 identifiers = [
     { tag = "v1.20.0", arch = "win32", cross = "i686-w64-mingw32-", identifier = "v1.20.0-win32" },
     { tag = "v1.20.0", arch = "win_amd64", cross = "x86_64-w64-mingw32-", identifier = "v1.20.0-win_amd64" },
@@ -611,6 +613,7 @@ identifiers = [
 # not a consumer-facing ABI tier that varies per build the way a glibc
 # floor does -- it only shows up embedded in arch/identifier above.
 [usermod.webassembly]
+identifier_format = "{tag}-{arch}"
 identifiers = [
     { tag = "v1.20.0", arch = "pyemscripten_6_0_8_wasm32", identifier = "v1.20.0-pyemscripten_6_0_8_wasm32" },
     { tag = "v1.21.0", arch = "pyemscripten_6_0_8_wasm32", identifier = "v1.21.0-pyemscripten_6_0_8_wasm32" },
