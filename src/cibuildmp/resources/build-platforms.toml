@@ -3087,3 +3087,15 @@ identifiers = [
     { tag = "v1.30.0-preview", board = "WEACTSTUDIO_MINI_STM32U585", mcu = "stm32u5", product = "Mini STM32U585", vendor = "WeAct Studio", variants = [], identifier = "v1.30.0-preview-stm32-WEACTSTUDIO_MINI_STM32U585" },
     { tag = "v1.30.0-preview", board = "WEACT_F411_BLACKPILL", mcu = "stm32f411", product = "WeAct F411 'blackpill'. Default variant is v3.1 with no SPI Flash.", vendor = "WeAct Studio", variants = ["V13", "V13_FLASH_4M", "V20_FLASH_4M", "V31_FLASH_8M", "V31_XTAL_8M"], identifier = "v1.30.0-preview-stm32-WEACT_F411_BLACKPILL" },
 ]
+
+# Newest port of any covered here -- ports/psoc-edge did not exist before
+# v1.29.0 (verified live: 404 on every earlier tag's own Makefile,
+# checked directly, not inferred from v1.28.0 alone), so v1.20.0..v1.28.0
+# correctly contribute zero rows, not an empty-board placeholder. Exactly
+# one board known so far (KIT_PSE84_AI), unchanged between its only two
+# tags.
+[usermod.psoc-edge]
+identifiers = [
+    { tag = "v1.29.0", board = "KIT_PSE84_AI", mcu = "PSE846GPS2DBZC4", product = "KIT_PSE84_AI", vendor = "Infineon Technologies", variants = [], identifier = "v1.29.0-psoc-edge-KIT_PSE84_AI" },
+    { tag = "v1.30.0-preview", board = "KIT_PSE84_AI", mcu = "PSE846GPS2DBZC4", product = "KIT_PSE84_AI", vendor = "Infineon Technologies", variants = [], identifier = "v1.30.0-preview-psoc-edge-KIT_PSE84_AI" },
+]
