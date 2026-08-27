@@ -21,13 +21,106 @@
 # needs the REST API (unavailable in the session that generated this file;
 # the two dates spot-checked against it beforehand matched exactly).
 #
-# Tags: every stable MicroPython release >= v1.20.0, plus only the single
-# newest preview tag (an older preview is superseded by its own stable
-# release, or by a newer preview -- neither is independently useful once
-# that happens).
+# Tags differ by section, on purpose, not by oversight:
+#
+# [natmod] goes back to v1.12 -- the real floor, not an arbitrary one:
+# py/dynruntime.mk returns HTTP 404 at v1.11 and 200 at v1.12 (checked
+# directly against every tag in between), so v1.12 is where natmod becomes
+# buildable at all, not a cutoff this record picked for convenience. v1.12
+# through v1.18 report mpy = "5" (bare, no sub-version -- MPY_SUB_VERSION
+# did not exist yet, confirmed by its own absence in each of those tags'
+# py/persistentcode.h, not inferred); v1.19/v1.19.1 report "6" already but
+# still bare (the two-part "6.1"-style ABI starts at v1.20.0). armv6m's
+# `cross` is genuinely absent (not "") through v1.18 -- that tag range's
+# own dynruntime.mk has no CROSS line for that branch at all, confirmed
+# per tag, not assumed from a neighbor.
+#
+# [usermod.*] sections still start at v1.20.0 -- each port's own real
+# floor has not been walked back the same way natmod's was (esp32 exists
+# far earlier than v1.20.0, for one; qemu's is already recorded as
+# v1.24.0 within the current range). Extending any of them the way
+# [natmod] was extended here is future work, not something this record
+# claims is done.
+#
+# Every tag: only the single newest preview at the current upper edge (an
+# older preview is superseded by its own stable release, or by a newer
+# preview -- neither is independently useful once that happens); every
+# stable release in between is included, none skipped.
 
 [natmod]
 identifiers = [
+    { tag = "v1.12", date = "2019-12-20", mpy = "5", sha = "1f371947309c5ea6023b6d9065415697cbc75578", arch = "x86", arch_code = 1, arch_flags = 0, cross = "", identifier = "mpy5-v1.12-x86" },
+    { tag = "v1.12", date = "2019-12-20", mpy = "5", sha = "1f371947309c5ea6023b6d9065415697cbc75578", arch = "x64", arch_code = 2, arch_flags = 0, cross = "", identifier = "mpy5-v1.12-x64" },
+    { tag = "v1.12", date = "2019-12-20", mpy = "5", sha = "1f371947309c5ea6023b6d9065415697cbc75578", arch = "armv6m", arch_code = 4, arch_flags = 0, identifier = "mpy5-v1.12-armv6m" },
+    { tag = "v1.12", date = "2019-12-20", mpy = "5", sha = "1f371947309c5ea6023b6d9065415697cbc75578", arch = "armv7m", arch_code = 5, arch_flags = 0, cross = "arm-none-eabi-", identifier = "mpy5-v1.12-armv7m" },
+    { tag = "v1.12", date = "2019-12-20", mpy = "5", sha = "1f371947309c5ea6023b6d9065415697cbc75578", arch = "armv7emsp", arch_code = 7, arch_flags = 0, cross = "arm-none-eabi-", identifier = "mpy5-v1.12-armv7emsp" },
+    { tag = "v1.12", date = "2019-12-20", mpy = "5", sha = "1f371947309c5ea6023b6d9065415697cbc75578", arch = "armv7emdp", arch_code = 8, arch_flags = 0, cross = "arm-none-eabi-", identifier = "mpy5-v1.12-armv7emdp" },
+    { tag = "v1.12", date = "2019-12-20", mpy = "5", sha = "1f371947309c5ea6023b6d9065415697cbc75578", arch = "xtensa", arch_code = 9, arch_flags = 0, cross = "xtensa-lx106-elf-", identifier = "mpy5-v1.12-xtensa" },
+    { tag = "v1.12", date = "2019-12-20", mpy = "5", sha = "1f371947309c5ea6023b6d9065415697cbc75578", arch = "xtensawin", arch_code = 10, arch_flags = 0, cross = "xtensa-esp32-elf-", identifier = "mpy5-v1.12-xtensawin" },
+    { tag = "v1.13", date = "2020-09-02", mpy = "5", sha = "b0932fcf2e2f9a81abf7737ed4b2573bd9ad4a49", arch = "x86", arch_code = 1, arch_flags = 0, cross = "", identifier = "mpy5-v1.13-x86" },
+    { tag = "v1.13", date = "2020-09-02", mpy = "5", sha = "b0932fcf2e2f9a81abf7737ed4b2573bd9ad4a49", arch = "x64", arch_code = 2, arch_flags = 0, cross = "", identifier = "mpy5-v1.13-x64" },
+    { tag = "v1.13", date = "2020-09-02", mpy = "5", sha = "b0932fcf2e2f9a81abf7737ed4b2573bd9ad4a49", arch = "armv6m", arch_code = 4, arch_flags = 0, identifier = "mpy5-v1.13-armv6m" },
+    { tag = "v1.13", date = "2020-09-02", mpy = "5", sha = "b0932fcf2e2f9a81abf7737ed4b2573bd9ad4a49", arch = "armv7m", arch_code = 5, arch_flags = 0, cross = "arm-none-eabi-", identifier = "mpy5-v1.13-armv7m" },
+    { tag = "v1.13", date = "2020-09-02", mpy = "5", sha = "b0932fcf2e2f9a81abf7737ed4b2573bd9ad4a49", arch = "armv7emsp", arch_code = 7, arch_flags = 0, cross = "arm-none-eabi-", identifier = "mpy5-v1.13-armv7emsp" },
+    { tag = "v1.13", date = "2020-09-02", mpy = "5", sha = "b0932fcf2e2f9a81abf7737ed4b2573bd9ad4a49", arch = "armv7emdp", arch_code = 8, arch_flags = 0, cross = "arm-none-eabi-", identifier = "mpy5-v1.13-armv7emdp" },
+    { tag = "v1.13", date = "2020-09-02", mpy = "5", sha = "b0932fcf2e2f9a81abf7737ed4b2573bd9ad4a49", arch = "xtensa", arch_code = 9, arch_flags = 0, cross = "xtensa-lx106-elf-", identifier = "mpy5-v1.13-xtensa" },
+    { tag = "v1.13", date = "2020-09-02", mpy = "5", sha = "b0932fcf2e2f9a81abf7737ed4b2573bd9ad4a49", arch = "xtensawin", arch_code = 10, arch_flags = 0, cross = "xtensa-esp32-elf-", identifier = "mpy5-v1.13-xtensawin" },
+    { tag = "v1.14", date = "2021-02-03", mpy = "5", sha = "78b23c3a1f064dc19bbee68930ef3aba110c781c", arch = "x86", arch_code = 1, arch_flags = 0, cross = "", identifier = "mpy5-v1.14-x86" },
+    { tag = "v1.14", date = "2021-02-03", mpy = "5", sha = "78b23c3a1f064dc19bbee68930ef3aba110c781c", arch = "x64", arch_code = 2, arch_flags = 0, cross = "", identifier = "mpy5-v1.14-x64" },
+    { tag = "v1.14", date = "2021-02-03", mpy = "5", sha = "78b23c3a1f064dc19bbee68930ef3aba110c781c", arch = "armv6m", arch_code = 4, arch_flags = 0, identifier = "mpy5-v1.14-armv6m" },
+    { tag = "v1.14", date = "2021-02-03", mpy = "5", sha = "78b23c3a1f064dc19bbee68930ef3aba110c781c", arch = "armv7m", arch_code = 5, arch_flags = 0, cross = "arm-none-eabi-", identifier = "mpy5-v1.14-armv7m" },
+    { tag = "v1.14", date = "2021-02-03", mpy = "5", sha = "78b23c3a1f064dc19bbee68930ef3aba110c781c", arch = "armv7emsp", arch_code = 7, arch_flags = 0, cross = "arm-none-eabi-", identifier = "mpy5-v1.14-armv7emsp" },
+    { tag = "v1.14", date = "2021-02-03", mpy = "5", sha = "78b23c3a1f064dc19bbee68930ef3aba110c781c", arch = "armv7emdp", arch_code = 8, arch_flags = 0, cross = "arm-none-eabi-", identifier = "mpy5-v1.14-armv7emdp" },
+    { tag = "v1.14", date = "2021-02-03", mpy = "5", sha = "78b23c3a1f064dc19bbee68930ef3aba110c781c", arch = "xtensa", arch_code = 9, arch_flags = 0, cross = "xtensa-lx106-elf-", identifier = "mpy5-v1.14-xtensa" },
+    { tag = "v1.14", date = "2021-02-03", mpy = "5", sha = "78b23c3a1f064dc19bbee68930ef3aba110c781c", arch = "xtensawin", arch_code = 10, arch_flags = 0, cross = "xtensa-esp32-elf-", identifier = "mpy5-v1.14-xtensawin" },
+    { tag = "v1.15", date = "2021-04-19", mpy = "5", sha = "321d1897c34f16243edf2c94913d7cf877a013d1", arch = "x86", arch_code = 1, arch_flags = 0, cross = "", identifier = "mpy5-v1.15-x86" },
+    { tag = "v1.15", date = "2021-04-19", mpy = "5", sha = "321d1897c34f16243edf2c94913d7cf877a013d1", arch = "x64", arch_code = 2, arch_flags = 0, cross = "", identifier = "mpy5-v1.15-x64" },
+    { tag = "v1.15", date = "2021-04-19", mpy = "5", sha = "321d1897c34f16243edf2c94913d7cf877a013d1", arch = "armv6m", arch_code = 4, arch_flags = 0, identifier = "mpy5-v1.15-armv6m" },
+    { tag = "v1.15", date = "2021-04-19", mpy = "5", sha = "321d1897c34f16243edf2c94913d7cf877a013d1", arch = "armv7m", arch_code = 5, arch_flags = 0, cross = "arm-none-eabi-", identifier = "mpy5-v1.15-armv7m" },
+    { tag = "v1.15", date = "2021-04-19", mpy = "5", sha = "321d1897c34f16243edf2c94913d7cf877a013d1", arch = "armv7emsp", arch_code = 7, arch_flags = 0, cross = "arm-none-eabi-", identifier = "mpy5-v1.15-armv7emsp" },
+    { tag = "v1.15", date = "2021-04-19", mpy = "5", sha = "321d1897c34f16243edf2c94913d7cf877a013d1", arch = "armv7emdp", arch_code = 8, arch_flags = 0, cross = "arm-none-eabi-", identifier = "mpy5-v1.15-armv7emdp" },
+    { tag = "v1.15", date = "2021-04-19", mpy = "5", sha = "321d1897c34f16243edf2c94913d7cf877a013d1", arch = "xtensa", arch_code = 9, arch_flags = 0, cross = "xtensa-lx106-elf-", identifier = "mpy5-v1.15-xtensa" },
+    { tag = "v1.15", date = "2021-04-19", mpy = "5", sha = "321d1897c34f16243edf2c94913d7cf877a013d1", arch = "xtensawin", arch_code = 10, arch_flags = 0, cross = "xtensa-esp32-elf-", identifier = "mpy5-v1.15-xtensawin" },
+    { tag = "v1.16", date = "2021-06-18", mpy = "5", sha = "7c51cb2307eaca1a1ccc071e0bb5eb4a5f734610", arch = "x86", arch_code = 1, arch_flags = 0, cross = "", identifier = "mpy5-v1.16-x86" },
+    { tag = "v1.16", date = "2021-06-18", mpy = "5", sha = "7c51cb2307eaca1a1ccc071e0bb5eb4a5f734610", arch = "x64", arch_code = 2, arch_flags = 0, cross = "", identifier = "mpy5-v1.16-x64" },
+    { tag = "v1.16", date = "2021-06-18", mpy = "5", sha = "7c51cb2307eaca1a1ccc071e0bb5eb4a5f734610", arch = "armv6m", arch_code = 4, arch_flags = 0, identifier = "mpy5-v1.16-armv6m" },
+    { tag = "v1.16", date = "2021-06-18", mpy = "5", sha = "7c51cb2307eaca1a1ccc071e0bb5eb4a5f734610", arch = "armv7m", arch_code = 5, arch_flags = 0, cross = "arm-none-eabi-", identifier = "mpy5-v1.16-armv7m" },
+    { tag = "v1.16", date = "2021-06-18", mpy = "5", sha = "7c51cb2307eaca1a1ccc071e0bb5eb4a5f734610", arch = "armv7emsp", arch_code = 7, arch_flags = 0, cross = "arm-none-eabi-", identifier = "mpy5-v1.16-armv7emsp" },
+    { tag = "v1.16", date = "2021-06-18", mpy = "5", sha = "7c51cb2307eaca1a1ccc071e0bb5eb4a5f734610", arch = "armv7emdp", arch_code = 8, arch_flags = 0, cross = "arm-none-eabi-", identifier = "mpy5-v1.16-armv7emdp" },
+    { tag = "v1.16", date = "2021-06-18", mpy = "5", sha = "7c51cb2307eaca1a1ccc071e0bb5eb4a5f734610", arch = "xtensa", arch_code = 9, arch_flags = 0, cross = "xtensa-lx106-elf-", identifier = "mpy5-v1.16-xtensa" },
+    { tag = "v1.16", date = "2021-06-18", mpy = "5", sha = "7c51cb2307eaca1a1ccc071e0bb5eb4a5f734610", arch = "xtensawin", arch_code = 10, arch_flags = 0, cross = "xtensa-esp32-elf-", identifier = "mpy5-v1.16-xtensawin" },
+    { tag = "v1.17", date = "2021-09-02", mpy = "5", sha = "7c54b6428058a236b8a48c93c255948ece7e718b", arch = "x86", arch_code = 1, arch_flags = 0, cross = "", identifier = "mpy5-v1.17-x86" },
+    { tag = "v1.17", date = "2021-09-02", mpy = "5", sha = "7c54b6428058a236b8a48c93c255948ece7e718b", arch = "x64", arch_code = 2, arch_flags = 0, cross = "", identifier = "mpy5-v1.17-x64" },
+    { tag = "v1.17", date = "2021-09-02", mpy = "5", sha = "7c54b6428058a236b8a48c93c255948ece7e718b", arch = "armv6m", arch_code = 4, arch_flags = 0, identifier = "mpy5-v1.17-armv6m" },
+    { tag = "v1.17", date = "2021-09-02", mpy = "5", sha = "7c54b6428058a236b8a48c93c255948ece7e718b", arch = "armv7m", arch_code = 5, arch_flags = 0, cross = "arm-none-eabi-", identifier = "mpy5-v1.17-armv7m" },
+    { tag = "v1.17", date = "2021-09-02", mpy = "5", sha = "7c54b6428058a236b8a48c93c255948ece7e718b", arch = "armv7emsp", arch_code = 7, arch_flags = 0, cross = "arm-none-eabi-", identifier = "mpy5-v1.17-armv7emsp" },
+    { tag = "v1.17", date = "2021-09-02", mpy = "5", sha = "7c54b6428058a236b8a48c93c255948ece7e718b", arch = "armv7emdp", arch_code = 8, arch_flags = 0, cross = "arm-none-eabi-", identifier = "mpy5-v1.17-armv7emdp" },
+    { tag = "v1.17", date = "2021-09-02", mpy = "5", sha = "7c54b6428058a236b8a48c93c255948ece7e718b", arch = "xtensa", arch_code = 9, arch_flags = 0, cross = "xtensa-lx106-elf-", identifier = "mpy5-v1.17-xtensa" },
+    { tag = "v1.17", date = "2021-09-02", mpy = "5", sha = "7c54b6428058a236b8a48c93c255948ece7e718b", arch = "xtensawin", arch_code = 10, arch_flags = 0, cross = "xtensa-esp32-elf-", identifier = "mpy5-v1.17-xtensawin" },
+    { tag = "v1.18", date = "2022-01-17", mpy = "5", sha = "da4b38e7562dfa451917f9d7f344a7f26de8c7bd", arch = "x86", arch_code = 1, arch_flags = 0, cross = "", identifier = "mpy5-v1.18-x86" },
+    { tag = "v1.18", date = "2022-01-17", mpy = "5", sha = "da4b38e7562dfa451917f9d7f344a7f26de8c7bd", arch = "x64", arch_code = 2, arch_flags = 0, cross = "", identifier = "mpy5-v1.18-x64" },
+    { tag = "v1.18", date = "2022-01-17", mpy = "5", sha = "da4b38e7562dfa451917f9d7f344a7f26de8c7bd", arch = "armv6m", arch_code = 4, arch_flags = 0, identifier = "mpy5-v1.18-armv6m" },
+    { tag = "v1.18", date = "2022-01-17", mpy = "5", sha = "da4b38e7562dfa451917f9d7f344a7f26de8c7bd", arch = "armv7m", arch_code = 5, arch_flags = 0, cross = "arm-none-eabi-", identifier = "mpy5-v1.18-armv7m" },
+    { tag = "v1.18", date = "2022-01-17", mpy = "5", sha = "da4b38e7562dfa451917f9d7f344a7f26de8c7bd", arch = "armv7emsp", arch_code = 7, arch_flags = 0, cross = "arm-none-eabi-", identifier = "mpy5-v1.18-armv7emsp" },
+    { tag = "v1.18", date = "2022-01-17", mpy = "5", sha = "da4b38e7562dfa451917f9d7f344a7f26de8c7bd", arch = "armv7emdp", arch_code = 8, arch_flags = 0, cross = "arm-none-eabi-", identifier = "mpy5-v1.18-armv7emdp" },
+    { tag = "v1.18", date = "2022-01-17", mpy = "5", sha = "da4b38e7562dfa451917f9d7f344a7f26de8c7bd", arch = "xtensa", arch_code = 9, arch_flags = 0, cross = "xtensa-lx106-elf-", identifier = "mpy5-v1.18-xtensa" },
+    { tag = "v1.18", date = "2022-01-17", mpy = "5", sha = "da4b38e7562dfa451917f9d7f344a7f26de8c7bd", arch = "xtensawin", arch_code = 10, arch_flags = 0, cross = "xtensa-esp32-elf-", identifier = "mpy5-v1.18-xtensawin" },
+    { tag = "v1.19", date = "2022-06-16", mpy = "6", sha = "d7919ea71e7b7cc203ca984cc2f4a55019634835", arch = "x86", arch_code = 1, arch_flags = 0, cross = "", identifier = "mpy6-v1.19-x86" },
+    { tag = "v1.19", date = "2022-06-16", mpy = "6", sha = "d7919ea71e7b7cc203ca984cc2f4a55019634835", arch = "x64", arch_code = 2, arch_flags = 0, cross = "", identifier = "mpy6-v1.19-x64" },
+    { tag = "v1.19", date = "2022-06-16", mpy = "6", sha = "d7919ea71e7b7cc203ca984cc2f4a55019634835", arch = "armv6m", arch_code = 4, arch_flags = 0, cross = "arm-none-eabi-", identifier = "mpy6-v1.19-armv6m" },
+    { tag = "v1.19", date = "2022-06-16", mpy = "6", sha = "d7919ea71e7b7cc203ca984cc2f4a55019634835", arch = "armv7m", arch_code = 5, arch_flags = 0, cross = "arm-none-eabi-", identifier = "mpy6-v1.19-armv7m" },
+    { tag = "v1.19", date = "2022-06-16", mpy = "6", sha = "d7919ea71e7b7cc203ca984cc2f4a55019634835", arch = "armv7emsp", arch_code = 7, arch_flags = 0, cross = "arm-none-eabi-", identifier = "mpy6-v1.19-armv7emsp" },
+    { tag = "v1.19", date = "2022-06-16", mpy = "6", sha = "d7919ea71e7b7cc203ca984cc2f4a55019634835", arch = "armv7emdp", arch_code = 8, arch_flags = 0, cross = "arm-none-eabi-", identifier = "mpy6-v1.19-armv7emdp" },
+    { tag = "v1.19", date = "2022-06-16", mpy = "6", sha = "d7919ea71e7b7cc203ca984cc2f4a55019634835", arch = "xtensa", arch_code = 9, arch_flags = 0, cross = "xtensa-lx106-elf-", identifier = "mpy6-v1.19-xtensa" },
+    { tag = "v1.19", date = "2022-06-16", mpy = "6", sha = "d7919ea71e7b7cc203ca984cc2f4a55019634835", arch = "xtensawin", arch_code = 10, arch_flags = 0, cross = "xtensa-esp32-elf-", identifier = "mpy6-v1.19-xtensawin" },
+    { tag = "v1.19.1", date = "2022-06-17", mpy = "6", sha = "9b486340da22931cde82872f79e1c34db959548b", arch = "x86", arch_code = 1, arch_flags = 0, cross = "", identifier = "mpy6-v1.19.1-x86" },
+    { tag = "v1.19.1", date = "2022-06-17", mpy = "6", sha = "9b486340da22931cde82872f79e1c34db959548b", arch = "x64", arch_code = 2, arch_flags = 0, cross = "", identifier = "mpy6-v1.19.1-x64" },
+    { tag = "v1.19.1", date = "2022-06-17", mpy = "6", sha = "9b486340da22931cde82872f79e1c34db959548b", arch = "armv6m", arch_code = 4, arch_flags = 0, cross = "arm-none-eabi-", identifier = "mpy6-v1.19.1-armv6m" },
+    { tag = "v1.19.1", date = "2022-06-17", mpy = "6", sha = "9b486340da22931cde82872f79e1c34db959548b", arch = "armv7m", arch_code = 5, arch_flags = 0, cross = "arm-none-eabi-", identifier = "mpy6-v1.19.1-armv7m" },
+    { tag = "v1.19.1", date = "2022-06-17", mpy = "6", sha = "9b486340da22931cde82872f79e1c34db959548b", arch = "armv7emsp", arch_code = 7, arch_flags = 0, cross = "arm-none-eabi-", identifier = "mpy6-v1.19.1-armv7emsp" },
+    { tag = "v1.19.1", date = "2022-06-17", mpy = "6", sha = "9b486340da22931cde82872f79e1c34db959548b", arch = "armv7emdp", arch_code = 8, arch_flags = 0, cross = "arm-none-eabi-", identifier = "mpy6-v1.19.1-armv7emdp" },
+    { tag = "v1.19.1", date = "2022-06-17", mpy = "6", sha = "9b486340da22931cde82872f79e1c34db959548b", arch = "xtensa", arch_code = 9, arch_flags = 0, cross = "xtensa-lx106-elf-", identifier = "mpy6-v1.19.1-xtensa" },
+    { tag = "v1.19.1", date = "2022-06-17", mpy = "6", sha = "9b486340da22931cde82872f79e1c34db959548b", arch = "xtensawin", arch_code = 10, arch_flags = 0, cross = "xtensa-esp32-elf-", identifier = "mpy6-v1.19.1-xtensawin" },
     { tag = "v1.20.0", date = "2023-04-26", mpy = "6.1", sha = "294baf52b346e400e2255c6c1e82af5b978b18f7", arch = "x86", arch_code = 1, arch_flags = 0, cross = "", identifier = "mpy6.1-v1.20.0-x86" },
     { tag = "v1.20.0", date = "2023-04-26", mpy = "6.1", sha = "294baf52b346e400e2255c6c1e82af5b978b18f7", arch = "x64", arch_code = 2, arch_flags = 0, cross = "", identifier = "mpy6.1-v1.20.0-x64" },
     { tag = "v1.20.0", date = "2023-04-26", mpy = "6.1", sha = "294baf52b346e400e2255c6c1e82af5b978b18f7", arch = "armv6m", arch_code = 4, arch_flags = 0, cross = "arm-none-eabi-", identifier = "mpy6.1-v1.20.0-armv6m" },
