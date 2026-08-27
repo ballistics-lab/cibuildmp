@@ -220,14 +220,22 @@ domain with no per-cell data on its own, correctly a bare list) still
 produces invalid combinations once crossed against ABI at runtime — the
 exact PyPy-on-`riscv64` mistake A6's own cibuildwheel reading warns
 against, just discovered here independently before that section was
-written, not after. **The fix is the same one A6 lands on for the whole
-resource: the natmod version×arch space is not computed at runtime from
-two independent lists, it is a flat, pre-verified list of
-`{identifier, abi, tag, arch}` facts** — `mpy6.3-x64` is in the list
-because it is real; `mpy6.1-rv32imc` is not, because it was checked and
-found not to exist, not because a formula happened to exclude it. See
-A6 below for the resource shape this settles on; this paragraph's own
-earlier "crossed at runtime" description above is superseded by it.
+written, not after. **Corrected once more, directly, after reaching for
+cibuildwheel's own flat `python_configurations` row-per-identifier shape
+as the fix and being pushed back on: that is not what this record's own
+central argument calls for.** The bug is real, but the fix is not
+flattening into one table — it is scoping `archs` to the *right node* of
+the tree this whole record already argues for: `[natmod."6.1"]` and
+`[natmod."6.2"]` each carry their own `archs` list (eight arches, no
+`rv32imc`/`rv64imc`), `[natmod."6.3"]` carries its own (all ten). No
+global `archs` list crossed against a separate ABI table, no need to
+flatten to one row per identifier either — the tree structure itself
+makes the invalid combination unwritable, the same way a tree node makes
+a per-board override unwritable-as-ambiguous elsewhere in this record.
+See A6 below for the corrected resource shape; both this paragraph's
+"crossed at runtime" description and its own immediately-prior "flat
+list of facts" correction are superseded by it — third position on this
+one narrow point, recorded rather than silently overwritten again.
 
 **Usermod: the domain is every known tag (the same pin table's own 23
 keys, not collapsed — [0051]'s own point stands, every usermod tag is
@@ -888,54 +896,51 @@ version and board axes are built on (see "Identifier grammar" above);
 shape corrected directly against a real reference, not designed from
 scratch.**
 
-**CLAUDE.md's own first rule, applied here directly**: cibuildwheel ships
-a real `cibuildwheel/resources/build-platforms.toml` — read directly this
-session, not recalled, after an early draft here got the shape wrong.
-Its own structure is a flat `python_configurations = [{identifier,
-version, url, sha256}, ...]` list per platform, not a set of independent
-axis-lists crossed at runtime — and *why* clarifies what to copy and what
-not to: PyPy exists for `x86_64`/`aarch64`/`i686` but not `ppc64le`/
-`s390x`/`armv7l`/`riscv64` (visible directly in the real file, not
-derivable from any formula), and each `(python, platform)` cell carries
-its own download URL and hash that cannot be factored out of the axes
-either. **The lesson is "store real per-cell facts flatly wherever a
-cell's own data cannot be derived by crossing independent axes" — not
-"flatten everything into one list."** cibuildwheel's own domain has no
-depth beyond platform -> flat config list, because CPython-per-platform
-genuinely has none; cibuildmp's own domain does, and forcing
-cibuildwheel's flat shape onto a tree this record's own diagnosis already
-argues is real would be exactly the mistake CLAUDE.md's own four cited
-examples are about.
+**CLAUDE.md's own first rule, applied here directly, twice over — first
+by reading the real file, second by not over-applying what it teaches**:
+cibuildwheel ships a real `cibuildwheel/resources/build-platforms.toml`
+— read directly this session, not recalled, after an early draft here
+got the shape wrong. Its own structure is a flat `python_configurations
+= [{identifier, version, url, sha256}, ...]` list per platform — and
+*why* is the actual lesson, not the flatness itself: PyPy exists for
+`x86_64`/`aarch64`/`i686` but not `ppc64le`/`s390x`/`armv7l`/`riscv64`
+(visible directly in the real file, not derivable from a formula), and
+each `(python, platform)` cell carries its own download URL and hash
+that cannot be factored out of the axes either. **The lesson is "never
+let an invalid combination become writable/computable" — cibuildwheel
+achieves that by flattening, because its own domain has no depth beyond
+platform -> config list to flatten *from*.** cibuildmp's own domain does
+have that depth (this record's own central argument), so the fix a real,
+live-verified invalid-combination bug needed (below) is not flattening
+to cibuildwheel's own row shape — a first attempt at exactly that was
+tried here and corrected right back — but scoping each axis to the
+correct *tree node*, so the same guarantee (no invalid combination is
+writable) holds through nesting instead of through flatness.
 
 Applying the real criterion per axis, checked directly, not assumed:
 
-- **`archs` (natmod) — corrected again, live, after first being called a
-  safe bare list: the axis itself has no per-cell data, but *crossing* it
-  against ABI is not automatically valid, and assuming otherwise was
-  itself a live-verified mistake** (below). `boards` (qemu), `archs`
-  (unix/windows) have no equivalent cross-axis validity question (qemu's
-  three boards and unix/windows's own archs are not further crossed
-  against anything else that could invalidate a combination) and stay
-  bare lists.
-- **natmod's own version×arch space is not a cross-product at all — it
-  is a flat, pre-verified list of `{identifier, abi, tag, arch}` facts,
-  the same shape cibuildwheel's own `python_configurations` uses, for the
-  same reason.** Verified live, not assumed: cloned `v1.20.0` (ABI 6.1)
-  and `v1.23.0-preview` (ABI 6.2) and grepped each one's own
+- **`boards` (qemu), `archs` (unix/windows)** — no per-cell data, no
+  cross-axis validity question either (nothing else these are crossed
+  against could invalidate a combination); stay bare lists, unaffected
+  by anything below.
+- **natmod's own `archs` moves from one global list to a per-ABI-node
+  list — the tree, not a flat table, is what makes the invalid
+  combination unwritable.** Verified live, not assumed: cloned `v1.20.0`
+  (ABI 6.1) and `v1.23.0-preview` (ABI 6.2) and grepped each one's own
   `py/dynruntime.mk` directly — neither has an `rv32imc`/`rv64imc` branch
-  at all; RISC-V natmod support only exists from ABI 6.3 onward. So
-  `NATMOD_ARCHS` (today's 10 arches) is not uniformly valid across all 3
-  ABIs — crossing it against `[mpy-abi]` at runtime would happily
-  generate `mpy6.1-rv32imc`, an identifier naming a target that cannot be
-  built, exactly the PyPy-on-`riscv64` mistake cibuildwheel's own file
-  avoids by enumerating instead of computing. `arch_flags` (rv32imc-only)
-  compounds onto this the same way — a flat list entry per real
-  `(abi, arch, arch_flags)` combination, not three independently-crossed
-  axes. Refreshed by walking each known tag's own checked-out
-  `dynruntime.mk` (or `mpy_ld.py`'s own arch table) once, at maintainer-
-  script time — the same "verify by building/inspecting a real checkout
-  once, cache the result" pattern `[mpy-abi]` itself already follows for
-  the ABI mapping.
+  at all; RISC-V natmod support only exists from ABI 6.3 onward. A single
+  top-level `archs` list crossed against `[mpy-abi]` at runtime would
+  happily generate `mpy6.1-rv32imc`, an identifier naming a target that
+  cannot be built. Decided shape: `[natmod."6.1"]`/`[natmod."6.2"]` each
+  carry their own `archs` (eight entries, no RISC-V); `[natmod."6.3"]`
+  carries its own (all ten) — three real tree nodes, each individually
+  accurate, not one list plus a separate validity rule to remember to
+  apply. `[natmod."6.3".arch-flags.rv32imc]` nests one level further for
+  the same reason `arch_flags` was already correctly scoped to one arch
+  (D15) — now also scoped to the one ABI that actually has it. Refreshed
+  by walking each known tag's own checked-out `dynruntime.mk` once at
+  maintainer-script time — the same "verify by inspecting a real checkout
+  once, cache the result" pattern `[mpy-abi]` itself already follows.
 - **`[mpy-abi]` (tag -> abi)** — already exactly the flat-map-of-real-facts
   shape this lesson calls for; unchanged.
 - **`pinned_docker_images.toml` (arch -> image)** — same, already correct,
