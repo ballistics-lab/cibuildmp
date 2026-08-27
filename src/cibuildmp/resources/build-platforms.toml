@@ -300,6 +300,7 @@ identifiers = [
 [usermod.unix]
 identifier_format = "{tag}-{arch}"
 artifacts_dir_name = "{name}-{ver}-{identifier}"
+pre_checkout = "apt install build-essential git python3 pkg-config libffi-dev"
 post_checkout = "make -C mpy-cross && make -C ports/unix submodules"
 identifiers = [
     { tag = "v1.20.0", arch = "manylinux_2_28_x86_64", identifier = "v1.20.0-manylinux_2_28_x86_64" },
@@ -538,6 +539,7 @@ identifiers = [
 [usermod.windows]
 identifier_format = "{tag}-{arch}"
 artifacts_dir_name = "{name}-{ver}-{identifier}"
+pre_checkout = "apt-get install python3 build-essential gcc-mingw-w64"
 post_checkout = "make -C mpy-cross"
 identifiers = [
     { tag = "v1.20.0", arch = "win32", cross = "i686-w64-mingw32-", identifier = "v1.20.0-win32" },
@@ -759,6 +761,7 @@ identifiers = [
 [usermod.esp32]
 identifier_format = "{tag}-esp32-{board}"
 artifacts_dir_name = "{name}-{ver}-{identifier}[-{variant}]"
+pre_checkout = "git clone -b v5.5.1 --recursive https://github.com/espressif/esp-idf.git && cd esp-idf && ./install.sh esp32"
 post_checkout = "idf.py -D UPDATE_SUBMODULES=1 reconfigure"
 identifiers = [
     { tag = "v1.20.0", idf_version = "v4.4", board = "ESP32_S2_WROVER", mcu = "esp32s2", product = "ESP32-S2 WROVER", vendor = "Espressif", variants = [], identifier = "v1.20.0-esp32-ESP32_S2_WROVER" },
@@ -3125,6 +3128,7 @@ identifiers = [
 [usermod.psoc-edge]
 identifier_format = "{tag}-psoc-edge-{board}"
 artifacts_dir_name = "{name}-{ver}-{identifier}"
+pre_checkout = "sudo apt-get install gcc-arm-none-eabi libnewlib-arm-none-eabi"
 post_checkout = "make -C mpy-cross && make -C ports/psoc-edge BOARD={board} submodules"
 identifiers = [
     { tag = "v1.29.0", board = "KIT_PSE84_AI", mcu = "PSE846GPS2DBZC4", product = "KIT_PSE84_AI", vendor = "Infineon Technologies", variants = [], cross = "arm-none-eabi-", identifier = "v1.29.0-psoc-edge-KIT_PSE84_AI" },
@@ -3167,6 +3171,7 @@ identifiers = [
 [usermod.esp8266]
 identifier_format = "{tag}-esp8266-{board}"
 artifacts_dir_name = "{name}-{ver}-{identifier}[-{variant}]"
+pre_checkout = "docker pull larsks/esp-open-sdk"
 post_checkout = "make -C ports/esp8266 submodules && make -C mpy-cross"
 identifiers = [
     { tag = "v1.18", board = "GENERIC", mcu = "esp8266", product = "ESP8266 with 2MiB+ flash", vendor = "Espressif", variants = ["ota"], cross = "xtensa-lx106-elf-", identifier = "v1.18-esp8266-GENERIC" },
