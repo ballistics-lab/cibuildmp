@@ -58,11 +58,17 @@ function of the MicroPython tag/sha already in [tags] -- checking it out
 is one `git ls-tree HEAD <path>` against a checkout of that same sha away,
 not a separate fact worth storing on every row. Dropped rather than kept
 around unused.
+
+`cross` (this port's own `ports/<port>/Makefile` `CROSS_COMPILE`
+default) is read per tag too now -- see parse_cross_compile()'s own
+docstring for why some ports genuinely have none to report (rp2, alif)
+rather than one silently missed.
 """
 
 from __future__ import annotations
 
 import argparse
+import re
 import shutil
 import subprocess
 import sys
@@ -120,12 +126,43 @@ def commit_sha(dest: Path) -> str:
     return out.stdout.strip()
 
 
+def parse_cross_compile(port: str, checkout: Path) -> str | None:
+    """This port's own `CROSS_COMPILE` default from its real
+    `ports/<port>/Makefile`, or None wherever that Makefile sets none --
+    confirmed live to be a real, meaningful distinction, not a scan gap:
+    `py/mkenv.mk` (every port's own Makefile includes it) sets no default
+    of its own (`AS = $(CROSS_COMPILE)as` etc, `CROSS_COMPILE` itself
+    unset), so a port that never assigns it (rp2 -- a CMake wrapper, its
+    real toolchain is resolved inside the vendored `lib/pico-sdk`
+    submodule, not this Makefile; alif -- no default anywhere, must be
+    passed in externally) genuinely has none to report here, the same
+    way `parse_cross_prefixes()` in refresh_natmod_archs.py already
+    leaves a natmod arch's own `cross` absent rather than guessed.
+
+    Checked stable across every tag this project has scanned so far for
+    every port that does set one (mimxrt/samd/stm32/psoc-edge/cc3200/
+    renesas-ra/nrf: `arm-none-eabi-`; esp8266: `xtensa-lx106-elf-`) --
+    still read per tag, not cached across tags, since nothing here
+    guarantees it never changes (esp32's own idf_version already proved
+    a per-tag/per-MCU toolchain fact can vary within this same project).
+    """
+    makefile = checkout / "ports" / port / "Makefile"
+    try:
+        text = makefile.read_text(errors="ignore")
+    except OSError:
+        return None
+    match = re.search(r"^CROSS_COMPILE\s*[?:]?=\s*(\S+)\s*$", text, re.MULTILINE)
+    return match.group(1) if match else None
+
+
 def board_rows(tag: str, port: str, checkout: Path) -> list[dict]:
     try:
         db = Database(mpy_root_directory=checkout, port_filter=port)
     except BoardDatabaseError as exc:
         print(f"!! {tag}: {exc}", file=sys.stderr)
         return []
+
+    cross = parse_cross_compile(port, checkout)
 
     rows = []
     for name in sorted(db.boards):
@@ -138,6 +175,7 @@ def board_rows(tag: str, port: str, checkout: Path) -> list[dict]:
                 "product": board.product,
                 "vendor": board.vendor,
                 "variants": [v.name for v in board.variants],
+                "cross": cross,
                 "identifier": f"{tag}-{port}-{name}",
             }
         )
