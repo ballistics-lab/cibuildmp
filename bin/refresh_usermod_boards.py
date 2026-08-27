@@ -12,12 +12,16 @@ board-database reader `usermod/build.py` already trusts, rather than
 parsing the JSON a second time by hand.
 
     bin/refresh_usermod_boards.py esp32 v1.20.0 v1.21.0 v1.24.0 v1.29.0 > /tmp/esp32.toml
-    bin/refresh_usermod_boards.py rp2 v1.20.0 v1.28.0 v1.29.0 > /tmp/rp2.toml
+    bin/refresh_usermod_boards.py stm32 v1.20.0 v1.28.0 v1.29.0 > /tmp/stm32.toml
 
 Generalized from an esp32-only version (`bin/refresh_esp32_boards.py`) once
 a second board.json-backed port (rp2) needed the exact same treatment --
 `Database`'s own `port_filter` was already port-agnostic, only this
-script's own PORT constant was not.
+script's own PORT constant was not. Covers every board.json-backed
+Tier-1 port `resources/build-platforms.toml` has a section for as of this
+writing: esp32, rp2, mimxrt, samd, stm32 -- port is a plain positional
+argument, so a new one needs no code change here, only a new
+`[usermod.<port>]` section built by running this against it.
 
 Unlike `bin/refresh_natmod_archs.py`, this does NOT auto-discover tags:
 board.json scanning needs a real directory tree per tag (a sparse clone,
