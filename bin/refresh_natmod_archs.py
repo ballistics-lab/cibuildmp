@@ -189,6 +189,33 @@ def parse_cross_prefixes(text: str) -> dict[str, str]:
     return cross_map
 
 
+def fetch_rv32_extensions(ref: str, token: str | None) -> dict[str, int] | None:
+    """{extension_name: bit_value} from tools/mpy_ld.py's own
+    RV32_EXTENSIONS dict, or None if this tag's mpy_ld.py doesn't have one
+    yet -- confirmed live: absent at v1.27.0, present (zba=1, zcmp=2) from
+    v1.28.0 onward, even though rv32imc itself is natmod-buildable from
+    v1.24.0 -- --arch-flags support arrived four tags after the arch
+    itself did, a real gap, not a scan miss.
+
+    This is the vocabulary of what --arch-flags values are even
+    expressible at this tag, not a build's own choice of which to use --
+    cibuildmp requests none by default, so this is what lets
+    identifiers() enumerate the real, distinct natmod targets a value
+    like `zba` or `zba,zcmp` actually produces, matching
+    tools/mpy_ld.py's own validate_arch_flags() bitwise-OR parsing.
+    """
+    text = fetch_raw("tools/mpy_ld.py", ref, token)
+    if text is None:
+        return None
+    match = re.search(r"RV32_EXTENSIONS\s*=\s*\{([^}]*)\}", text)
+    if not match:
+        return None
+    extensions: dict[str, int] = {}
+    for name, shift in re.findall(r'"(\w+)"\s*:\s*1\s*<<\s*(\d+)', match.group(1)):
+        extensions[name] = 1 << int(shift)
+    return extensions or None
+
+
 def get_mpy_info(ref: str, token: str | None) -> dict | None:
     text = fetch_raw("py/persistentcode.h", ref, token)
     if text is None:
@@ -220,7 +247,16 @@ def identifiers(token: str | None):
     across every section rather than repeated per row: sha/date are pure
     per-tag facts, never varying by arch within one tag). Each row itself
     no longer carries sha -- [natmod]'s own rows read it back from [tags]
-    by tag name instead of repeating it."""
+    by tag name instead of repeating it.
+
+    One row per (tag, arch), identifier unaffected by arch_flags --
+    arch_flags is a real compatibility fact (which --arch-flags bits a
+    .mpy built for this row's arch would carry, checked as a bitmask
+    subset at load time, see py/persistentcode.c), not a naming axis:
+    identifying which extensions are even expressible at a given tag is
+    main()'s own `[natmod.rv32imc-extensions]` table's job
+    (fetch_rv32_extensions()), kept separate from this per-arch row.
+    """
     for tag_info in fetch_tags(token):
         tag_name = tag_info["name"]
         sha = tag_info["commit"]["sha"]
@@ -309,6 +345,28 @@ def main() -> int:
     for row in rows:
         print("    " + _inline_row(row) + ",")
     print("]")
+
+    # Real --arch-flags vocabulary per tag (name -> bit value), fetched
+    # only for tags that actually have an rv32imc row -- every other
+    # arch's arch_flags stays structurally 0, nothing to look up for it.
+    # A separate table, not folded into `identifiers` above: this is a
+    # per-tag fact about which flags are *expressible* at all (which
+    # cibuildmp does not itself request by default), not a naming axis
+    # for the rows themselves -- see identifiers()'s own docstring.
+    rv32imc_tags = list(dict.fromkeys(row["tag"] for row in rows if row["arch"] == "rv32imc"))
+    if rv32imc_tags:
+        print()
+        print("[natmod.rv32imc-extensions]")
+        for tag_name in rv32imc_tags:
+            sha = tags[tag_name]["sha"]
+            extensions = fetch_rv32_extensions(sha, token)
+            if not extensions:
+                continue
+            entries = ", ".join(
+                _inline_row({"name": name, "arch_flags": flags})
+                for name, flags in extensions.items()
+            )
+            print(f'"{tag_name}" = [{entries}]')
     return 0
 
 
