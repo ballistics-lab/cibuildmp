@@ -1371,6 +1371,95 @@ node names the same way A5's pre-build audit validates everything else
 offline — see the new "`build-platforms.toml`, formalized" section below,
 added for exactly this reason.
 
+## Addendum, 2026-08-27 — A6 continued: `docker_image` must resolve at runtime from
+`cross`/`port`/`arch`, not live as static data anywhere; A6's own "already correct,
+unchanged" line about `pinned_docker_images.toml` was premature
+
+Two false starts, both caught and reverted before landing on the real requirement —
+recorded because both are instructive, not just the outcome. First attempt: a
+`docker_image` field added directly to every one of `build-platforms.toml`'s 3354 rows
+(computed by three ad-hoc dicts inside `bin/refresh_natmod_archs.py`/
+`bin/refresh_usermod_boards.py`). Wrong for the same reason A6's own "fact-first, not
+axis-first" lesson already argued against `refresh_*.py` inventing anything: which Docker
+image a target builds in is not a fact about that MicroPython tag at all — it is
+infrastructure the refresh scripts have no business computing, exactly the "an item must
+resolve automatically, and `docker_image` cannot [the way an upstream-README fact can]"
+distinction the user drew directly. Reverted (`git revert 3eed752`, commit `ce92d7e`).
+Second attempt considered and also rejected before being written: storing `docker_image`
+as static per-row data in `build-platforms.toml` at all, computed once by a maintainer
+script and committed. Still wrong, one level further down — a *runtime* fact
+(`dockerrun.py`'s own docstring already says so: "cibuildmp itself never builds a Docker
+image... a maintainer edits *data*, not something an end user configures") belongs
+resolved by code from other already-verified facts (`cross`, `port`, `arch`) each time a
+build runs, not duplicated as a third copy of information `cross` already carries.
+
+**The mechanism the second attempt was reaching for already exists and does not need
+inventing**: `dockerrun.py`'s `image_for()`/`ensure_image()`, resolving from the
+already-separate `resources/pinned_docker_images.toml` (never `build-platforms.toml`)
+with a `CIBMP_<PORT>_<TARGET>_DOCKER_IMAGE` env override that always wins. `natmod`/
+`unix`/`qemu`/`webassembly`/`windows` are already wired to it through the real CLI;
+`esp32` alone has no image yet ([0028], host-provisioned). So A6's own line above —
+`"pinned_docker_images.toml (arch -> image) — same, already correct, unchanged"` — was
+premature: the *existence* of a resolver was correct, but not its *shape*. That line is
+left standing above rather than edited, per this record's own append-only discipline;
+this addendum is the correction.
+
+**What is actually wrong with the shape, verified directly against
+`build-platforms.toml`'s own now-complete `cross` column (not recalled from an earlier,
+design-only sketch this same session produced before this column existed):**
+
+- `image_for()` hardcodes two shapes: `unix` keyed per `(arch, floor)`, every other port
+  keyed by port name alone, one image each. That undercounts the real toolchain overlap
+  — `arm-none-eabi-` alone is natmod's `armv7m`/`armv7emsp`/`armv7emdp` *and* eight usermod
+  ports (`qemu` partially, `mimxrt`, `samd`, `stm32`, `psoc-edge`, `cc3200`, `renesas-ra`,
+  `nrf`) — eleven targets that could share one image and today have up to nine separate
+  `[port]` entries plus natmod's own `[port].natmod` doing the same `arm-none-eabi-gcc`
+  work nine-plus times over. `xtensa-lx106-elf-` is natmod's `xtensa` *and* `esp8266`,
+  two more currently-separate images for one toolchain.
+- Joining `xtensawin` (natmod, real `cross = "xtensa-esp32-elf-"`) with `esp32` (usermod,
+  stores no `cross` at all — ESP-IDF resolves its own toolchain internally, confirmed
+  this session, not assumed) cannot be done by string-equality on `cross`: `esp32`'s row
+  has nothing to match against. Any shared-image rule needs an explicit port/arch
+  exception list alongside the `cross`-keyed groups, not a single lookup.
+- **The bigger correction: `cross` is not uniformly a per-port fact, so "one image per
+  port" is not a valid target shape even for the ports that keep their own image.**
+  `qemu` alone carries three distinct `cross` values across its own boards
+  (`arm-none-eabi-` for six boards, `riscv64-unknown-elf-` for `VIRT_RV32`/`VIRT_RV64`,
+  `powerpc64le-linux-gnu-` for `POWERNV9`) and `windows` carries three across its arches
+  (`x86_64-`/`aarch64-`/`i686-w64-mingw32-`) — both confirmed live against
+  `build-platforms.toml`'s own rows this session, not assumed uniform by port the way
+  `image_for()` currently treats them. `windows`'s single shared image may still be
+  correct if `llvm-mingw` genuinely bundles all three target triples in one image (not
+  yet verified against the real Dockerfile/toolchain) — but `qemu`'s riscv/ppc boards
+  resolving to whatever single image its port-keyed entry names today would be
+  outright wrong, the same class of bug 0043 already fixed once for `unix`
+  cross-compiling from the wrong architecture. `qemu` needs the same per-row
+  granularity `unix` already has, not the single-image treatment it currently gets
+  alongside `windows`/`webassembly`.
+
+**A narrower, already-landed, and genuinely orthogonal simplification shipped this same
+session, ahead of any resolver redesign** (commit `ce94021`, record [0044]'s own new
+addendum has the full account): nine of `unix`'s fifteen `(arch, floor)` cells were
+verified to add no cibuildmp layer over their pypa base at all (a bare `FROM` and
+nothing else) and no longer get a cibuildmp-published image — `pinned_docker_images.toml`
+points those nine cells straight at `pinned_pypa_images.toml`'s own digest instead.
+This is data cleanup within the *existing* resolver shape (`image_for()`'s own
+`unix`-keyed branch needed no code change), not the toolchain-grouping redesign above —
+worth stating plainly so the two are not conflated: one is done, the other is not.
+
+**Left open, on the user's own direction not to spin up a separate design document for
+it — this addendum is that record, in place of a new one.** Concretely undecided:
+whether the toolchain-group key becomes a new field (`toolchain` / `image_group`) derived
+once by a refresh-adjacent step from each row's own `cross` (plus the `esp32`/`xtensawin`
+exception), or a pure function computed by `dockerrun.py` itself from `cross` at
+resolution time with no new stored field at all — the latter keeps `build-platforms.toml`
+describing only verified upstream facts (A6's own governing rule) and treats the
+toolchain grouping as what it actually is, infrastructure policy, not a fact about a
+MicroPython tag. Also open: the concrete Dockerfiles for the four proposed consolidated
+images (`arm_embedded`, `riscv_embedded`, `xtensa_lx106`, `esp_idf` — sketched, none
+written), `qemu`'s move to per-board resolution, and whether `windows`'s single image is
+actually correct or itself needs splitting. No code for any of this has been written.
+
 [0001]: 0001-natmod-first.md
 [0004]: 0004-config-file-location.md
 [0005]: 0005-one-identifier-namespace.md
