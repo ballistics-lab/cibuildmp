@@ -440,3 +440,35 @@ identifiers = [
     { tag = "v1.30.0-preview", date = "2026-08-25", arch = "win_amd64", identifier = "v1.30.0-preview-win_amd64" },
     { tag = "v1.30.0-preview", date = "2026-08-25", arch = "win_arm64", identifier = "v1.30.0-preview-win_arm64" },
 ]
+
+# `identifier` is bare `{tag}` -- no arch suffix, unlike unix/windows.
+# `variant` ("pyscript", the only one this project currently builds --
+# `build_webassembly()`'s own hardcoded default, not yet a config axis)
+# is real per-row metadata, kept off the identifier deliberately: a
+# second variant is expected eventually and belongs in the identifier
+# once it's an actual selectable axis, not now as a single always-true
+# value copied onto every row.
+#
+# emsdk's own pinned version (6.0.8, docker/webassembly.Dockerfile) is
+# NOT a per-row field at all, unlike unix's manylinux/musllinux glibc
+# floor: it is one global toolchain pin baked into a single Docker image
+# and used identically for every tag here, not a consumer-facing ABI
+# tier that varies per build the way a glibc floor does.
+[usermod.webassembly]
+identifiers = [
+    { tag = "v1.20.0", date = "2023-04-26", variant = "pyscript", identifier = "v1.20.0" },
+    { tag = "v1.21.0", date = "2023-10-06", variant = "pyscript", identifier = "v1.21.0" },
+    { tag = "v1.22.0", date = "2023-12-27", variant = "pyscript", identifier = "v1.22.0" },
+    { tag = "v1.22.1", date = "2024-01-05", variant = "pyscript", identifier = "v1.22.1" },
+    { tag = "v1.22.2", date = "2024-02-20", variant = "pyscript", identifier = "v1.22.2" },
+    { tag = "v1.23.0", date = "2024-05-31", variant = "pyscript", identifier = "v1.23.0" },
+    { tag = "v1.24.0", date = "2024-10-26", variant = "pyscript", identifier = "v1.24.0" },
+    { tag = "v1.24.1", date = "2024-11-29", variant = "pyscript", identifier = "v1.24.1" },
+    { tag = "v1.25.0", date = "2025-04-16", variant = "pyscript", identifier = "v1.25.0" },
+    { tag = "v1.26.0", date = "2025-08-09", variant = "pyscript", identifier = "v1.26.0" },
+    { tag = "v1.26.1", date = "2025-09-11", variant = "pyscript", identifier = "v1.26.1" },
+    { tag = "v1.27.0", date = "2025-12-10", variant = "pyscript", identifier = "v1.27.0" },
+    { tag = "v1.28.0", date = "2026-04-06", variant = "pyscript", identifier = "v1.28.0" },
+    { tag = "v1.29.0", date = "2026-08-24", variant = "pyscript", identifier = "v1.29.0" },
+    { tag = "v1.30.0-preview", date = "2026-08-25", variant = "pyscript", identifier = "v1.30.0-preview" },
+]
