@@ -17,11 +17,12 @@ parsing the JSON a second time by hand.
 Generalized from an esp32-only version (`bin/refresh_esp32_boards.py`) once
 a second board.json-backed port (rp2) needed the exact same treatment --
 `Database`'s own `port_filter` was already port-agnostic, only this
-script's own PORT constant was not. Covers every board.json-backed
-Tier-1 port `resources/build-platforms.toml` has a section for as of this
-writing: esp32, rp2, mimxrt, samd, stm32 -- port is a plain positional
-argument, so a new one needs no code change here, only a new
-`[usermod.<port>]` section built by running this against it.
+script's own PORT constant was not. `port` is a plain positional
+argument, so any board.json-backed port needs no code change here, only
+a new `[usermod.<port>]` section built by running this against it. Every
+port `resources/build-platforms.toml` has such a section for as of this
+writing went through this exact tool: Tier 1's esp32/rp2/mimxrt/samd/
+stm32, and Tier 2's psoc-edge.
 
 Unlike `bin/refresh_natmod_archs.py`, this does NOT auto-discover tags:
 board.json scanning needs a real directory tree per tag (a sparse clone,
