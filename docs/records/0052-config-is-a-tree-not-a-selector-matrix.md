@@ -917,8 +917,8 @@ row (self-describing outside its own nesting, not only implied by table
 position) — `mpy6.3-v1.28.0-x64` and `mpy6.3-v1.29.0-x64` are two
 distinct rows despite sharing ABI 6.3, because both are independently
 real. This *is* still a tree at the top level (`[natmod]`,
-`[usermod.unix]`, `[usermod.esp32.boards.<name>]` — not one
-undifferentiated cibuildwheel-style list mixing every family together);
+`[usermod.unix]`, `[usermod.esp32]` — not one undifferentiated
+cibuildwheel-style list mixing every family together);
 the correction is that each leaf's own contents are flat, verified rows,
 not a further-abstracted axis list that can silently assume homogeneity
 it was never checked for. `identifier` here is the fact table's own key
@@ -948,35 +948,34 @@ Applying this per axis, checked directly, not assumed:
   tag, not duplicated data).
 - **`pinned_docker_images.toml` (arch -> image)** — same, already correct,
   unchanged.
-- **`esp32`'s (and `zephyr`'s) own boards — genuinely need real nesting,
-  deeper than a name list, confirmed directly against `usermod/boards.py`
-  this session**: `Board` (`boards.py:141-172`) carries real per-board
-  data a bare list would lose — `mcu`, `product`, `vendor`, `url`, and
-  critically **`variants: list[Variant]`, a board's own further nested
-  sub-axis** (`DP_THREAD`, etc.) — meaning the real tree depth here is
+- **`esp32`'s (and `zephyr`'s) own boards — one `identifiers` list, board
+  metadata folded directly into each row, not a separate sidecar table.**
+  Two real gaps caught in sequence and both closed the same way: first,
+  `esp32` initially had board *metadata* (`mcu`/`product`/`vendor`/
+  `variants`, confirmed real and necessary directly against
+  `usermod/boards.py`'s own `Board` dataclass, `boards.py:141-172` —
+  `variants: list[Variant]` is a board's own further nested sub-axis,
   `usermod -> esp32 -> <board> -> <variant>`, one level deeper than this
-  record's own earlier sketches assumed. `[usermod.esp32.boards.<name>]`
-  needs to be a real table per board, not a list entry, carrying at least
-  `mcu` and its own `variants` list, plus `family`/`port`/`board`
-  restated explicitly for the same self-describing-outside-nesting
-  reason the natmod rows above carry theirs. Pulled live against a real
-  checkout this session, not placeholders — `ESP32_GENERIC`
-  (`mcu = "esp32"`, `variants = ["D2WD", "SPIRAM", "UNICORE", "OTA"]`)
-  and `ESP32_GENERIC_S3` (`mcu = "esp32s3"`,
-  `variants = ["SPIRAM_OCT"]`), both read directly from their own
-  real `ports/esp32/boards/<name>/board.json`. **Caught directly, a
-  second time on this same axis: board metadata is not the same fact as
-  board *existence per tag*, and esp32 needs its own `identifiers` list
-  of `(tag, board)` rows — the same shape natmod/unix have, initially
-  missing here entirely.** Verified live, not assumed: `v1.29.0`'s own
-  `ports/esp32/boards/` has `ESP32_GENERIC_H2`; `v1.28.0`'s own does not
-  — diffed the two real checkouts directly. `ESP32_GENERIC_S3`'s own
-  `board.json` is byte-identical between `v1.28.0` and today's `master`,
-  so metadata stability and per-tag existence are two independent facts,
-  neither derivable from the other — both need the refresh script to
-  check per real release, not extrapolate from one checkout the way the
-  metadata above was pulled from `master` alone (worth re-pulling
-  per-tag too, flagged, not yet done).
+  record's own earlier sketches assumed) but no `identifiers` list of
+  `(tag, board)` rows at all — every other platform in this record had
+  one, esp32 did not. Second, once added, a `[usermod.esp32.boards.<name>]`
+  sidecar table for the metadata was itself dropped — metadata now lives
+  directly on each `identifiers` row (`mcu`, `product`, `vendor`,
+  `variants`, alongside `identifier`/`family`/`port`/`tag`/`board`), one
+  list, no cross-referencing between two structures for one platform.
+  Not merely simpler — board metadata was never verified invariant
+  across tags either, so repeating it per row is the honest fact-first
+  shape, the same reasoning natmod's own per-`(tag, arch)` rows already
+  follow. Verified live, not assumed, on both axes: `ESP32_GENERIC_S3`'s
+  own `board.json` is byte-identical between `v1.28.0` and today's
+  `master` (metadata stable, at least for this one board, this one
+  comparison); `ESP32_GENERIC_H2` exists in `v1.29.0`'s own
+  `ports/esp32/boards/` but is absent from `v1.28.0`'s (existence is
+  not stable) — diffed both real checkouts directly, metadata and
+  existence are independent facts, neither derivable from the other.
+  All metadata pulled from a live checkout of `master`, not a tagged
+  release — flagged for the refresh script to re-pull per-tag too, not
+  yet done here.
 
 Refreshed by a maintainer-run script (not part of any build invocation)
 that clones MicroPython once, walks `ports/esp32/boards/*/board.json` via
