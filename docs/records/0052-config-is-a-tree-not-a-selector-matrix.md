@@ -1750,4 +1750,68 @@ addition this pass leaves open for B4 itself, not for a further review round.
 [0038]: 0038-m5-adopt-in-three-repos.md
 [0045]: 0045-only-is-a-filter-not-a-forced-identifier.md
 [0048]: 0048-build-skip-live-in-opposite-tables.md
+## Addendum, 2026-08-27 — Track B's own B4.1–B4.3 reverted: the tree-path `select` mode was
+solving a problem cibuildmp's own identifier scheme already closes
+
+**B4.1 (`abc4a20`), B4.2 (`f294dea`), B4.3 (`f4be1ca`) are reverted** (`4c62ec7`, `9b6c4b5`,
+`20cf60e`), back to the exact state as of the B0–B3 review pass (`9550dcc`). Only one piece
+of B4.2 survives, reapplied fresh on top: esp32's own `boards = [...]` values are now
+validated against `resources/build-platforms.toml`'s own known board list (`f66d2b5`) --
+`boards = [...]` itself, as a config key, is unchanged.
+
+**What was found, live, that the B0–B3 review pass itself did not check.** That pass
+accepted B2's own premise almost verbatim: "a natmod target's identifier carries no literal
+tree-path segment at all... a usermod-port identifier is matched by fnmatch against a
+flattened string with no family/platform prefix to glob against." True for natmod. **False
+for usermod, checked directly rather than trusted from the record's own earlier prose**:
+`UsermodTarget.identifier` is `f"{tag}-{port}-{arch}"` -- `port` is a literal, stable
+substring of every usermod identifier, confirmed live:
+
+```
+fnmatch("v1.29.0-esp32-ESP32_GENERIC_S3", "*-esp32-*")  -> True
+fnmatch("v1.28.0-unix-manylinux_2_28_x86_64", "*-esp32-*") -> False
+fnmatch("mpy6.3-x64", "mpy*") -> True   # natmod's own equivalent, already worked
+```
+
+No board name contains a dash (checked against all 57), so `*-esp32-*`/`*-esp32-BOARD` are
+unambiguous, exact, and were **already sufficient** for "every board under this port" and
+"this one board specifically" -- the exact two cases B2/B4.3 were built to answer. Tree-path
+matching added no reachable case flat identifier globbing did not already have. Confirmed
+by writing the counter-example directly (`select = "*-esp32-*"` reaching every board,
+`select = "*-esp32-ESP32_GENERIC_S3"` reaching exactly one, both zero-risk against real
+board names) rather than merely asserting it.
+
+**A second finding, from rereading `cibuildwheel/options.py` directly rather than recalling
+it (this record's own first rule), that reframes what the actual missing piece was.**
+`OptionsReader.get()` reads every option -- `build`/`skip` included
+(`self.reader.get("build", env_plat=False, ...)`) -- through the identical cascade every
+other option uses, and `_validate_platform_option()` allows `self.default_options.keys() |
+self.default_platform_options.keys()` inside `[tool.cibuildwheel.<platform>]` -- meaning
+`build`/`skip` genuinely are settable per-platform in real upstream configs
+(`[tool.cibuildwheel.linux] build = "cp312-*"`), unlike cibuildmp's own `GENERIC_KEYS`
+mechanism ([0048]'s own design), which has always forced `build`/`skip` to the top level
+only, a loud error anywhere else. `DISALLOWED_OPTIONS` (`options.py:210-214`) is a small,
+separate "this key is meaningless on this platform" guard (`manylinux-*-image` on
+macos/windows) with nothing like a tree behind it either. Upstream's own `[[overrides]]`
+matches `select_pattern` against one flat identifier string, same as cibuildmp's own
+pre-B2 mechanism -- no dotted-path mode anywhere in the real source.
+
+**What this means for Track B's own original diagnosis.** The record's central argument --
+non-rectangular axes need a tree -- held for the *fact* layer (Track C:
+`resources/build-platforms.toml`, one row per independently-verified `(tag, arch)`/`(tag,
+board)` pair, exactly cibuildwheel's own flat `python_configurations` shape, not a tree at
+all) but did not hold for the *selector* layer, where cibuildmp's own identifier scheme --
+deliberately keeping `{port}`/`{arch}`/`{abi}` as literal, stable substrings -- already gives
+flat globbing everything a tree-path mode would add. The real, upstream-precedented gap is
+different from what B2/B4.3 built: cibuildmp forbids `build`/`skip` from ever living inside a
+platform's own table at all, where upstream allows it. That is the next thing to design, not
+yet started, not yet even written up -- flagged here rather than assumed either way.
+
+**B0–B3's own "accepted" verdicts stand corrected, not deleted** -- the review pass's own
+text stays as the honest record of what was reasoned through and accepted before this gap
+was found; this addendum is what closes it, the same "argue the reversal in the record,
+don't silently edit history" rule the rest of this record already follows for A2's own
+`resolve_micropython_tags()` misstep. B4.4/B4.5 do not proceed as scoped -- there is no more
+board-level tree node for them to wire into.
+
 [0051]: 0051-usermod-identifiers-have-no-version-axis.md
