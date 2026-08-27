@@ -568,27 +568,6 @@ def test_reachability_audit_allows_a_deliberate_skip_everything(tmp_path):
     assert UsermodOptions.load(tmp_path).targets() == []
 
 
-def test_reachability_audit_accepts_a_select_reachable_only_via_tree_path(tmp_path):
-    # record 0052, Track B, B4.3: "usermod.esp32.*" matches no real
-    # identifier (v1.29.0-esp32-ESP32_GENERIC never starts with
-    # "usermod.esp32."), so this must not be flagged unreachable now that
-    # select gained a second, tree-path matching mode -- the regression
-    # this phase's own fix (check_selector_reachable()'s tree_paths=) is
-    # for; caught live the first time this test was written, before the
-    # fix existed, as a real ConfigError from options.targets() itself.
-    write_config(
-        tmp_path,
-        """
-        [esp32.ESP32_GENERIC]
-
-        [[overrides]]
-        select = "usermod.esp32.*"
-        extra-make-args = ["X=1"]
-        """,
-    )
-    assert UsermodOptions.load(tmp_path, ports=["esp32"]).targets() != []
-
-
 # ── record 0051 point 8: enable / GROUPS ──────────────────────────────────
 
 

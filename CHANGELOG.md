@@ -9,15 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **`[[overrides]]`'s own `select` can now match a config tree node's dotted
-  address, additively alongside the existing identifier glob.** `select =
-  "usermod.esp32.*"` now reaches every esp32 board in one override, without
-  relying on the identifier string happening to encode the family/port --
-  it never did for usermod (`v1.29.0-esp32-ESP32_GENERIC_S3` has no
-  `usermod.esp32.` prefix to glob). `select = "natmod"` similarly reaches
-  every natmod target regardless of arch/ABI. An override applies if
-  either mode matches; `build`/`skip` are unaffected, identifier-only as
-  before. Record 0052, Track B, B2/B4.3.
 - **`esp32`'s own `boards = [...]` config key is gone; a board is selected by
   writing its own `[esp32.BOARD_NAME]` table now, the same table-presence
   rule every other platform already follows.** `[esp32] boards =

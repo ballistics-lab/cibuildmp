@@ -389,20 +389,6 @@ class UsermodTarget:
         base = f"{self.port}-{self.arch}" if self.arch else self.port
         return f"{self.tag}-{base}" if self.tag else base
 
-    @property
-    def tree_path(self) -> str:
-        """This target's own dotted tree-node address (record 0052,
-        Track B, B2/B4.3) -- `"usermod.<port>"`, or
-        `"usermod.<port>.<arch>"` when `port` is tree-addressed
-        (`TREE_ADDRESSED_AXIS_PORTS`, `esp32` today) and `arch` is a real
-        board name, not the empty-axis sentinel. Used only for
-        `[[overrides]]`'s own `select` matching, as a second mode
-        alongside `.identifier` -- `build`/`skip` never read this."""
-        segments = ["usermod", self.port]
-        if self.port in TREE_ADDRESSED_AXIS_PORTS and self.arch:
-            segments.append(self.arch)
-        return ".".join(segments)
-
     def __str__(self) -> str:
         return self.identifier
 

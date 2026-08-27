@@ -36,7 +36,7 @@ this is that caller.
 from __future__ import annotations
 
 import difflib
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -147,7 +147,6 @@ def matching_overrides(
     overrides: Sequence[Mapping[str, Any]],
     identifier: str,
     *,
-    tree_path: str | None = None,
     error: type[Exception] = ConfigError,
 ) -> list[Mapping[str, Any]]:
     """Every override table (file order) whose `select` matches
@@ -157,35 +156,13 @@ def matching_overrides(
     exception class for a missing `select` (`natmod.options.ConfigError`
     / `usermod.options.UsermodConfigError`), since existing tests assert
     the specific class each mode already raises.
-
-    `tree_path` (record 0052, Track B, B2/B4.3) is a second, additive way
-    for `select` to match: the target's own dotted tree-node address
-    (`"natmod"`, `"usermod.unix"`, `"usermod.esp32.ESP32_GENERIC_S3"`),
-    matched as one whole string against each `select` pattern the exact
-    same way `identifier` already is -- fnmatch's own `*` already crosses
-    a `.` the way a real path glob would, so `select = "usermod.esp32.*"`
-    matches every board under that port with no separator-aware matching
-    needed here. An override applies if *either* mode matches (an OR, not
-    a "try tree-path, fall back to identifier" priority order) -- the two
-    modes answer genuinely different questions (address a tree node vs.
-    address a compatibility-axis subset) and neither subsumes the other,
-    so a `select` ambiguous between the two is intentionally allowed to
-    match via both without being counted twice (this loop appends an
-    override once per matching call, regardless of how many of its own
-    patterns matched or which mode each one matched through).
-    `build`/`skip` never gain this second mode -- scoped to `[[overrides]]`'s
-    own `select` only, the residual case B0's own tree-node-presence
-    mechanism cannot express by construction.
     """
     result = []
     for override in overrides:
         selector = override.get("select")
         if selector is None:
             raise error("every [[overrides]] table needs a `select` key")
-        patterns = parse_selector(selector)
-        if matches(identifier, patterns) or (
-            tree_path is not None and matches(tree_path, patterns)
-        ):
+        if matches(identifier, parse_selector(selector)):
             result.append(override)
     return result
 
@@ -195,7 +172,6 @@ def check_selector_reachable(
     where: str,
     identifiers: Sequence[str],
     *,
-    tree_paths: Iterable[str] | None = None,
     error: type[Exception] = ConfigError,
 ) -> None:
     """Raise unless every pattern in `patterns` matches at least one of
@@ -211,24 +187,9 @@ def check_selector_reachable(
     to zero *selected* targets stays legitimate and is never confused
     with a pattern that could never have matched anything in the first
     place.
-
-    `tree_paths` (record 0052, Track B, B4.3), when given, is a second,
-    additive set a pattern may match against instead of an identifier --
-    the same OR `matching_overrides()` itself now applies at
-    `build_options()` time. Passed only for `[[overrides]]`'s own
-    `select` (which gained tree-path matching under B2/B4.3); omitted for
-    `build`/`skip`, which never did and still only match identifiers. Not
-    passing it here is not merely "no extra layer" the way an empty
-    `family_table` was for `Options.get()` -- omitting it for `select`
-    would make a legitimately tree-path-reachable pattern (`select =
-    "usermod.esp32.*"`) a false-positive "matches nothing" error, since
-    no identifier ever looks like a dotted tree path.
     """
     for pattern in patterns:
-        reachable = any(matches(identifier, [pattern]) for identifier in identifiers)
-        if not reachable and tree_paths is not None:
-            reachable = any(matches(path, [pattern]) for path in tree_paths)
-        if not reachable:
+        if not any(matches(identifier, [pattern]) for identifier in identifiers):
             raise error(
                 f"{where}: {pattern!r} matches no known identifier -- a typo, "
                 f"or an axis value this project has never verified"
