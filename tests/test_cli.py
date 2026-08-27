@@ -1,4 +1,6 @@
 import json
+import os
+import stat
 from pathlib import Path
 
 from cibuildmp.cli import main
@@ -202,3 +204,22 @@ def test_output_is_line_buffered_and_survives_a_stream_without_reconfigure(
     assert main([write(tmp_path, CONFIG), "--print-build-identifiers"]) == 0
 
     assert calls == [{"line_buffering": True}]
+
+
+def test_clean_cache_removes_readonly_entries(tmp_path, monkeypatch, capsys):
+    # Real failure, not hypothetical: autoconf's own autom4te.cache
+    # (created under ports/unix's libffi build, MICROPY_STANDALONE=1)
+    # leaves entries some platforms create without the owner write bit,
+    # so a plain shutil.rmtree(root) raises PermissionError even though
+    # this process owns the whole cache tree.
+    cache_dir = tmp_path / "cibuildmp-cache"
+    stale = cache_dir / "micropython" / "v1.28.0" / "lib" / "libffi" / "autom4te.cache"
+    stale.mkdir(parents=True)
+    readonly_file = stale / "requests"
+    readonly_file.write_text("stale")
+    os.chmod(stale, stat.S_IREAD | stat.S_IEXEC)  # no write bit -- the real trigger
+
+    monkeypatch.setattr("cibuildmp.cli.cache_root", lambda: cache_dir)
+    assert main(["--clean-cache"]) == 0
+    assert not cache_dir.exists()
+    assert f"removed {cache_dir}" in capsys.readouterr().out

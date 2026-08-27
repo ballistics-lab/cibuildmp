@@ -25,8 +25,10 @@ import argparse
 import json
 import os
 import shutil
+import stat
 import sys
 from pathlib import Path
+from typing import Any
 
 from . import __version__
 from .platforms import PLATFORM_FAMILY, PlatformModule
@@ -382,6 +384,32 @@ def _run_multi_platform(
     return rc
 
 
+def _clear_readonly_and_retry(func: Any, path: str, _exc: Any) -> None:
+    """`shutil.rmtree()` error handler: a real, live failure --
+    `autom4te.cache` (autoconf, `ports/unix`'s own libffi build under
+    `MICROPY_STANDALONE=1`) creates entries some platforms leave without
+    the owner write bit, so a plain `os.unlink`/`os.rmdir` refuses with
+    `PermissionError` even though this process owns the cache tree
+    outright and can simply reclaim write access first."""
+    os.chmod(path, stat.S_IWRITE | stat.S_IREAD | stat.S_IEXEC)
+    func(path)
+
+
+def _rmtree_writable(root: Path) -> None:
+    """`shutil.rmtree(root)`, tolerating read-only entries under it --
+    see `_clear_readonly_and_retry()`. `onexc` (the exception instance)
+    replaced `onerror` (a `sys.exc_info()` triple) in Python 3.12 and the
+    old name is deprecated since; this project supports 3.11 onward
+    (`pyproject.toml`), so both are wired to the same handler -- its
+    third parameter is unused either way, so one function satisfies both
+    call shapes without actually branching on which fields it receives.
+    """
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(root, onexc=_clear_readonly_and_retry)
+    else:
+        shutil.rmtree(root, onerror=_clear_readonly_and_retry)
+
+
 def main(argv: list[str] | None = None) -> int:
     # Every `print()` in this tool is progress output, and until this line
     # existed none of it *was* progress output on CI. Python block-buffers
@@ -422,7 +450,7 @@ def main(argv: list[str] | None = None) -> int:
         if not root.exists():
             print(f"cibuildmp: nothing to clean ({root} does not exist)")
             return 0
-        shutil.rmtree(root)
+        _rmtree_writable(root)
         print(f"cibuildmp: removed {root}")
         return 0
 
