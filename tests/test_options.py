@@ -204,15 +204,35 @@ def test_extra_files_from_publish_table(tmp_path):
 
 
 def test_a_top_level_key_inside_the_natmod_table_names_where_it_goes(tmp_path):
-    # The exact trap that cost `test_only_overrides_skip` its meaning:
-    # `skip` under `[natmod]` was read by nothing, and `archs` right next
-    # to it is dual-read and works, so there was every reason to expect
-    # this to work too. "unknown key" would be a lie here -- the tool
-    # knows precisely what `skip` means, just not in this table.
-    write(tmp_path, 'version = "0.1.0"\n[natmod]\nskip = "*-armv6m"\n')
+    # `version` stays truly top-level-only (record 0052's own per-platform
+    # build/skip addendum moved build/skip out of GENERIC_KEYS, not
+    # version) -- "unknown key" would be a lie here, the tool knows
+    # precisely what `version` means, just not in this table.
+    write(tmp_path, 'version = "0.1.0"\n[natmod]\nname = "x"\nversion = "0.2.0"\n')
 
     with pytest.raises(ConfigError, match="read from the top level"):
         Options.load(tmp_path)
+
+
+def test_build_skip_inside_the_natmod_table_beat_the_top_level(tmp_path):
+    # record 0052's own per-platform build/skip addendum: [natmod]'s own
+    # build/skip is now legal, and more specific -- matching upstream's
+    # own [tool.cibuildwheel.<platform>] build/skip, and every other
+    # dual-read key `archs` already has here.
+    write(
+        tmp_path,
+        """
+        skip = "*-armv6m"
+        [natmod]
+        archs = ["x64", "armv6m"]
+        skip = ""
+        """,
+    )
+    options = Options.load(tmp_path, env={})
+    identifiers = [t.identifier for t in options.targets()]
+    # [natmod]'s own skip = "" beats the top-level skip = "*-armv6m" --
+    # more specific wins, exactly like archs already does.
+    assert any(i.endswith("-armv6m") for i in identifiers)
 
 
 def test_an_unknown_key_in_the_natmod_table_is_an_error(tmp_path):

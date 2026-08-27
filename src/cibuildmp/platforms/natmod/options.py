@@ -81,12 +81,23 @@ class ConfigError(Exception):
 # would be speculative, but listing the key means a misplaced `enable`
 # inside `[natmod]` still gets a clear error instead of silently doing
 # nothing.
+#
+# `build`/`skip` are deliberately *not* here any more (record 0052,
+# addendum: per-platform build/skip) -- reread directly against
+# `cibuildwheel/options.py`, upstream's own `build`/`skip` go through the
+# identical cascade every other option does and are genuinely settable
+# inside `[tool.cibuildwheel.<platform>]`; cibuildmp's own `GENERIC_KEYS`
+# mechanism had forced them to the top level only since [0048], a real
+# divergence found only by comparing against the real source rather than
+# recalling it. They now belong to the same category `archs`/
+# `extra-make-args` already occupy: dual-read via the cascade, listed in
+# each platform's own schema (`NATMOD_SCHEMA` below,
+# `USERMOD_PORT_BASE` in `usermod/options.py`) rather than in this
+# top-level-only set.
 GENERIC_KEYS: frozenset[str] = frozenset(
     {
         "micropython",
         "output-dir",
-        "build",
-        "skip",
         "name",
         "version",
         "micropython-submodules",
@@ -95,10 +106,12 @@ GENERIC_KEYS: frozenset[str] = frozenset(
 )
 
 # Keys `[natmod]` itself, or the top level as natmod's own default, may
-# carry: the two dual-read axis keys plus the four per-target ones
-# `build_options()`'s own `opt()` layers over.
+# carry: `build`/`skip` and the two dual-read axis keys, plus the four
+# per-target ones `build_options()`'s own `opt()` layers over.
 NATMOD_SCHEMA: frozenset[str] = frozenset(
     {
+        "build",
+        "skip",
         "archs",
         "arch-flags",
         "module-dir",
@@ -406,12 +419,22 @@ class Options:
         # `build = "*"` (or `"mpy6.2-*"`, etc.) opens it up wider.
         default_build = f"mpy{newest_known_abi()}-*"
 
+        # Through the real cascade now, not the ad-hoc opt() chain --
+        # `[natmod] build = "..."` is legal now too (per-platform
+        # build/skip, record 0052's own addendum), platform beating
+        # global the same way `archs` already does. Natmod only ever has
+        # one platform, so this changes nothing about the *resolved
+        # value* for a config that never writes `build`/`skip` inside
+        # `[natmod]` -- only what becomes legal to write there.
+        build_value = cascade_env.get("build", platform="natmod", default=default_build)
+        skip_value = cascade_env.get("skip", platform="natmod", default="")
+
         return cls(
             package_dir=package_dir,
             config_path=config_path,
             output_dir=Path(str(opt("output-dir", DEFAULT_OUTPUT_DIR))),
-            build=parse_selector(opt("build", default_build)),
-            skip=parse_selector(opt("skip", "")),
+            build=parse_selector(build_value),
+            skip=parse_selector(skip_value),
             archs=_as_list(archs_value, "archs"),
             micropython_submodules=_as_list(
                 opt("micropython-submodules"), "micropython-submodules"

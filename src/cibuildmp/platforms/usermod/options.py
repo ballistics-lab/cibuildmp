@@ -104,10 +104,27 @@ USERMOD_PORT_BASE: frozenset[str] = frozenset(
     {"user-c-modules", "manifest", "extra-make-args"}
 )
 
+# `build`/`skip` are dual-read now, legal at the family table (`[usermod]`)
+# and each port's own table (record 0052's own per-platform build/skip
+# addendum -- reread directly against `cibuildwheel/options.py`: upstream's
+# own `build`/`skip` go through the identical cascade every other option
+# does and are genuinely settable inside `[tool.cibuildwheel.<platform>]`;
+# cibuildmp's own top-level-only rule, since [0048], was a real, unnoticed
+# divergence). Deliberately *not* folded into `USERMOD_PORT_BASE` itself,
+# since that constant is also `build_options()`'s own tier-2
+# `[[overrides]]` schema (`natmod/options.py`'s own
+# `_USERMOD_OVERRIDE_OPTION_KEYS_MIRROR` mirrors `USERMOD_PORT_BASE`
+# specifically, not this) -- `build`/`skip` decide *which targets exist at
+# all*, a question already answered before any `[[overrides]]` entry can
+# match, so writing them there would be circular, not a real per-target
+# option. The same split `NATMOD_SCHEMA`/`NATMOD_OVERRIDE_OPTION_KEYS`
+# already keeps in `natmod/options.py`.
+USERMOD_PLATFORM_KEYS: frozenset[str] = USERMOD_PORT_BASE | {"build", "skip"}
+
 
 def _port_schema(port: str) -> frozenset[str]:
     key = axis_key(port)
-    return USERMOD_PORT_BASE | ({key} if key else frozenset())
+    return USERMOD_PLATFORM_KEYS | ({key} if key else frozenset())
 
 
 # port name -> that port's own option-key schema, for `check_keys()`'s
@@ -143,7 +160,7 @@ def check_usermod_family_table(
     as a dict value here -- means this config has not migrated at all,
     and gets a dedicated, specific message pointing at the real shape,
     the same courtesy `cli.py`'s own (now-removed) blanket `[usermod]`
-    rejection used to give. Anything else unknown to `USERMOD_PORT_BASE`
+    rejection used to give. Anything else unknown to `USERMOD_PLATFORM_KEYS`
     (a typo, a per-port axis key like `archs` written here instead of in
     its own port table) falls through to the ordinary `check_keys()`
     error.
@@ -176,7 +193,7 @@ def check_usermod_family_table(
             f"nesting under [usermod]. Write [{nested[0]}] as its own "
             "top-level table, sibling to [usermod] and [natmod]."
         )
-    check_keys(table, USERMOD_PORT_BASE, where="[usermod]", error=error)
+    check_keys(table, USERMOD_PLATFORM_KEYS, where="[usermod]", error=error)
     return table
 
 
@@ -237,10 +254,41 @@ def check_reachable(cfg: UsermodOptions) -> None:
     deliberate `skip = "*"`) must stay a valid, ordinary outcome, never
     confused with a pattern that could never have matched anything at
     all.
+
+    Each active port's own `build`/`skip` -- **only when `[<port>]` itself
+    actually sets one** -- is checked a second time, scoped to *that
+    port's own* identifiers: unlike the shared `[[overrides]]` list (task
+    tracked separately: `check_reachable()` there has no way to know
+    which family an entry was meant for), a value written directly inside
+    a port's own table is unambiguous by construction. Deliberately
+    skipped when the port sets neither: `cfg._port_build_skip(port)` then
+    falls back to `cfg.build`/`cfg.skip`, which may itself be a
+    `[usermod]`-level (family-wide) pattern meaning "every port, some of
+    which are not this one" (`skip = "*-webassembly"` legitimately
+    matches nothing among `[unix]`'s own identifiers) -- re-checking it
+    against one port's own narrow subset would be a false positive, not a
+    stricter check; the equality test below is what tells "this port
+    genuinely set its own value" apart from "this is only the inherited
+    default resolving here too."
     """
-    identifiers = [t.identifier for t in cfg.all_targets()]
+    all_targets = cfg.all_targets()
+    identifiers = [t.identifier for t in all_targets]
     check_selector_reachable(cfg.build, "build", identifiers, error=UsermodConfigError)
     check_selector_reachable(cfg.skip, "skip", identifiers, error=UsermodConfigError)
+    for port in cfg.ports:
+        port_build, port_skip = cfg._port_build_skip(port)
+        port_identifiers = [t.identifier for t in all_targets if t.port == port]
+        if port_build != cfg.build:
+            check_selector_reachable(
+                port_build,
+                f"[{port}] build",
+                port_identifiers,
+                error=UsermodConfigError,
+            )
+        if port_skip != cfg.skip:
+            check_selector_reachable(
+                port_skip, f"[{port}] skip", port_identifiers, error=UsermodConfigError
+            )
     for index, override in enumerate(cfg.overrides, 1):
         selector = override.get("select")
         if selector is None:
@@ -286,6 +334,13 @@ class UsermodOptions:
     # overrides, matching the precedence it has always had),
     # platform_tables keyed by port name.
     _cascade: OptionCascade = field(default=None, repr=False, compare=False)  # type: ignore[assignment]
+    # A second instance over the same tables, env included -- build/skip's
+    # own per-port resolution (targets() below, record 0052's own
+    # per-platform build/skip addendum) has no per-target opt() closure of
+    # its own the way build_options() does, so it reads straight through a
+    # real env-aware cascade instead, the same way natmod/options.py's own
+    # cascade_env already does for archs/build/skip.
+    _cascade_env: OptionCascade = field(default=None, repr=False, compare=False)  # type: ignore[assignment]
 
     @classmethod
     def load(
@@ -356,8 +411,27 @@ class UsermodOptions:
             platform_tables=platform_tables,
             env={},
         )
+        # Env-aware sibling of `cascade` above -- build/skip's own
+        # per-port resolution (targets() below) reads through this one
+        # directly, the same way natmod/options.py's own cascade_env
+        # already does (record 0052's own per-platform build/skip
+        # addendum).
+        cascade_env = OptionCascade(
+            global_table=raw,
+            family_table=family_table,
+            platform_tables=platform_tables,
+            env=os.environ,
+        )
 
         overrides = load_overrides(raw, error=UsermodConfigError)
+
+        # `self.build`/`self.skip` are the global+family-resolved
+        # baseline -- `family_table.get()` is consulted by `.get()`
+        # regardless of whether `platform=` is passed, so `[usermod]`'s
+        # own build/skip already applies here, before any one port's own
+        # table narrows it further in targets().
+        build_value = cascade_env.get("build", default="*")
+        skip_value = cascade_env.get("skip", default="")
 
         return cls(
             package_dir=package_dir,
@@ -365,15 +439,30 @@ class UsermodOptions:
             micropython=micropython,
             output_dir=Path(str(opt("output-dir", DEFAULT_OUTPUT_DIR))),
             ports=ports,
-            build=parse_selector(opt("build", "*")),
-            skip=parse_selector(opt("skip", "")),
+            build=parse_selector(build_value),
+            skip=parse_selector(skip_value),
             name=str(opt("name", "")),
             version=str(opt("version", "")),
             axis_overrides=axis_overrides,
             overrides=overrides,
             enable=frozenset(parse_selector(opt("enable"))),
             _cascade=cascade,
+            _cascade_env=cascade_env,
         )
+
+    def _port_build_skip(self, port: str) -> tuple[list[str], list[str]]:
+        """This port's own `build`/`skip`, `self.build`/`self.skip` (the
+        global+family-resolved baseline) as the default when `[port]`
+        itself sets neither -- record 0052's own per-platform build/skip
+        addendum, the same more-specific-wins cascade `archs`/
+        `extra-make-args` already have."""
+        build = parse_selector(
+            self._cascade_env.get("build", platform=port, default=self.build)
+        )
+        skip = parse_selector(
+            self._cascade_env.get("skip", platform=port, default=self.skip)
+        )
+        return build, skip
 
     def targets(self) -> list[UsermodTarget]:
         unknown = self.enable - GROUPS.keys()
@@ -384,9 +473,20 @@ class UsermodOptions:
             )
         check_reachable(self)
         all_targets = usermod_targets(self.micropython, self.ports, self.axis_overrides)
-        return select(
-            all_targets, self.build, self.skip, enable=self.enable, groups=GROUPS
-        )
+        # build/skip resolve per port now, not once globally -- selecting
+        # per port-group and reassembling in all_targets' own original
+        # order (tag-outer, port-inner) rather than concatenating groups,
+        # which would reorder every multi-tag, multi-port config's own
+        # output.
+        selected: list[UsermodTarget] = []
+        for port in self.ports:
+            build, skip = self._port_build_skip(port)
+            group = [t for t in all_targets if t.port == port]
+            selected.extend(
+                select(group, build, skip, enable=self.enable, groups=GROUPS)
+            )
+        position = {t: i for i, t in enumerate(all_targets)}
+        return sorted(selected, key=lambda t: position[t])
 
     def all_targets(self) -> list[UsermodTarget]:
         """Every identifier this config can name, across every known port

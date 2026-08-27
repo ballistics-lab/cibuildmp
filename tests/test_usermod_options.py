@@ -357,13 +357,80 @@ def test_skip_is_read_from_the_top_level(tmp_path):
 
 
 def test_a_generic_key_inside_a_port_table_names_where_it_goes(tmp_path):
-    # `skip` (and every other GENERIC_KEYS member) applies to the whole
-    # invocation, not to one platform -- the same "read from the top
-    # level" diagnostic natmod's own [natmod] table gives, now shared.
-    write_config(tmp_path, '[unix]\nskip = "*-manylinux_2_28_i686"\n')
+    # `version` stays truly top-level-only (record 0052's own
+    # per-platform build/skip addendum moved build/skip out of
+    # GENERIC_KEYS, not version) -- "unknown key" would be a lie here,
+    # the tool knows precisely what `version` means, just not in this
+    # table.
+    write_config(tmp_path, '[unix]\nversion = "0.1.0"\n')
 
     with pytest.raises(UsermodConfigError, match="read from the top level"):
         UsermodOptions.load(tmp_path)
+
+
+def test_build_skip_inside_a_port_table_beat_the_top_level(tmp_path):
+    # record 0052's own per-platform build/skip addendum: [unix]'s own
+    # skip is now legal, and more specific -- matching upstream's own
+    # [tool.cibuildwheel.<platform>] build/skip, and every other
+    # dual-read key `archs` already has here. A sibling port with no
+    # skip of its own still respects the top-level one.
+    write_config(
+        tmp_path,
+        """
+        skip = "*-manylinux_2_28_i686 *-manylinux_2_28_x86_64"
+        [unix]
+        archs = ["manylinux_2_28_i686", "manylinux_2_28_x86_64"]
+        skip = ""
+        """,
+    )
+    identifiers = [t.identifier for t in UsermodOptions.load(tmp_path).targets()]
+
+    assert any(i.endswith("manylinux_2_28_i686") for i in identifiers)
+    assert any(i.endswith("manylinux_2_28_x86_64") for i in identifiers)
+
+
+def test_family_skip_narrows_every_active_port_but_not_natmod(tmp_path):
+    # [usermod]'s own skip/build sit strictly between global and
+    # per-port, the same tier every other family-scoped key already has
+    # -- a port with no skip of its own still falls through to
+    # [usermod]'s, not straight past it to the top level.
+    write_config(
+        tmp_path,
+        """
+        [usermod]
+        skip = "*-webassembly"
+
+        [unix]
+        [webassembly]
+        """,
+    )
+    identifiers = [t.identifier for t in UsermodOptions.load(tmp_path).targets()]
+
+    assert not any(i.endswith("webassembly") for i in identifiers)
+    assert any("-unix-" in i for i in identifiers)
+
+
+def test_per_port_build_skip_env_override(tmp_path, monkeypatch):
+    # CIBMP_SKIP_UNIX -- the per-platform env var every other dual-read
+    # key already gets for free from the cascade.
+    write_config(tmp_path, "[unix]\n[webassembly]\n")
+    monkeypatch.setenv("CIBMP_SKIP_UNIX", "*")
+
+    identifiers = [t.identifier for t in UsermodOptions.load(tmp_path).targets()]
+
+    assert not any("-unix-" in i for i in identifiers)
+    assert any(i.endswith("webassembly") for i in identifiers)
+
+
+def test_reachability_audit_rejects_an_unreachable_per_port_build(tmp_path):
+    # record 0052's own per-platform build/skip addendum: a per-port
+    # value gets the same offline reachability check as the global one,
+    # scoped to that port's own identifiers -- unambiguous by
+    # construction, unlike the shared [[overrides]] case.
+    write_config(tmp_path, '[unix]\nbuild = "*-not-a-real-unix-cell"\n')
+
+    with pytest.raises(UsermodConfigError, match=r"\[unix\] build: '\*-not-a-real"):
+        UsermodOptions.load(tmp_path).targets()
 
 
 def test_an_unknown_key_in_a_port_table_is_an_error(tmp_path):

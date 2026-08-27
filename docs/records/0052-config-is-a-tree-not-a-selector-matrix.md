@@ -1814,4 +1814,60 @@ don't silently edit history" rule the rest of this record already follows for A2
 `resolve_micropython_tags()` misstep. B4.4/B4.5 do not proceed as scoped -- there is no more
 board-level tree node for them to wire into.
 
+## Addendum, 2026-08-27 — per-platform `build`/`skip` landed, closing the real gap the
+reverted tree was mistaken for
+
+`build`/`skip` are settable inside `[natmod]`, `[usermod]` (family, usermod only), and each
+platform's own table (`[unix]`, `[esp32]`, ...) now -- matching upstream's own
+`[tool.cibuildwheel.<platform>] build = "..."`, confirmed live against real
+`cibuildwheel/options.py` in the addendum above, not assumed. More specific wins, the same
+cascade order `archs`/`extra-make-args` already have.
+
+**Schema split, mirrored on both sides, to avoid a real circularity risk found while
+designing this**: `build`/`skip` moved out of `GENERIC_KEYS` (natmod's own shared constant)
+into `NATMOD_SCHEMA` directly, and into a new `USERMOD_PLATFORM_KEYS` (`USERMOD_PORT_BASE |
+{"build", "skip"}`) on the usermod side -- deliberately *not* folded into `USERMOD_PORT_BASE`
+itself, since that constant is also `build_options()`'s own tier-2 `[[overrides]]` schema:
+`build`/`skip` decide *which targets exist at all*, a question already answered before any
+`[[overrides]]` entry can match, so accepting them there would be circular, not a real
+per-target option -- the same split `NATMOD_SCHEMA`/`NATMOD_OVERRIDE_OPTION_KEYS` already
+keeps.
+
+**natmod's own side is close to trivial**: one platform, ever, so `[natmod] build = "..."`
+resolving through the cascade rather than the old ad-hoc `opt()` closure changes nothing
+about what a config that never writes `build`/`skip` inside `[natmod]` resolves to -- only
+what becomes legal to write there. Live-verified: `[natmod] skip = "*-armv7emsp"` alongside
+a top-level `skip = ""` correctly narrows only natmod's own targets.
+
+**usermod's own side needed real restructuring, because more than one port can be active at
+once, each potentially wanting its own `build`/`skip`.** `UsermodOptions.build`/`.skip` stay
+the global-*and*-family-resolved baseline (`family_table.get()` is consulted by
+`Options.get()` regardless of whether `platform=` is passed, so `[usermod]`'s own value
+already applies here for free); `targets()` additionally resolves each active port's own
+`build`/`skip` via `self._cascade_env.get(..., platform=port, default=self.build)`, applies
+`select()` per port-group, then **reassembles in `all_targets()`'s own original order**
+(tag-outer, port-inner) rather than concatenating groups, which would have silently
+reordered every multi-tag, multi-port config's own output -- caught by design, not by a
+failing test. A second cascade instance, `_cascade_env` (env included), sits alongside the
+existing file-only `_cascade` (`build_options()`'s own per-target resolution, which checks
+env itself already) -- mirrors natmod's own `cascade_env`/`cascade_file` split.
+
+**A5's own `check_reachable()` needed the per-port value checked too, scoped to that port's
+own identifiers -- and a real false positive, caught live by the first test written against
+it, not foreseen in the design.** `[usermod] skip = "*-webassembly"` is a legitimate
+family-wide pattern; checked against `[unix]`'s own narrow identifier subset specifically
+(since `_port_build_skip("unix")` falls back to the family-resolved `cfg.skip` when `[unix]`
+sets nothing of its own), it reads as unreachable even though it correctly matches something
+in the full domain. Fixed by checking the port's own resolved value against `cfg.build`/
+`cfg.skip` first: only when they differ (the port's own table genuinely set something) does
+the scoped, per-port check run at all -- when they're equal, the value is only the inherited
+default resolving here too, already correctly checked against the full domain by the
+existing top-level call. Unlike the shared `[[overrides]]` list (the separate, still-open,
+pre-existing cross-family bug this same session already found and tracked), a per-port
+`build`/`skip` value is unambiguous by construction -- it lives inside that port's own table,
+no guessing which family it was meant for.
+
+423 tests pass; ruff and pyright clean. Live-verified end to end for both families, not just
+unit-tested.
+
 [0051]: 0051-usermod-identifiers-have-no-version-axis.md

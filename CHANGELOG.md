@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`build`/`skip` are settable per platform now, not just at the top
+  level.** `[natmod] build = "..."`, `[usermod] skip = "..."` (usermod's
+  own family-wide default), and `[unix]`/`[esp32]`/etc.'s own `build`/
+  `skip` are all legal now, more-specific-wins -- matching upstream
+  cibuildwheel's own `[tool.cibuildwheel.<platform>] build = "..."`
+  shape, confirmed directly against real `cibuildwheel/options.py` before
+  building this. Previously `build`/`skip` could only be written once, at
+  the top level, for the whole invocation. Record 0052's own addendum.
 - **New `name`/`version` config keys give built artifacts real project
   identity.** Both are read from the top level, for every platform.
   `version` already existed for natmod (writing it into each identifier's
