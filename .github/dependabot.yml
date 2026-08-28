@@ -2,35 +2,31 @@ version: 2
 updates:
   # Dependabot's github-actions ecosystem only scans one directory's worth
   # of `uses:` references per entry -- it does not recurse into
-  # subdirectories on its own. None of the composite actions below
-  # currently have a `uses:` step (they're pure `run:` shell), so this has
-  # nothing to bump yet; it's here so a future `uses:` step (or a
-  # .github/workflows/*.yml this repo doesn't have today) gets picked up
-  # automatically instead of silently going stale.
+  # subdirectories on its own. `directories:` (plural, glob-capable) is the
+  # one entry that covers the root workflow files and every composite
+  # action's own subdirectory at once, so a newly added `.github/actions/*`
+  # folder is picked up automatically instead of needing its own entry
+  # here too. None of today's composite actions have a `uses:` step
+  # (they're pure `run:` shell), so this has nothing to bump yet; it's here
+  # so a future `uses:` step (or a `.github/workflows/*.yml` this repo
+  # doesn't have today) gets picked up automatically instead of silently
+  # going stale.
   - package-ecosystem: "github-actions"
-    directory: "/"
+    directories:
+      - "/"
+      - "/.github/actions/*"
     schedule:
       interval: "weekly"
-
-  - package-ecosystem: "github-actions"
-    directory: "/.github/actions/fetch-micropython"
-    schedule:
-      interval: "weekly"
-
-  - package-ecosystem: "github-actions"
-    directory: "/.github/actions/clone-micropython"
-    schedule:
-      interval: "weekly"
-
-  - package-ecosystem: "github-actions"
-    directory: "/.github/actions/build-natmod"
-    schedule:
-      interval: "weekly"
-
-  - package-ecosystem: "github-actions"
-    directory: "/.github/actions/build-usermod-unix"
-    schedule:
-      interval: "weekly"
+    # Without this, `directories:` still opens one PR per directory/
+    # dependency combination -- the same fan-out the old five-entry file
+    # already had, just re-introduced one level down instead of fixed.
+    # One group across every directory this entry scans means one bump
+    # lands as one PR regardless of how many `uses:` pins moved or which
+    # of the covered directories they were in.
+    groups:
+      github-actions:
+        patterns:
+          - "*"
 
   # [0046]'s own gap ("nothing notices when a pin goes stale, except
   # container images") for the pypa half of it: five of the fifteen `unix`

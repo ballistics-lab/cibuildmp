@@ -1,0 +1,113 @@
+name: Test platforms
+
+# Orchestrator over `test-platforms.yml` (`workflow_call`), one call per
+# port -- **not** one shared matrix over every identifier this project
+# builds, the shape `test-platforms.yml` itself had until 2026-08-29. That
+# shape hit a real ceiling, not a hypothetical one: adding `rp2`'s own 74
+# identifiers ([0060]) pushed the single amd64 matrix to 211/256, with nine
+# more usermod ports ([0053]) and zephyr ([0022]) still queued -- the next
+# port with a wide board list would have overflowed it outright. GitHub's
+# own 256-config cap applies per `strategy.matrix` instantiation, so
+# `matrix.include` below (one leg per port, each its own call to
+# `test-platforms.yml`) gives every port its own independent 256, not one
+# shared ceiling across all of them. See
+# docs/records/0062-test-platforms-per-port-orchestrator.md.
+#
+# Each port's own `build` glob below was verified to union back to exactly
+# what one unqualified `v1.29.0-* v1.28.0-* mpy6.3-v1.29.0-* mpy6.3-v1.28.0-*`
+# selected before this split -- 231 identifiers either way, checked directly
+# against a real `--print-build-identifiers` run, not assumed from the glob
+# shapes alone. `unix`'s own `*linux*` (matching both `manylinux`/
+# `musllinux`) is the same idiom `examples/template/cibuildmp.toml`'s own
+# `build` already uses, not a new one invented here. `skip` is shared and
+# passed to every call unconditionally (see `test-platforms.yml`'s own
+# comment for why an omitted `skip` is not the same as an empty one) --
+# `v1.28.0-qemu-NETDUINO2` only ever matches a qemu identifier regardless of
+# which port's call receives it, so one shared default costs nothing and
+# needs no per-port skip map.
+
+on:
+  pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "LICENSE"
+  workflow_dispatch:
+    inputs:
+      build:
+        description: "--build override for every port's own call (default: each port's own glob below)"
+        required: false
+        type: string
+      skip:
+        description: "--skip override for every port's own call (default: v1.28.0-qemu-NETDUINO2)"
+        required: false
+        type: string
+
+concurrency:
+  group: test-platforms-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-port:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - port: natmod
+            build: "mpy6.3-v1.29.0-* mpy6.3-v1.28.0-*"
+          - port: unix
+            build: "v1.29.0-*linux* v1.28.0-*linux*"
+          - port: windows
+            build: "v1.29.0-win* v1.28.0-win*"
+          - port: webassembly
+            build: "v1.29.0-wasm32 v1.28.0-wasm32"
+          - port: qemu
+            build: "v1.29.0-qemu-* v1.28.0-qemu-*"
+          - port: esp32
+            build: "v1.29.0-esp32-* v1.28.0-esp32-*"
+          - port: rp2
+            build: "v1.29.0-rp2-* v1.28.0-rp2-*"
+    uses: ./.github/workflows/test-platforms.yml
+    with:
+      label: ${{ matrix.port }}
+      build: ${{ inputs.build || matrix.build }}
+      skip: ${{ inputs.skip || 'v1.28.0-qemu-NETDUINO2' }}
+
+  # Aggregates every port's own call's result-*.md into one table on this
+  # workflow run's own Summary page -- no single job can: a matrix job's
+  # outputs only ever keep the *last* leg to finish, and continue-on-error
+  # (set one level down, inside `test-platforms.yml`) means a real failure
+  # never turns this check red either, so without this a failure is visible
+  # only by opening that one leg's own log. Artifacts uploaded by a called
+  # reusable workflow's own jobs are still part of this same top-level run,
+  # so `download-artifact` here sees every port's own uploads without
+  # needing anything passed back through `test-port`'s own outputs.
+  #
+  # Job id `aggregate-results`, not `summary` -- GitHub's own Summary page
+  # headers each job's section "<job id> summary" (live-caught 2026-08-28:
+  # a job literally id'd `summary` renders as "summary summary" there).
+  aggregate-results:
+    needs: test-port
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: result-*
+          path: results
+          merge-multiple: true
+
+      - name: Build summary
+        run: |
+          rows=$(cat results/*.md | sort)
+          total=$(echo "$rows" | wc -l)
+          failed=$(echo "$rows" | grep -c '❌' || true)
+          {
+            echo "### Test platforms, every port combined"
+            echo
+            echo "$((total - failed))/$total passed"
+            echo
+            echo "| Identifier | Result |"
+            echo "| --- | --- |"
+            echo "$rows"
+          } >> "$GITHUB_STEP_SUMMARY"

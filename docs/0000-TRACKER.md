@@ -95,6 +95,19 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 - [ ] [0057] more than one module per build | **decided, both halves, and both are documentation rather than mechanism.** natmod: one config per module -- `examples/template` and `examples/wasm2mpy` already demonstrate it, and `collect_output()`'s two-`.mpy` refusal becomes the guard for a mis-scoped config. usermod: `user-c-modules` stays one path; N modules live in the consumer's own layout -- subdirectories on Make ports (`py/py.mk` globs `*/micropython.mk`), an aggregating `micropython.cmake` that `include()`s the others on CMake ports. No list, because the aggregator is the consumer's file rather than one cibuildmp generates ([0002]) and one key keeps one meaning ([0052]). The trap the docs must name: upstream's own `examples/usercmodule/micropython.cmake` lists only `cexample`/`cppexample`, so the same directory yields three modules on a Make port and two on a CMake one. [0054]'s fixture is what tests both forms -- neither has ever run here
 ### Implemented
 
+- [x] [0062] `test-platforms.yml` split into a per-port orchestrator | landed
+      2026-08-29, closing the real (not hypothetical) 211/256 amd64-matrix
+      headroom [0060]'s own 74 rp2 identifiers exposed, with nine more usermod
+      ports ([0053]) and zephyr ([0022]) still queued. `test-platforms.yml`
+      itself became a reusable `workflow_call` (kept its own `workflow_dispatch`
+      too, for single-target-set debugging); new `test-all-platforms.yml`
+      orchestrates one call per port, each with its own independent 256 cap.
+      Per-port `build` globs verified to union back to exactly the prior
+      single-glob selection (231 identifiers, checked directly, not assumed).
+      Live-caught mid-design: an omitted `--skip` is not an empty one --
+      `examples/template`'s own config-level skip silently re-applied and
+      dropped twelve emulated unix cells until every call started passing
+      `skip` explicitly
 - [x] [0061] usermod build drivers split per port, cibuildwheel-style | `usermod/build.py`
       (1628 lines, seven ports' worth) split into `build_common.py` + one `build_<port>.py`
       each, mirroring cibuildwheel's own `linux.py`/`macos.py`/`windows.py`/`pyodide.py` +
@@ -242,3 +255,4 @@ record is added.
 [0059]: records/0059-ghcr-untagged-cleanup-deletes-referenced-manifests.md
 [0060]: records/0060-rp2-build-driver.md
 [0061]: records/0061-usermod-build-drivers-split-per-port.md
+[0062]: records/0062-test-platforms-per-port-orchestrator.md
