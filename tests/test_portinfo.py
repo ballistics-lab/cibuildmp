@@ -1,6 +1,6 @@
 import pytest
 
-from cibuildmp.usermod.portinfo import (
+from cibuildmp.platforms.usermod.portinfo import (
     UnknownPortError,
     build_system,
     default_manifest,

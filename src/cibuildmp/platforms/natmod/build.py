@@ -5,7 +5,7 @@ Fails fast, one target at a time -- matching cibuildwheel's own
 build-in-container loop (platforms/linux.py), which lets a
 `subprocess.CalledProcessError` from one identifier abort the whole
 invocation rather than collecting per-target failures into a report.
-`cli.build()` already handles that: this module raises, cli.main() catches
+`build_all()` already handles that: this module raises, cli.main() catches
 alongside SourceError.
 
 Also cibuildwheel-shaped: `collect_output()`/`verify_output()` mirror its
@@ -24,6 +24,7 @@ step, the same way cibuildwheel never runs `twine upload` itself.
 from __future__ import annotations
 
 import json
+import os
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -99,7 +100,7 @@ def _natmod_image() -> str:
     machine underneath stops mattering: what is not native to it is
     emulated, like every other port.
     """
-    from .. import dockerrun
+    from ... import dockerrun
 
     image = dockerrun.ensure_image("natmod")
     if image is None:
@@ -116,7 +117,7 @@ def _natmod_image() -> str:
 def _run_in_image(
     command: list[str], *, mounts: list[Path], workdir: Path, what: str
 ) -> None:
-    from .. import dockerrun
+    from ... import dockerrun
 
     try:
         dockerrun.run(
@@ -128,6 +129,42 @@ def _run_in_image(
         )
     except Exception as exc:  # UsermodBuildError, and anything docker raises
         raise BuildError(f"{what}: {exc}") from exc
+
+
+def build_mpy_cross(mpy_dir: Path) -> Path:
+    """Build mpy-cross **inside the natmod image** and return the binary.
+
+    `py/dynruntime.mk` hardcodes `MPY_CROSS = $(MPY_DIR)/mpy-cross/build/mpy-cross`
+    with no override (unlike ports/unix's `MICROPY_MPYCROSS=`) -- confirmed
+    directly against v1.29.0's own dynruntime.mk, not assumed -- so the
+    binary must exist at that exact path before `run_make()` invokes it.
+
+    Building it on the host (`sources.build_mpy_cross()`, still used for
+    usermod's `qemu`) worked here only because host glibc happened to
+    match `docker/natmod.Dockerfile`'s own glibc -- the same coincidence
+    `usermod/build.py`'s own `container_mpy_cross()` already documents and
+    fixed for the port builds (a real `GLIBC_2.34' not found` failure). No
+    `slug` scoping here the way that function needs: natmod has exactly
+    one image for every arch, so there is only ever one binary to build,
+    at the fixed path dynruntime.mk itself expects -- no `MPY_CROSS=`
+    override to pass, unlike `MICROPY_MPYCROSS=`.
+
+    Cached by existence, like `sources.build_mpy_cross()`/
+    `usermod.build.container_mpy_cross()`: rebuilt only when the image
+    itself changes (the image is digest-pinned).
+    """
+    binary = mpy_dir / "mpy-cross" / "build" / "mpy-cross"
+    if binary.exists():
+        return binary
+    _run_in_image(
+        ["make", "-C", (mpy_dir / "mpy-cross").as_posix(), f"-j{os.cpu_count() or 1}"],
+        mounts=[mpy_dir],
+        workdir=mpy_dir / "mpy-cross",
+        what="mpy-cross",
+    )
+    if not binary.exists():
+        raise BuildError(f"mpy-cross build reported success but {binary} is missing")
+    return binary
 
 
 def run_pre_build_command(
@@ -294,13 +331,24 @@ def verify_output(build_options: BuildOptions, mpy_path: Path) -> None:
         )
 
 
-def output_name(build_options: BuildOptions, mpy_path: Path) -> str:
+def output_name(
+    build_options: BuildOptions, mpy_path: Path, *, name: str = "", version: str = ""
+) -> str:
     # Identifier-qualified even though the file already lives in its own
     # identifier/ directory: package.json's own urls stay unambiguous even
     # if a caller later flattens several identifiers' directories into one
     # namespace (e.g. a GitHub Release's own asset list, which cannot nest
     # directories -- see D14's "still open" deployment note).
-    return f"{mpy_path.stem}-{build_options.identifier}{mpy_path.suffix}"
+    #
+    # `name`/`version` (record 0052, A3) give the file real project
+    # identity -- `mpy_path.stem` alone is a side effect of the user's own
+    # Makefile, not a config value. Gated on `name` being set at all: a
+    # project that has not set it yet keeps exactly today's filename
+    # rather than gaining a bare leading `-`.
+    if not name:
+        return f"{mpy_path.stem}-{build_options.identifier}{mpy_path.suffix}"
+    prefix = f"{name}-{version}-" if version else f"{name}-"
+    return f"{prefix}{build_options.identifier}{mpy_path.suffix}"
 
 
 def _write_package_json(path: Path, urls: list[tuple[str, str]], version: str) -> None:
@@ -359,6 +407,7 @@ def build_target(
     *,
     package_dir: Path,
     extra_files: Sequence[Path] = (),
+    name: str = "",
     version: str = "",
 ) -> BuildResult:
     """Run one target's build end to end: pre-build-command, make, collect,
@@ -384,7 +433,9 @@ def build_target(
 
     identifier_dir = output_dir / build_options.identifier
     identifier_dir.mkdir(parents=True, exist_ok=True)
-    dest = identifier_dir / output_name(build_options, produced)
+    dest = identifier_dir / output_name(
+        build_options, produced, name=name, version=version
+    )
     dest.write_bytes(produced.read_bytes())
 
     package_target(

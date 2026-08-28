@@ -30,41 +30,26 @@ FROM ubuntu:24.04
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# ── apt: the host-native half ─────────────────────────────────────────
+# ── apt: only what fetching+extracting the toolchains below needs ──────
 #
-# **Two generations of `x86`, because the tool supports both.**
-# `dynruntime.mk` changed in MicroPython v1.29.0: `x86` went from
-# `CFLAGS_ARCH += -m32` on the host gcc to `CROSS = i686-linux-gnu-`, and
-# `x64` from an empty prefix to `CROSS = x86_64-linux-gnu-`. Upstream
-# dropping multilib for a real cross-compiler is the same conclusion this
-# image reached, arrived at independently -- but `micropython` accepts a
-# list of tags ([0013]), so a single run can span the change and the
-# image has to satisfy both spellings:
-#
-#   <= v1.28.0   host gcc + `gcc-13-multilib` + `linux-libc-dev:i386`
-#   >= v1.29.0   `gcc-i686-linux-gnu`
-#
-# `x86_64-linux-gnu-gcc` needs nothing: `build-essential` already
-# installs gcc under exactly that name on an amd64 base.
-#
-# `linux-libc-dev:i386` is not optional for the older path and was
-# re-added once after being cut: `py/dynruntime.h`'s include chain pulls
-# `<asm/errno.h>`, and amd64's own copy does not satisfy it under `-m32`
-# (record 0025's own live finding, one of six).
+# Deliberately minimal, and deliberately *first*: this is a real fix, not
+# tidiness. The toolchain layer below is 3.38GB and does not change
+# unless a pinned version does, but every apt-installed package sits in a
+# layer *before* it -- so, before this split, adding a single apt package
+# (`gcc-i686-linux-gnu`, added live to close one of record 0025's six
+# real bugs) invalidated that whole layer's own cache and forced a full
+# ten-minute re-download+re-extract of toolchains whose own content had
+# not changed at all. Docker's cache invalidates every layer *after* the
+# one that changed, regardless of whether a later layer's own instructions
+# did -- content-addressing only helps once a layer is reached, not before.
+# Splitting the apt-native, x86-multilib half (below) out from this one
+# and moving it *after* the toolchains means only a change to the four
+# pinned tarball specs themselves can ever invalidate that big layer again.
 RUN set -eux; \
-    dpkg --add-architecture i386; \
-    sed -i '/^Types: deb$/a Architectures: amd64 i386' \
-        /etc/apt/sources.list.d/ubuntu.sources; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
-        build-essential \
         ca-certificates \
         curl \
-        git \
-        gcc-13-multilib \
-        gcc-i686-linux-gnu \
-        linux-libc-dev:i386 \
-        python3 \
         xz-utils; \
     rm -rf /var/lib/apt/lists/*
 
@@ -132,6 +117,47 @@ RUN set -eux; \
     done; \
     ln -s /opt/toolchains/xtensa-esp-elf/bin/xtensa-esp-elf-gcc \
           /usr/local/bin/xtensa-esp32-elf-gcc
+
+# ── apt: the rest of the host-native half ───────────────────────────────
+#
+# Everything apt-installed that is *not* needed to reach the toolchain
+# layer above -- moved here, after it, on purpose (see that layer's own
+# comment): this is the volatile half, the one a future package addition
+# is actually likely to touch, so it is this layer that should pay the
+# cache miss, not the 3.38GB one above it.
+#
+# **Two generations of `x86`, because the tool supports both.**
+# `dynruntime.mk` changed in MicroPython v1.29.0: `x86` went from
+# `CFLAGS_ARCH += -m32` on the host gcc to `CROSS = i686-linux-gnu-`, and
+# `x64` from an empty prefix to `CROSS = x86_64-linux-gnu-`. Upstream
+# dropping multilib for a real cross-compiler is the same conclusion this
+# image reached, arrived at independently -- but `micropython` accepts a
+# list of tags ([0013]), so a single run can span the change and the
+# image has to satisfy both spellings:
+#
+#   <= v1.28.0   host gcc + `gcc-13-multilib` + `linux-libc-dev:i386`
+#   >= v1.29.0   `gcc-i686-linux-gnu`
+#
+# `x86_64-linux-gnu-gcc` needs nothing: `build-essential` already
+# installs gcc under exactly that name on an amd64 base.
+#
+# `linux-libc-dev:i386` is not optional for the older path and was
+# re-added once after being cut: `py/dynruntime.h`'s include chain pulls
+# `<asm/errno.h>`, and amd64's own copy does not satisfy it under `-m32`
+# (record 0025's own live finding, one of six).
+RUN set -eux; \
+    dpkg --add-architecture i386; \
+    sed -i '/^Types: deb$/a Architectures: amd64 i386' \
+        /etc/apt/sources.list.d/ubuntu.sources; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        git \
+        gcc-13-multilib \
+        gcc-i686-linux-gnu \
+        linux-libc-dev:i386 \
+        python3; \
+    rm -rf /var/lib/apt/lists/*
 
 # ── the build's own Python ────────────────────────────────────────────
 #

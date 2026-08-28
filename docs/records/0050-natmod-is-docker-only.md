@@ -220,6 +220,90 @@ It was found by the user asking why two test files were sitting unstaged.
   `container_mpy_cross()`; natmod has not been checked for whether its `make`
   reaches that binary at all.
 
+## Addendum, 2026-08-27 — the natmod image republished by CI itself; first real CI run
+
+The "Still open" item above ("the published digest predates `gcc-i686-linux-gnu`... no CI
+run has ever exercised natmod-in-a-container at all") is closed. `publish-docker-images.yml`
+was dispatched (`only: natmod`) against this image's own current Dockerfile content (already
+carrying `gcc-i686-linux-gnu`, committed earlier) and, for the first time, actually pushed
+through `docker/build-push-action` rather than by hand.
+
+**A second, previously-unknown gap surfaced doing this**: the push failed with `denied:
+permission_denied: write_package`, even with `packages: write` in the workflow. A package's
+first hand `docker push` (this record's own earlier text) does more damage than "unlinked and
+private" -- it also leaves the package with no Actions-write grant for any repository, since
+GitHub only auto-grants that at the moment a package is first created *by* a repository's own
+Actions run. Fixed the same way the earlier private-visibility gap was (both settings-UI-only,
+no REST endpoint for either): the package was connected to this repository ("Connect
+Repository") and explicitly granted `Write` under "Manage Actions access". Once both were set,
+the exact same workflow dispatch succeeded immediately, no other change needed.
+
+The resulting digest (`sha256:d3f6c431...`) is a real, workflow-published OCI index with
+provenance and attestation -- not the bare-manifest shape the prior two hand-pushed digests
+had. Content is unchanged (same Dockerfile, same four verified toolchains); only the
+publishing path changed, which is why the digest itself differs from a byte-identical build.
+
+`resources/pinned_docker_images.toml`'s own comment above the `natmod` pin was rewritten to
+carry this history (superseding, not deleting, the account of the second digest). Confirmed
+live, not just by the publish workflow's own "publicly pullable" check: the very next push to
+this branch triggered `build-examples.yml` on a fresh runner with no local cache, which
+anonymously pulled exactly this digest and built `examples/template` through it successfully
+(`Build examples/template (natmod)`, green). That is the first real CI run this project has
+ever had exercise natmod-in-a-container end to end.
+
+## Addendum, 2026-08-27 — natmod's own mpy-cross moves into the image; the apt step does not go
+
+The "Still open" `mpy-cross` item is closed: `build_mpy_cross()` (now
+`platforms/natmod/build.py`, not `sources.py`) builds it inside the natmod
+image, reusing `_natmod_image()`/`_run_in_image()`, at the exact fixed path
+`py/dynruntime.mk` hardcodes (`mpy-cross/build/mpy-cross` -- confirmed
+against the real file, no override mechanism exists) -- the same fix
+[0044]'s own `container_mpy_cross()` already made for `unix`/`windows`/
+`webassembly`, for the identical reason: a host-built binary only worked
+by coincidence of matching the image's own glibc, and cannot work at all
+across an architecture boundary.
+
+The other "still open" claim from this record's original text --
+"`action.yml`'s apt step can now go" -- does **not** follow from this fix,
+and was wrong even at the time it was written: `usermod`'s own `qemu` and
+`esp32` ports build *their* mpy-cross on the host too
+(`_HOST_MPY_CROSS_PORTS`, `platforms/usermod/orchestrate.py`), for a
+reason unrelated to natmod (`esp32`'s `make` never runs in a container at
+all; `qemu` passes no `MICROPY_MPYCROSS=`). `build-essential` stays in
+`action.yml` until those two get the same treatment -- a separate,
+not-yet-scoped piece of work, since neither port's own build is
+containerized the way `unix`/`windows`/`webassembly`'s already are.
+
+## Addendum, 2026-08-28 — the toolchain layer moves ahead of the volatile apt layer
+
+The "Still open" item about the 3.38GB toolchain layer sitting in the wrong
+place is fixed. `docker/natmod.Dockerfile`'s single apt-install `RUN` (ten
+packages: `build-essential`, `ca-certificates`, `curl`, `git`,
+`gcc-13-multilib`, `gcc-i686-linux-gnu`, `linux-libc-dev:i386`, `python3`,
+`xz-utils`, plus the i386 multiarch setup) sat *before* the toolchain
+download layer -- so changing that one `RUN` for any reason (adding
+`gcc-i686-linux-gnu` live, closing one of [0025]'s own six bugs, was the
+actual case that surfaced this) invalidated Docker's cache for every layer
+after it, forcing a full re-download and re-extract of all four toolchains
+even though none of their own pinned URLs or hashes had changed. Measured:
+ten minutes, for one added package.
+
+Split in three now: a minimal, rarely-changing apt layer
+(`ca-certificates`/`curl`/`xz-utils` -- exactly what fetching and
+extracting the four tarballs needs) first; the toolchain download
+unchanged, second; everything else apt-installs (`build-essential`, `git`,
+the x86-multilib pair, `python3`) third, after it. Only a change to the
+first layer -- essentially never, once set -- can invalidate the big one
+now; the volatile half moved to where a cache miss is cheap.
+
+Whether `xtensa-lx106` (the ESP8266 toolchain) is worth keeping at all was a
+separate question (tracker's own row): at ~38MB compressed it is the
+smallest of the four by a wide margin (`riscv-none-elf` ~433MB,
+`arm-none-eabi` ~307MB, `xtensa-esp-elf` ~89MB), so dropping it would not
+have meaningfully addressed the layer-ordering problem this addendum fixes
+-- only cost one of ten supported natmod arches for real ESP8266 hardware.
+**Decided: kept.**
+
 [0012]: 0012-pyelftools-ar-own-deps.md
 [0030]: 0030-container-approach-natmod-and-docker-vs-qemu.md
 [0032]: 0032-unix-docker-default-and-webassembly-wiring.md

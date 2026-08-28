@@ -45,6 +45,22 @@ def usermod_data() -> dict[str, Any]:
     return _load("usermod.toml")
 
 
+def build_platforms_data() -> dict[str, Any]:
+    """`resources/build-platforms.toml` -- the packaged, fact-first source
+    of truth `platforms/natmod/targets.py`/`platforms/usermod/boards.py`
+    resolve tags, archs and boards against (record 0052, Track C).
+
+    One row per independently-verified `(tag, arch[, arch_flags])` or
+    `(tag, board)` fact, walked by `bin/refresh_natmod_archs.py`/
+    `bin/refresh_usermod_boards.py` against real MicroPython checkouts --
+    never an assumed axis product. A tag this table has never walked is a
+    loud error at resolution time, not a silent guess: refreshing this
+    file is what fixes it, the same discipline `natmod.toml`/
+    `pinned_docker_images.toml` already have for their own pinned data.
+    """
+    return _load("build-platforms.toml")
+
+
 def pinned_docker_images() -> dict[str, Any]:
     """`resources/pinned_docker_images.toml` -- the digest-pinned base and
     published container images `usermod/dockerrun.py` resolves against

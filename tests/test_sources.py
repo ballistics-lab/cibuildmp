@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from cibuildmp.natmod import sources
-from cibuildmp.natmod.sources import (
+from cibuildmp import sources
+from cibuildmp.sources import (
     STAMP,
     SourceError,
     cache_root,

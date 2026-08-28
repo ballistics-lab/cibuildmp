@@ -16,28 +16,23 @@ inputs:
     description: "File containing the config, defaults to {package-dir}/cibuildmp.toml"
     required: false
     default: ""
-  only:
+  build:
     description: >
-      Build exactly this one identifier (e.g. mpy6.3-natmod-armv7emsp),
-      ignoring the config's own build/skip selectors and its axis alike.
-      Resolved against every identifier that exists, not against what the
-      config selects (record 0045).
+      Override the config's own build selector -- space-separated
+      glob(s) matched against the real identifier (e.g.
+      "mpy6.3-v1.29.0-armv7emsp", or "*manylinux*" for every unix cell).
+      Replaces the old only/archs inputs (record 0052): name a glob
+      specific enough to match one identifier for "build exactly this
+      one thing", or list several runs-on-specific globs by hand to
+      spread work across a matrix -- there is no more auto/native/all
+      keyword vocabulary computing that for you. See the README for the
+      full real identifier list.
     required: false
     default: ""
-  archs:
+  skip:
     description: >
-      Which architectures to build here, overriding the config's own.
-      Comma-separated names, or one of the words auto, native, all --
-      native is this runner's own architecture, auto adds the 32-bit
-      sibling it can execute directly, all is every cell.
-
-      This is how work is spread across runners, and it replaced
-      cibuildmp generating a matrix (record 0049). Give each job in your
-      own matrix a runs-on and archs&#58; auto, and each one builds what it is
-      native to. Nothing is unbuildable on the wrong runner -- every
-      build runs in a container with an explicit --platform, so a
-      non-native cell builds under emulation -- so this is a choice about
-      time, not about capability.
+      Override the config's own skip selector -- same glob syntax as
+      build above.
     required: false
     default: ""
   extras:
@@ -122,11 +117,14 @@ runs:
     # place in this action that treated an arm64 runner as a special
     # case, and it is why `x86` could not be built on one at all.
     #
-    # What is left is for the *host*, which now only launches containers
-    # and does one thing itself: `sources.build_mpy_cross()` still
-    # compiles mpy-cross outside Docker for natmod, which is why
-    # `build-essential` stays. When that moves into the image too --
-    # 0050's own last open item -- this step can go entirely.
+    # What is left is for the *host*. natmod no longer needs it: its own
+    # mpy-cross now builds inside the natmod image (natmod/build.py's
+    # `build_mpy_cross()`), closing [0050]'s "still builds mpy-cross on
+    # the host" item -- but `build-essential` still stays, because
+    # usermod's `qemu`/`esp32` ports build *their* mpy-cross on the host
+    # too (`_HOST_MPY_CROSS_PORTS`, usermod/orchestrate.py) and were never
+    # part of this item. Closing that pair the same way `unix`/`windows`/
+    # `webassembly` already were in [0044] is what would let this step go.
     - name: Install cibuildmp's own apt prerequisites
       # Slimmed live, D33: every package this used to install beyond
       # what's left below (mingw-w64 x64/x86, aarch64/armhf/mipsel-
@@ -230,16 +228,16 @@ runs:
         if [ -n "$ACTION_CONFIG_FILE" ]; then
           args+=(--config-file "$ACTION_CONFIG_FILE")
         fi
-        if [ -n "$ACTION_ONLY" ]; then
-          args+=(--only "$ACTION_ONLY")
+        if [ -n "$ACTION_BUILD" ]; then
+          args+=(--build "$ACTION_BUILD")
         fi
-        if [ -n "$ACTION_ARCHS" ]; then
-          args+=(--archs "$ACTION_ARCHS")
+        if [ -n "$ACTION_SKIP" ]; then
+          args+=(--skip "$ACTION_SKIP")
         fi
         cibuildmp "${args[@]}"
       env:
         ACTION_PACKAGE_DIR: ${{ inputs.package-dir }}
         ACTION_OUTPUT_DIR: ${{ inputs.output-dir }}
         ACTION_CONFIG_FILE: ${{ inputs.config-file }}
-        ACTION_ONLY: ${{ inputs.only }}
-        ACTION_ARCHS: ${{ inputs.archs }}
+        ACTION_BUILD: ${{ inputs.build }}
+        ACTION_SKIP: ${{ inputs.skip }}

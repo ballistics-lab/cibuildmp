@@ -3,11 +3,10 @@ from pathlib import Path
 import pytest
 
 from cibuildmp import dockerrun
-from cibuildmp.natmod.options import DEFAULT_MICROPYTHON
-from cibuildmp.usermod import build as build_module
-from cibuildmp.usermod.options import UsermodOptions
-from cibuildmp.usermod.orchestrate import build, build_one
-from cibuildmp.usermod.targets import UsermodTarget
+from cibuildmp.platforms.usermod import build as build_module
+from cibuildmp.platforms.usermod.options import UsermodOptions
+from cibuildmp.platforms.usermod.orchestrate import _dest_name, build, build_one
+from cibuildmp.platforms.usermod.targets import UsermodTarget
 
 
 # Every `unix` cell in resources/pinned_docker_images.toml is empty until
@@ -56,7 +55,7 @@ def make_module_dir(package_dir: Path, name: str = "usermod") -> None:
 def test_build_one_unix_writes_into_output_dir_identifier(tmp_path, monkeypatch):
     package_dir = tmp_path / "pkg"
     make_module_dir(package_dir)
-    write_config(package_dir, '[usermod]\nports = ["unix"]\n')
+    write_config(package_dir, "")
     options = UsermodOptions.load(package_dir)
     options.output_dir = tmp_path / "mpyhouse"
 
@@ -83,6 +82,64 @@ def test_build_one_unix_writes_into_output_dir_identifier(tmp_path, monkeypatch)
     assert result.output.read_bytes() == FAKE_X86_64_ELF
 
 
+def test_dest_name_unset_keeps_todays_filename():
+    # record 0052, A3: gated on `name` alone -- a project that has not set
+    # it yet keeps exactly today's filename, "micropython" stem included.
+    assert (
+        _dest_name(Path("micropython"), "unix-manylinux_2_28_x86_64")
+        == "micropython-unix-manylinux_2_28_x86_64"
+    )
+
+
+def test_dest_name_with_name_and_version_drops_the_micropython_stem():
+    assert (
+        _dest_name(
+            Path("micropython.exe"),
+            "windows-arm64",
+            name="mylib",
+            version="1.2.0",
+        )
+        == "mylib-1.2.0-windows-arm64.exe"
+    )
+
+
+def test_dest_name_with_name_only_omits_the_version_segment():
+    assert (
+        _dest_name(Path("micropython.bin"), "esp32-ESP32_GENERIC", name="mylib")
+        == "mylib-esp32-ESP32_GENERIC.bin"
+    )
+
+
+def test_build_one_threads_name_and_version_into_the_output_filename(
+    tmp_path, monkeypatch
+):
+    package_dir = tmp_path / "pkg"
+    make_module_dir(package_dir)
+    write_config(package_dir, 'name = "mylib"\nversion = "1.2.0"\n')
+    options = UsermodOptions.load(package_dir)
+    options.output_dir = tmp_path / "mpyhouse"
+
+    mpy_dir = tmp_path / "mpy"
+    target = UsermodTarget(port="unix", arch="manylinux_2_28_x86_64")
+
+    def fake_run(cmd, **kwargs):
+        build_dir = mpy_dir / "ports" / "unix" / "build-unix-manylinux_2_28_x86_64"
+        build_dir.mkdir(parents=True, exist_ok=True)
+        (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
+
+    monkeypatch.setattr(build_module.subprocess, "run", fake_run)
+    (mpy_dir / "ports" / "unix").mkdir(parents=True)
+
+    result = build_one(options, target, mpy_dir)
+
+    assert (
+        result.output
+        == options.output_dir
+        / "unix-manylinux_2_28_x86_64"
+        / "mylib-1.2.0-unix-manylinux_2_28_x86_64"
+    )
+
+
 def test_build_one_qemu_uses_default_board_not_empty_string(tmp_path, monkeypatch):
     # Regression check for the bug caught while writing this: qemu has no
     # configurable axis, so target.arch is always "" -- passing that
@@ -90,7 +147,7 @@ def test_build_one_qemu_uses_default_board_not_empty_string(tmp_path, monkeypatc
     # "MPS2_AN385" default with an empty string.
     package_dir = tmp_path / "pkg"
     make_module_dir(package_dir)
-    write_config(package_dir, '[usermod]\nports = ["qemu"]\n')
+    write_config(package_dir, "")
     options = UsermodOptions.load(package_dir)
     options.output_dir = tmp_path / "mpyhouse"
 
@@ -122,9 +179,8 @@ def test_build_one_writes_combined_manifest_when_present(tmp_path, monkeypatch):
     write_config(
         package_dir,
         """
-        [usermod]
-        ports = ["unix"]
         manifest = "extra_manifest.py"
+        [unix]
         """,
     )
     options = UsermodOptions.load(package_dir)
@@ -162,10 +218,7 @@ def test_build_one_esp32_passes_board_through(tmp_path, monkeypatch):
     write_config(
         package_dir,
         """
-        [usermod]
-        ports = ["esp32"]
-
-        [usermod.esp32]
+        [esp32]
         boards = ["ESP32_GENERIC_S3"]
         """,
     )
@@ -201,7 +254,7 @@ def test_build_one_esp32_passes_board_through(tmp_path, monkeypatch):
 def test_build_fetches_micropython_and_skips_the_host_mpy_cross(tmp_path, monkeypatch):
     package_dir = tmp_path / "pkg"
     make_module_dir(package_dir)
-    write_config(package_dir, '[usermod]\nports = ["unix"]\n')
+    write_config(package_dir, "")
     options = UsermodOptions.load(package_dir)
     options.output_dir = tmp_path / "mpyhouse"
 
@@ -209,7 +262,7 @@ def test_build_fetches_micropython_and_skips_the_host_mpy_cross(tmp_path, monkey
     (mpy_dir / "ports" / "unix").mkdir(parents=True)
     calls = []
 
-    import cibuildmp.usermod.orchestrate as orchestrate_module
+    import cibuildmp.platforms.usermod.orchestrate as orchestrate_module
 
     monkeypatch.setattr(
         orchestrate_module.sources,
@@ -223,21 +276,82 @@ def test_build_fetches_micropython_and_skips_the_host_mpy_cross(tmp_path, monkey
     )
 
     def fake_run(cmd, **kwargs):
-        build_dir = mpy_dir / "ports" / "unix" / "build-unix-manylinux_2_28_x86_64"
+        build_dir = mpy_dir / "ports" / "unix" / "build-v1.29.0-manylinux_2_28_x86_64"
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
 
     monkeypatch.setattr(build_module.subprocess, "run", fake_run)
 
-    results = build(options, [UsermodTarget(port="unix", arch="manylinux_2_28_x86_64")])
+    results = build(
+        options,
+        [UsermodTarget(port="unix", arch="manylinux_2_28_x86_64", tag="v1.29.0")],
+    )
 
     # No host mpy-cross for a `unix` target: record 0044 gave it
     # `container_mpy_cross()`, because a host-built one cannot run inside
     # an image of another architecture or another libc. Only `qemu`
     # still reaches the host copy.
-    assert calls == [("fetch", DEFAULT_MICROPYTHON)]
+    assert calls == [("fetch", "v1.29.0")]
     assert len(results) == 1
-    assert results[0].identifier == "unix-manylinux_2_28_x86_64"
+    assert results[0].identifier == "v1.29.0-manylinux_2_28_x86_64"
+
+
+def test_build_groups_by_tag_and_fetches_once_per_group(tmp_path, monkeypatch):
+    # The regression 0051's usermod half exists to fix: two tags of the
+    # same port/arch must produce two distinct output directories in one
+    # run, not one overwriting the other -- and each tag is fetched once,
+    # not once per target in it (mirrors natmod's own cli.build()).
+    package_dir = tmp_path / "pkg"
+    make_module_dir(package_dir)
+    write_config(package_dir, "")
+    options = UsermodOptions.load(package_dir)
+    options.output_dir = tmp_path / "mpyhouse"
+
+    calls = []
+
+    import cibuildmp.platforms.usermod.orchestrate as orchestrate_module
+
+    def fake_fetch(tag, **k):
+        calls.append(("fetch", tag))
+        mpy_dir = tmp_path / f"mpy-{tag}"
+        (mpy_dir / "ports" / "unix").mkdir(parents=True, exist_ok=True)
+        return mpy_dir
+
+    monkeypatch.setattr(orchestrate_module.sources, "fetch_micropython", fake_fetch)
+    monkeypatch.setattr(
+        orchestrate_module.sources,
+        "build_mpy_cross",
+        lambda d, **k: calls.append(("mpy-cross", d)),
+    )
+
+    def fake_run(cmd, **kwargs):
+        # unix_make_command() always carries its own `BUILD=<build_dir>`
+        # entry -- read it back rather than hardcoding one, since this
+        # test runs the same command shape against two different
+        # mpy_dirs (one per tag).
+        build_arg = next(a for a in cmd if a.startswith("BUILD="))
+        build_dir = Path(build_arg.removeprefix("BUILD="))
+        build_dir.mkdir(parents=True, exist_ok=True)
+        (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
+
+    monkeypatch.setattr(build_module.subprocess, "run", fake_run)
+
+    targets = [
+        UsermodTarget(port="unix", arch="manylinux_2_28_x86_64", tag="v1.28.0"),
+        UsermodTarget(port="unix", arch="manylinux_2_28_x86_64", tag="v1.29.0"),
+    ]
+    results = build(options, targets)
+
+    assert calls == [("fetch", "v1.28.0"), ("fetch", "v1.29.0")]
+    identifiers = {r.identifier for r in results}
+    assert identifiers == {
+        "v1.28.0-manylinux_2_28_x86_64",
+        "v1.29.0-manylinux_2_28_x86_64",
+    }
+    output_dirs = {r.output.parent for r in results}
+    assert (
+        len(output_dirs) == 2
+    )  # two distinct directories, not one overwriting the other
 
 
 def test_build_one_resolves_relative_output_dir_against_package_dir(
@@ -251,7 +365,7 @@ def test_build_one_resolves_relative_output_dir_against_package_dir(
     # the bug (Path("x") / "/abs" == "/abs" regardless of the left side).
     package_dir = tmp_path / "pkg"
     make_module_dir(package_dir)
-    write_config(package_dir, '[usermod]\nports = ["unix"]\n')
+    write_config(package_dir, "")
     options = UsermodOptions.load(package_dir)
     options.output_dir = Path("mpyhouse")  # relative, the real default
 
@@ -282,7 +396,7 @@ def test_build_one_preserves_executable_bit(tmp_path, monkeypatch):
     # build's output IS meant to be run.
     package_dir = tmp_path / "pkg"
     make_module_dir(package_dir)
-    write_config(package_dir, '[usermod]\nports = ["unix"]\n')
+    write_config(package_dir, "")
     options = UsermodOptions.load(package_dir)
     options.output_dir = tmp_path / "mpyhouse"
 

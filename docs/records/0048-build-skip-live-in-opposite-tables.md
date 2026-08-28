@@ -32,16 +32,18 @@ def opt(key, default=None):
     if env_value is not None:
         return env_value
     return raw.get(key, default)
+
+
 ...
-build=parse_selector(opt("build", "*")),
-skip=parse_selector(opt("skip", "")),
+build = (parse_selector(opt("build", "*")),)
+skip = (parse_selector(opt("skip", "")),)
 ```
 
 `usermod/options.py` reads the **mode table**:
 
 ```python
-build=parse_selector(usermod.get("build", "*")),
-skip=parse_selector(usermod.get("skip", "")),
+build = (parse_selector(usermod.get("build", "*")),)
+skip = (parse_selector(usermod.get("skip", "")),)
 ```
 
 Neither is unreasonable alone. Together they are a trap, and one line above the
@@ -167,3 +169,77 @@ has, so it exits 2 with one line like everything else.
 
 Eleven tests, across `test_options.py` and `test_usermod_options.py`; every
 path also run against the real CLI on real configs.
+
+---
+
+## Addendum, 2026-08-26 — the partition doesn't generalise, a cascade does
+
+Surfaced while designing [0051]'s points 4/6 (`--platform` becomes the port,
+`natmod` alongside `unix`/`windows`/`qemu`/`webassembly`/`esp32`, six
+structurally identical platform tables instead of two modes). This record's
+own fix — every key has exactly one correct location, every other location is
+a loud error — does not generalise cleanly to six platforms that need to
+share option keys (`module-dir`, `manifest`, `extra-make-args`): either every
+platform table repeats an identical value, or a bespoke "these specific keys
+are shared, these are not" rule gets invented per key, which is this record's
+own trap again in a different shape.
+
+Read from `cibuildwheel/options.py` directly, not recalled: upstream never
+partitions. `Options.get()` resolves every option as a **cascade** —
+`default → global config → platform config → environment → CLI`,
+most-specific-wins, and nothing is an error to place at any layer. There is
+no "wrong location" for the cascade to protect against, because every
+location is a real, meaningful layer.
+
+**This is not a reversal of this record's own reasoning — it is a more
+general way to satisfy the same constraint.** The actual guarantee this
+record cared about was never "a key has one true home"; it was "a misplaced
+key must never silently do nothing." A cascade satisfies that differently:
+there is no placement left that silently does nothing, because every
+placement is *some* layer that genuinely applies (global as every platform's
+own default, platform as that one platform's override). What the cascade
+does still need, and gets, is this record's other real finding — a key
+**unknown to every schema at once** (a typo, `module-dr` for `module-dir`)
+must still be a loud error. `cibuildmp/options.py`'s own `known_option_names()`
+(the union of every platform's own keys plus the generic ones) and
+`check_known_keys()` are that check, replacing `TOP_LEVEL_ONLY_KEYS`/
+`NATMOD_TABLE_KEYS`/`USERMOD_TABLE_KEYS`/`check_table_keys()`'s
+placement-specific error with a single "does this key exist anywhere"
+check — `difflib`-suggested close matches, the same upstream already does in
+`_validate_global_option()`.
+
+`archs`/`arch-flags`'s own dual-read exception (natmod, predating this
+record) stops being an exception under a cascade — it was always just the
+platform layer overriding the global one, the general case, not a special
+carve-out for two keys.
+
+Not yet wired to real config loading — `cibuildmp/options.py` (the cascade
+mechanism) landed standalone and unit-tested; `natmod/options.py`/
+`usermod/options.py` still read config exactly as this record's own
+resolution describes until [0051]'s later phases migrate them. See that
+record's own addendum for the full phased plan.
+
+**Wired, 2026-08-26 (the same day, [0051]'s own Phase F):** both modules
+now resolve `module-dir`/`extra-make-args`/etc. through `Options.get()`,
+bounded to the plain `default → global → platform → env` layers — not
+`[[overrides]]`/`inherit`, which stay [0051]'s own "Phase G" ([0051]'s
+fourth addendum has the full account). `check_table_keys()` itself is
+retired in favour of `check_known_keys()` plus a small per-module
+`check_keys()` wrapper that still gives the "this belongs at the top
+level" message this record's own resolution introduced, now also with a
+`difflib`-suggested close match for a genuine typo.
+
+**`[[overrides]]`/`inherit` wired too, the same day ([0051]'s own Phase
+G):** this record's own guarantee — a misplaced or unknown key is a loud
+error, never a silent no-op — now covers the merged, shared
+`[[overrides]]` list specifically, re-verified once more under the
+cascade: a key valid on some platform's own schema but written inside an
+override that only ever matches a *different* platform's identifiers is
+still rejected, checked at `build_options()` resolution time once the
+matched identifier's own platform is known ([0051]'s fifth addendum has
+the full account, including a real "raw traceback instead of a clean CLI
+error" bug this phase's own live testing found in both `natmod/cli.py`
+and `usermod/cli.py`, unrelated to the cascade itself, and fixed the same
+day).
+
+[0051]: 0051-usermod-identifiers-have-no-version-axis.md

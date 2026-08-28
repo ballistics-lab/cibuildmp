@@ -83,8 +83,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from .platforms.usermod.build import UsermodBuildError
 from .resources import pinned_docker_images, pinned_pypa_images
-from .usermod.build import UsermodBuildError
 
 
 # ── where the pins live now ───────────────────────────────────────────
@@ -242,8 +242,8 @@ def image_for(port: str, target: str | None = None) -> str | None:
     `resources/pinned_docker_images.toml`.
 
     `target` is the platform tag for `unix` (`manylinux_2_28_aarch64`),
-    the arch for `windows` (`x64`/`x86`/`arm64`, all three sharing one
-    image), and omitted entirely for a port with no per-build axis
+    the arch for `windows` (`win32`/`win_amd64`/`win_arm64`, all three
+    sharing one image), and omitted entirely for a port with no per-build axis
     (`qemu`, `webassembly`) -- omit it rather than passing `""`, so the
     key and env name carry no separator that means nothing.
 

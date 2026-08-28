@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..natmod import sources
+from ... import sources
 from . import manifests, portinfo
 from .build import (
     Esp32BuildOptions,
@@ -93,8 +93,17 @@ def _port_build_options(
     port = target.port
     identifier = target.identifier
 
-    module_root = (package_dir / build_options.module_dir).resolve()
-    user_c_modules = portinfo.resolve_user_c_modules(port, module_root.as_posix())
+    # `build_options.user_c_modules` is the raw, unresolved value from
+    # config (record 0051's ninth addendum -- was `module_dir`, renamed
+    # to match the literal TOML key now that it no longer collides with
+    # natmod's own). `resolve_user_c_modules()` below turns it into the
+    # actual `USER_C_MODULES=` value each port's own build wants --
+    # unchanged for Make ports, `/micropython.cmake` appended for CMake
+    # ports -- kept under its own name so the two are never conflated.
+    module_root = (package_dir / build_options.user_c_modules).resolve()
+    resolved_user_c_modules = portinfo.resolve_user_c_modules(
+        port, module_root.as_posix()
+    )
 
     module_manifest = (
         (package_dir / build_options.manifest).resolve().as_posix()
@@ -118,7 +127,7 @@ def _port_build_options(
             # itself stays one field on the target, so only the name of
             # the parameter it feeds changes here.
             target=target.arch,
-            user_c_modules=user_c_modules,
+            user_c_modules=resolved_user_c_modules,
             frozen_manifest=frozen_manifest,
             build_dir=_resolved_build_dir(mpy_dir, port, identifier),
             extra_make_args=extra_make_args,
@@ -126,7 +135,7 @@ def _port_build_options(
     if port == "windows":
         return WindowsBuildOptions(
             arch=target.arch,
-            user_c_modules=user_c_modules,
+            user_c_modules=resolved_user_c_modules,
             frozen_manifest=frozen_manifest,
             build_dir=_resolved_build_dir(mpy_dir, port, identifier),
             extra_make_args=extra_make_args,
@@ -140,7 +149,7 @@ def _port_build_options(
         # back into QemuBuildOptions' own default board instead of
         # overriding it with an empty string.
         return QemuBuildOptions(
-            user_c_modules=user_c_modules,
+            user_c_modules=resolved_user_c_modules,
             frozen_manifest=frozen_manifest,
             build_dir=_resolved_build_dir(mpy_dir, port, identifier),
             board=target.arch or "MPS2_AN385",
@@ -148,14 +157,14 @@ def _port_build_options(
         )
     if port == "webassembly":
         return WebassemblyBuildOptions(
-            user_c_modules=user_c_modules,
+            user_c_modules=resolved_user_c_modules,
             frozen_manifest=frozen_manifest,
             build_dir=_resolved_build_dir(mpy_dir, port, identifier),
             extra_make_args=extra_make_args,
         )
     if port == "esp32":
         return Esp32BuildOptions(
-            user_c_modules=user_c_modules,
+            user_c_modules=resolved_user_c_modules,
             frozen_manifest=frozen_manifest,
             board=target.arch,
             extra_make_args=extra_make_args,
@@ -163,13 +172,27 @@ def _port_build_options(
     raise UsermodBuildError(f"no build_options builder wired for port {port!r}")
 
 
-def _dest_name(produced: Path, identifier: str) -> str:
+def _dest_name(
+    produced: Path, identifier: str, *, name: str = "", version: str = ""
+) -> str:
     # Identifier-qualified even though the file already lives in its own
     # identifier/ directory -- same reasoning natmod's own output_name()
     # gives: stays unambiguous if a caller later flattens several
     # identifiers' directories into one namespace (a GitHub Release's own
     # flat asset list, which cannot nest directories).
-    return f"{produced.stem}-{identifier}{produced.suffix}"
+    #
+    # `name`/`version` (record 0052, A3) replace `produced.stem` entirely
+    # when set, rather than prefixing it: `produced.stem` is always
+    # literally "micropython"/"micropython.exe", and restating that a
+    # usermod build produces MicroPython firmware is noise a project name
+    # already displaces (the same reason `natmod` was dropped from
+    # natmod's own identifier). Gated on `name` alone, same as natmod's
+    # own output_name() -- a project that has not set it yet keeps
+    # exactly today's filename.
+    if not name:
+        return f"{produced.stem}-{identifier}{produced.suffix}"
+    prefix = f"{name}-{version}-" if version else f"{name}-"
+    return f"{prefix}{identifier}{produced.suffix}"
 
 
 # Ports whose build still runs a *host* mpy-cross, and therefore the only
@@ -220,7 +243,7 @@ def build_one(
     # genhdr/qstrdefs.generated.h missing this run's own module's QSTRs --
     # `'MP_QSTR_mymod' undeclared` -- the exact same "nothing cleans
     # between invocations" bug natmod's own build/ scratch space had (see
-    # cli.build()'s own comment), just one layer deeper (MicroPython's own
+    # natmod.build_all()'s own comment), just one layer deeper (MicroPython's own
     # qstr pipeline, not cibuildmp's glob). Only safe to delete host-side
     # now that dockerrun.run() passes --user (see its own comment) --
     # every port build here runs in a sibling container as root otherwise,
@@ -245,7 +268,9 @@ def build_one(
     # package_dir.
     identifier_dir = options.package_dir / options.output_dir / target.identifier
     identifier_dir.mkdir(parents=True, exist_ok=True)
-    dest = identifier_dir / _dest_name(produced, target.identifier)
+    dest = identifier_dir / _dest_name(
+        produced, target.identifier, name=options.name, version=options.version
+    )
     # shutil.copy(), not copyfile(): unlike natmod's own .mpy (always
     # mip.install()-ed or imported, never executed directly -- D23), a
     # usermod build's own output IS a runnable binary. copyfile() only
@@ -269,22 +294,30 @@ def build(
 ) -> list[UsermodBuildResult]:
     """Build every selected target in one invocation.
 
-    MicroPython is fetched and mpy-cross built once, shared across every
-    target -- the same D9 reasoning `cli.build()` already applies for
-    natmod, and for the same reason: nothing here needs a different
-    checkout or a different mpy-cross per target, since none of the five
-    ports' own axes (arch/board) change which MicroPython release is
-    being built, only how it is cross-compiled.
+    Grouped by MicroPython tag (**0051**), the same D9/D13 reasoning
+    natmod's own `build_all()` already applies: fetching a checkout (and,
+    for the two ports that still need one, a host mpy-cross) is identical
+    for every target sharing a release -- none of the five ports' own
+    axes (arch/board) change which MicroPython release is being built,
+    only how it is cross-compiled -- so paying for it once per tag beats
+    paying for it once per target. Almost always one group, since that is
+    the common case, but `targets` can span more than one release since
+    `micropython` stopped being silently truncated to its first entry.
     """
-    mpy_dir = sources.fetch_micropython(options.micropython)
-    if any(t.port in _HOST_MPY_CROSS_PORTS for t in targets):
-        sources.build_mpy_cross(mpy_dir, quiet=quiet)
-
     results = []
-    for target in targets:
-        results.append(
-            build_one(
-                options, target, mpy_dir, toolchain_root=toolchain_root, quiet=quiet
+    # Preserves first-appearance order (usermod_targets() emits one tag
+    # group at a time), not sorted -- matches natmod's own
+    # dict.fromkeys(bo.target.tag for bo in resolved) idiom exactly.
+    build_tags = list(dict.fromkeys(t.tag for t in targets))
+    for tag in build_tags:
+        group = [t for t in targets if t.tag == tag]
+        mpy_dir = sources.fetch_micropython(tag)
+        if any(t.port in _HOST_MPY_CROSS_PORTS for t in group):
+            sources.build_mpy_cross(mpy_dir, quiet=quiet)
+        for target in group:
+            results.append(
+                build_one(
+                    options, target, mpy_dir, toolchain_root=toolchain_root, quiet=quiet
+                )
             )
-        )
     return results

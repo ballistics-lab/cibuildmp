@@ -16,8 +16,8 @@
 # the try/except -- same shape micropython-bclibc's own usermod/manifest.py
 # already uses for the identical reason.
 try:
-    include("$(PORT_DIR)/boards/manifest.py") # type: ignore
+    include("$(PORT_DIR)/boards/manifest.py")  # type: ignore
 except Exception:
     pass
 
-freeze("../src", "facade.py") # type: ignore
+freeze("../src", "facade.py")  # type: ignore

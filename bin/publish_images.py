@@ -12,10 +12,10 @@ way:
   resource for a container package's visibility, only the settings UI --
   but `--make-visible` reads it back for every cell, so the state is one
   command away instead of a surprise in a consumer's build.
-* **Emulation cost.** Thirteen of the eighteen cells are foreign-arch
-  images whose `dnf`/`apk` step runs under binfmt. On a slow runner that
-  is a long job; on a workstation with the images half-cached it is often
-  faster, and `--only` lets you publish one cell at a time.
+* **Emulation cost.** Three of the ten cells (aarch64, ppc64le, s390x)
+  are foreign-arch images whose install step runs under binfmt. On a slow
+  runner that is a long job; on a workstation with the images half-cached
+  it is often faster, and `--only` lets you publish one cell at a time.
 
 Usage:
 
@@ -55,11 +55,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from cibuildmp.resources import pinned_docker_images
-from cibuildmp.usermod.dockerrun import (
+from cibuildmp.dockerrun import (
     _PORT_OCI_PLATFORM,
     ARCH_OCI_PLATFORM,
 )
+from cibuildmp.resources import pinned_docker_images
 
 
 def cells() -> list[tuple[str, str]]:
@@ -68,12 +68,21 @@ def cells() -> list[tuple[str, str]]:
     `unix` cells are named by their platform tag and are native to their
     own architecture; the cross-compiling ports keep plain port names and
     are amd64 Linux hosts (record 0043).
+
+    A cell whose pin does not start with `ghcr.io/` has no cibuildmp
+    image or Dockerfile behind it at all -- nine `unix` cells add nothing
+    over pypa's own base (verified: each Dockerfile was a bare `FROM`)
+    and point straight at `pinned_pypa_images.toml`'s own digest instead.
+    Skipped here for the same reason `bin/update_docker.py --images`
+    mirrors rather than queries them: there is no `docker/<name>.Dockerfile`
+    to build and no GHCR package to push.
     """
     pins = pinned_docker_images()
     out = [
         (f"{floor}_{arch}", ARCH_OCI_PLATFORM[arch])
         for arch, floors in pins["image"].items()
-        for floor in floors
+        for floor, reference in floors.items()
+        if reference.startswith("ghcr.io/")
     ]
     out += [(port, _PORT_OCI_PLATFORM) for port in pins["port"]]
     return out
@@ -105,9 +114,9 @@ def current_visibility(name: str, owner: str, *, user_account: bool) -> str | No
     Checked before trying to change anything, because the interesting
     answer is usually "already public". `publish-docker-images.yml` has
     its own visibility step, and when that step works there is nothing
-    left to do here -- reporting eighteen failures for eighteen packages
-    that are already in the desired state is worse than useless, since it
-    reads exactly like the real failure this script exists to fix.
+    left to do here -- reporting ten failures for ten packages that are
+    already in the desired state is worse than useless, since it reads
+    exactly like the real failure this script exists to fix.
     """
     endpoint = (
         f"user/packages/container/{name}"

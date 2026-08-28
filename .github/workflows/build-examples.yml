@@ -24,10 +24,13 @@ name: Build examples
 #               above it -- copied alongside template.mpy on the natmod
 #               side ([publish] extra-files), frozen into the firmware
 #               image on the usermod side (usermod/manifest.py). Built
-#               twice, `CIBMP_PLATFORM=natmod` then `=usermod` (the
-#               config now has both tables, so detect_mode() cannot infer
-#               which one alone) -- natmod's own five bare-host arches
-#               below, usermod's own five real unix arches
+#               twice, `CIBMP_BUILD` narrowed to natmod's own ten arches
+#               first, then to a runner-specific usermod subset -- separate
+#               jobs for CI layout reasons (this workflow's own
+#               matrix/scheduling shape below), not because one invocation
+#               can't span both (it can -- every platform is always in
+#               scope, record 0052) -- natmod's own ten bare-host arches
+#               below, usermod's own real unix arches
 #               (x64/x86/aarch64/armhf/mipsel, D20/D24) plus webassembly
 #               (D26/D30's Docker-only path) in build-usermod, which is
 #               what actually proves action.yml's own apt prerequisites
@@ -80,14 +83,17 @@ jobs:
       - name: Build examples/template (natmod)
         uses: ./
         env:
-          # examples/template/cibuildmp.toml now has both [natmod] and
-          # [usermod] (natmod/, usermod/ and src/ as siblings, the real
-          # downstream layout -- see that file's own header comment), so
-          # detect_mode() can no longer infer which table this invocation
-          # means. CIBMP_PLATFORM, not a dedicated action.yml input --
-          # the same generic env-override every cibuildmp.toml key
-          # already has, matching cibuildwheel's own CIBW_BUILD shape.
-          CIBMP_PLATFORM: "natmod"
+          # examples/template/cibuildmp.toml's own `build` spans natmod
+          # plus every usermod port in one glob (natmod/, usermod/ and
+          # src/ as siblings, the real downstream layout -- see that
+          # file's own header comment); one invocation could build all of
+          # it at once, but this job wants only natmod's own ten arches,
+          # so CIBMP_BUILD narrows it -- the same generic env-override
+          # every cibuildmp.toml key already has, not a dedicated
+          # action.yml input, matching cibuildwheel's own CIBW_BUILD
+          # shape. Replaces the old CIBMP_PLATFORM=natmod (record 0052:
+          # there is no more platform-activation concept to narrow).
+          CIBMP_BUILD: "mpy6.3-v1.29.0-*"
           # Exercises D14's packaging step (extra-files + package.json) on
           # every push -- no real release tag needed for that, this repo
           # ships no module of its own to version.
@@ -98,7 +104,6 @@ jobs:
       - name: Build examples/wasm2mpy
         uses: ./
         env:
-          CIBMP_PLATFORM: "natmod"
           CIBMP_VERSION: 0.0.0-ci
         with:
           package-dir: examples/wasm2mpy
@@ -166,32 +171,61 @@ jobs:
   # equivalent of any of them and the whole project is cibuildwheel for
   # MicroPython. Upstream emits no matrix and holds no opinion about
   # hosts; each job says `CIBW_ARCHS: auto` and the runner it is on
-  # decides what that means. This is that, spelled `archs: auto`.
+  # decides what that means.
+  #
+  # **There is no more `archs: auto`/`native`/`all` vocabulary** (record
+  # 0052's own live-caught retraction, folded into the same round that
+  # removed table-presence activation): it was host-convenience keyword
+  # expansion sitting on top of a per-port axis config concept that no
+  # longer exists. What used to compute "what runs natively here" is
+  # spelled out directly per runner in the matrix below instead -- see
+  # each entry's own comment for the real cells it names.
   #
   # **Nothing here is unbuildable on the other runner.** Every build runs
   # in a container with an explicit `--platform`, so a non-native cell
-  # builds under emulation wherever it lands -- `archs` picks what to
-  # build *here*, and is a choice about time, not capability. The
+  # builds under emulation wherever it lands -- `build` below picks what
+  # to build *here*, and is a choice about time, not capability. The
   # `foreign-host` job below is the standing proof of exactly that.
   #
-  # Between the two runners `auto` covers nine of the fifteen unix cells
-  # plus `webassembly` and all three `windows` arches. The six left over
-  # (`ppc64le`, `s390x`, `riscv64`, both columns) are native to no runner
-  # GitHub offers and are emulated whatever we do, which is why they are
-  # a descope decision rather than a scheduling one.
+  # Between the two runners this matrix covers nine of the fifteen real
+  # unix cells plus `webassembly` and all three `windows` arches (both of
+  # those two ports' own images are `linux/amd64`, so only the amd64 leg
+  # is native to either). The six left over (`ppc64le`, `s390x`,
+  # `riscv64`, both libcs) are native to no runner GitHub offers and are
+  # emulated whatever we do, which is why they are a descope decision
+  # rather than a scheduling one -- `skip` below excludes them explicitly.
   #
   # `windows` used to have a fan-out job of its own here, three legs of
   # one arch each. It was wrong twice over: its three arches all come out
   # of **one** amd64 image, so fanning out pulled the same 2GB three
   # times instead of once -- and having gone green three runs running,
-  # the port had earned its place in the example's own `ports` anyway.
+  # the port had earned its place in the example's own config anyway.
   # Fan out by *image*, not by target: `unix` gains from it (a different
   # image per cell, so the pulls overlap), `windows` only loses.
   build-usermod:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm]
+        include:
+          # x86_64 is this runner's own native arch; i686 (32-bit x86) and
+          # mipsel (no published mipsel image at all, so it cross-compiles
+          # from the same amd64 base -- record 0044) both run natively in
+          # an amd64 container too. webassembly/windows are native here
+          # for the same reason.
+          - os: ubuntu-latest
+            build: >-
+              v1.29.0-manylinux_2_28_x86_64 v1.29.0-musllinux_1_2_x86_64
+              v1.29.0-manylinux_2_28_i686 v1.29.0-musllinux_1_2_i686
+              v1.29.0-manylinux_2_39_mipsel
+              v1.29.0-wasm32
+              v1.29.0-win32 v1.29.0-win_amd64 v1.29.0-win_arm64
+          # aarch64 is this runner's own native arch; armv7l (32-bit ARM)
+          # runs natively on it too, on the AArch32-at-EL0 CPUs GitHub's
+          # own arm64 runners use (measured, record 0044).
+          - os: ubuntu-24.04-arm
+            build: >-
+              v1.29.0-manylinux_2_28_aarch64 v1.29.0-musllinux_1_2_aarch64
+              v1.29.0-manylinux_2_31_armv7l v1.29.0-musllinux_1_2_armv7l
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -207,11 +241,9 @@ jobs:
 
       - name: Build examples/template (usermod, native to ${{ matrix.os }})
         uses: ./
-        env:
-          CIBMP_PLATFORM: "usermod"
         with:
           package-dir: examples/template
-          archs: auto
+          build: ${{ matrix.build }}
 
       - name: List built artifacts
         run: ls -laR examples/template/mpyhouse
@@ -219,31 +251,32 @@ jobs:
   # ── the same build on the runner it would not have chosen ──────────
   #
   # The property the whole design rests on: **a foreign runner can still
-  # build, through emulation.** Everything else in this workflow now says
-  # `archs: auto`, which by construction only ever builds what the runner
-  # is native to -- so without this job the emulated path would go
-  # unexercised, which is exactly the state it was in before record 0049.
+  # build, through emulation.** Every other job's own `build` above only
+  # ever names cells that runner is native to -- so without this job the
+  # emulated path would go unexercised, which is exactly the state it
+  # was in before record 0049.
   #
   # Both directions, because they are different mechanisms:
   #
   #   amd64 image on an arm64 host   `webassembly` on ubuntu-24.04-arm
   #   arm64 image on an amd64 host   unix aarch64 on ubuntu-latest
   #
-  # Named with `only`, not `archs`, precisely because `auto` would refuse
-  # to pick them here -- that refusal is the thing under test.
-  # `webassembly` and `manylinux_2_28_aarch64` because both are green on
-  # their own host in every run, so a failure is unambiguously about the
-  # host rather than about the target.
+  # A `--build` glob specific enough to match exactly one identifier,
+  # precisely because the matrix above would never pick these on the
+  # "wrong" runner -- that refusal is the thing under test. `webassembly`
+  # and `manylinux_2_28_aarch64` because both are green on their own host
+  # in every run, so a failure is unambiguously about the host rather
+  # than about the target.
   #
   # **Not on push.** Both legs are emulated by definition, and one of
   # them measured 18 minutes -- against roughly three for everything
   # else in this workflow put together. That is the wrong trade for what
   # it buys: this job *proves a property*, and the property is proven
   # (both directions green, 2026-08-26). What it would catch on a
-  # per-push cadence is a regression in `--platform` handling, which is
-  # one small, rarely-touched code path -- not something worth twenty
-  # minutes of every push, and the cost only grows as ports are added.
-  # Nightly, plus on demand.
+  # per-push cadence is a regression in cross-platform container
+  # dispatch, which is one small, rarely-touched code path -- not
+  # something worth twenty minutes of every push, and the cost only
+  # grows as ports are added. Nightly, plus on demand.
   build-usermod-foreign-host:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     permissions:
@@ -253,10 +286,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - only: webassembly
+          - build: v1.29.0-wasm32
             os: ubuntu-24.04-arm
             direction: amd64 image on an arm64 host
-          - only: unix-manylinux_2_28_aarch64
+          - build: v1.29.0-manylinux_2_28_aarch64
             os: ubuntu-latest
             direction: arm64 image on an amd64 host
     runs-on: ${{ matrix.os }}
@@ -264,13 +297,71 @@ jobs:
       - uses: actions/checkout@v7
       - uses: docker/setup-qemu-action@v4
 
-      - name: Build ${{ matrix.only }} -- ${{ matrix.direction }}
+      - name: Build ${{ matrix.build }} -- ${{ matrix.direction }}
         uses: ./
-        env:
-          CIBMP_PLATFORM: "usermod"
         with:
           package-dir: examples/template
-          only: ${{ matrix.only }}
+          build: ${{ matrix.build }}
+
+      - name: List built artifacts
+        run: ls -laR examples/template/mpyhouse
+
+  # ── usermod: the six emulated-everywhere cells ──────────────────────
+  #
+  # ppc64le/s390x/riscv64, manylinux and musllinux both -- native to no
+  # runner GitHub offers at all (record 0044's own addendum: "emulated on
+  # every runner GitHub offers, and never built"), which is exactly why
+  # examples/template/cibuildmp.toml's own `skip = "*_ppc64le *_s390x
+  # *_riscv64"` excludes them from every push-triggered job above. That
+  # keeps push cheap, same reasoning `build-usermod-foreign-host` above
+  # already uses -- but it also means these six had zero CI coverage at
+  # all, not even nightly: `build-usermod-foreign-host` only proves the
+  # emulation *mechanism* (one webassembly leg, one unix leg), it was
+  # never meant to stand in for these three arches specifically.
+  #
+  # CIBMP_SKIP="" is load-bearing, not decorative: `build:`/`skip:` on
+  # the `uses: ./` step below only forward to `--build`/`--skip` when
+  # non-empty (action.yml's own `[ -n ... ]` guard), so passing an empty
+  # `skip:` input would silently do nothing and the config file's own
+  # skip would still apply, matching nothing at all every leg. Setting
+  # the env var directly instead reaches `Options.get()`'s own cascade
+  # (`src/cibuildmp/options.py`), which does distinguish an unset layer
+  # from an explicitly empty one -- confirmed against that module's own
+  # `resolve_cascade()` docstring, not assumed.
+  #
+  # One identifier per matrix leg, not one job building all six
+  # sequentially in a single `cibuildmp` invocation the way `build`/
+  # `build-usermod` above do: `fail-fast: false` plus a separate leg per
+  # cell means one arch's failure neither blocks nor delays the other
+  # five, and each leg's own timing shows up on its own rather than
+  # buried inside one job's combined log.
+  build-usermod-emulated:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        build:
+          - v1.29.0-manylinux_2_28_ppc64le
+          - v1.29.0-manylinux_2_28_s390x
+          - v1.29.0-manylinux_2_39_riscv64
+          - v1.29.0-musllinux_1_2_ppc64le
+          - v1.29.0-musllinux_1_2_s390x
+          - v1.29.0-musllinux_1_2_riscv64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v4
+
+      - name: Build ${{ matrix.build }}
+        uses: ./
+        env:
+          CIBMP_SKIP: ""
+        with:
+          package-dir: examples/template
+          build: ${{ matrix.build }}
 
       - name: List built artifacts
         run: ls -laR examples/template/mpyhouse

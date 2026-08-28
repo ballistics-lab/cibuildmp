@@ -591,3 +591,53 @@ than the evidence this job is after.
 
 [32958683512]: https://github.com/ballistics-lab/cibuildmp/actions/runs/32958683512
 [32959019090]: https://github.com/ballistics-lab/cibuildmp/actions/runs/32959019090
+
+## Addendum, 2026-08-27 — reversing "still published... so the file already exists": nine
+of the fifteen `unix` cells no longer have an image of their own
+
+This record's own body above (the `pkg-config --libs libffi` table) already knew nine of
+the fifteen Dockerfiles were a bare `FROM` with no `RUN` at all, and made a deliberate,
+argued call to keep publishing them as cibuildmp's own images anyway: "so that every cell
+shares one name scheme, one publish pipeline and one pin table — and so the day
+`ports/unix` needs a package there, the file already exists." That reasoning held for over
+a day; this addendum reverses it, on the user's own call, not a rediscovery of the fact.
+
+The tradeoff looks different once it is actually nine idle GHCR packages plus nine idle
+CI build-check legs, indefinitely, against a hypothetical future package that may never
+be needed for these particular libc/arch combinations specifically (`musllinux` and the
+two non-`_2_28` manylinux floors already have no known `ports/unix` requirement the
+`_2_28` cells don't). "The file already exists" bought convenience for a need that has
+not materialized in the time since this record landed, against a real, ongoing cost:
+publishing, pulling and caching a second, identical copy of an image cibuildmp adds
+nothing to. A Dockerfile that only ever says `FROM <x>` is not a build step, it is a
+second name for `<x>` — and if the need does materialize for one specific cell later, one
+Dockerfile is one Dockerfile, not a reason to carry nine speculative ones now.
+
+Deleted rather than kept idle: the nine Dockerfiles, their nine matrix rows in
+`publish-docker-images.yml` and `verify-docker-images.yml`, and their nine GHCR
+packages (left to expire, not force-deleted). `resources/pinned_docker_images.toml`'s
+matching nine cells now hold `resources/pinned_pypa_images.toml`'s own `quay.io/pypa/...`
+reference verbatim instead of a `ghcr.io/ballistics-lab/...` copy of it —
+`dockerrun.image_for()` needed no change at all, since it only ever returns whatever
+string a cell holds and never inspects which registry it names. `bin/update_docker.py
+--images` and `bin/publish_images.py`'s own `cells()` both now skip a cell whose
+reference is not `ghcr.io/...`-prefixed: the former mirrors it straight from
+`pinned_pypa_images.toml` instead of querying a GHCR package that was never published;
+the latter excludes it from what gets built and pushed, since there is no
+`docker/<name>.Dockerfile` left for it to build.
+
+The published/build-checked matrix is ten cells now, not fifteen (`unix`) plus four
+(the cross-compiling ports): the five `manylinux_2_28` arches, `mipsel`, `natmod`,
+`windows`, `qemu`, `webassembly`. `unix_targets()` in `dockerrun.py` is unaffected —
+it still lists all fifteen `[image.<arch>]` cells, published or mirrored alike, since
+every one of them is still a real, buildable `unix` target from a consumer's own point
+of view. Only *how many of them cibuildmp itself publishes* changed.
+
+This does not touch the separate, larger question of whether `dockerrun.py`'s own
+per-port resolution logic (`image_for()`'s hardcoded `if port == "unix": ... else:
+_pins()["port"].get(port)` branches) should instead be driven by
+`resources/build-platforms.toml`'s own per-row `cross` fact — grouping many natmod
+arches and usermod ports onto a small number of shared toolchain images (the
+`arm_embedded`/`riscv_embedded`/`xtensa_lx106`/`esp_idf` consolidation sketched but not
+built this session). That is a resolver-shape redesign, not a data cleanup, and stays
+open.

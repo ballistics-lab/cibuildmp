@@ -22,13 +22,33 @@
 # Upstream wasm2mpy presumably handles this in its own CI toolchain choice
 # or an unmerged dynruntime.mk difference (see its now-obsolete
 # mpy-ld-link-archives fork); not something to guess a fix for here.
-micropython = "v1.29.0"
+#
+# No [natmod] table any more (record 0052's own live-caught retraction --
+# it carried no settable content of its own once every key here moved to
+# global-only, and no activation meaning either, once natmod became always
+# in scope). No archs key either -- what it used to filter is now spelled
+# out directly in `build` below, one identifier per arch this Makefile
+# documents.
+#
+# Pinned to a literal tag (v1.29.0, matching examples/template's own
+# choice and its reasoning), not a bare `mpy6.3-*` ABI wildcard: this
+# example exists specifically to prove the natmod contract holds against
+# real dynruntime.mk (D2/D13) -- and dynruntime.mk itself is what varies
+# between tags sharing one ABI, not just the ABI number. A wildcard would
+# let narrow_to_newest_tag() silently drift onto whichever tag happens to
+# be newest for ABI 6.3, which today is v1.30.0-preview -- an unstable
+# preview tag, not the kind of thing a dynruntime-sensitive test should
+# drift onto unnoticed. There is no implicit default build value at all
+# any more either (record 0052's own live-caught correction) -- an
+# unconfigured build selects nothing, so naming the tag here is what
+# keeps this building at all. Needs bumping by hand when this project
+# wants to track a newer stable release, the same way examples/template's
+# own tag pin does.
+build = "mpy6.3-v1.29.0-{x64,x86,armv6m,armv7m,armv7emsp,armv7emdp,xtensawin}"
 
-[natmod]
-archs = ["x64", "x86", "armv6m", "armv7m", "armv7emsp", "armv7emdp",
-         "xtensawin"]
 # wasm2mpy's own layout has no natmod/ subdirectory -- its Makefile is
-# vendored at this module's own root (unlike examples/template's).
+# vendored at this module's own root (unlike examples/template's). Lives
+# at the bare top level now, not inside a retired [natmod] table.
 module-dir = "."
 extra-make-args = ["APP=zig"]
 # wasm2c (wabt) is this module's own dependency, not cibuildmp's --

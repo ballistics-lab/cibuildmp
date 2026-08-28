@@ -2,7 +2,34 @@ from pathlib import Path
 
 import pytest
 
-from cibuildmp.natmod.options import DEFAULT_MICROPYTHON, ConfigError, Options
+from cibuildmp.platforms.natmod.options import ConfigError, Options
+from cibuildmp.platforms.natmod.targets import (
+    newest_known_abi,
+    newest_stable_tag_for_abi,
+)
+
+# There is no `archs` config key any more (record 0052's own live-caught
+# correction: it duplicated exactly what a `build`/`skip` glob over the
+# identifier already expresses). Every fixture below that used to narrow
+# to a specific arch or set of arches via `archs = [...]` now does it via
+# `build`, prefixed with the current default ABI so a config that doesn't
+# care about spanning more than one ABI still resolves deterministically.
+ABI = newest_known_abi()
+# The tag build_for()'s own unpinned build glob actually resolves to --
+# narrow_to_newest_tag() prefers a stable release over a preview sharing
+# the same ABI now (record 0052's own live-caught correction), not just
+# whichever tag is numerically newest.
+STABLE_TAG = newest_stable_tag_for_abi(ABI)
+
+
+def build_for(*archs: str) -> str:
+    # rv32imc may carry a +0x{flags} suffix (D15) -- a plain literal
+    # suffix match would miss it, so it alone gets a trailing wildcard;
+    # safe against every other arch name (none is its own prefix).
+    parts = [f"{a}*" if a == "rv32imc" else a for a in archs]
+    if len(parts) == 1:
+        return f'build = "mpy{ABI}-*-{parts[0]}"\n'
+    return f'build = "mpy{ABI}-*-{{{",".join(parts)}}}"\n'
 
 
 def write(tmp_path: Path, text: str, name: str = "cibuildmp.toml") -> Path:
@@ -13,11 +40,22 @@ def write(tmp_path: Path, text: str, name: str = "cibuildmp.toml") -> Path:
 def test_defaults_with_no_config_at_all(tmp_path):
     options = Options.load(tmp_path, env={})
     assert options.config_path is None
-    # Derived, not restated: which release is newest changes on
-    # upstream's schedule, and a test about *defaulting* should not fail
-    # every time it does. `test_targets.py` owns the pin itself.
-    assert options.micropython == [DEFAULT_MICROPYTHON]
+    # No implicit default build value at all (record 0052's own
+    # live-caught correction): an unconfigured build selects nothing, not
+    # "the newest known ABI" -- a config states what it wants, explicitly,
+    # via a glob, or gets nothing built.
+    assert options.build == []
+    assert options.targets() == []
+
+
+def test_a_build_glob_narrowing_to_the_newest_abi_produces_ten_targets(tmp_path):
+    # All ten arches are real for the newest known ABI's own newest tag
+    # (verified live, not assumed).
+    write(tmp_path, f'build = "mpy{newest_known_abi()}-*"\n')
+    options = Options.load(tmp_path, env={})
+
     assert len(options.targets()) == 10
+    assert {t.abi for t in options.targets()} == {newest_known_abi()}
     build_options = options.build_options(options.targets()[0], env={})
     assert build_options.module_dir == "natmod"
     assert build_options.make_target == "dist"
@@ -26,13 +64,11 @@ def test_defaults_with_no_config_at_all(tmp_path):
 def test_overrides_beat_natmod_table(tmp_path):
     write(
         tmp_path,
-        """
-        micropython = "v1.28.0"
-        [natmod]
-        archs = ["x64", "armv7emsp"]
+        build_for("x64", "armv7emsp")
+        + """
         extra-make-args = ["COMMON=1"]
-        [[overrides]]
-        select = "*-armv7emsp"
+
+        [override."*-armv7emsp"]
         extra-make-args = ["MP_BCLIBC_PRECISION=single"]
         """,
     )
@@ -45,34 +81,30 @@ def test_overrides_beat_natmod_table(tmp_path):
     assert resolved["armv7emsp"] == ["MP_BCLIBC_PRECISION=single"]
 
 
-def test_override_without_select_is_an_error(tmp_path):
-    write(tmp_path, '[[overrides]]\nextra-make-args = ["X=1"]\n')
-    options = Options.load(tmp_path, env={})
+def test_a_select_key_inside_an_override_body_is_an_error(tmp_path):
+    # The glob is the table's own name now (`[override."glob"]`) -- a
+    # `select` key inside the body would only duplicate it, so it is
+    # rejected at load time rather than silently shadowing the name.
+    write(tmp_path, '[override."*"]\nselect = "*"\nextra-make-args = ["X=1"]\n')
     with pytest.raises(ConfigError, match="select"):
-        options.build_options(options.targets()[0], env={})
+        Options.load(tmp_path, env={})
 
 
 def test_environment_beats_file(tmp_path):
-    write(
-        tmp_path,
-        'micropython = "v1.22.0"\nskip = ""\n[natmod]\narchs = ["x64", "x86"]\n',
-    )
-    options = Options.load(
-        tmp_path, env={"CIBMP_SKIP": "*-x86", "CIBMP_MICROPYTHON": "v1.28.0"}
-    )
-    # not 6.2, which the file's tag would give
-    assert options.tag_groups() == [("v1.28.0", "6.3")]
+    # record 0052, A2: micropython/mpy-abi are gone as config keys, so
+    # this now exercises skip -- CIBMP_SKIP still beats the file's own
+    # skip = "" the same way CIBMP_MICROPYTHON used to beat a file tag.
+    write(tmp_path, 'skip = ""\n' + build_for("x64", "x86"))
+    options = Options.load(tmp_path, env={"CIBMP_SKIP": "*-x86"})
     assert [t.arch for t in options.targets()] == ["x64"]
 
 
 def test_environment_beats_override(tmp_path):
     write(
         tmp_path,
-        """
-        [natmod]
-        archs = ["armv7emsp"]
-        [[overrides]]
-        select = "*"
+        build_for("armv7emsp")
+        + """
+        [override."*"]
         extra-make-args = ["FROM=override"]
         """,
     )
@@ -85,81 +117,40 @@ def test_environment_beats_override(tmp_path):
 def test_pyproject_fallback(tmp_path):
     write(
         tmp_path,
-        '[tool.cibuildmp]\nmicropython = "v1.22.0"\n[tool.cibuildmp.natmod]\narchs = ["x64"]\n',
+        "[tool.cibuildmp]\n" + build_for("x64"),
         name="pyproject.toml",
     )
     options = Options.load(tmp_path, env={})
     assert (
         options.config_path is not None and options.config_path.name == "pyproject.toml"
     )
-    assert options.tag_groups() == [("v1.22.0", "6.2")]
     assert [t.arch for t in options.targets()] == ["x64"]
 
 
 def test_standalone_wins_over_pyproject(tmp_path):
-    write(tmp_path, 'micropython = "v1.28.0"\n')
+    write(tmp_path, build_for("x64"))
     write(
-        tmp_path, '[tool.cibuildmp]\nmicropython = "v1.21.0"\n', name="pyproject.toml"
+        tmp_path,
+        "[tool.cibuildmp]\n" + build_for("armv6m"),
+        name="pyproject.toml",
     )
     options = Options.load(tmp_path, env={})
     assert options.config_path.name == "cibuildmp.toml"
-    assert options.tag_groups() == [("v1.28.0", "6.3")]
-
-
-def test_micropython_list_spans_two_abi_groups(tmp_path):
-    write(
-        tmp_path,
-        """
-        micropython = ["v1.22.0", "v1.28.0"]
-        [natmod]
-        archs = ["x64"]
-        """,
-    )
-    options = Options.load(tmp_path, env={})
-    assert options.tag_groups() == [("v1.22.0", "6.2"), ("v1.28.0", "6.3")]
-    targets = options.targets()
-    assert [(t.tag, t.abi, t.identifier) for t in targets] == [
-        ("v1.22.0", "6.2", "mpy6.2-natmod-x64"),
-        ("v1.28.0", "6.3", "mpy6.3-natmod-x64"),
-    ]
-
-
-def test_micropython_list_dedups_redundant_abi(tmp_path):
-    write(
-        tmp_path,
-        """
-        micropython = ["v1.23.0", "v1.28.0"]
-        [natmod]
-        archs = ["x64"]
-        """,
-    )
-    options = Options.load(tmp_path, env={})
-    # Both are ABI 6.3 -- one build, not two, and it is built against
-    # whichever tag was listed first.
-    assert options.tag_groups() == [("v1.23.0", "6.3")]
-    assert [t.tag for t in options.targets()] == ["v1.23.0"]
-
-
-def test_micropython_env_accepts_space_separated_list(tmp_path):
-    write(tmp_path, '[natmod]\narchs = ["x64"]\n')
-    options = Options.load(tmp_path, env={"CIBMP_MICROPYTHON": "v1.22.0 v1.28.0"})
-    assert options.micropython == ["v1.22.0", "v1.28.0"]
-    assert options.tag_groups() == [("v1.22.0", "6.2"), ("v1.28.0", "6.3")]
+    assert [t.arch for t in options.targets()] == ["x64"]
 
 
 def test_arch_flags_land_on_rv32imc_identifier_and_make_args(tmp_path):
     write(
         tmp_path,
-        """
-        [natmod]
-        archs = ["rv32imc", "rv64imc"]
+        build_for("rv32imc", "rv64imc")
+        + """
         arch-flags = "zba,zcmp"
         """,
     )
     options = Options.load(tmp_path, env={})
     targets = {t.arch: t for t in options.targets()}
-    assert targets["rv32imc"].identifier == "mpy6.3-natmod-rv32imc+0x3"
-    assert targets["rv64imc"].identifier == "mpy6.3-natmod-rv64imc"  # unaffected
+    assert targets["rv32imc"].identifier == f"mpy6.3-{STABLE_TAG}-rv32imc+0x3"
+    assert targets["rv64imc"].identifier == f"mpy6.3-{STABLE_TAG}-rv64imc"  # unaffected
 
     rv32_args = options.build_options(targets["rv32imc"], env={}).extra_make_args
     assert "ARCH_FLAGS=0x3" in rv32_args
@@ -170,43 +161,67 @@ def test_arch_flags_land_on_rv32imc_identifier_and_make_args(tmp_path):
 def test_arch_flags_list_builds_one_rv32imc_target_per_variant(tmp_path):
     write(
         tmp_path,
-        """
-        [natmod]
-        archs = ["rv32imc"]
+        build_for("rv32imc")
+        + """
         arch-flags = ["", "zba", "zba,zcmp"]
         """,
     )
     options = Options.load(tmp_path, env={})
     identifiers = [t.identifier for t in options.targets()]
     assert identifiers == [
-        "mpy6.3-natmod-rv32imc",
-        "mpy6.3-natmod-rv32imc+0x1",
-        "mpy6.3-natmod-rv32imc+0x3",
+        f"mpy6.3-{STABLE_TAG}-rv32imc",
+        f"mpy6.3-{STABLE_TAG}-rv32imc+0x1",
+        f"mpy6.3-{STABLE_TAG}-rv32imc+0x3",
     ]
     make_args_by_id = {
         t.identifier: options.build_options(t, env={}).extra_make_args
         for t in options.targets()
     }
     assert not any(
-        a.startswith("ARCH_FLAGS=") for a in make_args_by_id["mpy6.3-natmod-rv32imc"]
+        a.startswith("ARCH_FLAGS=")
+        for a in make_args_by_id[f"mpy6.3-{STABLE_TAG}-rv32imc"]
     )
-    assert "ARCH_FLAGS=0x1" in make_args_by_id["mpy6.3-natmod-rv32imc+0x1"]
-    assert "ARCH_FLAGS=0x3" in make_args_by_id["mpy6.3-natmod-rv32imc+0x3"]
+    assert "ARCH_FLAGS=0x1" in make_args_by_id[f"mpy6.3-{STABLE_TAG}-rv32imc+0x1"]
+    assert "ARCH_FLAGS=0x3" in make_args_by_id[f"mpy6.3-{STABLE_TAG}-rv32imc+0x3"]
+
+
+def test_arch_flags_list_dedupes_two_spellings_of_the_same_value(tmp_path):
+    # "0x3" and "zba,zcmp" both resolve to 3 -- before the dedup fix this
+    # silently produced two targets sharing one identifier (the second
+    # build's output overwriting the first's), the same collision class
+    # D13 exists to prevent for tags.
+    write(
+        tmp_path,
+        build_for("rv32imc")
+        + """
+        arch-flags = ["0x3", "zba,zcmp"]
+        """,
+    )
+    options = Options.load(tmp_path, env={})
+    identifiers = [t.identifier for t in options.targets()]
+    assert identifiers == [f"mpy6.3-{STABLE_TAG}-rv32imc+0x3"]
 
 
 def test_version_defaults_empty_and_is_settable(tmp_path):
-    write(tmp_path, '[natmod]\narchs = ["x64"]\n')
+    write(tmp_path, "")
     assert Options.load(tmp_path, env={}).version == ""
     versioned = Options.load(tmp_path, env={"CIBMP_VERSION": "0.3.0"})
     assert versioned.version == "0.3.0"
+
+
+def test_name_defaults_empty_and_is_settable(tmp_path):
+    # record 0052, A3: `name`, alongside `version`, feeds output_name()'s
+    # {name}-{version}- filename prefix.
+    write(tmp_path, "")
+    assert Options.load(tmp_path, env={}).name == ""
+    named = Options.load(tmp_path, env={"CIBMP_NAME": "mylib"})
+    assert named.name == "mylib"
 
 
 def test_extra_files_from_publish_table(tmp_path):
     write(
         tmp_path,
         """
-        [natmod]
-        archs = ["x64"]
         [publish]
         extra-files = ["src/facade.py", "src/ffi.py"]
         """,
@@ -215,31 +230,37 @@ def test_extra_files_from_publish_table(tmp_path):
     assert options.extra_files() == ["src/facade.py", "src/ffi.py"]
 
 
-def test_a_top_level_key_inside_the_natmod_table_names_where_it_goes(tmp_path):
-    # The exact trap that cost `test_only_overrides_skip` its meaning:
-    # `skip` under `[natmod]` was read by nothing, and `archs` right next
-    # to it is dual-read and works, so there was every reason to expect
-    # this to work too. "unknown key" would be a lie here -- the tool
-    # knows precisely what `skip` means, just not in this table.
-    write(tmp_path, 'micropython = "v1.28.0"\n[natmod]\nskip = "*-armv6m"\n')
+def test_natmod_table_no_longer_exists(tmp_path):
+    # [natmod] used to gate activation and, before that, carry its own
+    # settable keys -- neither concept survives (record 0052's own
+    # live-caught retraction, folded into the same round that removed
+    # table-presence activation entirely). A config still writing it gets
+    # a specific error naming the real replacement.
+    write(tmp_path, '[natmod]\nname = "x"\n')
 
-    with pytest.raises(ConfigError, match="read from the top level"):
+    with pytest.raises(ConfigError, match=r"\[natmod\] no longer exists"):
         Options.load(tmp_path)
 
 
-def test_an_unknown_key_in_the_natmod_table_is_an_error(tmp_path):
-    write(tmp_path, '[natmod]\nmodule-dr = "natmod"\n')
+def test_natmod_table_present_but_empty_is_still_rejected(tmp_path):
+    write(tmp_path, "[natmod]\n")
 
-    with pytest.raises(ConfigError, match="unknown key `module-dr`"):
+    with pytest.raises(ConfigError, match=r"\[natmod\] no longer exists"):
         Options.load(tmp_path)
 
 
-def test_archs_stays_dual_read_and_is_not_flagged(tmp_path):
-    # Predates 0048 and is not the trap: both placements work, so neither
-    # is silent. Asserted so the new check does not quietly take it away.
+def test_archs_is_gone_as_a_config_key(tmp_path):
+    # record 0052's own live-caught correction: archs filtered candidate
+    # rows by .arch alone, before build/skip ever ran -- exactly what a
+    # build/skip glob over the identifier already expresses directly
+    # (e.g. build = "*-x64"), so it is removed rather than kept dual-read.
+    # There is no [natmod] table left to write it inside any more either,
+    # so this is now caught by that table's own rejection, not a
+    # dedicated per-key error.
     write(tmp_path, '[natmod]\narchs = ["x64"]\n')
 
-    assert Options.load(tmp_path).archs == ["x64"]
+    with pytest.raises(ConfigError, match=r"\[natmod\] no longer exists"):
+        Options.load(tmp_path)
 
 
 def test_arch_flags_in_an_overrides_table_is_an_error(tmp_path):
@@ -249,14 +270,37 @@ def test_arch_flags_in_an_overrides_table_is_an_error(tmp_path):
     write(
         tmp_path,
         """
-        micropython = "v1.28.0"
-        [natmod]
-        archs = ["x64"]
-        [[overrides]]
-        select = "*"
+        [override."*"]
         arch-flags = "rv32imc"
         """,
     )
 
-    with pytest.raises(ConfigError, match=r"\[\[overrides\]\]: unknown key"):
+    with pytest.raises(ConfigError, match=r'\[override\."\*"\]: unknown key'):
         Options.load(tmp_path)
+
+
+def test_reachability_audit_rejects_an_override_select_that_can_never_match(tmp_path):
+    # record 0052, A5: "*-aarch64" can never match any identifier at all
+    # (dynruntime.mk has no such arch, in any ABI) -- caught before a real
+    # build ever starts, the same way a misplaced key already is (0048),
+    # one level down at the selector-string level.
+    write(
+        tmp_path,
+        """
+        [override."*-aarch64"]
+        extra-make-args = ["X=1"]
+        """,
+    )
+    with pytest.raises(
+        ConfigError, match=r'\[override\."\*-aarch64"\]: \'\*-aarch64\''
+    ):
+        Options.load(tmp_path).targets()
+
+
+def test_reachability_audit_allows_a_deliberate_skip_everything(tmp_path):
+    # The distinction this audit exists to preserve: skip = "*" narrows a
+    # real, reachable domain down to zero *selected* targets, which stays
+    # entirely legitimate -- only a pattern that can never match anything
+    # in the first place is an error.
+    write(tmp_path, 'skip = "*"\n')
+    assert Options.load(tmp_path).targets() == []

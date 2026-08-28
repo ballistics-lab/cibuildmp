@@ -4,8 +4,8 @@ from pathlib import Path
 import pytest
 
 from cibuildmp import dockerrun
-from cibuildmp.natmod import build
-from cibuildmp.natmod.build import (
+from cibuildmp.platforms.natmod import build
+from cibuildmp.platforms.natmod.build import (
     BuildError,
     BuildResult,
     build_target,
@@ -18,15 +18,17 @@ from cibuildmp.natmod.build import (
     run_pre_build_command,
     verify_output,
 )
-from cibuildmp.natmod.options import BuildOptions
-from cibuildmp.natmod.targets import Target
+from cibuildmp.platforms.natmod.options import BuildOptions
+from cibuildmp.platforms.natmod.targets import Target
 
 
 def build_options(
     arch: str = "armv7emsp", arch_flags: int = 0, **overrides
 ) -> BuildOptions:
     defaults = {
-        "target": Target(abi="6.3", mode="natmod", arch=arch, arch_flags=arch_flags),
+        "target": Target(
+            abi="6.3", arch=arch, tag="v1.30.0-preview", arch_flags=arch_flags
+        ),
         "micropython": "v1.28.0",
         "output_dir": Path("mpyhouse"),
         "module_dir": "natmod",
@@ -265,7 +267,37 @@ def test_verify_output_rejects_mismatched_arch_flags(tmp_path):
 
 def test_output_name_is_unambiguous():
     mpy = Path("build/armv7emsp-eabi/mymodule.mpy")
-    assert output_name(build_options(), mpy) == "mymodule-mpy6.3-natmod-armv7emsp.mpy"
+    assert (
+        output_name(build_options(), mpy)
+        == "mymodule-mpy6.3-v1.30.0-preview-armv7emsp.mpy"
+    )
+
+
+def test_output_name_unset_name_keeps_todays_filename():
+    # record 0052, A3: gated on `name` alone -- a project that has not set
+    # it yet keeps exactly today's filename rather than gaining a bare
+    # leading `-`.
+    mpy = Path("build/armv7emsp-eabi/mymodule.mpy")
+    assert (
+        output_name(build_options(), mpy, version="1.2.0")
+        == "mymodule-mpy6.3-v1.30.0-preview-armv7emsp.mpy"
+    )
+
+
+def test_output_name_with_name_and_version_drops_the_makefile_stem():
+    mpy = Path("build/armv7emsp-eabi/mymodule.mpy")
+    assert (
+        output_name(build_options(), mpy, name="mylib", version="1.2.0")
+        == "mylib-1.2.0-mpy6.3-v1.30.0-preview-armv7emsp.mpy"
+    )
+
+
+def test_output_name_with_name_only_omits_the_version_segment():
+    mpy = Path("build/armv7emsp-eabi/mymodule.mpy")
+    assert (
+        output_name(build_options(), mpy, name="mylib")
+        == "mylib-mpy6.3-v1.30.0-preview-armv7emsp.mpy"
+    )
 
 
 def _stub_make(tmp_path, native_code=7, arch_flags=0):
@@ -294,8 +326,8 @@ def test_build_target_writes_into_its_own_identifier_directory(tmp_path, monkeyp
     expected = (
         tmp_path
         / "out"
-        / "mpy6.3-natmod-armv7emsp"
-        / "mymodule-mpy6.3-natmod-armv7emsp.mpy"
+        / "mpy6.3-v1.30.0-preview-armv7emsp"
+        / "mymodule-mpy6.3-v1.30.0-preview-armv7emsp.mpy"
     )
     assert result.output == expected
     assert result.output.exists()
