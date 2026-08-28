@@ -73,6 +73,32 @@ _IDENTIFIER_BY_PORT_TAG_AXIS: dict[tuple[str, str, str], str] = {
     for row in rows
 }
 
+# (tag, board) -> (idf_version, mcu) -- esp32-only, since it is the one
+# port whose own board axis carries a real per-row toolchain fact
+# `UsermodTarget` itself does not (D19: eight distinct `idf_version`
+# values across this table, and `mcu` is `idf_tools.py install
+# --targets=`'s own real vocabulary, e.g. "esp32"/"esp32c3"/"esp32s3").
+# `UsermodTarget` stays `port`/`arch`/`tag` only -- widening it for one
+# port's own extra axis would put a field every other port's own target
+# carries and ignores on the shared dataclass; a lookup keyed the same
+# way `_IDENTIFIER_BY_PORT_TAG_AXIS` already is keeps that fact where it
+# belongs, resolved from `board`/`tag` rather than carried on the target.
+_ESP32_IDF_INFO_BY_TAG_BOARD: dict[tuple[str, str], tuple[str, str]] = {
+    (row["tag"], row["board"]): (row["idf_version"], row["mcu"])
+    for row in _USERMOD_ROWS["esp32"]
+}
+
+
+def esp32_idf_info(tag: str, board: str) -> tuple[str, str]:
+    """This `(tag, board)`'s own real `(idf_version, idf_target)` --
+    `usermod/orchestrate.py`'s `_port_build_options()` is the one real
+    caller, resolving what `Esp32BuildOptions` needs from a target that
+    itself carries only `board`/`tag`. `KeyError` here means a hand-built
+    target naming a combination the file has never walked, the same
+    class of caller `UsermodTarget.identifier`'s own docstring already
+    covers for the identifier lookup."""
+    return _ESP32_IDF_INFO_BY_TAG_BOARD[(tag, board)]
+
 
 class UnknownPortError(ValueError):
     pass

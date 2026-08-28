@@ -369,9 +369,10 @@ path for it.
 <tr>
   <td><code>esp32</code></td>
   <td>
-    <code>ESP32_GENERIC</code>
+    <code>ESP32_GENERIC</code> (Xtensa)<br>
+    <code>ESP32_GENERIC_C3</code> (RISC-V)
   </td>
-  <td><code>esp_idf_base</code> (Docker) -- ESP-IDF cloned on the host, installed in-container</td>
+  <td><code>esp_idf_base</code> (Docker) -- ESP-IDF cloned on the host, installed in-container, per-board <code>idf_target</code>/<code>idf_version</code></td>
   <td>✅</td>
 </tr>
 <tr>

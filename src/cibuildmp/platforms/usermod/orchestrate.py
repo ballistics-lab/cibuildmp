@@ -43,7 +43,7 @@ from .build import (
     build_windows,
 )
 from .options import UsermodBuildOptions, UsermodOptions
-from .targets import UsermodTarget
+from .targets import UsermodTarget, esp32_idf_info
 
 # port -> the build_<port>() function, uniform signature across all five:
 # build_x(opts, mpy_dir, *, toolchain_root=None, quiet=False) -> Path.
@@ -163,11 +163,21 @@ def _port_build_options(
             extra_make_args=extra_make_args,
         )
     if port == "esp32":
+        # `esp32_idf_info()` needs a real tag -- a hand-built target with
+        # none (most of this project's own build/orchestrate tests, per
+        # `UsermodTarget.identifier`'s own docstring) falls back to
+        # `Esp32BuildOptions`' own defaults instead of a lookup that
+        # would only ever `KeyError` for it.
+        idf_kwargs = {}
+        if target.tag:
+            idf_version, idf_target = esp32_idf_info(target.tag, target.arch)
+            idf_kwargs = {"idf_version": idf_version, "idf_target": idf_target}
         return Esp32BuildOptions(
             user_c_modules=resolved_user_c_modules,
             frozen_manifest=frozen_manifest,
             board=target.arch,
             extra_make_args=extra_make_args,
+            **idf_kwargs,
         )
     raise UsermodBuildError(f"no build_options builder wired for port {port!r}")
 

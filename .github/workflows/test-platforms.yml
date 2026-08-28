@@ -26,18 +26,15 @@ on:
 # matrix.yml's own 256-configuration cap (see the job below).
 env:
   TEST_PLATFORMS_BUILD: "v1.29.0-* v1.28.0-* mpy6.3-v1.29.0-* mpy6.3-v1.28.0-*"
-  # `esp32` no longer skipped -- [0028]'s own closing addendum: `build_esp32()`
+  # `esp32` no longer skipped -- [0028]'s own closing addenda: `build_esp32()`
   # went Docker (`esp_idf_base`, [0058]), closing the venv-conflict that
   # made every esp32 leg fail (live-caught 2026-08-28: 83 of 94 real
-  # failures in one run were this one cause). Only `v1.29.0-esp32-ESP32_GENERIC`
-  # has been live-verified end to end so far -- `_port_build_options()`
-  # (`usermod/orchestrate.py`) still doesn't thread a target's own real
-  # `idf_version`/`idf_target` through to `Esp32BuildOptions` (a separate,
-  # not-yet-fixed gap), so every board still resolves the dataclass
-  # defaults (`v5.5.1`/`esp32`) regardless of what its own row says --
-  # a RISC-V board (esp32c2/c3/c6) would install the wrong toolchain
-  # target. Left in rather than pre-filtered: this workflow's whole job is
-  # surfacing exactly this kind of gap for real.
+  # failures in one run were this one cause), and `idf_version`/`idf_target`
+  # are now threaded from each target's own real row instead of always
+  # resolving `Esp32BuildOptions`' dataclass defaults. Both halves
+  # live-verified for one board each of Xtensa (`ESP32_GENERIC`) and
+  # RISC-V (`ESP32_GENERIC_C3`) -- this workflow's own broad sweep is what
+  # proves the rest of the ~40-board matrix for real.
   #
   # `ppc64le`/`s390x`/`riscv64` are *not* skipped either -- native to no
   # GitHub-hosted runner (record 0044's own descope), they route to

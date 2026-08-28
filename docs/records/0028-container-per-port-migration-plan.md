@@ -758,6 +758,29 @@ invocation produced a genuine `micropython.bin` with the project's own C module
 install, `mpy-cross` (moved out of `orchestrate.py`'s own `_HOST_MPY_CROSS_PORTS`, matching
 `unix`/`windows`/`webassembly`), and `make` itself, none of it touching the bare host.
 
+## Addendum, 2026-08-28 (second) — `idf_version`/`idf_target` threaded from the real row
+
+Found the same day, once `test-platforms.yml` (no longer skipping `esp32`) was actually run:
+every board resolved `Esp32BuildOptions`' own dataclass defaults (`v5.5.1`/`esp32`)
+regardless of what its real `build-platforms.toml` row said, because `UsermodTarget` itself
+only ever carried `port`/`arch`/`tag` -- `idf_version`/`mcu` were dropped the moment
+`all_usermod_targets()` built one from a row. A RISC-V board (`esp32c2`/`c3`/`c6`) would have
+installed the Xtensa toolchain and failed.
+
+Closed by a lookup, not by widening `UsermodTarget`: `targets.py`'s new
+`esp32_idf_info(tag, board)` resolves `(idf_version, mcu)` from the same rows
+`_IDENTIFIER_BY_PORT_TAG_AXIS` already indexes, keyed the same way. `_port_build_options()`
+(`orchestrate.py`) calls it when `target.tag` is set, falling back to the dataclass defaults
+only for a hand-built target with none (most of this project's own tests) -- the same
+allowance `UsermodTarget.identifier`'s own docstring already makes for that case.
+
+Live-verified for both instruction-set families, not inferred from the lookup being correct
+on paper: `v1.29.0-esp32-ESP32_GENERIC` (Xtensa, `esp32`/`v5.5.1`) and
+`v1.29.0-esp32-ESP32_GENERIC_C3` (RISC-V, `esp32c3`/`v5.5.2`) each produced a real
+`micropython.bin`, the second confirmed via its own build log ("Creating esp32c3 image...",
+not `esp32`) that the resolved `idf_target` actually reached `idf_tools.py install
+--targets=`, not just the identifier string.
+
 [0032]: 0032-unix-docker-default-and-webassembly-wiring.md
 [0042]: 0042-windows-docker-wiring-and-resolver-removal.md
 [0043]: 0043-unix-adopts-cibuildwheel-native-image-model.md

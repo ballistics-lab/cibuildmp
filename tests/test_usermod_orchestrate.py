@@ -253,6 +253,51 @@ def test_build_one_esp32_passes_board_through(tmp_path, monkeypatch):
     assert result.identifier == "esp32-ESP32_GENERIC_S3"
 
 
+def test_build_one_esp32_threads_real_idf_version_and_target(tmp_path, monkeypatch):
+    # ESP32_GENERIC_C3 at v1.29.0 is a real row (resources/build-platforms.toml):
+    # idf_version = "v5.5.2", mcu = "esp32c3" -- neither matches
+    # Esp32BuildOptions' own defaults ("v5.5.1"/"esp32"), so this only
+    # passes if _port_build_options() actually resolved the real row
+    # rather than falling back to them.
+    package_dir = tmp_path / "pkg"
+    make_module_dir(package_dir)
+    write_config(package_dir, "")
+    options = UsermodOptions.load(package_dir)
+    options.output_dir = tmp_path / "mpyhouse"
+
+    mpy_dir = tmp_path / "mpy"
+    target = UsermodTarget(port="esp32", arch="ESP32_GENERIC_C3", tag="v1.29.0")
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        build_dir = mpy_dir / "ports" / "esp32" / "build-ESP32_GENERIC_C3"
+        build_dir.mkdir(parents=True, exist_ok=True)
+        (build_dir / "micropython.bin").write_bytes(FAKE_X86_64_ELF)
+
+    fetch_calls = []
+    monkeypatch.setenv("CIBMP_ESP32_DOCKER_IMAGE", "cibuildmp-esp32:local")
+    monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", fake_run)
+    monkeypatch.setattr(
+        build_module,
+        "container_mpy_cross",
+        lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build-stub" / "mpy-cross",
+    )
+    monkeypatch.setattr(
+        build_module.espidf,
+        "fetch_esp_idf",
+        lambda version, **k: fetch_calls.append(version) or tmp_path / "idf" / version,
+    )
+    (mpy_dir / "ports" / "esp32").mkdir(parents=True)
+
+    build_one(options, target, mpy_dir)
+
+    assert fetch_calls == ["v5.5.2"]
+    script = " ".join(captured["cmd"])
+    assert "--targets=esp32c3" in script
+    assert "esp-idf/v5.5.2/tools/esp32c3" in script
+
+
 def test_build_fetches_micropython_and_skips_the_host_mpy_cross(tmp_path, monkeypatch):
     package_dir = tmp_path / "pkg"
     make_module_dir(package_dir)
