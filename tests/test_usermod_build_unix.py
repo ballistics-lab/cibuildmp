@@ -8,10 +8,10 @@ from cibuildmp.platforms.usermod.build_common import UsermodBuildError
 from cibuildmp.platforms.usermod.build_unix import (
     UNIX_ARCH_SETTINGS,
     UnixBuildOptions,
-    build_unix as build_unix_fn,
     run_unix_deplibs,
     unix_make_command,
 )
+from cibuildmp.platforms.usermod.build_unix import build_unix as build_unix_fn
 
 
 def fake_elf(target: str = "manylinux_2_28_x86_64") -> bytes:
