@@ -102,7 +102,7 @@ jobs:
         run: |
           icon="✅"
           [ "${{ steps.build.outcome }}" = "success" ] || icon="❌"
-          echo "$icon \`${{ matrix.build }}\`" > result.md
+          echo "| \`${{ matrix.build }}\` | $icon ${{ steps.build.outcome }} |" > result.md
 
       - name: Upload result
         if: always()
@@ -130,8 +130,15 @@ jobs:
 
       - name: Build summary
         run: |
+          rows=$(cat results/*.md | sort)
+          total=$(echo "$rows" | wc -l)
+          failed=$(echo "$rows" | grep -c '❌' || true)
           {
             echo "### Test platforms (\`$TEST_PLATFORMS_BUILD\`)"
             echo
-            cat results/*.md | sort
+            echo "$((total - failed))/$total passed"
+            echo
+            echo "| Identifier | Result |"
+            echo "| --- | --- |"
+            echo "$rows"
           } >> "$GITHUB_STEP_SUMMARY"
