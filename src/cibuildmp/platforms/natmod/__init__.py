@@ -28,12 +28,11 @@ from typing import Any
 
 from ...sources import (
     SourceError,
-    build_mpy_cross,
     fetch_micropython,
     read_mpy_abi,
 )
 from ...stepsummary import write_step_summary
-from .build import BuildError, BuildResult, build_target
+from .build import BuildError, BuildResult, build_mpy_cross, build_target
 from .options import BuildOptions, ConfigError, Options
 from .targets import Target, UnknownArchError, UnknownTagError
 

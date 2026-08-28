@@ -251,6 +251,29 @@ anonymously pulled exactly this digest and built `examples/template` through it 
 (`Build examples/template (natmod)`, green). That is the first real CI run this project has
 ever had exercise natmod-in-a-container end to end.
 
+## Addendum, 2026-08-27 — natmod's own mpy-cross moves into the image; the apt step does not go
+
+The "Still open" `mpy-cross` item is closed: `build_mpy_cross()` (now
+`platforms/natmod/build.py`, not `sources.py`) builds it inside the natmod
+image, reusing `_natmod_image()`/`_run_in_image()`, at the exact fixed path
+`py/dynruntime.mk` hardcodes (`mpy-cross/build/mpy-cross` -- confirmed
+against the real file, no override mechanism exists) -- the same fix
+[0044]'s own `container_mpy_cross()` already made for `unix`/`windows`/
+`webassembly`, for the identical reason: a host-built binary only worked
+by coincidence of matching the image's own glibc, and cannot work at all
+across an architecture boundary.
+
+The other "still open" claim from this record's original text --
+"`action.yml`'s apt step can now go" -- does **not** follow from this fix,
+and was wrong even at the time it was written: `usermod`'s own `qemu` and
+`esp32` ports build *their* mpy-cross on the host too
+(`_HOST_MPY_CROSS_PORTS`, `platforms/usermod/orchestrate.py`), for a
+reason unrelated to natmod (`esp32`'s `make` never runs in a container at
+all; `qemu` passes no `MICROPY_MPYCROSS=`). `build-essential` stays in
+`action.yml` until those two get the same treatment -- a separate,
+not-yet-scoped piece of work, since neither port's own build is
+containerized the way `unix`/`windows`/`webassembly`'s already are.
+
 [0012]: 0012-pyelftools-ar-own-deps.md
 [0030]: 0030-container-approach-natmod-and-docker-vs-qemu.md
 [0032]: 0032-unix-docker-default-and-webassembly-wiring.md

@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **natmod's own `mpy-cross` now builds inside the natmod image, not on
+  the host.** `py/dynruntime.mk` hardcodes the path it invokes
+  (`mpy-cross/build/mpy-cross`, no override), so a host-built binary only
+  worked by the coincidence of matching `docker/natmod.Dockerfile`'s own
+  glibc -- the same bug class [0044]'s `container_mpy_cross()` already
+  fixed for `unix`/`windows`/`webassembly`. `build-essential` stays in
+  `action.yml`'s apt step regardless: `qemu`/`esp32` still build their
+  own mpy-cross on the host and were never part of this change.
 - **Every per-platform table, and every activation/keyword mechanism
   riding on it, is retracted -- config is purely `build`/`skip`
   glob-matching a real identifier now, plus `[override]`.** This
