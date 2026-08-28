@@ -7,323 +7,123 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Extensive, still-unreleased rework of the config surface and natmod's own
+container story. Written as the current, final state rather than as a
+phase-by-phase account -- several intermediate mechanisms below were
+designed, shipped inside this same Unreleased section, and then retracted
+again before ever reaching a release; the full journey (including what was
+tried and rejected) lives in `docs/records/`, not here.
+
 ### Changed
 
-- **`docker/natmod.Dockerfile`'s apt/toolchain layers are reordered so a
-  package addition no longer invalidates the 3.38GB toolchain layer.**
-  Docker cache-invalidates every layer after the one that changed, so the
-  toolchain layer sitting *after* the full apt-install layer meant adding
-  a single package (e.g. `gcc-i686-linux-gnu`) forced a full ten-minute
-  re-download+re-extract of four toolchains whose own content had not
-  changed. Now: minimal apt (`ca-certificates`/`curl`/`xz-utils`) ->
-  toolchains -> the rest of apt.
-- **natmod's own `mpy-cross` now builds inside the natmod image, not on
-  the host.** `py/dynruntime.mk` hardcodes the path it invokes
-  (`mpy-cross/build/mpy-cross`, no override), so a host-built binary only
-  worked by the coincidence of matching `docker/natmod.Dockerfile`'s own
-  glibc -- the same bug class [0044]'s `container_mpy_cross()` already
-  fixed for `unix`/`windows`/`webassembly`. `build-essential` stays in
-  `action.yml`'s apt step regardless: `qemu`/`esp32` still build their
-  own mpy-cross on the host and were never part of this change.
-- **Every per-platform table, and every activation/keyword mechanism
-  riding on it, is retracted -- config is purely `build`/`skip`
-  glob-matching a real identifier now, plus `[override]`.** This
-  supersedes several bullets further down this same Unreleased section
-  (per-platform `build`/`skip`, `--platform`/`CIBMP_PLATFORM`,
-  `--enable`/opt-in groups, `--archs auto`/`native`/`all`) -- none of
-  those ever shipped, so this is the net, current behaviour, not an
-  additional change layered on top. `[natmod]`/`[unix]`/`[windows]`/
-  `[qemu]`/`[webassembly]`/`[esp32]` do not exist as config tables at
-  all any more: every platform is always in scope, on every invocation,
-  and `build`/`skip` (config, `CIBMP_BUILD`/`CIBMP_SKIP`, or the new
-  `--build`/`--skip` CLI flags) glob-matching each platform's own real
-  identifier is the only thing that decides what actually gets built.
-  **Breaking, and deliberate: an unconfigured `build` now selects
-  nothing at all, from any platform** -- the old zero-config default
-  ("natmod, narrowed to the newest known ABI") is gone; a config states
-  what it wants, explicitly, via a glob, or nothing builds.
-  `--platform`/`CIBMP_PLATFORM`/`--only` are removed from the CLI;
-  `--build`/`--skip` replace `--only` (name a glob specific enough to
-  match one identifier for "build exactly this one thing"). `--archs`'s
-  own `auto`/`native`/`all` host-convenience keyword vocabulary and
-  `--enable`/`enable`/`GROUPS` (the `unix-emulated-everywhere` opt-in
-  group) are both removed outright -- everything either reached, an
-  ordinary `build`/`skip` glob against the real identifier already
-  reaches directly. `[usermod]` is unaffected by any of this -- it was
-  never a selector, only a shared-defaults tier for usermod's own ports,
-  and stays exactly that. Usermod also gains the identical real-row
-  candidate model natmod already had (every real `(port, tag,
-  arch/board)` row `resources/build-platforms.toml` has verified is a
-  candidate, always) -- fixing a real, previously-silent bug along the
-  way: `unix`/`windows`/`webassembly` identifiers never actually carried
-  the port name at all (`v1.29.0-manylinux_2_28_x86_64`, not
+- **Config is purely `build`/`skip` glob-matching a real identifier, plus
+  `[override]` -- no per-platform tables, no `--platform`, no opt-in
+  keywords.** `[natmod]`/`[unix]`/`[windows]`/`[qemu]`/`[webassembly]`/
+  `[esp32]` do not exist as config tables at all: every platform is
+  always in scope, on every invocation, and `build`/`skip` (config,
+  `CIBMP_BUILD`/`CIBMP_SKIP`, or `--build`/`--skip` on the CLI)
+  glob-matching each platform's own real identifier is the only thing
+  that decides what actually gets built. **Breaking, and deliberate: an
+  unconfigured `build` selects nothing at all, from any platform** -- a
+  config states what it wants, explicitly, via a glob, or nothing
+  builds. `--platform`/`CIBMP_PLATFORM`/`--only`/`--toolchain`/`--archs`
+  and `--enable`/`enable`/`GROUPS` are all gone from the CLI and every
+  config surface; more than one platform can build in a single
+  invocation, with no flag needed at all, since cibuildmp's platforms are
+  just Docker images on one host rather than being bound to it the way
+  cibuildwheel's own are. `[usermod]` is unaffected -- it was never a
+  selector, only a shared-defaults tier for usermod's own ports (see
+  below), and stays exactly that. See the README's own "Identifiers and
+  selectors" section for the full real identifier list and glob syntax.
+  Record 0052.
+- **Every real `(port, tag, arch/board)` row `resources/build-platforms.toml`
+  has verified is a candidate, always, for both natmod and usermod.**
+  Selection narrows that real-row domain; nothing computes an axis
+  product any more. Fixed a real, previously-silent bug along the way:
+  `unix`/`windows`/`webassembly` identifiers never actually carried the
+  port name at all (`v1.29.0-manylinux_2_28_x86_64`, not
   `v1.29.0-unix-manylinux_2_28_x86_64`), which every earlier build of
-  this identifier had gotten wrong. See the README's own "Identifiers
-  and selectors" section for the full real identifier list and glob
-  syntax. Record 0052's own addenda.
+  this identifier had gotten wrong. A tag or arch/board this file has
+  never verified is a loud, specific error at resolution time, naming
+  `bin/refresh_natmod_archs.py`/`bin/refresh_usermod_boards.py` as the
+  fix, not a silent guess. Record 0052, Track C.
+- **natmod's identifier is `mpy{abi}-{tag}-{arch}[+0x{flags}]`, read
+  directly off its own verified row rather than reassembled** (matching
+  cibuildwheel's own `PythonConfiguration.identifier`, a literal field,
+  never computed) **-- tag included**, so two MicroPython releases
+  sharing one `.mpy` ABI never collapse onto the same identifier
+  (`mpy5-x86` alone spans seven distinct tags, `v1.12`-`v1.18`). A
+  `build`/`skip` glob that never names a tag narrows to the single
+  newest one per arch automatically, preferring a stable release over a
+  newer preview sharing the same ABI; a glob that does name a specific
+  tag is trusted as-is. `micropython`/`mpy-abi` no longer exist as
+  natmod config keys -- the ABI/tag domain is read from
+  `resources/build-platforms.toml` instead of pinned by hand. Record
+  0052.
+- **`[[overrides]]` is `[override]`, one shared list keyed by its own
+  glob directly** (`[override."*-armv7emsp"]`, no separate `select =`
+  field) rather than upstream's own `[[tool.cibuildwheel.overrides]]`
+  array-of-tables shape -- this project's overrides have always been
+  "one glob, some options," so the glob can simply be the table's own
+  name. `inherit = {extra-make-args = "append"|"prepend"|"none"}`
+  (default `"none"`, i.e. replace) lets the one option genuinely
+  list-shaped across every platform's own override surface compose onto
+  the running value instead of always replacing it outright. An
+  override's own key is validated twice -- loosely (valid for *any*
+  platform) when the config loads, and strictly (valid for the platform
+  the matched identifier actually belongs to) once a target resolves --
+  so a `natmod`-only key inside an override that only ever matches a
+  `unix` identifier is still a loud, specific error, not silently
+  ignored. Precedence is declaration order, which a TOML table's own
+  keys already preserve: a narrower glob written further down the file
+  still wins over a broader one above it. Record 0052.
 - **New `name`/`version` config keys give built artifacts real project
-  identity.** Both are read from the top level, for every platform.
-  `version` already existed for natmod (writing it into each identifier's
-  `package.json`, D14) but usermod never read it; `name` is wholly new for
-  both. Setting `name` replaces natmod's `mpy_path.stem`-derived filename
-  prefix and usermod's literal `"micropython"`/`"micropython.exe"` stem
-  with `{name}-{version}-{identifier}` (`mylib-1.2.0-mpy6.3-x64.mpy`,
+  identity**, read from the top level for every platform. Setting `name`
+  replaces natmod's `mpy_path.stem`-derived filename prefix and
+  usermod's literal `"micropython"`/`"micropython.exe"` stem with
+  `{name}-{version}-{identifier}` (`mylib-1.2.0-mpy6.3-v1.29.0-x64.mpy`,
   `mylib-1.2.0-v1.29.0-unix-manylinux_2_28_x86_64`) -- two different
   projects' usermod firmware used to be indistinguishable by filename
-  alone. Leaving `name` unset keeps exactly today's filename. Record 0052,
-  Track A, A3.
-- **natmod's `micropython`/`mpy-abi` config keys are gone; the version
-  axis is a statically known domain now, and its identifier drops the
-  literal `-natmod-` segment.** `mpy6.3-natmod-armv7emsp` becomes
-  `mpy6.3-armv7emsp` -- natmod is one platform among six sharing this
-  identifier shape (record 0051), not a mode this string spells out.
-  `resources/build-platforms.toml` records every `.mpy` ABI this project
-  has verified against a real MicroPython tag (five today), each resolved
-  to its own newest known tag automatically; `build`/`skip` narrow that
-  domain the same way they already narrow `archs`. An unconfigured
-  `build` still defaults to the single newest known ABI, matching the old
-  `micropython`-pinned default's own narrow footprint rather than opening
-  up to every ABI this project has ever verified. Natmod also gained
-  `resources/build-platforms.toml`-backed per-tag arch availability: an
-  arch dynruntime.mk really does support but a specific tag's own source
-  tree predates (`rv32imc` before v1.24.0, `rv64imc` before v1.27.0) is
-  now a loud, specific error instead of a real build failing deep inside
-  `dynruntime.mk`. An unrecognised MicroPython tag is now a hard error
-  too, naming `bin/refresh_natmod_archs.py` as the fix, replacing a
-  silent fallback to a guessed ABI. Record 0052, Tracks A (A2) and C.
-
-- **Every usermod identifier now carries the MicroPython release, and
-  natmod's `mpy-abi` can name the ABI axis directly.**
-  `unix-manylinux_2_28_x86_64` becomes
-  `v1.29.0-unix-manylinux_2_28_x86_64`. Before this, usermod's
-  `micropython` was silently truncated to its first entry whenever more
-  than one was configured -- the only thing standing between a two-tag
-  config and one release's output silently overwriting the other's,
-  since nothing distinguished them: not the identifier, not the output
-  filename, not the directory. `micropython` is a real list now, and a
-  second tag gets its own output. natmod gets the same axis from the
-  other direction: `mpy-abi = ["6.3", "6.2"]` states the ABIs to build
-  directly, each resolved to its own newest known MicroPython tag,
-  rather than only being derivable by supplying tags and letting the ABI
-  fall out (still supported, unchanged). `select()`/`matches()`/
-  `parse_selector()`, previously hand-duplicated between the two modes,
-  now live once in `cibuildmp/selector.py`, which also gained brace
-  expansion (`cp{36,37}-*`-style globs), matching upstream. Record 0051
-  (partial -- moving `--platform` to mean the port landed later the same
-  day; see below).
-- **usermod gained its own `[[usermod.overrides]]`, and both modes gained
-  opt-in groups (`--enable`/`enable`).** `[[usermod.overrides]]` layers
-  `module-dir`/`manifest`/`extra-make-args` per target
-  (`file -> matching override -> environment`), nested under `[usermod]`
-  rather than shared with natmod's own top-level `[[overrides]]`, since
-  the two modes' override tables take different keys. Opt-in groups
-  (upstream's own `EnableGroup`): a target matching an unenabled group is
-  excluded before `build`/`skip` is even checked, and `--enable
-  <name>`/`enable = [...]` is what reaches it -- naming it in `build`
-  alone cannot. The concrete first group,
-  `unix-emulated-everywhere` (`ppc64le`/`s390x`/`riscv64`, both libcs),
-  answers this file's own "stay opt-in" line above properly: those three
-  cells are in the `unix` axis now (`default_axis_values("unix")` is the
-  full fifteen), not held out of it, and it is the group -- reachable
-  without editing a config's own `archs` -- that keeps a bare `build =
-  "*"` at nine cells by default, same as before. One narrow, deliberate
-  behaviour change: `--archs all` alone no longer reaches those three
-  archs, matching upstream's own precedent (`CIBW_ARCHS=all` does not
-  alone build `pypy` either). Record 0051.
-- **`--platform` names a platform, not a build mode, and `[usermod]` is
-  gone.** `[usermod.<port>]` becomes `[<port>]` -- `[unix]`, `[windows]`,
-  `[qemu]`, `[webassembly]`, `[esp32]` -- a top-level table sibling to
-  `[natmod]`, exactly like `[natmod]`'s own shape; `ports = [...]` no
-  longer exists as a concept, a port's own table presence is what selects
-  it. **Breaking**: any config still using `[usermod]` now fails loudly,
-  naming the exact migration, with no deprecation window (`examples/template`,
-  this repo's own included, migrated in the same commit); the old
-  single-mode spelling `--platform usermod` is rejected the same way any
-  other unknown platform name is (`--platform natmod` still works, since
-  `natmod` is a real platform name now). The headline new capability:
-  **more than one platform can build in a single invocation**, with no
-  `--platform` needed at all -- unlike cibuildwheel's own platforms
-  (bound to host OS), cibuildmp's six are just Docker images on one host,
-  so nothing forces one platform per invocation. `--platform`/
-  `CIBMP_PLATFORM` becomes an optional, comma- or space-separated filter
-  over the six platform names instead. `module-dir`/`manifest`/
-  `extra-make-args` (natmod also `make-target`/`pre-build-command`) are
-  genuinely shared-with-per-platform-override now, resolved through
-  `cibuildmp/options.py`'s cascade; `[[usermod.overrides]]` is renamed to
-  a top-level `[[usermod-overrides]]` (still not merged with natmod's own
-  `[[overrides]]` -- that unification is record 0051's own next phase).
-  Record 0051 (Phase F).
-- **One shared `[[overrides]]` list, and `inherit`.** Natmod's own
-  `[[overrides]]` and `[[usermod-overrides]]` (above) merge into one
-  top-level `[[overrides]]`, shared by every platform. `inherit =
-  {extra-make-args = "append"|"prepend"|"none"}` is real now (default
-  `"none"`, unchanged behaviour for every override written before this):
-  the one option genuinely list-shaped across every platform's own
-  override surface can compose onto the running value instead of always
-  replacing it outright. An override's own key is validated twice --
-  loosely (is it valid for *any* platform) when the config loads, and
-  strictly (is it valid for the platform the matched identifier actually
-  belongs to) once a target resolves -- so a `natmod`-only key inside an
-  override that only ever matches a `unix` identifier is still a loud,
-  specific error, not silently ignored. `natmod.targets.Target` gained a
-  `.port` property (always `"natmod"`) to make the strict check possible
-  for natmod too. Record 0051 (Phase G).
-- **`natmod`/`usermod` physically merged into `cibuildmp/platforms/`, and
-  `cli.py`'s dispatch is a family registry.** The previous three bullets
-  unified the *config* shape; this is the matching code-layout move:
-  `natmod/` and `usermod/` (and their own `cli.py` dispatch modules) are
-  now `cibuildmp/platforms/natmod/` and `cibuildmp/platforms/usermod/`,
-  each a `PlatformModule` (`resolve_options()`/`run()`); `sources.py`/
-  `stepsummary.py` moved to the package root, since both were already
-  shared across families. `cli.py` reaches either only through
-  `PLATFORM_FAMILY: dict[str, PlatformModule]`, never by name, so adding a
-  future platform family (zephyr, record 0022) costs one new module plus
-  registry entries, not a `cli.py` change. Record 0051 (Phase H).
-- **usermod's `module-dir` is renamed `user-c-modules`, its default
-  changes to `"."`, and `[usermod]` returns as a real cascade tier.**
-  `module-dir` collided in name with natmod's own key of the same name
-  while meaning something different downstream (`make -C` target vs.
-  `USER_C_MODULES=` forwarded into the port's own build) -- renamed to
-  the literal Makefile variable it feeds; natmod's own `module-dir` is
-  untouched. The default changes from `"usermod"` to `"."` -- broader,
-  not narrower, and what every real consumer already configured by hand.
-  `[usermod]` -- gone since Phase F removed it as a mode/selector table
-  -- is legal again, but not as that: a sixth top-level table, sibling to
-  `[natmod]`, holding shared defaults for every active usermod port at
-  once, one real layer in the cascade
-  (`default → global → family → platform → env → CLI`, a new
-  `family_table` field on `cibuildmp.options.Options`). The old
-  `ports = [...]` selector and nested `[usermod.<port>]` sub-tables stay
-  loud, specific errors. **Breaking**: any config still writing
-  `module-dir` under a usermod port table needs to rename it. Record 0051
-  (ninth addendum).
-- **natmod builds in a container, and there is no bare-host path.** It used to
-  resolve a toolchain onto the invoking machine -- an apt probe, a pinned
-  tarball, or the host gcc's own 32-bit multilib -- and run `make` there. One
-  `linux/amd64` image now carries all ten `dynruntime.mk` toolchains under
-  exactly the prefixes it expects. The visible consequence: **`x86` builds on an
-  arm64 runner**, which it could not before, because inside the image the host
-  is amd64 by construction. Record 0050.
-- **The default MicroPython release is `v1.29.0`** (was `v1.28.0`). Its `.mpy`
-  ABI is 6.3, unchanged, so no identifier moves. v1.29.0 also changed
-  `dynruntime.mk`'s `x86` from `-m32` to `CROSS = i686-linux-gnu-`; the image
-  carries both spellings, since `micropython` accepts a list of tags that can
-  span the change.
+  alone. Leaving `name` unset keeps exactly today's filename. Record
+  0052, Track A.
+- **usermod's `module-dir` is renamed `user-c-modules`** (the literal
+  Makefile variable it feeds; natmod's own, differently-meaning
+  `module-dir` is untouched), **its default changes from `"usermod"` to
+  `"."`, and `[usermod]` is a real shared-defaults tier again** -- a
+  top-level table, sibling to every platform table, holding
+  `user-c-modules`/`manifest`/`extra-make-args` defaults for every
+  active usermod port at once
+  (`default → global → family → platform → env → CLI` cascade). It does
+  **not** gate which ports are active -- a port's own table presence
+  does that, same as `[natmod]`'s presence always has. **Breaking**: any
+  config still writing `module-dir` under a usermod port table needs to
+  rename it. Record 0051.
+- **natmod builds in a container, with no bare-host path at all**, and
+  its own `mpy-cross` builds inside that same image rather than on the
+  host (`py/dynruntime.mk` hardcodes the path it invokes, so a host-built
+  binary only ever worked by the coincidence of matching the image's own
+  glibc -- the same bug class already fixed for `unix`/`windows`/
+  `webassembly`). One `linux/amd64` image carries all ten
+  `dynruntime.mk` toolchains under exactly the prefixes it expects.
+  Visible consequence: **`x86` builds on an arm64 runner**, which it
+  could not before. `docker/natmod.Dockerfile`'s own apt/toolchain
+  layers are ordered minimal-apt → toolchains → the rest of apt, so a
+  package addition to the volatile half no longer invalidates the
+  3.38GB toolchain layer. `build-essential` stays in `action.yml`'s apt
+  step regardless: `qemu`/`esp32` still build their own `mpy-cross` on
+  the host, unrelated to any of this. Records 0050, 0052.
 - **`pre-build-command` runs inside the build's own container**, the shape
   cibuildwheel's `before-all` has. It therefore runs unprivileged and cannot
   install system packages -- a project that needs a tool should fetch it, as
   `examples/wasm2mpy` now does for `wabt`.
-- **`esp32` is no longer in the default port set.** It is the one port with no
-  Dockerfile and no pinned image, so it is also the one that cannot satisfy the
-  Docker-only rule; its build provisions ESP-IDF onto the host. Still a real
-  identifier, still reachable with `--only`, still built by a config that names
-  it.
-- `qemu` runs in its published image like every other port (record 0032, closed
-  by 0050).
-
-### Fixed
-
-- **A shared `[[overrides]]` entry meant only for natmod could fail a
-  usermod-only invocation's reachability check.** `cibuildmp --dry-run
-  --platform unix` wrongly rejected a natmod-only override
-  (`select = "*-armv7emsp"`) as unreachable, since `[[overrides]]` is one
-  shared, top-level list but each family's own reachability audit only
-  checked a `select` pattern against its own identifiers. Fixed on
-  usermod's own side (it already imports from natmod, one-way): its
-  reachability check now also considers natmod's own identifiers,
-  computed from the same config. The mirror direction -- a natmod-only
-  invocation flagged by a usermod-only override -- is not yet fixed
-  (natmod must never import usermod back); tracked separately. Record
-  0052's own addendum.
-- **The pinned natmod Docker image is republished, this time by CI itself.**
-  The prior digest was a hand `docker push` and predated the
-  `gcc-i686-linux-gnu` fix (record 0050); republishing it through
-  `publish-docker-images.yml` surfaced that a hand-pushed package also
-  carries no Actions-write grant for any repository, not only the
-  already-known private-visibility issue -- fixed via GHCR's "Connect
-  Repository" plus an explicit "Manage Actions access" grant, both
-  settings-UI-only. Confirmed live: the next push built
-  `examples/template` through the new digest, pulled anonymously by a
-  fresh CI runner -- the first real CI run to exercise
-  natmod-in-a-container end to end. Record 0050's own addendum.
-- **natmod's build identifier is matched against a real `build-platforms.toml`
-  row now, not rebuilt -- and that row's own tag is part of it.** The
-  string was already close but was assembled by an f-string never
-  checked against the file's own (stale, pre-record-0052-A2) `identifier`
-  field. Confirmed against real cibuildwheel source: its own
-  `PythonConfiguration.identifier` is a literal field read off a row,
-  never computed -- natmod's 205 rows were regenerated and
-  `Target.identifier` now looks its base string up
-  (`mpy{abi}-{tag}-{arch}`, e.g. `mpy6.3-v1.30.0-preview-armv7emsp`). An
-  initial version of this fix dropped tag from the identifier instead --
-  live-caught and reversed the same day: a tag-free identifier collapses
-  every tag sharing one ABI onto one string (`mpy5-x86` alone spans seven
-  real, distinct rows, tags `v1.12`-`v1.18`), which is a real loss of
-  information a `collapse_newest_tag()` helper only papered over. With
-  tag restored, every `(tag, arch)` row is unambiguous and there is
-  nothing left to collapse; a `build` selector that never names a tag
-  still narrows to the newest one automatically
-  (`selector_names_a_tag()`/`narrow_to_newest_tag()`), while a selector
-  that does name a specific historical tag is trusted as-is. The per-tag
-  arch-availability table this used to need (`archs_available_for()`) is
-  gone too: selection now matches every real row directly via the
-  existing `build`/`skip` glob mechanism, narrowed only *afterward*, not
-  via an availability table computed before selection ever ran. Verified
-  live against both the default (no-tag) and an explicit-tag `--only`
-  case. Record 0052's own addenda.
-- **`[[overrides]]` becomes `[override]`, keyed by its own glob directly.**
-  `[[overrides]]\nselect = "*-armv7emsp"\n...` becomes
-  `[override."*-armv7emsp"]\n...` -- no more separate `select =` field. A
-  deliberate simplification below upstream's own
-  `[[tool.cibuildwheel.overrides]]` array-of-tables shape: this project's
-  overrides have always been "one glob, some options," so the glob can
-  simply be the table's own name. Precedence is unchanged (declaration
-  order, which a TOML table's own keys already preserve) -- a narrower
-  glob written further down the file still wins over a broader one above
-  it, with no new depth/specificity mechanism. Record 0052's own latest
-  addendum.
+- **`esp32` has no Docker image and provisions ESP-IDF onto the host** --
+  the one platform that cannot satisfy the Docker-only rule. Still a
+  real identifier, still reachable by naming it in `build`, still built
+  by a config that does. `qemu` runs in its own published image like
+  every other usermod port.
 
 ### Removed
 
-- **`archs` is gone as a natmod config key entirely.** It filtered
-  candidate rows by `.arch` alone, *before* `build`/`skip` ever ran --
-  duplicating exactly what a `build`/`skip` glob over the identifier
-  already expresses directly (`build = "*-x64"`, or `"mpy6.3-*-x64"` to
-  also pin the ABI). Raised live against the root `cibuildmp.toml`'s own
-  `[natmod] archs = [...]` line, which turned out to name every real
-  natmod arch verbatim -- the config's own default, spelled out in full,
-  narrowing nothing at all. Removed outright rather than kept dual-read:
-  writing `archs = [...]` in `[natmod]` is now a plain "unknown key"
-  error naming `build`/`skip` as the replacement. `--archs` on the CLI
-  now raises a specific, actionable error when passed for a natmod
-  invocation -- there is no `--build`/`--skip` CLI flag to fall back on,
-  and no single, generally-correct way to translate an arbitrary arch
-  list into a `build`/`skip` glob rewrite on top of whatever `build`
-  pattern a config already has, so this is an honest capability loss
-  rather than a fragile synthesized one. `--archs` is unaffected for
-  usermod ports. Record 0052's own newest addendum.
-- **Per-platform config tables are gone entirely -- `[unix] key = "..."`,
-  `[natmod] key = "..."` no longer set anything.** The same argument
-  that removed `archs`, one tier further: every platform's own real
-  identifier already carries a marker (`manylinux`/`musllinux` for unix,
-  `win32` for windows, the literal `mpy` prefix for natmod, ...) a
-  `build`/`skip` glob or an `[override]` selector can already address
-  directly, so a per-platform table was always a second way to say a
-  value already sayable at the top level (or, per-target, through
-  `[override]`). `[natmod]`'s own schema is empty now -- its presence
-  still activates natmod alongside other platforms in one invocation,
-  its content does not carry anything any more; each usermod port's own
-  table (`[unix]`, `[esp32]`, ...) keeps only its own axis key
-  (`archs`/`boards`), nothing else. `[usermod]` (shared defaults across
-  every active port) is unaffected -- kept deliberately, a distinct,
-  still-load-bearing tier. `CIBMP_BUILD_NATMOD`-style per-platform
-  *environment* overrides are unaffected too -- a real, distinct
-  capability the TOML argument above doesn't touch. `--archs` no longer
-  applies to natmod. Record 0052's own newest addendum, including a
-  real, separately-tracked gap this surfaced: a `build`/`skip` pattern
-  meant for one active platform can now fail a different active
-  platform's own reachability check, the same shape as the still-open
-  cross-family `[override]` reachability gap.
 - **`--toolchain`, and the toolchain resolver behind it.** Every question it
   answered -- is a compiler for this arch here, where is one fetched from, does
   its prefix match what `dynruntime.mk` hardcodes -- is answered by the natmod
@@ -342,28 +142,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`--archs auto` / `native` / `all` for usermod**, and an `archs:` input on
-  the root action. This is what replaces matrix generation, and it is
-  upstream's own mechanism for spreading work across runners: give each job
-  in your own matrix a `runs-on` and `archs: auto`, and each one builds what
-  it is native to. `native` is the runner's own architecture, `auto` adds
-  the 32-bit sibling it can execute directly, `all` is every cell. Keywords
-  work in `[usermod.<port>] archs` too, and can be mixed with explicit
-  names.
-
-  Nothing is unbuildable on the "wrong" runner: every build runs in a
-  container with an explicit `--platform`, so a non-native cell builds under
-  emulation wherever it lands. `archs` is a choice about time, not about
-  capability.
 - `verify_windows_output()` — reads the COFF `Machine` out of the produced
   `micropython.exe` and rejects a binary that is not the architecture its
   identifier names. `windows` previously checked only that the file existed.
-- **The four native `musllinux` cells are in the default `unix` axis**
-  (`x86_64`, `i686`, `aarch64`, `armv7l`), so a bare `ports = ["unix"]` is nine
-  cells rather than five. They are the musl cells with a runner they are native
-  to; the other three are emulated everywhere and stay opt-in.
-- `windows` joined `examples/template`'s own `ports` and is verified on every
-  push.
 - A `workflow_dispatch` input on `publish-docker-images.yml` to republish one
   image instead of all nineteen.
 
