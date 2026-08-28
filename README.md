@@ -194,14 +194,15 @@ path for it.
 | Port          | Target                                           | Provisioning                            | Status              |
 | ------------- | ------------------------------------------------ | ---------------------------------------- | -------------------- |
 | `unix`        | `manylinux_2_28_x86_64`                          | native image[^native-image]              | ✅                   |
-| `unix`        | `manylinux_2_28_i686`                            | native image[^native-image]              | ⚠️[^unverified-cell] |
-| `unix`        | `manylinux_2_28_aarch64`                         | native image[^native-image]              | ⚠️[^unverified-cell] |
+| `unix`        | `manylinux_2_28_i686`                            | native image[^native-image]              | ✅                   |
+| `unix`        | `manylinux_2_28_aarch64`                         | native image[^native-image]              | ✅                   |
+| `unix`        | `manylinux_2_31_armv7l`                          | native image[^native-image]              | ✅                   |
+| `unix`        | `manylinux_2_39_mipsel`                          | cross image[^mipsel-cross]               | ✅                   |
+| `unix`        | `musllinux_1_2_{x86_64,i686,aarch64,armv7l}`     | native image[^native-image]              | ✅                   |
 | `unix`        | `manylinux_2_28_ppc64le`                         | native image[^native-image]              | ⚠️[^unverified-cell] |
 | `unix`        | `manylinux_2_28_s390x`                           | native image[^native-image]              | ⚠️[^unverified-cell] |
-| `unix`        | `manylinux_2_31_armv7l`                          | native image[^native-image]              | ⚠️[^unverified-cell] |
 | `unix`        | `manylinux_2_39_riscv64`                         | native image[^native-image]              | ⚠️[^unverified-cell] |
-| `unix`        | `musllinux_1_2_*` (7 arches)                     | native image[^native-image]              | ⚠️[^unverified-cell] |
-| `unix`        | `manylinux_2_39_mipsel`                          | cross image[^mipsel-cross]               | ⚠️[^unverified-cell] |
+| `unix`        | `musllinux_1_2_{ppc64le,s390x,riscv64}`          | native image[^native-image]              | ⚠️[^unverified-cell] |
 | `qemu`        | `MPS2_AN385` (Cortex-M3, and 5 other ARM boards) | `arm-none-eabi-`                         | ✅                   |
 | `qemu`        | `VIRT_RV32`/`VIRT_RV64`, `POWERNV9` (PowerPC)    | `riscv64-unknown-elf-`/`powerpc64le-linux-gnu-` | ❌ not attempted |
 | `webassembly` | `pyscript` variant                               | `emsdk` (Linux x64 host only)             | ✅                   |
@@ -215,7 +216,7 @@ path for it.
 | `pic16bit` / `powerpc` (as a standalone port) / `bare-arm` / `minimal` / `embed` | no verified rows at all — reference builds or CPU families with no matching natmod/usermod facts | — | ❌ out of scope |
 
 [^native-image]: Nothing to provision. The image is `ghcr.io/ballistics-lab/<target>`, a thin layer over pypa's own `quay.io/pypa/<target>` (the same images cibuildwheel builds wheels in), carrying a native compiler for that architecture. Non-native targets run emulated. The binary is checked against its target's real platform tag after every build.
-[^unverified-cell]: Declared and Dockerfile-backed, but not yet published or verified live — point `CIBMP_UNIX_<TARGET>_DOCKER_IMAGE` at a locally-built image to work on one of these.
+[^unverified-cell]: `ppc64le`/`s390x`/`riscv64`, both libcs — published (`resources/pinned_docker_images.toml` has a real digest for each) and reachable by naming them in `build`, but native to no runner GitHub offers, so no real build has ever run through one: the six-cell equivalent of `qemu`'s own gap before it got a dedicated CI leg. Point `CIBMP_UNIX_<TARGET>_DOCKER_IMAGE` at a locally-built image, or an emulated one, to work on one of these.
 [^mipsel-cross]: The one target that still cross-compiles: pypa publishes no mipsel image and there's no Docker official image for 32-bit mipsel, so there's nothing to be native to.
 [^verified-no-driver]: `resources/build-platforms.toml` has real, independently-verified rows for each of these ports (walked against a real MicroPython checkout the same way every ✅ row above was); a config can name their identifiers today. What's missing is a `build_<port>()` driver in `platforms/usermod/build.py` to actually run one — not a scope decision, just not built yet.
 
