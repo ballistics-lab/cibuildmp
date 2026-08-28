@@ -184,7 +184,7 @@ arm_embedded = "ghcr.io/ballistics-lab/arm_embedded@sha256:71942f597e20ec7056b41
 riscv_embedded = "ghcr.io/ballistics-lab/riscv_embedded@sha256:7dc9b92ef8d4cd457bd14681feaa7f07493fb426712601e19d9219f38d28dc07"
 xtensa_lx106 = "ghcr.io/ballistics-lab/xtensa_lx106@sha256:ed50e6da5732eeb6aed3e7f99152f9d5d75c2c4cc163b8dee6d3da1d5fe3689b"
 xtensa_esp = "ghcr.io/ballistics-lab/xtensa_esp@sha256:a359ff0474cd10aaf1514bef20a57e4c8a7a5dbd830d6c5a0d9eab72f0ea3a60"
-natmod_host = "ghcr.io/ballistics-lab/natmod_host@sha256:9b48f9422ca6c63e30238847cbe2de0bed94a903ae30b301239e53349178aaaf"
+natmod_host = "ghcr.io/ballistics-lab/natmod_host@sha256:85a790d948cd9ae690241e7b7234a9f411f82d9490aba5b249f24979a02bde47"
 ppc64le_linux = "ghcr.io/ballistics-lab/ppc64le_linux@sha256:dff49fd91ab8a2b209769c03da12307e1ab655d8c420248671ba893f17544835"
 
 # Not a toolchain image (record 0058's own "esp_idf_base is not a
