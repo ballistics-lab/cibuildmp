@@ -1,8 +1,11 @@
 # 0047 — the run output works, but it is not cibuildwheel's
 
-Status: Accepted (design; nothing implemented here). **Corrected and widened by the
-2026-08-28 addendum**, read against an installed cibuildwheel 4.1.0: the folds are
-per *step*, not per build identifier, and `stepsummary.py` is in scope after all
+Status: In progress. **Corrected and widened by the 2026-08-28 addendum**, read
+against an installed cibuildwheel 4.1.0: the folds are per *step*, not per build
+identifier, and `stepsummary.py` is in scope after all. **The `stepsummary.py`
+half shipped 2026-08-28** (second addendum, below) — terminal log folding,
+colour/symbols and `::error::`/`::warning::`/`::notice::` annotations are still
+nothing-implemented.
 
 The user's call, stated directly: the run summary works, but they want it to
 look **exactly** like cibuildwheel's. This record separates what that actually
@@ -391,3 +394,61 @@ build loop, and upstream reaches all of it because the step summary and the term
 summary read the *same* `list[BuildInfo]`. Keeping `stepsummary.py` a separate module
 fed by its own `Sequence[_Result]` argument is exactly what makes each new column a
 second plumbing job.
+
+---
+
+## Addendum, 2026-08-28 (second) — `write_step_summary()` now matches upstream's shape
+
+Deliberately scoped to the step-summary half only, on the user's own explicit call
+once the addendum above made the real size of "look exactly like cibuildwheel's"
+clear: log folding, colour/symbol policy and the `::error::`/`::warning::`/`::notice::`
+annotations are still nothing-implemented, tracked separately. What shipped:
+
+- `stepsummary.py`'s output is now an HTML table (`Output`/`Size`/`Build
+  identifier`/`Time`/`SHA256`), not a Markdown pipe table, with an optional
+  `<details><summary>Build options</summary>` block ahead of it and a right-aligned
+  `N target(s) built in <duration>` footer -- the heading itself dropped the counts
+  (moved to the footer, matching upstream's own `### 🎡 cibuildwheel` + footer split,
+  the "deliberate departure either way" this record's own addendum above flagged as
+  undecided).
+- SHA256 lands per row (`hashlib.file_digest`, lazy, `None`/`&mdash;` for a path that
+  cannot be read rather than raising -- covers `--dry-run` previews and test doubles).
+- The options block lists `build`/`skip` as configured, plus every `[override]` whose
+  `select` actually matched one of the run's own built identifiers (deduplicated by
+  glob) -- not a real `Options.summary()`-style YAML dump the way upstream's is; this
+  record's own "not free" note about that renderer stands, unaddressed.
+- Two departures kept on purpose, both because the alternative genuinely does not fit
+  this project:
+  - **`open(path, "a")`, still append, not upstream's truncating `write_text()`.**
+    `build-examples.yml`'s own composite action runs three times inside one job
+    (template/wasm2mpy/usermod-unix), so truncating would keep only the last table --
+    exactly the case this record's own addendum flagged as needing a real check
+    before converging, now checked.
+  - **No `humanize` dependency.** Sizes/durations are hand-formatted
+    (`_natural_size`/`_natural_duration` in `stepsummary.py`) to upstream's shape
+    ("696.9 kB", "45.7 seconds") instead. `pyproject.toml`'s own comment is explicit
+    that this project is stdlib-only with two deliberate, load-bearing exceptions
+    (`pyelftools`/`ar`, [0012]) -- a formatting-only dependency does not clear that
+    bar, so this record's implicit assumption of pulling `humanize` in does not carry
+    over.
+- `_Result` Protocol grew a fourth field, `duration` -- both `BuildResult` and
+  `UsermodBuildResult` already carried it; the Protocol just did not expose it yet.
+- `natmod/__init__.py`/`usermod/__init__.py` now pass `build`/`skip`/`overrides` plus
+  their own `ConfigError`/`UsermodConfigError` into `write_step_summary()` --
+  `stepsummary.py` itself still imports neither family module (only this project's
+  own top-level `options.py`, for `matching_overrides()`), so the no-circular-import
+  constraint this record's module-shape section argues for still holds.
+- Two pre-existing mypy errors and one more found while getting the whole package
+  clean (`platforms/natmod/targets.py`'s unannotated `result: list[Target] = []`,
+  `platforms/usermod/build.py`'s `int.from_bytes()` byteorder needing a real
+  `Literal["little", "big"]` annotation, `platforms/usermod/boards.py`'s
+  `Variant(*v, board=board)` reading as an unknown-length splat against a keyword
+  argument once `v` comes from an `Any`-typed JSON dict) -- unrelated to this change,
+  fixed alongside since they were sitting in files this pass was already touching or
+  because `mypy src/cibuildmp` was run to confirm nothing regressed.
+
+Not touched: terminal log folding (`::group::`/`::endgroup::`, the per-step fold
+granularity the first addendum corrected), colour/symbol policy, the
+`::error::`/`::warning::`/`::notice::` workflow-command annotations, and the real
+`Options.summary()`-shaped options renderer the block above approximates instead of
+building for real.

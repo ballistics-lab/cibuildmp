@@ -1,5 +1,5 @@
 # The container images cibuildmp itself publishes and runs builds in --
-# the table `usermod/dockerrun.py` resolves against, and cibuildmp's own
+# the table `dockerrun.py` resolves against, and cibuildmp's own
 # equivalent of cibuildwheel's `resources/pinned_docker_images.cfg`.
 #
 # It was a `PORT_IMAGES` dict literal inside `dockerrun.py` until record
@@ -12,12 +12,36 @@
 # **Base images are not here.** `resources/pinned_pypa_images.toml`
 # mirrors upstream's own pinned list and is the only thing a Dockerfile's
 # `FROM` refers to. This file is the other half: what those bases become
-# once cibuildmp has added the handful of dev packages `ports/unix`
-# actually needs, and what a build then pulls.
+# once cibuildmp has added the handful of dev packages a build actually
+# needs, and what a build then pulls.
+#
+# ── One flat table, keyed by image group ────────────────────────────────
+#
+# **Record 0058.** Before this, `unix` was keyed two levels deep
+# (`[image.<arch>].<floor>`) and every other port sat in a separate
+# `[port]` table keyed by port name. Both were really the same question --
+# "which published image does this build need" -- with two different
+# answers for what a build's own *key* is. Record 0058 moved that key out
+# of this file entirely: `resources/build-platforms.toml` now names, at
+# each port's own table level, which **image group** a build resolves to
+# (a scalar `image = "..."` for a port with no per-build image axis, an
+# `images.<...>` map for one that has one -- `unix`'s own map is an
+# identity, since that is the one port whose image axis and build-target
+# axis coincide). This file only has to answer the second half: what a
+# named group is pinned to. `dockerrun.image_for()` reads both in
+# sequence and never branches on the port name itself.
+#
+# Ten of the fifteen usermod ports and four of natmod's ten arches share
+# one `arm-none-eabi`/`riscv64-unknown-elf`/etc toolchain -- see record
+# 0058 for the full mapping -- so a group is very often pulled in by more
+# than one (port, target) pair. `unix`'s own fifteen cells stay an
+# identity map for the reason record 0058 gives: every cell there is
+# built natively for itself, so the image axis and the target axis are
+# one fact, not two.
 #
 # ── Names ─────────────────────────────────────────────────────────────
 #
-# Image, Dockerfile and identifier all reuse **pypa's own names**, with no
+# `unix`'s own group names reuse **pypa's own names**, with no
 # `cibuildmp-` prefix and no private dialect:
 #
 #   pypa base    quay.io/pypa/manylinux_2_28_x86_64
@@ -34,44 +58,26 @@
 # parity in the matrix is worth little if the labels still need
 # translating at every comparison.
 #
-# ── This table declares the matrix ────────────────────────────────────
+# The six toolchain groups record 0058 introduced (`arm_embedded`,
+# `riscv_embedded`, `xtensa_lx106`, `xtensa_esp`, `natmod_host`,
+# `ppc64le_linux`) and `esp_idf_base` are named for what they hold, since
+# none of them is a PEP 600 tag -- there is no upstream naming convention
+# to reuse for a bare-metal cross toolchain.
 #
-# The **keys** of each `[image.<arch>]` are cibuildmp's own curated
-# choice of which libc floor that architecture gets, the same decision
-# cibuildwheel makes in its `resources/defaults.toml`
-# (`manylinux-x86_64-image = "manylinux_2_28"`) -- trusted, not computed.
-# They are deliberately not uniform, and cannot be: pypa publishes no
-# `manylinux_2_28_armv7l` or `manylinux_2_28_riscv64` at all, so those
-# arches take the floors that exist (`_2_31`, `_2_39`).
+# A key with an **empty value** is a declared group with nothing
+# published for it yet. It is still real: `unix_targets()` (and, for
+# every other port, `build-platforms.toml`'s own `images`/`image` key)
+# lists the target that resolves to it, and asking to build that target
+# fails with "no image registered", not with "unknown architecture".
+# Those are different errors, and conflating them is how a half-published
+# matrix quietly starts looking like a smaller one.
 #
-# A key with an **empty value** is a declared cell with nothing published
-# for it yet. It is a real, nameable target: `--print-build-identifiers`
-# lists it, and asking to build it fails with "no image registered", not
-# with "unknown architecture". Those are different errors, and conflating
-# them is how a half-published matrix quietly starts looking like a
-# smaller one.
-#
-# ── Everything is empty right now, on purpose ─────────────────────────
-#
-# Record 0043 changed what every `unix` cell *means* (native-per-target
-# instead of cross-from-amd64) and record 0031's musllinux half added a
-# whole second column, so not one of the previously-published
-# `cibuildmp-unix-manylinux-<arch>` images describes a cell in this table
-# any more: they were amd64 images holding cross toolchains, under arch
-# names (`x64`, `armhf`) this file no longer uses.
-#
-# Carrying those digests forward would be worse than an empty cell. A
-# missing entry is an immediate, explicit error; a wrong-model digest
-# either fails deep inside `make` or -- the exact trap 0043 was written
-# about -- quietly produces a binary of the wrong architecture filed
-# under the right identifier.
-#
-# Fill these in from a real `publish-docker-images.yml` run, copying its
-# "Record the pinned digest" step output in a real PR -- the
-# manual-but-deliberate cadence `bin/update_docker.py` gives
-# cibuildwheel's own pins (record 0033: cibuildmp never builds one of
-# these itself, it only ever pulls one). Until then, local work goes
-# through the documented per-cell override
+# Fill an empty one in from a real `publish-docker-images.yml` run,
+# copying its "Record the pinned digest" step output in a real PR -- or
+# run `bin/update_docker.py --images`, which re-reads every digest
+# straight off GHCR (record 0033: cibuildmp never builds one of these
+# itself, it only ever pulls one). Until then, local work goes through
+# the documented per-target override
 # (`CIBMP_UNIX_MANYLINUX_2_28_X86_64_DOCKER_IMAGE=<local tag>`), which is
 # what that knob has always been for.
 #
@@ -80,62 +86,55 @@
 # fact, so `dockerrun.run()`'s `--pull missing` never has to guess
 # whether a locally-cached image is stale.
 #
-# ── Nine cells point straight at pypa, no cibuildmp layer at all ──────
+# ── Nine `unix` cells point straight at pypa, no cibuildmp layer at all ─
 #
-# Not every cell needs a `ghcr.io/ballistics-lab/...` image: `armv7l`'s
-# `manylinux_2_31`, `riscv64`'s `manylinux_2_39`, and every `musllinux_1_2`
-# cell (all seven arches) never got the `libffi-devel` layer the
-# `manylinux_2_28` cells need -- verified by diffing each `docker/*.Dockerfile`
-# against a bare `FROM`: those nine files were byte-for-byte a `FROM` line
-# and nothing else, so publishing, pulling and caching a second copy of an
-# image cibuildmp adds nothing to was pure overhead. Their value here is
-# copied verbatim from `pinned_pypa_images.toml`'s own matching `[<arch>]`
-# `<floor>` cell (a `quay.io/pypa/...` reference, not `ghcr.io/...`) --
-# `image_for()` does not care which registry a cell names, so nothing in
-# `dockerrun.py` changes. `bin/update_docker.py --images` mirrors these
-# nine straight from `pinned_pypa_images.toml` instead of querying GHCR,
-# since there is no cibuildmp-published image to query. Their own
-# Dockerfiles and `publish-docker-images.yml` matrix rows are deleted, not
-# kept idle -- a Dockerfile that is only ever `FROM <x>` is not a build
-# step, it is a second name for `<x>`.
+# Not every `unix` cell needs a `ghcr.io/ballistics-lab/...` image:
+# `armv7l`'s `manylinux_2_31`, `riscv64`'s `manylinux_2_39`, and every
+# `musllinux_1_2` cell (all seven arches) never got the `libffi-devel`
+# layer the `manylinux_2_28` cells need -- verified by diffing each
+# `docker/*.Dockerfile` against a bare `FROM`: those nine files were
+# byte-for-byte a `FROM` line and nothing else, so publishing, pulling
+# and caching a second copy of an image cibuildmp adds nothing to was
+# pure overhead. Their value here is copied verbatim from
+# `pinned_pypa_images.toml`'s own matching `[<arch>]` `<floor>` cell (a
+# `quay.io/pypa/...` reference, not `ghcr.io/...`) -- `image_for()` does
+# not care which registry a group name resolves to. `bin/update_docker.py
+# --images` mirrors these nine straight from `pinned_pypa_images.toml`
+# instead of querying GHCR, since there is no cibuildmp-published image
+# to query. Their own Dockerfiles and `publish-docker-images.yml` matrix
+# rows are deleted, not kept idle -- a Dockerfile that is only ever `FROM
+# <x>` is not a build step, it is a second name for `<x>`.
 
+[image_group]
 
-# ══ unix -- one native image per (arch, libc floor) ═══════════════════
+# ── unix -- one native image per (arch, libc floor), identity-keyed ────
+manylinux_2_28_x86_64 = "ghcr.io/ballistics-lab/manylinux_2_28_x86_64@sha256:849c8669a3e13c1402d43e1361dc750cc0560197b84574ddd5a595308beb2365"
+musllinux_1_2_x86_64 = "quay.io/pypa/musllinux_1_2_x86_64@sha256:75327606c7666fc971bd9239c6b220fd205b4bb9563b588075164622609219ca"
 
-[image.x86_64]
-manylinux_2_28 = "ghcr.io/ballistics-lab/manylinux_2_28_x86_64@sha256:44c282830770b3852d1311dfe862e3834c57e9d558bacfc4926f11b46b57d8db"
-musllinux_1_2 = "quay.io/pypa/musllinux_1_2_x86_64@sha256:75327606c7666fc971bd9239c6b220fd205b4bb9563b588075164622609219ca"
+manylinux_2_28_i686 = "ghcr.io/ballistics-lab/manylinux_2_28_i686@sha256:ca75c3ab34ab78e3324181142b72d375c6f174cc766078ed138fc6be3fd2791c"
+musllinux_1_2_i686 = "quay.io/pypa/musllinux_1_2_i686@sha256:8ca1be90979cb290909c1c945573ccdc7114505d66c563567ee6c78927fb215f"
 
-[image.i686]
-manylinux_2_28 = "ghcr.io/ballistics-lab/manylinux_2_28_i686@sha256:d8c6ccf0fdb01161f79fe4e883196c5a17a5e0ad97982927094edf09e0c058f1"
-musllinux_1_2 = "quay.io/pypa/musllinux_1_2_i686@sha256:8ca1be90979cb290909c1c945573ccdc7114505d66c563567ee6c78927fb215f"
+manylinux_2_28_aarch64 = "ghcr.io/ballistics-lab/manylinux_2_28_aarch64@sha256:166c369630ab42573898ed737cf920ac77a72bc80a85ecf7c899e2dec242abb3"
+musllinux_1_2_aarch64 = "quay.io/pypa/musllinux_1_2_aarch64@sha256:cea133e28484a93e9c40fc661256e8f1ec69b2887d0b64acbfaf48f26bbab103"
 
-[image.aarch64]
-manylinux_2_28 = "ghcr.io/ballistics-lab/manylinux_2_28_aarch64@sha256:498ac072047f94dce34e42636629dade70fe2c9c13a8b7f21c169852e0dbd97a"
-musllinux_1_2 = "quay.io/pypa/musllinux_1_2_aarch64@sha256:cea133e28484a93e9c40fc661256e8f1ec69b2887d0b64acbfaf48f26bbab103"
+manylinux_2_28_ppc64le = "ghcr.io/ballistics-lab/manylinux_2_28_ppc64le@sha256:0a40f9bda0c824c47c0f1629a078cf578fee991dc3f7b540bdd19a0b9a9a3532"
+musllinux_1_2_ppc64le = "quay.io/pypa/musllinux_1_2_ppc64le@sha256:d70f4708a377ba4a21eee38be20e35c757e911b5ca90df0fce002fd71a6df3a8"
 
-[image.ppc64le]
-manylinux_2_28 = "ghcr.io/ballistics-lab/manylinux_2_28_ppc64le@sha256:f6dc11a9dd6ba10b1c1a0370c984d3428aecb5ce37914597ec7b81656e7cfb3a"
-musllinux_1_2 = "quay.io/pypa/musllinux_1_2_ppc64le@sha256:d70f4708a377ba4a21eee38be20e35c757e911b5ca90df0fce002fd71a6df3a8"
-
-[image.s390x]
-manylinux_2_28 = "ghcr.io/ballistics-lab/manylinux_2_28_s390x@sha256:575a7d5cc8735ad07d519d7bdcf024263db4ca0227cf1d4e81327bb40b6a793c"
-musllinux_1_2 = "quay.io/pypa/musllinux_1_2_s390x@sha256:97af923ea31a097445fcaad1af154e1f0fd997a6d722141d55607dc3767f8782"
+manylinux_2_28_s390x = "ghcr.io/ballistics-lab/manylinux_2_28_s390x@sha256:575a7d5cc8735ad07d519d7bdcf024263db4ca0227cf1d4e81327bb40b6a793c"
+musllinux_1_2_s390x = "quay.io/pypa/musllinux_1_2_s390x@sha256:97af923ea31a097445fcaad1af154e1f0fd997a6d722141d55607dc3767f8782"
 
 # armv7l's manylinux line starts at `_2_31` upstream (Ubuntu 20.04/apt,
 # unlike the AlmaLinux 8/dnf `_2_28` images) -- `_2_31` is the lower,
 # more compatible of the two floors pypa offers, and cibuildwheel makes
 # the same default choice.
-[image.armv7l]
-manylinux_2_31 = "quay.io/pypa/manylinux_2_31_armv7l@sha256:235c282aa532e01136e5e1db0a9403463032c9281fa56d89b39e45dfb5081484"
-musllinux_1_2 = "quay.io/pypa/musllinux_1_2_armv7l@sha256:c7ee1ecd4967a3ea682c814b564a900d90dc81d75b0b7c2deeb8d6819752a460"
+manylinux_2_31_armv7l = "quay.io/pypa/manylinux_2_31_armv7l@sha256:235c282aa532e01136e5e1db0a9403463032c9281fa56d89b39e45dfb5081484"
+musllinux_1_2_armv7l = "quay.io/pypa/musllinux_1_2_armv7l@sha256:c7ee1ecd4967a3ea682c814b564a900d90dc81d75b0b7c2deeb8d6819752a460"
 
 # riscv64 is the newest arch upstream and carries the highest floor:
 # `manylinux_2_39` (Rocky Linux 10/dnf) is the only manylinux image pypa
 # publishes for it.
-[image.riscv64]
-manylinux_2_39 = "quay.io/pypa/manylinux_2_39_riscv64@sha256:9fa1bc388ea2494e457eec44e7c16a9e66fff892d73da8af3621009e76167949"
-musllinux_1_2 = "quay.io/pypa/musllinux_1_2_riscv64@sha256:c81bcd3275ce4372b3ceb59ad132619ffe3e7c591193c2d5f2ed97aba198ec51"
+manylinux_2_39_riscv64 = "quay.io/pypa/manylinux_2_39_riscv64@sha256:9fa1bc388ea2494e457eec44e7c16a9e66fff892d73da8af3621009e76167949"
+musllinux_1_2_riscv64 = "quay.io/pypa/musllinux_1_2_riscv64@sha256:c81bcd3275ce4372b3ceb59ad132619ffe3e7c591193c2d5f2ed97aba198ec51"
 
 # mipsel is cibuildmp's own architecture, not one of cibuildwheel's
 # seven, and the one documented exception to record 0043's model: pypa
@@ -157,65 +156,39 @@ musllinux_1_2 = "quay.io/pypa/musllinux_1_2_riscv64@sha256:c81bcd3275ce4372b3ceb
 # image). Recording it beats claiming nothing -- record 0031 found that
 # even this arch's static build still reaches glibc's own `dlopen`-based
 # NSS at runtime, so "no floor" would be the less honest of the two.
-[image.mipsel]
-manylinux_2_39 = "ghcr.io/ballistics-lab/manylinux_2_39_mipsel@sha256:740276d70517fc1041d8949871440ac919a66b14a325806e3f0ec03d772fa307"
+manylinux_2_39_mipsel = "ghcr.io/ballistics-lab/manylinux_2_39_mipsel@sha256:25e3706769e14dc6e453daf118a46a32f9106ba6421b9cc0d39d8e6a3c266b6a"
 
-
-# ══ cross-compiling ports -- no arch axis, amd64 hosts ═══════════════
+# ── cross-compiling ports with no image axis of their own ─────────────
 #
 # Outside record 0043's scope entirely and unchanged by it: these target
-# Windows, WASM and bare metal, which no Linux container is ever "native"
-# to, so cibuildwheel has no equivalent and no opinion. Each is a single
-# amd64 image holding a cross toolchain, and `linux/amd64` (stated in
+# Windows and wasm, which no Linux container is ever "native" to, so
+# cibuildwheel has no equivalent and no opinion. Each is a single amd64
+# image holding a cross toolchain, and `linux/amd64` (stated in
 # `dockerrun.py`, since it is a property of the image rather than of any
-# build target) is what now lets them run on an arm64 host at all --
-# emulated, instead of failing with `exec format error`.
-#
-# Digests move here verbatim from `dockerrun.PORT_IMAGES`:
-# `qemu`/`webassembly` from publish-docker-images.yml's own run
-# 32895072172 (2026-08-25), `windows` from the later by-hand push of the
-# rebuilt llvm-mingw image (record 0042). Nothing about these images
-# changed, so unlike the `unix` cells their pins carry over intact --
-# still under their old `cibuildmp-`-prefixed names, which is simply
-# where those digests live. They lose the prefix at their next publish,
-# alongside the `unix` cells above; renaming a published image means
-# republishing it, not editing a string here.
+# build target) is what lets them run on an arm64 host at all -- emulated,
+# instead of failing with `exec format error`.
+windows = "ghcr.io/ballistics-lab/windows@sha256:13a60ccb2bac7a19450d3e4fe41fbddaa42776d3be2c1c4f55e70a1255859f18"
+webassembly = "ghcr.io/ballistics-lab/webassembly@sha256:a0b08d84a27ee720e9ee56299aae1f7107da1400845cfc0be5f06b1d029a3734"
 
-[port]
-# natmod is not a usermod port and sits here anyway: this table is "what
-# a build pulls", and after record 0049 natmod pulls one too. Its shape
-# is the cross-compiling one -- a single `linux/amd64` image holding all
-# ten `dynruntime.mk` toolchains, for the reasons `natmod.Dockerfile`'s
-# own header gives.
+# ── the six toolchain-group images (record 0058) ───────────────────────
 #
-# **Republished by `publish-docker-images.yml` itself, finally** -- the
-# first two digests for this image were both pushed by hand (`docker
-# push`, not `docker/build-push-action`), which carries no
-# `org.opencontainers.image.source` label: GHCR created the package
-# unlinked from the repository, private until the visibility was flipped
-# by hand in the settings UI, and -- discovered only when this republish
-# was attempted -- **not linked for Actions write access either**, so
-# `publish-docker-images.yml`'s own `packages: write` token was denied
-# with `permission_denied: write_package` until the package was
-# connected to this repository and granted Write under "Manage Actions
-# access" (both settings-UI-only, no REST endpoint for either). This
-# digest is the first one that is a real, workflow-published OCI index
-# with provenance/attestation, not a bare manifest -- the actual
-# closing of record 0050's own "no CI run has ever exercised
-# natmod-in-a-container" gap.
-#
-# Content is unchanged from the second (hand-pushed) digest: all ten
-# `dynruntime.mk` arches still verify against it (record 0050),
-# `--platform linux/amd64` still stated explicitly rather than inherited
-# from whichever machine pushed. Only the publishing path changed, which
-# is why the digest itself changed even though no Dockerfile instruction
-# did -- `docker/build-push-action`'s own multi-platform/attestation
-# export produces a different digest than a plain `docker push` for
-# byte-identical build instructions.
-#
-# Local work still goes through `CIBMP_NATMOD_DOCKER_IMAGE=<local tag>`.
-natmod = "ghcr.io/ballistics-lab/natmod@sha256:d3f6c4316db529a2f811a6388958e3e2e08d692e230a34a0f6249da82a6580f9"
+# `natmod.Dockerfile` (all ten `dynruntime.mk` toolchains) and
+# `qemu.Dockerfile` (one board's worth of `arm-none-eabi`) are gone --
+# every natmod arch and every qemu board now names one of these six
+# through `build-platforms.toml`'s own `images.<arch>`/`images.<board>`
+# map, the same way ten usermod ports already do. Published by
+# `publish-docker-images.yml` run 33175380705 (2026-08-28), each one
+# verified live before that run -- see record 0058's own "built and
+# verified" table for what each was tested against.
+arm_embedded = "ghcr.io/ballistics-lab/arm_embedded@sha256:71942f597e20ec7056b417fd11fc51dd94f86e1de1f6c6401fe546ae4ad1ffd8"
+riscv_embedded = "ghcr.io/ballistics-lab/riscv_embedded@sha256:7dc9b92ef8d4cd457bd14681feaa7f07493fb426712601e19d9219f38d28dc07"
+xtensa_lx106 = "ghcr.io/ballistics-lab/xtensa_lx106@sha256:ed50e6da5732eeb6aed3e7f99152f9d5d75c2c4cc163b8dee6d3da1d5fe3689b"
+xtensa_esp = "ghcr.io/ballistics-lab/xtensa_esp@sha256:a359ff0474cd10aaf1514bef20a57e4c8a7a5dbd830d6c5a0d9eab72f0ea3a60"
+natmod_host = "ghcr.io/ballistics-lab/natmod_host@sha256:85a790d948cd9ae690241e7b7234a9f411f82d9490aba5b249f24979a02bde47"
+ppc64le_linux = "ghcr.io/ballistics-lab/ppc64le_linux@sha256:dff49fd91ab8a2b209769c03da12307e1ab655d8c420248671ba893f17544835"
 
-windows = "ghcr.io/ballistics-lab/windows@sha256:7caab34597a3cb2d9f4a412549d4a806134a17a1411aeb612ff61bbbcc151fcd"
-qemu = "ghcr.io/ballistics-lab/qemu@sha256:d0348b84cc684a45ca6f71e6475b5b1ea9fe73ceb6d242af028562795f944928"
-webassembly = "ghcr.io/ballistics-lab/webassembly@sha256:ed489afc6aef801d74d8d3b5673525a24878afc37e6f535cffac60ecff5ce73e"
+# Not a toolchain image (record 0058's own "esp_idf_base is not a
+# toolchain image"): ESP-IDF is installed into it at build time by
+# `usermod/espidf.py`, not baked in, since this table carries eight
+# distinct `idf_version`s. `esp32` names it directly.
+esp_idf_base = "ghcr.io/ballistics-lab/esp_idf_base@sha256:b9d213c834c3fb066c5407e9b6bf9e380c3813baf1b116b19ebadbadd4b57893"

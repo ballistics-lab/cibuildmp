@@ -328,7 +328,7 @@ def natmod_all_targets(rv32imc_arch_flags: Sequence[int] = (0,)) -> list[Target]
     `(tag, arch)` pair to begin with). Every other arch's row produces
     exactly one `Target`.
     """
-    result = []
+    result: list[Target] = []
     for row in _NATMOD_ROWS:
         if row["arch"] == "rv32imc":
             result.extend(

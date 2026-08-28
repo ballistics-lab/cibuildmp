@@ -6,11 +6,13 @@ Phase H of record 0051 (the "the ports are the platforms" redesign)
 physically merged `natmod/` and `usermod/` under this package, mirroring
 cibuildwheel's own `platforms/` tree. What is deliberately *not* mirrored
 is cibuildwheel's literal one-module-per-platform-name shape: cibuildmp's
-five usermod ports (`unix`/`windows`/`qemu`/`webassembly`/`esp32`) already
-share one real implementation (`usermod/build.py`'s own `_BUILD_FN` data
+six usermod ports (`unix`/`windows`/`qemu`/`webassembly`/`esp32`/`rp2`)
+share one real dispatch (`usermod/orchestrate.py`'s own `_BUILD_FN` data
 table, `usermod/targets.py`'s own `all_usermod_targets()`, reading every
-port's own rows uniformly) -- keyed data, not five independently-authored
-pipelines. `natmod` is the sixth name and the only one genuinely alone.
+port's own rows uniformly) over one `build_<port>.py` module per port
+(`usermod/build_common.py` for what they share) -- keyed data, not
+independently-authored pipelines with nothing in common. `natmod` is the
+seventh name and the only one genuinely alone.
 
 There is no more per-platform *activation* at all (record 0052's own
 live-caught retraction, folded into the same round that removed `archs`/

@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from cibuildmp import dockerrun
-from cibuildmp.platforms.usermod import build as build_module
+from cibuildmp.platforms.usermod import build_common, espidf
 from cibuildmp.platforms.usermod.options import UsermodOptions
 from cibuildmp.platforms.usermod.orchestrate import _dest_name, build, build_one
 from cibuildmp.platforms.usermod.targets import UsermodTarget
@@ -21,7 +21,7 @@ def _resolved_image(monkeypatch):
     monkeypatch.setattr(dockerrun, "ensure_image", lambda *a, **k: "stub-image:local")
     monkeypatch.setattr(dockerrun, "_probe_platform", lambda *a, **k: "")
     monkeypatch.setattr(
-        build_module,
+        build_common,
         "container_mpy_cross",
         lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build-stub" / "mpy-cross",
     )
@@ -67,7 +67,7 @@ def test_build_one_unix_writes_into_output_dir_identifier(tmp_path, monkeypatch)
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
 
-    monkeypatch.setattr(build_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
     (mpy_dir / "ports" / "unix").mkdir(parents=True)
 
     result = build_one(options, target, mpy_dir)
@@ -127,7 +127,7 @@ def test_build_one_threads_name_and_version_into_the_output_filename(
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
 
-    monkeypatch.setattr(build_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
     (mpy_dir / "ports" / "unix").mkdir(parents=True)
 
     result = build_one(options, target, mpy_dir)
@@ -200,7 +200,7 @@ def test_build_one_writes_combined_manifest_when_present(tmp_path, monkeypatch):
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
 
-    monkeypatch.setattr(build_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
     (mpy_dir / "ports" / "unix").mkdir(parents=True)
 
     build_one(options, target, mpy_dir)
@@ -235,20 +235,65 @@ def test_build_one_esp32_passes_board_through(tmp_path, monkeypatch):
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython.bin").write_bytes(FAKE_X86_64_ELF)
 
-    class _FakeIdf:
-        def env(self):
-            return {}
-
-    monkeypatch.setattr(build_module.subprocess, "run", fake_run)
+    monkeypatch.setenv("CIBMP_ESP32_DOCKER_IMAGE", "cibuildmp-esp32:local")
+    monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", fake_run)
     monkeypatch.setattr(
-        build_module.espidf, "resolve_esp_idf", lambda *a, **k: _FakeIdf()
+        build_common,
+        "container_mpy_cross",
+        lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build-stub" / "mpy-cross",
     )
+    monkeypatch.setattr(espidf, "fetch_esp_idf", lambda version, **k: tmp_path / "idf")
     (mpy_dir / "ports" / "esp32").mkdir(parents=True)
 
     result = build_one(options, target, mpy_dir)
 
-    assert "BOARD=ESP32_GENERIC_S3" in captured["cmd"]
+    assert "BOARD=ESP32_GENERIC_S3" in " ".join(captured["cmd"])
     assert result.identifier == "esp32-ESP32_GENERIC_S3"
+
+
+def test_build_one_esp32_threads_real_idf_version_and_target(tmp_path, monkeypatch):
+    # ESP32_GENERIC_C3 at v1.29.0 is a real row (resources/build-platforms.toml):
+    # idf_version = "v5.5.2", mcu = "esp32c3" -- neither matches
+    # Esp32BuildOptions' own defaults ("v5.5.1"/"esp32"), so this only
+    # passes if _port_build_options() actually resolved the real row
+    # rather than falling back to them.
+    package_dir = tmp_path / "pkg"
+    make_module_dir(package_dir)
+    write_config(package_dir, "")
+    options = UsermodOptions.load(package_dir)
+    options.output_dir = tmp_path / "mpyhouse"
+
+    mpy_dir = tmp_path / "mpy"
+    target = UsermodTarget(port="esp32", arch="ESP32_GENERIC_C3", tag="v1.29.0")
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        build_dir = mpy_dir / "ports" / "esp32" / "build-ESP32_GENERIC_C3"
+        build_dir.mkdir(parents=True, exist_ok=True)
+        (build_dir / "micropython.bin").write_bytes(FAKE_X86_64_ELF)
+
+    fetch_calls = []
+    monkeypatch.setenv("CIBMP_ESP32_DOCKER_IMAGE", "cibuildmp-esp32:local")
+    monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", fake_run)
+    monkeypatch.setattr(
+        build_common,
+        "container_mpy_cross",
+        lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build-stub" / "mpy-cross",
+    )
+    monkeypatch.setattr(
+        espidf,
+        "fetch_esp_idf",
+        lambda version, **k: fetch_calls.append(version) or tmp_path / "idf" / version,
+    )
+    (mpy_dir / "ports" / "esp32").mkdir(parents=True)
+
+    build_one(options, target, mpy_dir)
+
+    assert fetch_calls == ["v5.5.2"]
+    script = " ".join(captured["cmd"])
+    assert "--targets=esp32c3" in script
+    assert "esp-idf/v5.5.2/tools/esp32c3" in script
 
 
 def test_build_fetches_micropython_and_skips_the_host_mpy_cross(tmp_path, monkeypatch):
@@ -280,7 +325,7 @@ def test_build_fetches_micropython_and_skips_the_host_mpy_cross(tmp_path, monkey
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
 
-    monkeypatch.setattr(build_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
 
     results = build(
         options,
@@ -334,7 +379,7 @@ def test_build_groups_by_tag_and_fetches_once_per_group(tmp_path, monkeypatch):
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
 
-    monkeypatch.setattr(build_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
 
     targets = [
         UsermodTarget(port="unix", arch="manylinux_2_28_x86_64", tag="v1.28.0"),
@@ -377,7 +422,7 @@ def test_build_one_resolves_relative_output_dir_against_package_dir(
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
 
-    monkeypatch.setattr(build_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
     (mpy_dir / "ports" / "unix").mkdir(parents=True)
 
     result = build_one(options, target, mpy_dir)
@@ -410,7 +455,7 @@ def test_build_one_preserves_executable_bit(tmp_path, monkeypatch):
         produced.write_bytes(FAKE_X86_64_ELF)
         produced.chmod(0o755)
 
-    monkeypatch.setattr(build_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
     (mpy_dir / "ports" / "unix").mkdir(parents=True)
 
     result = build_one(options, target, mpy_dir)

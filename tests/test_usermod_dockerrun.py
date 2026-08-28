@@ -16,19 +16,16 @@ every republish is a test that will be edited without being read.
 import pytest
 
 from cibuildmp import dockerrun
-from cibuildmp.platforms.usermod.build import UsermodBuildError
+from cibuildmp.platforms.usermod.build_common import UsermodBuildError
 
 _FAKE_PINS = {
-    "image": {
-        "x86_64": {
-            "manylinux_2_28": "ghcr.io/example/manylinux_2_28_x86_64@sha256:"
-            + "a" * 64,
-            "musllinux_1_2": "",
-        },
-        "aarch64": {"manylinux_2_28": "", "musllinux_1_2": ""},
-        "mipsel": {"manylinux_2_39": ""},
-    },
-    "port": {
+    "image_group": {
+        "manylinux_2_28_x86_64": "ghcr.io/example/manylinux_2_28_x86_64@sha256:"
+        + "a" * 64,
+        "musllinux_1_2_x86_64": "",
+        "manylinux_2_28_aarch64": "",
+        "musllinux_1_2_aarch64": "",
+        "manylinux_2_39_mipsel": "",
         "qemu": "ghcr.io/example/qemu@sha256:" + "b" * 64,
         "windows": "ghcr.io/example/windows@sha256:" + "c" * 64,
         "webassembly": "",
@@ -36,9 +33,22 @@ _FAKE_PINS = {
 }
 
 
+def _fake_group(port: str, target: str | None) -> str | None:
+    """Stand-in for `_image_group_for()` -- unix is the identity map it
+    really is in `build-platforms.toml`; the other three fake ports are
+    each given a fixed group regardless of `target`/axis shape, which is
+    all these tests need from the group-resolution step."""
+    if port == "unix":
+        return target
+    if port in ("qemu", "windows", "webassembly"):
+        return port
+    return None
+
+
 @pytest.fixture(autouse=True)
 def _stub_pins(monkeypatch):
     monkeypatch.setattr(dockerrun, "_pins", lambda: _FAKE_PINS)
+    monkeypatch.setattr(dockerrun, "_image_group_for", _fake_group)
     for name in (
         "CIBMP_UNIX_MANYLINUX_2_28_X86_64_DOCKER_IMAGE",
         "CIBMP_UNIX_MANYLINUX_2_28_AARCH64_DOCKER_IMAGE",
@@ -70,25 +80,19 @@ def test_split_tag_rejects_an_unknown_architecture():
         dockerrun.split_tag("manylinux_2_28_sparc64")
 
 
-def test_unix_targets_lists_declared_cells_including_unpublished_ones():
-    # A declared-but-empty cell is still a real, nameable target:
-    # `--print-build-identifiers` must list it, and asking to build it
-    # must fail with "no image registered" rather than "unknown arch".
-    targets = dockerrun.unix_targets()
-
-    assert "manylinux_2_28_x86_64" in targets
-    assert "musllinux_1_2_x86_64" in targets  # declared, value is ""
-    assert "manylinux_2_39_mipsel" in targets
-
-
-def test_unix_targets_comes_from_the_real_pin_file(monkeypatch):
-    # The one case that deliberately reads the shipped resource rather
-    # than the stub: the matrix is data, and a typo that drops a whole
-    # architecture from it should fail here rather than at build time.
-    monkeypatch.undo()
+def test_unix_targets_lists_every_declared_target():
+    # `unix_targets()` reads `build-platforms.toml`'s own `images` map
+    # directly (record 0058), not the pin file -- there is nothing to
+    # stub here, and a typo that drops a whole architecture from it
+    # should fail in this test rather than at build time. A
+    # declared-but-unpublished target is still real: `image_for()`, not
+    # `unix_targets()`, is where "no image registered" comes from.
     targets = dockerrun.unix_targets()
 
     assert len(targets) == 15
+    assert "manylinux_2_28_x86_64" in targets
+    assert "musllinux_1_2_x86_64" in targets
+    assert "manylinux_2_39_mipsel" in targets
     for arch in ("x86_64", "i686", "aarch64", "armv7l", "ppc64le", "s390x", "riscv64"):
         assert f"musllinux_1_2_{arch}" in targets
     assert "manylinux_2_39_mipsel" in targets

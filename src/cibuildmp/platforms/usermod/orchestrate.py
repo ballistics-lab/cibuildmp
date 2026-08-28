@@ -29,23 +29,17 @@ from typing import Any
 
 from ... import sources
 from . import manifests, portinfo
-from .build import (
-    Esp32BuildOptions,
-    QemuBuildOptions,
-    UnixBuildOptions,
-    UsermodBuildError,
-    WebassemblyBuildOptions,
-    WindowsBuildOptions,
-    build_esp32,
-    build_qemu,
-    build_unix,
-    build_webassembly,
-    build_windows,
-)
+from .build_common import UsermodBuildError
+from .build_esp32 import Esp32BuildOptions, build_esp32
+from .build_qemu import QemuBuildOptions, build_qemu
+from .build_rp2 import RP2_SUBMODULES, Rp2BuildOptions, build_rp2
+from .build_unix import UnixBuildOptions, build_unix
+from .build_webassembly import WebassemblyBuildOptions, build_webassembly
+from .build_windows import WindowsBuildOptions, build_windows
 from .options import UsermodBuildOptions, UsermodOptions
-from .targets import UsermodTarget
+from .targets import UsermodTarget, esp32_idf_info
 
-# port -> the build_<port>() function, uniform signature across all five:
+# port -> the build_<port>() function, uniform signature across all six:
 # build_x(opts, mpy_dir, *, toolchain_root=None, quiet=False) -> Path.
 _BUILD_FN: dict[str, Callable[..., Path]] = {
     "unix": build_unix,
@@ -53,6 +47,7 @@ _BUILD_FN: dict[str, Callable[..., Path]] = {
     "qemu": build_qemu,
     "webassembly": build_webassembly,
     "esp32": build_esp32,
+    "rp2": build_rp2,
 }
 
 
@@ -84,7 +79,7 @@ def _port_build_options(
     mpy_dir: Path,
     package_dir: Path,
 ) -> Any:
-    """The port-specific `*BuildOptions` `usermod/build.py` wants, built
+    """The port-specific `*BuildOptions` each `usermod/build_<port>.py` wants, built
     from `build_options`' own generic ingredients: `user_c_modules`
     resolved (D16), a combined manifest written to a real file (D17,
     empty -- and no file at all -- when neither the port nor the config
@@ -163,10 +158,30 @@ def _port_build_options(
             extra_make_args=extra_make_args,
         )
     if port == "esp32":
+        # `esp32_idf_info()` needs a real tag -- a hand-built target with
+        # none (most of this project's own build/orchestrate tests, per
+        # `UsermodTarget.identifier`'s own docstring) falls back to
+        # `Esp32BuildOptions`' own defaults instead of a lookup that
+        # would only ever `KeyError` for it.
+        idf_kwargs = {}
+        if target.tag:
+            idf_version, idf_target = esp32_idf_info(target.tag, target.arch)
+            idf_kwargs = {"idf_version": idf_version, "idf_target": idf_target}
         return Esp32BuildOptions(
             user_c_modules=resolved_user_c_modules,
             frozen_manifest=frozen_manifest,
             board=target.arch,
+            extra_make_args=extra_make_args,
+            **idf_kwargs,
+        )
+    if port == "rp2":
+        # Same "" -> real default fallback qemu's own branch above uses --
+        # a hand-built target with no board names none, and `Rp2BuildOptions`'
+        # own default ("PICO") should apply rather than an empty BOARD=.
+        return Rp2BuildOptions(
+            user_c_modules=resolved_user_c_modules,
+            frozen_manifest=frozen_manifest,
+            board=target.arch or "PICO",
             extra_make_args=extra_make_args,
         )
     raise UsermodBuildError(f"no build_options builder wired for port {port!r}")
@@ -205,21 +220,24 @@ def _dest_name(
 # `MICROPY_MPYCROSS=` at the one built inside the image instead, so the
 # host copy is dead weight for them: seven seconds of compiling, plus a
 # bare-host build in a mode whose whole point is that it does not do
-# those.
+# those. `esp32` joined them 2026-08-28 (`build_esp32()` went Docker,
+# `usermod/espidf.py`'s own docstring has the full reasoning) -- it is no
+# longer in this set.
 #
-# `esp32` and `qemu` still need it. `esp32`'s `make` runs outside Docker
-# entirely (ESP-IDF is provisioned, not containerised -- D19), and
-# `qemu` passes no `MICROPY_MPYCROSS`, so both reach
-# `mpy-cross/build/mpy-cross` on the host through `py/mkrules.mk`'s own
-# default. `qemu` *is* wired to `ensure_image()` (`build_qemu()`), same
-# as every other port here -- this frozenset is about which port still
-# needs a *host* mpy-cross alongside the containerised build, not about
-# which ports reach a container at all. `esp32` is the one still out of
-# scope, pending [0028] (no Dockerfile for it yet).
+# `qemu` is the one port left here: it passes no `MICROPY_MPYCROSS`, so it
+# reaches `mpy-cross/build/mpy-cross` on the host through
+# `py/mkrules.mk`'s own default even though `build_qemu()` *is* wired to
+# `ensure_image()` like every other port -- this frozenset is about which
+# port still needs a *host* mpy-cross alongside its containerised build,
+# not about which ports reach a container at all. Whether this is exactly
+# the mismatch `container_mpy_cross()` exists to prevent, just not yet hit
+# for `qemu` specifically, or a real difference between its targets and
+# `esp32`'s, is not established here -- not touched by this change,
+# flagged rather than assumed either way.
 #
 # Built once for the whole run rather than per target, unchanged -- this
 # only stops building it for runs that will never look at it.
-_HOST_MPY_CROSS_PORTS = frozenset({"esp32", "qemu"})
+_HOST_MPY_CROSS_PORTS = frozenset({"qemu"})
 
 
 def build_one(
@@ -312,7 +330,15 @@ def build(
     build_tags = list(dict.fromkeys(t.tag for t in targets))
     for tag in build_tags:
         group = [t for t in targets if t.tag == tag]
-        mpy_dir = sources.fetch_micropython(tag)
+        # `RP2_SUBMODULES` only ever matters on `fetch_micropython()`'s own
+        # clone path (a preview tag with no release tarball) -- the
+        # tarball path already vendors every lib/ submodule for every
+        # port, rp2 included. Threaded here, not hardcoded into
+        # `fetch_micropython()` itself, since no other port needs one yet.
+        rp2_submodules = (
+            list(RP2_SUBMODULES) if any(t.port == "rp2" for t in group) else None
+        )
+        mpy_dir = sources.fetch_micropython(tag, submodules=rp2_submodules)
         if any(t.port in _HOST_MPY_CROSS_PORTS for t in group):
             sources.build_mpy_cross(mpy_dir, quiet=quiet)
         for target in group:

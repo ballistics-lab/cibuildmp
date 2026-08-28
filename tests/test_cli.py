@@ -171,7 +171,7 @@ def test_real_build_writes_github_step_summary_when_set(monkeypatch, tmp_path):
     monkeypatch.setattr(
         natmod_cli, "fetch_micropython", lambda tag, **k: tmp_path / "mpy"
     )
-    monkeypatch.setattr(natmod_cli, "build_mpy_cross", lambda mpy_dir, **k: None)
+    monkeypatch.setattr(natmod_cli, "build_mpy_cross", lambda mpy_dir, arch, **k: None)
     monkeypatch.setattr(natmod_cli, "read_mpy_abi", lambda mpy_dir: "6.3")
 
     produced = tmp_path / "template-mpy6.3-x64.mpy"
@@ -190,9 +190,9 @@ def test_real_build_writes_github_step_summary_when_set(monkeypatch, tmp_path):
     assert main([str(package_dir)]) == 0
 
     text = summary_path.read_text()
-    assert "1 target(s) built in 0.5s" in text
+    assert "1 target built in 0.5 seconds" in text
     assert "mpy6.3-x64" in text
-    assert "42 bytes" in text
+    assert "42 Bytes" in text
 
 
 def test_output_is_line_buffered_and_survives_a_stream_without_reconfigure(

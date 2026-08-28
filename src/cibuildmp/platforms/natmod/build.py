@@ -23,6 +23,7 @@ step, the same way cibuildwheel never runs `twine upload` itself.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import time
@@ -35,6 +36,14 @@ from .targets import NATIVE_ARCH_CODE
 
 MPY_HEADER_MAGIC = ord("M")
 MPY_ARCH_FLAGS_BIT = 0x40
+
+# The two packages `tools/mpy_ld.py`/`tools/ar_util.py` import that are not
+# in the standard library -- [0012]. Named here, not baked into any
+# toolchain image: mounted at their own already-installed location instead
+# (`_deps_mount()`), so bumping cibuildmp's own pin in `pyproject.toml` is
+# the only edit a version bump needs, independent of the six toolchain
+# images `[0058]` split `natmod.Dockerfile` into.
+_DEPS_MODULES = ("elftools", "ar")
 
 
 class BuildError(Exception):
@@ -92,51 +101,88 @@ def make_command(
     ]
 
 
-def _natmod_image() -> str:
-    """The image every natmod build runs in, or a clear error.
+def _natmod_image(arch: str) -> str:
+    """The image `arch`'s natmod build runs in, or a clear error.
 
     **There is no bare-host path any more** (record 0049). natmod resolved
     a toolchain onto whatever machine invoked it until then -- apt
     packages, downloaded tarballs, the host gcc's own multilib -- which is
     exactly the mutation D30 had already ruled out for usermod, and the
-    reason `x86` could not be built on an arm64 runner at all. One
-    `linux/amd64` image holds all ten arches' toolchains now, so the
+    reason `x86` could not be built on an arm64 runner at all. What
     machine underneath stops mattering: what is not native to it is
     emulated, like every other port.
+
+    One image per *toolchain group*, not one shared by every arch any
+    more (record 0058 split `docker/natmod.Dockerfile`'s own ten
+    toolchains into six group images, keyed by `arch` in
+    `resources/build-platforms.toml`'s own `[natmod].images`).
     """
     from ... import dockerrun
 
-    image = dockerrun.ensure_image("natmod")
+    image = dockerrun.ensure_image("natmod", arch)
     if image is None:
         raise BuildError(
-            "no image registered for natmod -- `pinned_docker_images.toml`'s "
-            "own `[port] natmod` entry is empty until a real "
+            f"no image registered for natmod arch {arch!r} -- "
+            "`pinned_docker_images.toml`'s own `[image_group]` entry for "
+            "its toolchain group is empty until a real "
             "publish-docker-images.yml run fills it. Point "
-            "CIBMP_NATMOD_DOCKER_IMAGE at a locally built tag to work "
-            "without one."
+            f"CIBMP_NATMOD_{arch.upper()}_DOCKER_IMAGE at a locally built "
+            "tag to work without one."
         )
     return image
 
 
+def _deps_mount() -> Path:
+    """The host directory holding cibuildmp's own already-installed
+    `elftools`/`ar` packages -- mounted into every natmod container and
+    put on its own `PYTHONPATH` (`_run_in_image()`), rather than baked
+    into each of the six toolchain images record 0058 split
+    `natmod.Dockerfile` into. Bumping either package's version is then
+    `pyproject.toml`'s own pin, the same as any other cibuildmp
+    dependency -- not a Dockerfile edit and a republish. Safe because
+    neither has a C extension: nothing here is coupled to a particular
+    image's glibc the way mpy-cross's own compiled binary is.
+    """
+    roots = set()
+    for name in _DEPS_MODULES:
+        spec = importlib.util.find_spec(name)
+        if spec is None or not spec.submodule_search_locations:
+            raise BuildError(
+                f"cibuildmp's own {name!r} dependency is not installed -- "
+                "this should not happen outside a broken install"
+            )
+        roots.add(str(Path(spec.submodule_search_locations[0]).parent))
+    if len(roots) != 1:
+        raise BuildError(
+            f"{_DEPS_MODULES} resolve to different site-packages directories "
+            f"({sorted(roots)}); expected cibuildmp's own dependencies to "
+            "share one"
+        )
+    return Path(next(iter(roots)))
+
+
 def _run_in_image(
-    command: list[str], *, mounts: list[Path], workdir: Path, what: str
+    command: list[str], *, mounts: list[Path], workdir: Path, what: str, arch: str
 ) -> None:
     from ... import dockerrun
 
+    deps_dir = _deps_mount()
     try:
         dockerrun.run(
             command,
-            mounts=mounts,
+            mounts=[*mounts, deps_dir],
             workdir=workdir,
-            image=_natmod_image(),
-            oci_platform=dockerrun.platform_for("natmod"),
+            image=_natmod_image(arch),
+            oci_platform=dockerrun.platform_for("natmod", arch),
+            env={"PYTHONPATH": deps_dir.as_posix()},
         )
     except Exception as exc:  # UsermodBuildError, and anything docker raises
         raise BuildError(f"{what}: {exc}") from exc
 
 
-def build_mpy_cross(mpy_dir: Path) -> Path:
-    """Build mpy-cross **inside the natmod image** and return the binary.
+def build_mpy_cross(mpy_dir: Path, arch: str) -> Path:
+    """Build mpy-cross **inside `arch`'s own natmod image** and return the
+    binary.
 
     `py/dynruntime.mk` hardcodes `MPY_CROSS = $(MPY_DIR)/mpy-cross/build/mpy-cross`
     with no override (unlike ports/unix's `MICROPY_MPYCROSS=`) -- confirmed
@@ -145,13 +191,17 @@ def build_mpy_cross(mpy_dir: Path) -> Path:
 
     Building it on the host (`sources.build_mpy_cross()`, still used for
     usermod's `qemu`) worked here only because host glibc happened to
-    match `docker/natmod.Dockerfile`'s own glibc -- the same coincidence
+    match the image's own glibc -- the same coincidence
     `usermod/build.py`'s own `container_mpy_cross()` already documents and
     fixed for the port builds (a real `GLIBC_2.34' not found` failure). No
-    `slug` scoping here the way that function needs: natmod has exactly
-    one image for every arch, so there is only ever one binary to build,
-    at the fixed path dynruntime.mk itself expects -- no `MPY_CROSS=`
-    override to pass, unlike `MICROPY_MPYCROSS=`.
+    `slug` scoping here the way that function needs, even after record
+    0058 split natmod's one image into six: mpy-cross is a *host* tool
+    dynruntime.mk invokes during the build, not a target artifact, so the
+    binary is glibc-portable across every one of them (all `ubuntu:24.04`)
+    regardless of which arch's toolchain built it. `arch` only picks which
+    already-required image runs the build -- there is still only one
+    binary, at the fixed path dynruntime.mk itself expects, and no
+    `MPY_CROSS=` override to pass, unlike `MICROPY_MPYCROSS=`.
 
     Cached by existence, like `sources.build_mpy_cross()`/
     `usermod.build.container_mpy_cross()`: rebuilt only when the image
@@ -165,6 +215,7 @@ def build_mpy_cross(mpy_dir: Path) -> Path:
         mounts=[mpy_dir],
         workdir=mpy_dir / "mpy-cross",
         what="mpy-cross",
+        arch=arch,
     )
     if not binary.exists():
         raise BuildError(f"mpy-cross build reported success but {binary} is missing")
@@ -176,6 +227,7 @@ def run_pre_build_command(
     command: str,
     mpy_dir: Path,
     package_dir: Path,
+    arch: str,
 ) -> None:
     """A project's own `pre-build-command`, inside the same image the
     build itself runs in.
@@ -199,6 +251,7 @@ def run_pre_build_command(
         mounts=[mpy_dir.resolve(), package_dir.resolve()],
         workdir=module_root,
         what=f"pre-build-command {command!r}",
+        arch=arch,
     )
 
 
@@ -236,6 +289,7 @@ def run_make(
         mounts=[mpy_dir, package_dir.resolve()],
         workdir=module_root,
         what=build_options.identifier,
+        arch=build_options.target.arch,
     )
 
 
@@ -428,7 +482,11 @@ def build_target(
     start = time.time()
 
     run_pre_build_command(
-        module_root, build_options.pre_build_command, mpy_dir, package_dir
+        module_root,
+        build_options.pre_build_command,
+        mpy_dir,
+        package_dir,
+        build_options.target.arch,
     )
     run_make(build_options, mpy_dir, module_root, package_dir)
 

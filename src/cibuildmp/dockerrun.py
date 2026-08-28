@@ -45,19 +45,24 @@ cibuildmp's own build infrastructure (D28).
 local-testing/override knob (point it at a `:local` tag you just built,
 or swap in a fork's image without touching source), and always wins.
 
-**Record 0043** is what shaped the two things this module resolves.
+**Record 0043** is what shaped the two things this module resolves;
+**record 0058** later corrected which *key* picks an image.
 
-*Which image.* `unix` is keyed by **platform tag** --
-`manylinux_2_28_x86_64`, `musllinux_1_2_aarch64`,
-`manylinux_2_39_mipsel` -- pypa's own names, which are real PEP 600 /
-PEP 656 tags rather than the decorative "manylinux" label record 0031
-flagged. Split back into `<floor>_<arch>` they are the pin file's own
-`[image.<arch>]`/`<floor>` coordinates, and unsplit they are the
-identifier suffix. Every other port is keyed by the port name alone:
-`windows` (all three arches share one image, D28 step 3), `qemu`,
-`webassembly` -- they cross-compile to Windows, bare metal and wasm,
-which no Linux container is native to, so they have no arch-shaped image
-axis at all.
+*Which image.* Not the port -- the toolchain a build needs, named at
+each port's own table level in `resources/build-platforms.toml`
+(`_image_group_for()`). `unix` is keyed by **platform tag** --
+`manylinux_2_28_x86_64`, `musllinux_1_2_aarch64`, `manylinux_2_39_mipsel`
+-- pypa's own names, which are real PEP 600 / PEP 656 tags rather than
+the decorative "manylinux" label record 0031 flagged, and an identity map
+onto the group of the same name: this is the one port whose image axis
+and build-target axis coincide. `natmod` is keyed by **arch** and `qemu`
+by **board** -- both span more than one toolchain (ten `dynruntime.mk`
+arches, three ISAs across `qemu`'s boards), so a bare port name would
+have meant either wrong-architecture images or one Dockerfile per row.
+`windows` (all three arches share one image, D28 step 3), `webassembly`
+and `esp32` are keyed by the port name alone: they cross-compile to
+Windows, wasm and (via ESP-IDF, installed at build time rather than
+baked in) two Xtensa/RISC-V ISAs, but each needs only one image.
 
 *Which platform.* `run()` passes `--platform`, cibuildwheel's own
 `OCIContainer` behaviour. For `unix` that platform **is** the build
@@ -83,8 +88,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from .platforms.usermod.build import UsermodBuildError
-from .resources import pinned_docker_images, pinned_pypa_images
+from .platforms.usermod.build_common import UsermodBuildError
+from .resources import build_platforms_data, pinned_docker_images, pinned_pypa_images
 
 
 # ── where the pins live now ───────────────────────────────────────────
@@ -103,7 +108,11 @@ from .resources import pinned_docker_images, pinned_pypa_images
 #
 # What this module keeps is only what is genuinely logic rather than
 # data: how a (port, target) pair becomes a key, which env var overrides
-# it, and which OCI platform an architecture means.
+# it, and which OCI platform an architecture means. Which *group* a
+# (port, target) pair names is not logic either, any more -- record 0058
+# moved it into `resources/build-platforms.toml`'s own `image`/`images`
+# keys (`_image_group_for()`), so this module only resolves a group name
+# to a pinned reference.
 #
 # ── the two shapes a target has ───────────────────────────────────────
 #
@@ -113,13 +122,16 @@ from .resources import pinned_docker_images, pinned_pypa_images
 # label record 0031 flagged (**0043**, which also renamed `x64`/`x86`/
 # `armhf` to `x86_64`/`i686`/`armv7l` so the labels stop needing
 # translation). The tag is both the identifier suffix (`unix-manylinux_
-# 2_28_x86_64`) and, split back into `<floor>_<arch>`, the pin file's own
-# `[image.<arch>]` / `<floor>` coordinates.
+# 2_28_x86_64`) and, unsplit, its own image group name -- an identity map.
 #
-# Every other port is keyed by the port name alone -- `windows` (all
-# three arches share one image, D28 step 3), `qemu`, `webassembly`. They
-# cross-compile to Windows, bare metal and wasm, which no Linux container
-# is native to, so they have no arch-shaped image axis at all and 0043
+# `natmod` (by arch) and `qemu` (by board) also have a real image axis,
+# just not one shaped like `unix`'s: several arches/boards share one
+# toolchain group rather than each naming its own (record 0058). Every
+# other port is keyed by the port name alone -- `windows` (all three
+# arches share one image, D28 step 3), `webassembly`, `esp32`. They
+# cross-compile to Windows and wasm, or install their toolchain at build
+# time (`esp32`), which no Linux container is native to, so they have no
+# per-build image axis at all and 0043
 # does not touch them.
 def _pins() -> dict[str, Any]:
     return pinned_docker_images()
@@ -193,14 +205,17 @@ def host_oci_platform() -> str | None:
 
 
 def unix_targets() -> tuple[str, ...]:
-    """Every `unix` platform tag the pin file declares, in table order --
+    """Every `unix` platform tag the matrix declares, in table order --
     `("manylinux_2_28_x86_64", "musllinux_1_2_x86_64", ...)`.
 
-    `resources/pinned_docker_images.toml`'s `[image.<arch>]` keys *are*
-    the matrix: which libc floor each architecture is curated onto, the
-    same decision cibuildwheel makes in its own `resources/defaults.toml`
-    (`manylinux-x86_64-image = "manylinux_2_28"`). A key whose value is
-    empty is a declared cell with nothing published for it yet, and it
+    `resources/build-platforms.toml`'s own `[usermod.unix].images` keys
+    *are* the matrix (record 0058 moved them there from the pin file):
+    which libc floor each architecture is curated onto, the same decision
+    cibuildwheel makes in its own `resources/defaults.toml`
+    (`manylinux-x86_64-image = "manylinux_2_28"`). "What targets exist"
+    and "what has a published image" are two different questions now --
+    this answers the first. A target whose `image_for()` comes back empty
+    is still a declared cell with nothing published for it yet, and it
     still counts here: `--print-build-identifiers` must list it, and
     asking to build it must fail with "no image registered", not with
     "unknown architecture". Those are different errors, and conflating
@@ -211,11 +226,32 @@ def unix_targets() -> tuple[str, ...]:
     -- `targets.py`'s own discipline, which `--print-build-identifiers`
     depends on.
     """
-    return tuple(
-        f"{floor}_{arch}"
-        for arch, floors in _pins()["image"].items()
-        for floor in floors
+    return tuple(build_platforms_data()["usermod"]["unix"]["images"])
+
+
+def _image_group_for(port: str, target: str | None) -> str | None:
+    """The toolchain-group name (record 0058) `port`'s build at `target`
+    resolves to, or `None` when `target` is required and missing.
+
+    Reads `resources/build-platforms.toml`'s own table-level policy, not
+    a row: a scalar `image = "..."` for a port with no per-build image
+    axis (`windows`, `webassembly`, `esp32`, every arm_embedded-toolchain
+    usermod port), an `images.<...>` map for one that has one (`natmod`
+    keyed by `arch`, `qemu` by `board`, `unix` by its own platform tag --
+    an identity map, since that port's image axis and build-target axis
+    coincide). One rule for every port, no `if port == "unix"` special
+    case: which shape a port's row has is what decides whether `target`
+    is consulted at all.
+    """
+    row = (
+        build_platforms_data()["natmod"]
+        if port == "natmod"
+        else build_platforms_data()["usermod"].get(port, {})
     )
+    images = row.get("images")
+    if images is not None:
+        return None if target is None else images.get(target)
+    return row.get("image")
 
 
 def split_tag(tag: str) -> tuple[str, str]:
@@ -239,40 +275,41 @@ def split_tag(tag: str) -> tuple[str, str]:
 def image_for(port: str, target: str | None = None) -> str | None:
     """The image `port`'s build should run in for `target`, or `None` when
     nothing resolves -- an env override first, then
+    `resources/build-platforms.toml`'s own group name, then
     `resources/pinned_docker_images.toml`.
 
     `target` is the platform tag for `unix` (`manylinux_2_28_aarch64`),
-    the arch for `windows` (`win32`/`win_amd64`/`win_arm64`, all three
-    sharing one image), and omitted entirely for a port with no per-build axis
-    (`qemu`, `webassembly`) -- omit it rather than passing `""`, so the
+    the arch for `natmod` and `windows` (all three `windows` arches share
+    one image, since its own row names a scalar group), the board for
+    `qemu`, and omitted entirely for a port with no per-build axis at all
+    (`webassembly`, `esp32`) -- omit it rather than passing `""`, so the
     key and env name carry no separator that means nothing.
 
     Pure and side-effect-free: no `docker` invocation, no filesystem
-    access beyond the packaged resource, which is what lets
+    access beyond the packaged resources, which is what lets
     `tests/test_usermod_dockerrun.py` cover the precedence rules with no
     Docker daemon at all. `run()` is what actually fetches the resolved
     reference, lazily, the first time it is used.
 
     `CIBMP_<PORT>_<TARGET>_DOCKER_IMAGE` (e.g.
     `CIBMP_UNIX_MANYLINUX_2_28_X86_64_DOCKER_IMAGE=manylinux_2_28_x86_64:local`,
-    or `CIBMP_QEMU_DOCKER_IMAGE` with no target segment) always wins over
-    the pinned default -- local testing against a freshly-built image, or
-    swapping in a fork's image, without touching source or resources.
+    or `CIBMP_WEBASSEMBLY_DOCKER_IMAGE` with no target segment) always
+    wins over the pinned default -- local testing against a freshly-built
+    image, or swapping in a fork's image, without touching source or
+    resources.
     """
     override = os.environ.get(_env_name(_key_parts(port, target), "DOCKER_IMAGE"))
     if override:
         return override
-    if port == "unix":
-        if target is None:
-            return None
-        floor, arch = split_tag(target)
-        # `or None`: a declared-but-empty cell means "this target exists,
-        # nothing published for it yet" and must resolve exactly the way
-        # an unknown one does -- `build_unix()` raises its own "no image
-        # registered" error on None. Returning `""` would sail straight
-        # into `docker run ... "" make`.
-        return _pins()["image"].get(arch, {}).get(floor) or None
-    return _pins()["port"].get(port) or None
+    group = _image_group_for(port, target)
+    if group is None:
+        return None
+    # `or None`: a declared-but-empty group means "this target exists,
+    # nothing published for it yet" and must resolve exactly the way an
+    # unregistered one does -- each build_<port>() raises its own "no
+    # image registered" error on None. Returning `""` would sail straight
+    # into `docker run ... "" make`.
+    return _pins()["image_group"].get(group) or None
 
 
 def base_image_for(target: str) -> str | None:
@@ -547,6 +584,7 @@ def run(
     timeout: float | None = None,
     oci_platform: str | None = None,
     linux32: bool = False,
+    env: dict[str, str] | None = None,
 ) -> None:
     """Run `command` inside `image`, as a sibling container -- not nested
     inside one `cibuildmp` itself is already running in (D26's own "why
@@ -606,6 +644,12 @@ def run(
     correctly-selected 32-bit container. Wrapping unconditionally would
     be wrong on a genuinely 32-bit kernel, where `linux32` may not exist
     at all, which is exactly why upstream probes instead of assuming.
+
+    `env` becomes `-e KEY=VALUE` per entry. natmod's own `PYTHONPATH`
+    (mounting cibuildmp's own installed `elftools`/`ar` into the
+    container rather than baking them into every toolchain image --
+    `natmod/build.py`'s `_deps_mount()`) is the first caller, but nothing
+    here is natmod-specific.
     """
     if oci_platform is not None and oci_platform != host_oci_platform():
         _probe_platform(image, oci_platform)
@@ -641,6 +685,8 @@ def run(
         docker_command += ["--user", f"{os.getuid()}:{os.getgid()}"]
     for mount in mounts:
         docker_command += ["-v", f"{mount.as_posix()}:{mount.as_posix()}"]
+    for key, value in (env or {}).items():
+        docker_command += ["-e", f"{key}={value}"]
     docker_command += ["-w", workdir.as_posix(), image, *command]
     try:
         subprocess.run(docker_command, check=True, timeout=timeout)

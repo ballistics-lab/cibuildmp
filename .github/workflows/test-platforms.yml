@@ -1,0 +1,294 @@
+name: Test target set
+
+# Reusable (`workflow_call`): builds every identifier `build`/`skip`
+# selects, split by what each is native to, one leg per identifier. Called
+# once per port from `test-all-platforms.yml`'s own matrix (2026-08-29
+# split -- see docs/records/0062-test-platforms-per-port-orchestrator.md)
+# instead of once for every port's identifiers combined into one shared
+# matrix, the shape this file itself had until then. That shape hit a real
+# ceiling, not a hypothetical one: adding `rp2`'s own 74 identifiers ([0060])
+# pushed the single amd64 matrix to 211/256, with nine more usermod ports
+# ([0053]) and zephyr ([0022]) still queued -- the next port with a wide
+# board list would have overflowed it outright. GitHub's own 256-config cap
+# applies per `strategy.matrix` instantiation, so one call per port each
+# gets its own independent 256, not one shared ceiling across all of them.
+#
+# `skip` defaults to `""`, not to being omitted -- omitting the flag
+# entirely to `cibuildmp` (rather than passing it as an explicit empty
+# string) does not mean "no skip", it means the CLI falls through to
+# whatever `skip = ...` the target `package-dir`'s own config already
+# carries. `examples/template`'s own config skips `*_ppc64le *_s390x
+# *_riscv64` by default (the six cells this project does not want skipped
+# in CI, [0044]'s own descope -- kept real and nameable, not dropped) --
+# live-caught while designing this split: a per-port `build` glob narrow
+# enough to look safe (`v1.29.0-manylinux*`) still silently lost all
+# twelve of those cells this way, until the `run:` step below started
+# passing `--skip "${{ inputs.skip }}"` unconditionally rather than only
+# when a caller happened to set it.
+
+on:
+  workflow_call:
+    inputs:
+      label:
+        description: "Short name for this call, shown in its own step summary"
+        required: true
+        type: string
+      build:
+        required: true
+        type: string
+      skip:
+        required: false
+        type: string
+        # No skip is still an explicit skip, never an omitted flag --
+        # `${{ inputs.skip }}` below always reaches `cibuildmp --skip`
+        # regardless, so a caller who forgets this input gets "" passed
+        # for real, not `examples/template`'s own config-level skip
+        # silently reapplying (see the module-level comment above for
+        # why that distinction is the one this whole file was rewritten
+        # to get right).
+        default: ""
+  # Kept alongside `workflow_call`, deliberately -- lets a maintainer
+  # dispatch this file directly against one target set (e.g. just `rp2`,
+  # or just the six emulated unix cells) without fanning out through
+  # `test-all-platforms.yml`'s own seven-port matrix. `label`/`skip`
+  # default to something sane for that standalone case; `build` has none
+  # on purpose -- a manual run should always say explicitly what it wants,
+  # the same discipline `build`/`CIBMP_BUILD` already hold everywhere else
+  # in this project (an unconfigured `build` selects nothing, not "*").
+  workflow_dispatch:
+    inputs:
+      label:
+        description: "Short name shown in this run's own step summary"
+        required: false
+        type: string
+        default: manual
+      build:
+        description: "--build glob to test"
+        required: true
+        type: string
+      skip:
+        description: "--skip glob (empty means none -- does not fall back to examples/template's own config skip)"
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  # Its only output is the two matrices `test-amd64`/`test-arm64` below fan
+  # out over -- see targets.py's own docstring ("nothing here touches the
+  # filesystem or the network", kept fast enough to run as its own CI job
+  # for exactly this). Not run through `uses: ./` (action.yml's own
+  # apt-prerequisites step installs cross-compilers this job never needs)
+  # -- just enough of action.yml's own "Install cibuildmp" step
+  # (astral-sh/setup-uv, `uv tool install`) to get the `cibuildmp` binary
+  # on PATH.
+  build-matrix:
+    runs-on: ubuntu-latest
+    # Advisory, not a required check -- see `test-amd64`'s own
+    # continue-on-error below for why.
+    continue-on-error: true
+    outputs:
+      build_amd64: ${{ steps.build-matrix.outputs.build_amd64 }}
+      build_arm64: ${{ steps.build-matrix.outputs.build_arm64 }}
+      build_emulated: ${{ steps.build-matrix.outputs.build_emulated }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+
+      - name: Install cibuildmp
+        run: uv tool install .
+
+      - name: Build matrix
+        id: build-matrix
+        run: |
+          set -euo pipefail
+          identifiers=$(cibuildmp examples/template --print-build-identifiers --json --build "${{ inputs.build }}" --skip "${{ inputs.skip }}")
+          # Three groups, by what each identifier is native to:
+          # - unix aarch64/armv7l (both libc floors) -> ubuntu-24.04-arm,
+          #   record 0044's own measurement that GitHub's arm64 runners run
+          #   AArch32-at-EL0 natively too.
+          # - unix ppc64le/s390x/riscv64 (both libc floors) -> native to no
+          #   GitHub-hosted runner at all (record 0044's own descope) ->
+          #   test-emulated, under QEMU, on a schedule rather than every
+          #   push (see that job's own comment for the cost argument).
+          # - everything else (every natmod/usermod toolchain image, plus
+          #   unix x86_64/i686/mipsel) is `linux/amd64` regardless of what
+          #   target arch it cross-compiles for (record 0058) -> ubuntu-latest.
+          # Split by these regexes, not by guessing from the port name, so
+          # this stays correct as ports are added -- confirmed empty for
+          # every non-unix port's own call, since only unix identifiers
+          # ever carry one of these suffixes.
+          build_amd64=$(echo "$identifiers" | jq -c '[.[] | select(test("_aarch64$|_armv7l$|_ppc64le$|_s390x$|_riscv64$") | not)]')
+          build_arm64=$(echo "$identifiers" | jq -c '[.[] | select(test("_aarch64$|_armv7l$"))]')
+          build_emulated=$(echo "$identifiers" | jq -c '[.[] | select(test("_ppc64le$|_s390x$|_riscv64$"))]')
+          echo "build_amd64=$build_amd64" >> "$GITHUB_OUTPUT"
+          echo "build_arm64=$build_arm64" >> "$GITHUB_OUTPUT"
+          echo "build_emulated=$build_emulated" >> "$GITHUB_OUTPUT"
+          {
+            echo "### ${{ inputs.label }}: selected \`${{ inputs.build }}\`"
+            echo "$(echo "$identifiers" | jq length) identifiers"
+            echo "-- $(echo "$build_amd64" | jq length) on ubuntu-latest, $(echo "$build_arm64" | jq length) on ubuntu-24.04-arm, $(echo "$build_emulated" | jq length) emulated"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # One job per runner, each building what that runner is native to --
+  # the same shape build-examples.yml's own build-usermod job uses, fanned
+  # out one identifier per leg instead of one batched `build:` string,
+  # since this workflow's own per-identifier result.md/summary mechanism
+  # (below) needs a leg per identifier to attribute a failure to. Neither
+  # of these two jobs runs docker/setup-qemu-action -- deliberately: every
+  # identifier build-matrix hands each one is already native to it, so
+  # there is nothing here for QEMU to do. `test-emulated` below is the
+  # one job in this file that does need it.
+  test-amd64:
+    needs: build-matrix
+    runs-on: ubuntu-latest
+    # This workflow is meant to run on every PR and surface real breakage,
+    # but not gate merging on it -- continue-on-error reports the job's
+    # conclusion as success to the Checks API (and to any `needs:`) even
+    # when its steps fail, so a real failure still shows up (a step in the
+    # log, a warning triangle on the job) without turning the PR check red.
+    # fail-fast: false alongside it: fail-fast cancellation is driven by a
+    # matrix job's real (pre-override) result, not the reported one, so
+    # without this one failing leg would still cancel every other leg.
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        build: ${{ fromJson(needs.build-matrix.outputs.build_amd64) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build examples/template (natmod)
+        id: build
+        uses: ./
+        env:
+          CIBMP_VERSION: 0.0.0-ci
+          # Disables cibuildmp's own native per-target step summary
+          # (stepsummary.py) -- each call already writes at most ~90 rows,
+          # each writing its own table would bury the one aggregate table
+          # `aggregate-results` (orchestrator-level) builds instead.
+          CIBMP_DISABLE_GITHUB_STEP_SUMMARY: "1"
+        with:
+          package-dir: examples/template
+          build: ${{ matrix.build }}
+
+      - name: Record result
+        if: always()
+        run: |
+          icon="✅"
+          [ "${{ steps.build.outcome }}" = "success" ] || icon="❌"
+          echo "| \`${{ matrix.build }}\` | $icon ${{ steps.build.outcome }} |" > "result-${{ matrix.build }}.md"
+
+      # The file inside each artifact must itself carry the identifier, not
+      # just the artifact's own name -- the orchestrator's own
+      # `aggregate-results` `merge-multiple: true` flattens every one of
+      # these artifacts (across every port's own call) into one directory
+      # by *filename*. A plain `result.md` in every one of them collided
+      # this way (live-caught 2026-08-28, before this split existed: 146
+      # artifacts uploaded, `results/*.md` resolved to exactly 1 after the
+      # merge, so the final table showed only the very last leg written)
+      # -- each leg's own file needs a name no other leg, in any port's
+      # own call, can produce. Real identifiers are disjoint across ports
+      # by construction (README's own "Identifiers and selectors"), so
+      # this still holds true across calls, not just within one.
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: result-${{ matrix.build }}
+          path: result-${{ matrix.build }}.md
+          retention-days: 1
+
+  # Same job, same steps, on GitHub's own arm64 runner -- see the comment
+  # above `test-amd64` for why there are two of these instead of one job
+  # with a runner axis.
+  test-arm64:
+    needs: build-matrix
+    runs-on: ubuntu-24.04-arm
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        build: ${{ fromJson(needs.build-matrix.outputs.build_arm64) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build examples/template (natmod)
+        id: build
+        uses: ./
+        env:
+          CIBMP_VERSION: 0.0.0-ci
+          CIBMP_DISABLE_GITHUB_STEP_SUMMARY: "1"
+        with:
+          package-dir: examples/template
+          build: ${{ matrix.build }}
+
+      - name: Record result
+        if: always()
+        run: |
+          icon="✅"
+          [ "${{ steps.build.outcome }}" = "success" ] || icon="❌"
+          echo "| \`${{ matrix.build }}\` | $icon ${{ steps.build.outcome }} |" > "result-${{ matrix.build }}.md"
+
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: result-${{ matrix.build }}
+          path: result-${{ matrix.build }}.md
+          retention-days: 1
+
+  # `ppc64le`/`s390x`/`riscv64` (both libc floors) -- native to no
+  # GitHub-hosted runner GitHub offers at all (record 0044's own descope).
+  # The same pattern build-examples.yml's own `build-usermod-foreign-host`
+  # job already argues for: **not** on `pull_request`, only
+  # `workflow_dispatch` -- that job's own measurement was one emulated leg
+  # costing ~18 minutes against ~3 for everything else in the workflow
+  # combined, and this one is up to six such legs per version tag. Proving
+  # these still build is worth doing on demand; it is the wrong trade to
+  # pay on every PR push, which is exactly the emulation cost the
+  # `test-amd64`/`test-arm64` split above exists to avoid for the common
+  # case. `github.event_name` reflects whichever trigger actually started
+  # this run: either this file's own `workflow_dispatch` (a maintainer
+  # ran it standalone), or -- when called via `workflow_call` -- the
+  # *caller's* own trigger event, propagated automatically rather than
+  # re-declared here. So this still only ever runs on a deliberate manual
+  # trigger, whether that is this file directly or `test-all-platforms.yml`'s
+  # own dispatch.
+  test-emulated:
+    needs: build-matrix
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        build: ${{ fromJson(needs.build-matrix.outputs.build_emulated) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-qemu-action@v4
+
+      - name: Build examples/template (natmod)
+        id: build
+        uses: ./
+        env:
+          CIBMP_VERSION: 0.0.0-ci
+          CIBMP_DISABLE_GITHUB_STEP_SUMMARY: "1"
+        with:
+          package-dir: examples/template
+          build: ${{ matrix.build }}
+
+      - name: Record result
+        if: always()
+        run: |
+          icon="✅"
+          [ "${{ steps.build.outcome }}" = "success" ] || icon="❌"
+          echo "| \`${{ matrix.build }}\` | $icon ${{ steps.build.outcome }} |" > "result-${{ matrix.build }}.md"
+
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: result-${{ matrix.build }}
+          path: result-${{ matrix.build }}.md
+          retention-days: 1

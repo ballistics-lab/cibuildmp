@@ -3,7 +3,7 @@
 The pre-CLI building blocks — one GitHub Action per build step, still fully
 supported for CI, but no longer where new work starts (see the main
 [README](../README.md)). New usermod ports and arches land in the
-`cibuildmp` CLI's own `usermod/build.py` first; these actions absorb the
+`cibuildmp` CLI's own `usermod/build_<port>.py` first; these actions absorb the
 CLI's work once it's wired up, not the other way around.
 
 Every table below is the action's complete input surface — if it isn't

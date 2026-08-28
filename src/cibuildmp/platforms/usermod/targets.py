@@ -35,13 +35,21 @@ from typing import Any
 
 from ...resources import build_platforms_data
 
-# The five ports with a real `build_<port>()` driver in usermod/build.py --
-# the other ten `resources/build-platforms.toml` already carries real,
-# verified rows for (rp2, mimxrt, samd, stm32, psoc-edge, alif, esp8266,
+# The six ports with a real `build_<port>()` driver in
+# usermod/build_<port>.py --
+# the other nine `resources/build-platforms.toml` already carries real,
+# verified rows for (mimxrt, samd, stm32, psoc-edge, alif, esp8266,
 # cc3200, renesas-ra, nrf) are a separate, much larger piece of unstarted
 # work (writing each one's own build pipeline), not a config-surface gap
 # this module could close by itself.
-KNOWN_PORTS: tuple[str, ...] = ("unix", "windows", "qemu", "webassembly", "esp32")
+KNOWN_PORTS: tuple[str, ...] = (
+    "unix",
+    "windows",
+    "qemu",
+    "webassembly",
+    "esp32",
+    "rp2",
+)
 
 _USERMOD_ROWS: dict[str, list[dict[str, Any]]] = {
     port: build_platforms_data()["usermod"][port]["identifiers"] for port in KNOWN_PORTS
@@ -72,6 +80,32 @@ _IDENTIFIER_BY_PORT_TAG_AXIS: dict[tuple[str, str, str], str] = {
     for port, rows in _USERMOD_ROWS.items()
     for row in rows
 }
+
+# (tag, board) -> (idf_version, mcu) -- esp32-only, since it is the one
+# port whose own board axis carries a real per-row toolchain fact
+# `UsermodTarget` itself does not (D19: eight distinct `idf_version`
+# values across this table, and `mcu` is `idf_tools.py install
+# --targets=`'s own real vocabulary, e.g. "esp32"/"esp32c3"/"esp32s3").
+# `UsermodTarget` stays `port`/`arch`/`tag` only -- widening it for one
+# port's own extra axis would put a field every other port's own target
+# carries and ignores on the shared dataclass; a lookup keyed the same
+# way `_IDENTIFIER_BY_PORT_TAG_AXIS` already is keeps that fact where it
+# belongs, resolved from `board`/`tag` rather than carried on the target.
+_ESP32_IDF_INFO_BY_TAG_BOARD: dict[tuple[str, str], tuple[str, str]] = {
+    (row["tag"], row["board"]): (row["idf_version"], row["mcu"])
+    for row in _USERMOD_ROWS["esp32"]
+}
+
+
+def esp32_idf_info(tag: str, board: str) -> tuple[str, str]:
+    """This `(tag, board)`'s own real `(idf_version, idf_target)` --
+    `usermod/orchestrate.py`'s `_port_build_options()` is the one real
+    caller, resolving what `Esp32BuildOptions` needs from a target that
+    itself carries only `board`/`tag`. `KeyError` here means a hand-built
+    target naming a combination the file has never walked, the same
+    class of caller `UsermodTarget.identifier`'s own docstring already
+    covers for the identifier lookup."""
+    return _ESP32_IDF_INFO_BY_TAG_BOARD[(tag, board)]
 
 
 class UnknownPortError(ValueError):

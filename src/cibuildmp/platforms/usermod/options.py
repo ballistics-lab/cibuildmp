@@ -215,7 +215,7 @@ def _as_list_or_str(value: Any, key: str) -> list[str]:
 @dataclass
 class UsermodBuildOptions:
     """Ingredients for one target's build, not yet the port-specific
-    `*BuildOptions` `usermod/build.py` wants -- `usermod/orchestrate.py`
+    `*BuildOptions` each `usermod/build_<port>.py` wants -- `usermod/orchestrate.py`
     resolves `manifest`/`user_c_modules` into real filesystem paths
     (writing the combined manifest text, picking a build directory) and
     builds the actual `UnixBuildOptions`/etc. from these, the same split

@@ -603,7 +603,7 @@ identifiers = [
 ]
 
 # cross is cibuildmp's own WINDOWS_ARCH_SETTINGS[arch].cross_compile
-# (platforms/usermod/build.py) -- a constant across every tag here, not a
+# (platforms/usermod/build_windows.py) -- a constant across every tag here, not a
 # per-tag fact like esp32's idf_version or natmod's x86/x64 cross: windows
 # has no per-tag arch gating at all (confirmed earlier this record), and
 # ports/windows/Makefile itself sets no CROSS_COMPILE/ARCH branches --
@@ -702,7 +702,7 @@ identifiers = [
 identifier_format = "{tag}-{arch}"
 artifacts_dir_name = "{name}-{ver}-{identifier}"
 
-image = "emsdk"
+image = "webassembly"
 identifiers = [
     { tag = "v1.20.0", arch = "wasm32", identifier = "v1.20.0-wasm32" },
     { tag = "v1.21.0", arch = "wasm32", identifier = "v1.21.0-wasm32" },
@@ -729,7 +729,7 @@ identifiers = [
 #
 # Every real board in ports/qemu/boards/ is listed, not only the three
 # (MPS2_AN385/VIRT_RV32/VIRT_RV64) cibuildmp's own QEMU_BOARD_CROSS
-# currently has a toolchain prefix for (platforms/usermod/build.py) --
+# currently has a toolchain prefix for (platforms/usermod/build_qemu.py) --
 # the gap is a real, visible TODO for that dict, not something to hide by
 # under-reporting this table.
 #
@@ -835,7 +835,7 @@ identifiers = [
 # mcu/product/vendor/variants come straight from each board's own real
 # board.json. variants is metadata (board.json's own name list, e.g.
 # ["SPIRAM", "OTA"]) -- not a selector axis, same reasoning as
-# [usermod.webassembly]'s own variant field: usermod/build.py's
+# [usermod.webassembly]'s own variant field: usermod/build_esp32.py's
 # Esp32BuildOptions has no variant parameter today, only board.
 #
 # idf_version is a per-row fact, NOT a constant like webassembly's emsdk --
@@ -848,7 +848,7 @@ identifiers = [
 # whichever of esp32c3/esp32s2/esp32s3's own IDF components exist in that
 # checkout) -- this table's own idf_version follows the MCU, not the tag,
 # for that one release. cibuildmp's own current Esp32BuildOptions.idf_version
-# default ("v5.5.1", platforms/usermod/build.py) only actually matches
+# default ("v5.5.1", platforms/usermod/build_esp32.py) only actually matches
 # v1.27.0/v1.28.0 -- a real, pre-existing mismatch for every other tag this
 # table now makes visible, not something this record fixes.
 #

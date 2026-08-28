@@ -39,17 +39,21 @@ classifiers = [
 # Standard library otherwise, deliberately: a build tool that has to resolve
 # its own dependency tree before it can fetch anything is harder to trust,
 # and `wget` not being everywhere is the exact class of problem this
-# replaces. pyelftools is the one exception ([0012]): it is pure Python and
-# it is what tools/mpy_ld.py itself needs to link a native .mpy.
+# replaces. pyelftools and ar are the two exceptions ([0012]): both are pure
+# Python and both are what tools/mpy_ld.py/tools/ar_util.py themselves need
+# to link a native .mpy.
 #
-# `ar` used to sit here beside it and was removed 2026-08-28 -- see [0012]'s
-# own addendum. MicroPython imports no such module at any tag natmod
-# supports (v1.12 through v1.28.0, checked by `grep` against real
-# checkouts): `tools/ar_util.py` uses only `os`/`re`/`hashlib`/`functools`/
-# `pickle`/`collections` plus `elftools.elf.elffile`. The PyPI package was
-# never a dependency of anything.
+# `ar` was removed 2026-08-28 by [0012]'s own addendum, on the claim that
+# no MicroPython tool imports it at any tag natmod supports (v1.12 through
+# v1.28.0, checked by `grep` against real checkouts). That check never
+# reached v1.29.0: `tools/ar_util.py` there does `from ar import Archive`
+# (with a try/except that only raises once a build actually links a `.a`
+# archive -- `examples/wasm2mpy`'s own build is exactly that case, found
+# live when this branch's split toolchain images ran it for real). Restored
+# 2026-08-28.
 dependencies = [
     "pyelftools>=0.29",
+    "ar",
 ]
 dynamic = ["version"]
 

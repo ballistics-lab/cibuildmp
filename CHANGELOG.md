@@ -47,6 +47,59 @@ tried and rejected) lives in `docs/records/`, not here.
   never verified is a loud, specific error at resolution time, naming
   `bin/refresh_natmod_archs.py`/`bin/refresh_usermod_boards.py` as the
   fix, not a silent guess. Record 0052, Track C.
+- **`unix` builds run inside a native image per target instead of
+  cross-compiling from one shared image.** Identifiers are the real PEP
+  600/656 platform tag (`unix-manylinux_2_28_x86_64`,
+  `unix-musllinux_1_2_aarch64`, `unix-manylinux_2_39_mipsel`), not a bare
+  arch name -- **breaking: every existing `unix` identifier changes**
+  (`x64` → `x86_64`, `x86` → `i686`, `armhf` → `armv7l`). Base images are
+  a thin layer over pypa's own manylinux/musllinux images; nine of
+  fifteen cells need no cibuildmp-published layer at all and resolve
+  straight to pypa's own digest. `docker run --platform=<target>` picks
+  the image the same way cibuildwheel's `OCIContainer` does, so an arm64
+  runner now runs `aarch64`/`armv7l` natively instead of under QEMU: a
+  real `manylinux_2_28_aarch64` build measured 88.8s native against
+  1041s emulated on the same machine (~12x), and `manylinux_2_31_armv7l`
+  built in 59.5s -- faster than the native `aarch64` leg on the same
+  runner class, confirming GitHub's own `ubuntu-24.04-arm` really does
+  run AArch32-at-EL0 natively too. All six default targets green on CI
+  (runs 32958683512/32959019090); the musllinux column (4 of 7 cells --
+  `x86_64`/`i686`/`aarch64`/`armv7l`; `ppc64le`/`s390x`/`riscv64` stay
+  declared but unbuilt) went green on run 32960761641. Records 0031,
+  0043, 0044.
+- **`mpy-cross` now builds inside the target container for every `unix`
+  build, not on the host.** A host-built binary only worked by
+  coincidence of matching the image's own glibc -- against a real
+  `manylinux_2_28` (AlmaLinux 8) image it failed outright with
+  `mpy-cross: /lib64/libc.so.6: version 'GLIBC_2.34' not found`, and
+  cannot run at all inside a foreign-architecture container regardless
+  of libc. `windows`/`qemu`/`webassembly` already build it in-container
+  for the same reason on an arm64 host. Two real compiler findings from
+  running gcc 14 against AlmaLinux 8/Alpine 3.22/Rocky 10 for the first
+  time, both fixed with a targeted `CFLAGS_EXTRA` rather than a global
+  suppression: `-Wno-error=cpp` for every `musllinux_*` cell (musl's own
+  `<sys/cdefs.h>` is a bare `#warning`), `-Wno-error=array-bounds` for
+  every `aarch64` cell (gcc 14's bounds analysis false-positives
+  identically on `mbedtls_xor` across both a glibc and a musl base).
+  Records 0043, 0044.
+- **`windows` builds inside a container too**, closing the last of
+  usermod's Docker-only ports still using a bare-host toolchain --
+  deletes both host-side resolvers it depended on (an apt
+  `gcc-mingw-w64` probe for `x64`/`x86`, a ~600MB `llvm-mingw` tarball
+  fetched onto the host per cache miss for `arm64`).
+  `docker/windows.Dockerfile` bakes llvm-mingw as a pinned layer
+  instead. **Breaking for anyone relying on `apt install
+  gcc-mingw-w64-*` on the runner** -- that path no longer exists. Found
+  live: llvm-mingw's own `bin/` ships `x86_64-w64-mingw32-gcc`/
+  `i686-w64-mingw32-gcc` wrapper names too, both really Clang --
+  prepending its directory onto `PATH` would have silently swapped
+  `x64`/`x86` from the real MinGW GCC (the toolchain upstream
+  MicroPython's own CI uses) onto Clang. Fixed by appending rather than
+  prepending, each ordering checked with a real `command -v` inside a
+  container rather than assumed. Verified against the published,
+  anonymously-pulled image, all three arches producing a genuinely
+  linked (not stock) `.exe`: `x64` → `PE32+ … x86-64`, `x86` → `PE32 …
+  Intel i386`, `arm64` → `PE32+ … ARM64`. Record 0042.
 - **natmod's identifier is `mpy{abi}-{tag}-{arch}[+0x{flags}]`, read
   directly off its own verified row rather than reassembled** (matching
   cibuildwheel's own `PythonConfiguration.identifier`, a literal field,
@@ -110,17 +163,21 @@ tried and rejected) lives in `docs/records/`, not here.
   layers are ordered minimal-apt → toolchains → the rest of apt, so a
   package addition to the volatile half no longer invalidates the
   3.38GB toolchain layer. `build-essential` stays in `action.yml`'s apt
-  step regardless: `qemu`/`esp32` still build their own `mpy-cross` on
-  the host, unrelated to any of this. Records 0050, 0052.
+  step regardless: `qemu` still builds its own `mpy-cross` on the host,
+  unrelated to any of this -- `esp32` no longer does (see the esp32
+  bullet above). Records 0050, 0052.
 - **`pre-build-command` runs inside the build's own container**, the shape
   cibuildwheel's `before-all` has. It therefore runs unprivileged and cannot
   install system packages -- a project that needs a tool should fetch it, as
   `examples/wasm2mpy` now does for `wabt`.
-- **`esp32` has no Docker image and provisions ESP-IDF onto the host** --
-  the one platform that cannot satisfy the Docker-only rule. Still a
-  real identifier, still reachable by naming it in `build`, still built
-  by a config that does. `qemu` runs in its own published image like
-  every other usermod port.
+- **`esp32` now builds in a container too, closing the one remaining
+  exception to the Docker-only rule.** `build_esp32()` runs entirely
+  inside `esp_idf_base`; only ESP-IDF's own `git clone` stays host-side
+  (source, not a binary, the same reasoning `mpy_dir` mounts straight
+  into every image already relies on). `idf_version`/`idf_target` are
+  now resolved from each target's own real `build-platforms.toml` row
+  rather than a fixed default, so a RISC-V board (`esp32c2`/`c3`/`c6`)
+  installs the right toolchain, not Xtensa's. Records 0028, 0058.
 
 ### Removed
 
@@ -142,9 +199,30 @@ tried and rejected) lives in `docs/records/`, not here.
 
 ### Added
 
+- **`rp2` usermod builds, live-verified.** `build_rp2()` closes [0022]'s own
+  last unstarted item ("no Pico SDK resolver, no live verification") --
+  config and the `arm_embedded` Docker image were already in place, only
+  the driver itself was missing. No provisioning step runs inside the
+  container: the Pico SDK and everything under it it needs
+  (`lib/pico-sdk`/`lib/tinyusb`/`lib/lwip`/`lib/btstack`/`lib/cyw43-driver`)
+  are plain git submodules of the MicroPython checkout, already vendored
+  for free by the release tarball `sources.fetch_micropython()` prefers --
+  running `ports/rp2`'s own `make ... submodules` target instead was tried
+  first and failed live against a real tarball checkout ("fatal: not a
+  git repository"), since it is a bare `git submodule update` and a
+  release tarball is not a git checkout at all. Confirmed live: a real
+  `examples/template` build against `v1.29.0-rp2-RPI_PICO` producing a
+  genuine 681984-byte `firmware.uf2` with the fixture's own C module
+  linked in. Record 0060.
 - `verify_windows_output()` — reads the COFF `Machine` out of the produced
   `micropython.exe` and rejects a binary that is not the architecture its
   identifier names. `windows` previously checked only that the file existed.
+- **`ppc64le`/`s390x`/`riscv64` (both libc columns) are now real, nameable
+  `unix` targets** — a pinned digest and a real identifier, reachable via
+  `build`/`skip` — but carry no CI leg: native to no runner GitHub offers,
+  and no consumer has asked for one (Alpine's own `community/micropython`
+  doesn't build for `ppc64le`/`s390x` at all). README marks them ⚠️ with a
+  footnote that no real build has ever run. Records 0043, 0044.
 - A `workflow_dispatch` input on `publish-docker-images.yml` to republish one
   image instead of all nineteen.
 - **`qemu` actually exercised in CI for the first time.** `build_qemu()` was

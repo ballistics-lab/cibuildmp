@@ -1,6 +1,8 @@
-"""usermod: `unix`/`windows`/`qemu`/`webassembly`/`esp32` -- the five
-usermod ports with a real `build_<port>()` driver in `usermod/build.py`.
-See docs/BACKLOG.md, "Later -- usermod".
+"""usermod: `unix`/`windows`/`qemu`/`webassembly`/`esp32`/`rp2` -- the six
+usermod ports with a real `build_<port>()` driver, one module per port
+(`usermod/build_<port>.py`, plus shared `build_common.py` -- see
+docs/records/0061-usermod-build-drivers-split-per-port.md). See
+docs/BACKLOG.md, "Later -- usermod".
 
 Also usermod's own half of the CLI dispatch (Phase H, record 0051; the
 `--platform`/`--only`/`--archs`/`--enable` retraction folded into this
@@ -39,7 +41,7 @@ from typing import Any
 from ...sources import SourceError
 from ...stepsummary import write_step_summary
 from . import orchestrate
-from .build import UsermodBuildError
+from .build_common import UsermodBuildError
 from .options import UsermodConfigError, UsermodOptions, check_usermod_family_table
 from .targets import UsermodTarget
 
@@ -129,7 +131,14 @@ def run_resolved(
     )
     for result in results:
         print(f"  {result.identifier}: {result.output.name} ({result.size} bytes)")
-    write_step_summary(results, total_duration)
+    write_step_summary(
+        results,
+        total_duration,
+        build=options.build,
+        skip=options.skip,
+        overrides=options.overrides,
+        override_error=UsermodConfigError,
+    )
     return 0
 
 

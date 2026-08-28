@@ -80,12 +80,9 @@ manifest = "usermod/manifest.py"
 # support should build here, or the claim is wrong") applies to it too.
 build = """
 mpy6.3-v1.29.0-*
-v1.29.0-manylinux*
-v1.29.0-musllinux*
+v1.29.0-*linux*
 v1.29.0-wasm32
-v1.29.0-win32
-v1.29.0-win_amd64
-v1.29.0-win_arm64
+v1.29.0-win*
 v1.29.0-qemu-MPS2_AN385
 """
 skip = "*_ppc64le *_s390x *_riscv64"
