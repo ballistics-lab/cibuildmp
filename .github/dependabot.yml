@@ -31,3 +31,26 @@ updates:
     directory: "/.github/actions/build-usermod-unix"
     schedule:
       interval: "weekly"
+
+  # [0046]'s own gap ("nothing notices when a pin goes stale, except
+  # container images") for the pypa half of it: five of the fifteen `unix`
+  # Dockerfiles already carry a real, digest-pinned `FROM
+  # quay.io/pypa/...@sha256:...` and get scanned here for free.
+  # `docker/pypa-tracker.Dockerfile` is not a build step -- it exists so
+  # the other nine `unix` cells, which have no Dockerfile of their own
+  # (record 0044/0058: bare `FROM` and nothing else, so publishing a
+  # cibuildmp copy would be pure overhead), still have something with a
+  # `FROM` line for this scan to read. A PR here bumps that tracker file's
+  # own digest, not `resources/pinned_pypa_images.toml` -- moving the real
+  # pin stays `bin/update_docker.py --pypa`'s own reviewed job (record
+  # 0033), since a new base can mean a new libc floor, not just routine
+  # hygiene.
+  #
+  # `ubuntu:24.04` is out of scope on purpose: every Dockerfile that uses
+  # it names a floating tag, not a digest, and Dependabot's docker
+  # ecosystem has nothing to compare a floating tag against. Digest-pinning
+  # cibuildmp's own base images is a separate decision, not yet made.
+  - package-ecosystem: "docker"
+    directory: "/docker"
+    schedule:
+      interval: "weekly"
