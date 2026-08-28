@@ -111,13 +111,13 @@
 manylinux_2_28_x86_64 = "ghcr.io/ballistics-lab/manylinux_2_28_x86_64@sha256:849c8669a3e13c1402d43e1361dc750cc0560197b84574ddd5a595308beb2365"
 musllinux_1_2_x86_64 = "quay.io/pypa/musllinux_1_2_x86_64@sha256:75327606c7666fc971bd9239c6b220fd205b4bb9563b588075164622609219ca"
 
-manylinux_2_28_i686 = "ghcr.io/ballistics-lab/manylinux_2_28_i686@sha256:d8c6ccf0fdb01161f79fe4e883196c5a17a5e0ad97982927094edf09e0c058f1"
+manylinux_2_28_i686 = "ghcr.io/ballistics-lab/manylinux_2_28_i686@sha256:ca75c3ab34ab78e3324181142b72d375c6f174cc766078ed138fc6be3fd2791c"
 musllinux_1_2_i686 = "quay.io/pypa/musllinux_1_2_i686@sha256:8ca1be90979cb290909c1c945573ccdc7114505d66c563567ee6c78927fb215f"
 
 manylinux_2_28_aarch64 = "ghcr.io/ballistics-lab/manylinux_2_28_aarch64@sha256:166c369630ab42573898ed737cf920ac77a72bc80a85ecf7c899e2dec242abb3"
 musllinux_1_2_aarch64 = "quay.io/pypa/musllinux_1_2_aarch64@sha256:cea133e28484a93e9c40fc661256e8f1ec69b2887d0b64acbfaf48f26bbab103"
 
-manylinux_2_28_ppc64le = "ghcr.io/ballistics-lab/manylinux_2_28_ppc64le@sha256:f6dc11a9dd6ba10b1c1a0370c984d3428aecb5ce37914597ec7b81656e7cfb3a"
+manylinux_2_28_ppc64le = "ghcr.io/ballistics-lab/manylinux_2_28_ppc64le@sha256:0a40f9bda0c824c47c0f1629a078cf578fee991dc3f7b540bdd19a0b9a9a3532"
 musllinux_1_2_ppc64le = "quay.io/pypa/musllinux_1_2_ppc64le@sha256:d70f4708a377ba4a21eee38be20e35c757e911b5ca90df0fce002fd71a6df3a8"
 
 manylinux_2_28_s390x = "ghcr.io/ballistics-lab/manylinux_2_28_s390x@sha256:575a7d5cc8735ad07d519d7bdcf024263db4ca0227cf1d4e81327bb40b6a793c"
