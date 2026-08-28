@@ -24,6 +24,17 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # `dynruntime.mk`'s `x86` row reaches for either depending on tag --
 # upstream's own `tools/ci.sh` installs plain `gcc-multilib` for the
 # same job (`ci_unix_32bit_setup`).
+#
+# `ca-certificates`/`curl` are not needed to build this image's own
+# toolchain (nothing here is downloaded, unlike the other five toolchain
+# groups) -- they are here because a project's own `pre-build-command`
+# runs inside whichever image its arch resolves to, and one that fetches
+# something over HTTPS (`examples/wasm2mpy`'s own wabt install) needs
+# both. The monolithic `natmod.Dockerfile` this group was split out of
+# carried them for its own toolchain downloads and every arch got them
+# for free; splitting the image means this arch has to ask for them on
+# its own merits. Found live: `wasm2mpy` failed with "curl: command not
+# found" on `x86` the first time this group's own image ran it for real.
 RUN set -eux; \
     dpkg --add-architecture i386; \
     sed -i '/^Types: deb$/a Architectures: amd64 i386' \
@@ -32,6 +43,8 @@ RUN set -eux; \
     apt-get install -y --no-install-recommends \
         build-essential \
         git \
+        ca-certificates \
+        curl \
         gcc-13-multilib \
         gcc-i686-linux-gnu \
         linux-libc-dev:i386 \

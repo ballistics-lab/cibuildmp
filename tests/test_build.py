@@ -135,7 +135,9 @@ def test_pre_build_command_failure_is_a_build_error(tmp_path, monkeypatch):
         dockerrun, "run", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
     )
     with pytest.raises(BuildError, match="pre-build-command"):
-        run_pre_build_command(tmp_path, "exit 1", tmp_path / "mpy", tmp_path, "armv7emsp")
+        run_pre_build_command(
+            tmp_path, "exit 1", tmp_path / "mpy", tmp_path, "armv7emsp"
+        )
 
 
 def test_run_make_failure_names_the_target(tmp_path, monkeypatch):
