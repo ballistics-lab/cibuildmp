@@ -104,14 +104,14 @@ platform.**
 
 Identifier shapes, one per platform:
 
-| Platform               | Shape                 | Example                        |
-| ----------------------- | ---------------------- | -------------------------------- |
-| natmod                  | `mpy{abi}-{tag}-{arch}` | `mpy6.3-v1.29.0-armv7emsp`      |
-| usermod `unix`          | `{tag}-{arch}`          | `v1.29.0-manylinux_2_28_x86_64` |
-| usermod `windows`       | `{tag}-{arch}`          | `v1.29.0-win_amd64`             |
-| usermod `webassembly`   | `{tag}-{arch}`          | `v1.29.0-wasm32`                |
-| usermod `qemu`          | `{tag}-qemu-{board}`    | `v1.24.0-qemu-MICROBIT`         |
-| usermod `esp32`         | `{tag}-esp32-{board}`   | `v1.29.0-esp32-ESP32_GENERIC`   |
+| Platform              | Shape                   | Example                         |
+| --------------------- | ----------------------- | ------------------------------- |
+| natmod                | `mpy{abi}-{tag}-{arch}` | `mpy6.3-v1.29.0-armv7emsp`      |
+| usermod `unix`        | `{tag}-{arch}`          | `v1.29.0-manylinux_2_28_x86_64` |
+| usermod `windows`     | `{tag}-{arch}`          | `v1.29.0-win_amd64`             |
+| usermod `webassembly` | `{tag}-{arch}`          | `v1.29.0-wasm32`                |
+| usermod `qemu`        | `{tag}-qemu-{board}`    | `v1.24.0-qemu-MICROBIT`         |
+| usermod `esp32`       | `{tag}-esp32-{board}`   | `v1.29.0-esp32-ESP32_GENERIC`   |
 
 The shape genuinely differs per usermod port — `unix`/`windows`/
 `webassembly` carry no port name at all in the identifier, only `qemu`/
@@ -159,16 +159,16 @@ repos and verified on real CI, arch by arch, not just `--dry-run`.
 
 | Arch        | Toolchain              | Status |
 | ----------- | ---------------------- | ------ |
-| `x64`       | host gcc               | ✅     |
-| `x86`       | host gcc (`-m32`)      | ✅     |
-| `armv6m`    | `arm-none-eabi-`       | ✅     |
-| `armv7m`    | `arm-none-eabi-`       | ✅     |
-| `armv7emsp` | `arm-none-eabi-`       | ✅     |
-| `armv7emdp` | `arm-none-eabi-`       | ✅     |
-| `xtensa`    | `xtensa-lx106-elf-`    | ✅     |
-| `xtensawin` | `xtensa-esp32-elf-`    | ✅     |
-| `rv32imc`   | `riscv64-unknown-elf-` | ✅     |
-| `rv64imc`   | `riscv64-unknown-elf-` | ✅     |
+| `x64`       | host gcc               | ✅      |
+| `x86`       | host gcc (`-m32`)      | ✅      |
+| `armv6m`    | `arm-none-eabi-`       | ✅      |
+| `armv7m`    | `arm-none-eabi-`       | ✅      |
+| `armv7emsp` | `arm-none-eabi-`       | ✅      |
+| `armv7emdp` | `arm-none-eabi-`       | ✅      |
+| `xtensa`    | `xtensa-lx106-elf-`    | ✅      |
+| `xtensawin` | `xtensa-esp32-elf-`    | ✅      |
+| `rv32imc`   | `riscv64-unknown-elf-` | ✅      |
+| `rv64imc`   | `riscv64-unknown-elf-` | ✅      |
 
 ### Usermod, per port/arch
 
@@ -191,34 +191,34 @@ through that path). `esp32` is the one port not wired into `action.yml`
 yet; its own composite action remains the supported, verified production
 path for it.
 
-| Port          | Target                                           | Provisioning                            | Status              |
-| ------------- | ------------------------------------------------ | ---------------------------------------- | -------------------- |
-| `unix`        | `manylinux_2_28_x86_64`                          | native image[^native-image]              | ✅                   |
-| `unix`        | `manylinux_2_28_i686`                            | native image[^native-image]              | ✅                   |
-| `unix`        | `manylinux_2_28_aarch64`                         | native image[^native-image]              | ✅                   |
-| `unix`        | `manylinux_2_31_armv7l`                          | native image[^native-image]              | ✅                   |
-| `unix`        | `manylinux_2_39_mipsel`                          | cross image[^mipsel-cross]               | ✅                   |
-| `unix`        | `musllinux_1_2_{x86_64,i686,aarch64,armv7l}`     | native image[^native-image]              | ✅                   |
-| `unix`        | `manylinux_2_28_ppc64le`                         | native image[^native-image]              | ⚠️[^unverified-cell] |
-| `unix`        | `manylinux_2_28_s390x`                           | native image[^native-image]              | ⚠️[^unverified-cell] |
-| `unix`        | `manylinux_2_39_riscv64`                         | native image[^native-image]              | ⚠️[^unverified-cell] |
-| `unix`        | `musllinux_1_2_{ppc64le,s390x,riscv64}`          | native image[^native-image]              | ⚠️[^unverified-cell] |
-| `qemu`        | `MPS2_AN385` (Cortex-M3, and 5 other ARM boards) | `arm-none-eabi-`                         | ✅                   |
-| `qemu`        | `VIRT_RV32`/`VIRT_RV64`, `POWERNV9` (PowerPC)    | `riscv64-unknown-elf-`/`powerpc64le-linux-gnu-` | ❌ not attempted |
-| `webassembly` | `pyscript` variant                               | `emsdk` (Linux x64 host only)             | ✅                   |
-| `esp32`       | `ESP32_GENERIC`                                  | ESP-IDF v5.5.1, self-cloned + installed  | ✅                   |
-| `esp32`       | other ESP32-family boards                        | same ESP-IDF resolver                    | ⚠️ unverified        |
-| `windows`     | `x64`                                            | `apt install gcc-mingw-w64-x86-64`       | ✅                   |
-| `windows`     | `x86`                                            | `apt install gcc-mingw-w64-i686`         | ✅                   |
-| `windows`     | `arm64`                                          | `llvm-mingw` (Linux x64 host only)        | ✅                   |
-| `rp2` / `mimxrt` / `samd` / `stm32` / `psoc-edge` / `alif` / `esp8266` / `cc3200` / `renesas-ra` / `nrf` | verified `(tag, board)` rows exist[^verified-no-driver] | — | ❌ no build driver yet |
-| `zephyr`      | Zephyr RTOS (any board)                          | —                                         | ❌ no build driver yet |
-| `pic16bit` / `powerpc` (as a standalone port) / `bare-arm` / `minimal` / `embed` | no verified rows at all — reference builds or CPU families with no matching natmod/usermod facts | — | ❌ out of scope |
+| Port                                                                                                     | Target                                                                                           | Provisioning                                    | Status                |
+| -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------- | --------------------- |
+| `unix`                                                                                                   | `manylinux_2_28_x86_64`                                                                          | native image[^fn1]                              | ✅                     |
+| `unix`                                                                                                   | `manylinux_2_28_i686`                                                                            | native image[^fn1]                              | ✅                     |
+| `unix`                                                                                                   | `manylinux_2_28_aarch64`                                                                         | native image[^fn1]                              | ✅                     |
+| `unix`                                                                                                   | `manylinux_2_31_armv7l`                                                                          | native image[^fn1]                              | ✅                     |
+| `unix`                                                                                                   | `manylinux_2_39_mipsel`                                                                          | cross image[^fn3]                               | ✅                     |
+| `unix`                                                                                                   | `musllinux_1_2_{x86_64,i686,aarch64,armv7l}`                                                     | native image[^fn1]                              | ✅                     |
+| `unix`                                                                                                   | `manylinux_2_28_ppc64le`                                                                         | native image[^fn1]                              | ⚠️[^fn2]               |
+| `unix`                                                                                                   | `manylinux_2_28_s390x`                                                                           | native image[^fn1]                              | ⚠️[^fn2]               |
+| `unix`                                                                                                   | `manylinux_2_39_riscv64`                                                                         | native image[^fn1]                              | ⚠️[^fn2]               |
+| `unix`                                                                                                   | `musllinux_1_2_{ppc64le,s390x,riscv64}`                                                          | native image[^fn1]                              | ⚠️[^fn2]               |
+| `qemu`                                                                                                   | `MPS2_AN385` (Cortex-M3, and 5 other ARM boards)                                                 | `arm-none-eabi-`                                | ✅                     |
+| `qemu`                                                                                                   | `VIRT_RV32`/`VIRT_RV64`, `POWERNV9` (PowerPC)                                                    | `riscv64-unknown-elf-`/`powerpc64le-linux-gnu-` | ❌ not attempted       |
+| `webassembly`                                                                                            | `pyscript` variant                                                                               | `emsdk` (Linux x64 host only)                   | ✅                     |
+| `esp32`                                                                                                  | `ESP32_GENERIC`                                                                                  | ESP-IDF v5.5.1, self-cloned + installed         | ✅                     |
+| `esp32`                                                                                                  | other ESP32-family boards                                                                        | same ESP-IDF resolver                           | ⚠️ unverified          |
+| `windows`                                                                                                | `x64`                                                                                            | `apt install gcc-mingw-w64-x86-64`              | ✅                     |
+| `windows`                                                                                                | `x86`                                                                                            | `apt install gcc-mingw-w64-i686`                | ✅                     |
+| `windows`                                                                                                | `arm64`                                                                                          | `llvm-mingw` (Linux x64 host only)              | ✅                     |
+| `rp2` / `mimxrt` / `samd` / `stm32` / `psoc-edge` / `alif` / `esp8266` / `cc3200` / `renesas-ra` / `nrf` | verified `(tag, board)` rows exist[^fn4]                                                         | —                                               | ❌ no build driver yet |
+| `zephyr`                                                                                                 | Zephyr RTOS (any board)                                                                          | —                                               | ❌ no build driver yet |
+| `pic16bit` / `powerpc` (as a standalone port) / `bare-arm` / `minimal` / `embed`                         | no verified rows at all — reference builds or CPU families with no matching natmod/usermod facts | —                                               | ❌ out of scope        |
 
-[^native-image]: Nothing to provision. The image is `ghcr.io/ballistics-lab/<target>`, a thin layer over pypa's own `quay.io/pypa/<target>` (the same images cibuildwheel builds wheels in), carrying a native compiler for that architecture. Non-native targets run emulated. The binary is checked against its target's real platform tag after every build.
-[^unverified-cell]: `ppc64le`/`s390x`/`riscv64`, both libcs — published (`resources/pinned_docker_images.toml` has a real digest for each) and reachable by naming them in `build`, but native to no runner GitHub offers, so no real build has ever run through one: the six-cell equivalent of `qemu`'s own gap before it got a dedicated CI leg. Point `CIBMP_UNIX_<TARGET>_DOCKER_IMAGE` at a locally-built image, or an emulated one, to work on one of these.
-[^mipsel-cross]: The one target that still cross-compiles: pypa publishes no mipsel image and there's no Docker official image for 32-bit mipsel, so there's nothing to be native to.
-[^verified-no-driver]: `resources/build-platforms.toml` has real, independently-verified rows for each of these ports (walked against a real MicroPython checkout the same way every ✅ row above was); a config can name their identifiers today. What's missing is a `build_<port>()` driver in `platforms/usermod/build.py` to actually run one — not a scope decision, just not built yet.
+[^fn1]: Nothing to provision. The image is `ghcr.io/ballistics-lab/<target>`, a thin layer over pypa's own `quay.io/pypa/<target>` (the same images cibuildwheel builds wheels in), carrying a native compiler for that architecture. Non-native targets run emulated. The binary is checked against its target's real platform tag after every build.
+[^fn2]: `ppc64le`/`s390x`/`riscv64`, both libcs — published (`resources/pinned_docker_images.toml` has a real digest for each) and reachable by naming them in `build`, but native to no runner GitHub offers, so no real build has ever run through one: the six-cell equivalent of `qemu`'s own gap before it got a dedicated CI leg. Point `CIBMP_UNIX_<TARGET>_DOCKER_IMAGE` at a locally-built image, or an emulated one, to work on one of these.
+[^fn3]: The one target that still cross-compiles: pypa publishes no mipsel image and there's no Docker official image for 32-bit mipsel, so there's nothing to be native to.
+[^fn4]: `resources/build-platforms.toml` has real, independently-verified rows for each of these ports (walked against a real MicroPython checkout the same way every ✅ row above was); a config can name their identifiers today. What's missing is a `build_<port>()` driver in `platforms/usermod/build.py` to actually run one — not a scope decision, just not built yet.
 
 No Windows or macOS host is needed for any of the ✅/⚠️ usermod targets
 above, `windows`'s own three arches included — every toolchain there is
