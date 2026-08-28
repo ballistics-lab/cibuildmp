@@ -500,7 +500,7 @@ def test_webassembly_no_image_registered_is_a_clear_error(monkeypatch, tmp_path)
     # resources/pinned_docker_images.toml, build_webassembly() must fail
     # loudly, not fall back to building docker/webassembly.Dockerfile.
     monkeypatch.delenv("CIBMP_WEBASSEMBLY_DOCKER_IMAGE", raising=False)
-    monkeypatch.setattr("cibuildmp.dockerrun._pins", lambda: {"image": {}, "port": {}})
+    monkeypatch.setattr("cibuildmp.dockerrun._pins", lambda: {"image_group": {}})
     build_dir = tmp_path / "build-wasm"
 
     calls = []
