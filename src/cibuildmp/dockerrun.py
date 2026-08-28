@@ -584,6 +584,7 @@ def run(
     timeout: float | None = None,
     oci_platform: str | None = None,
     linux32: bool = False,
+    env: dict[str, str] | None = None,
 ) -> None:
     """Run `command` inside `image`, as a sibling container -- not nested
     inside one `cibuildmp` itself is already running in (D26's own "why
@@ -643,6 +644,12 @@ def run(
     correctly-selected 32-bit container. Wrapping unconditionally would
     be wrong on a genuinely 32-bit kernel, where `linux32` may not exist
     at all, which is exactly why upstream probes instead of assuming.
+
+    `env` becomes `-e KEY=VALUE` per entry. natmod's own `PYTHONPATH`
+    (mounting cibuildmp's own installed `elftools`/`ar` into the
+    container rather than baking them into every toolchain image --
+    `natmod/build.py`'s `_deps_mount()`) is the first caller, but nothing
+    here is natmod-specific.
     """
     if oci_platform is not None and oci_platform != host_oci_platform():
         _probe_platform(image, oci_platform)
@@ -678,6 +685,8 @@ def run(
         docker_command += ["--user", f"{os.getuid()}:{os.getgid()}"]
     for mount in mounts:
         docker_command += ["-v", f"{mount.as_posix()}:{mount.as_posix()}"]
+    for key, value in (env or {}).items():
+        docker_command += ["-e", f"{key}={value}"]
     docker_command += ["-w", workdir.as_posix(), image, *command]
     try:
         subprocess.run(docker_command, check=True, timeout=timeout)

@@ -23,6 +23,7 @@ step, the same way cibuildwheel never runs `twine upload` itself.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import time
@@ -35,6 +36,14 @@ from .targets import NATIVE_ARCH_CODE
 
 MPY_HEADER_MAGIC = ord("M")
 MPY_ARCH_FLAGS_BIT = 0x40
+
+# The two packages `tools/mpy_ld.py`/`tools/ar_util.py` import that are not
+# in the standard library -- [0012]. Named here, not baked into any
+# toolchain image: mounted at their own already-installed location instead
+# (`_deps_mount()`), so bumping cibuildmp's own pin in `pyproject.toml` is
+# the only edit a version bump needs, independent of the six toolchain
+# images `[0058]` split `natmod.Dockerfile` into.
+_DEPS_MODULES = ("elftools", "ar")
 
 
 class BuildError(Exception):
@@ -123,18 +132,49 @@ def _natmod_image(arch: str) -> str:
     return image
 
 
+def _deps_mount() -> Path:
+    """The host directory holding cibuildmp's own already-installed
+    `elftools`/`ar` packages -- mounted into every natmod container and
+    put on its own `PYTHONPATH` (`_run_in_image()`), rather than baked
+    into each of the six toolchain images record 0058 split
+    `natmod.Dockerfile` into. Bumping either package's version is then
+    `pyproject.toml`'s own pin, the same as any other cibuildmp
+    dependency -- not a Dockerfile edit and a republish. Safe because
+    neither has a C extension: nothing here is coupled to a particular
+    image's glibc the way mpy-cross's own compiled binary is.
+    """
+    roots = set()
+    for name in _DEPS_MODULES:
+        spec = importlib.util.find_spec(name)
+        if spec is None or not spec.submodule_search_locations:
+            raise BuildError(
+                f"cibuildmp's own {name!r} dependency is not installed -- "
+                "this should not happen outside a broken install"
+            )
+        roots.add(str(Path(spec.submodule_search_locations[0]).parent))
+    if len(roots) != 1:
+        raise BuildError(
+            f"{_DEPS_MODULES} resolve to different site-packages directories "
+            f"({sorted(roots)}); expected cibuildmp's own dependencies to "
+            "share one"
+        )
+    return Path(next(iter(roots)))
+
+
 def _run_in_image(
     command: list[str], *, mounts: list[Path], workdir: Path, what: str, arch: str
 ) -> None:
     from ... import dockerrun
 
+    deps_dir = _deps_mount()
     try:
         dockerrun.run(
             command,
-            mounts=mounts,
+            mounts=[*mounts, deps_dir],
             workdir=workdir,
             image=_natmod_image(arch),
             oci_platform=dockerrun.platform_for("natmod", arch),
+            env={"PYTHONPATH": deps_dir.as_posix()},
         )
     except Exception as exc:  # UsermodBuildError, and anything docker raises
         raise BuildError(f"{what}: {exc}") from exc

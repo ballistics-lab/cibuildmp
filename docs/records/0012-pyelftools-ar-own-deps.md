@@ -81,3 +81,49 @@ of the places this had to be fixed.
 
 The image's own digest changes as a result, so `pinned_docker_images.toml` needs a
 republish before the smaller layer is what builds actually pull.
+
+## Addendum 2, 2026-08-28 — `ar` was needed after all, at a tag the last check skipped
+
+The addendum above grepped every tag natmod supports **at the time**: v1.12 through
+v1.28.0. v1.29.0 was not on that list. Read directly from a real checkout (not grepped
+for "import ar" this time, but opened and read), `tools/ar_util.py` at v1.29.0 does:
+
+```python
+try:
+    from ar import Archive
+except:
+    Archive = None
+...
+class CachedArFile:
+    def __init__(self, fn):
+        if not Archive:
+            raise RuntimeError("Please run 'pip install ar' to link .a files")
+```
+
+Found live: `examples/wasm2mpy`'s own build (v1.29.0, `.a`-linking a wasm2c runtime)
+failed with exactly that `RuntimeError` the first time [0058]'s split toolchain images
+ran it for real. The addendum's own conclusion -- "`ar` is not [needed], and they are not
+the same thing" -- was correct for every tag it actually checked and wrong for the one it
+didn't. `ar` is restored to `dependencies` in `pyproject.toml`.
+
+**The mechanism is not the one this record originally described, on purpose.** The
+original mechanism (`PYTHON=<sys.executable>` on the `make` command line) stopped
+working once [0050] containerized natmod -- the host interpreter's path does not exist
+across the mount, which is why `pyelftools` was baked into `docker/natmod.Dockerfile` as
+`python3-pyelftools` instead, and why `ar` briefly followed the same path (`python3-pip`
++ `pip install --break-system-packages ar`) before the first addendum removed both,
+believing the package unused. Restoring that same baked-in mechanism would mean editing
+and republishing every one of the six toolchain images [0058] split the one Dockerfile
+into, every time either package's pin moves.
+
+Chosen instead, by the user's own call: `dockerrun.run()` gained an `env` parameter
+(`-e KEY=VALUE` per entry); `natmod/build.py`'s `_deps_mount()` resolves the single
+site-packages directory `elftools`/`ar` are already installed into (cibuildmp's own,
+found via `importlib.util.find_spec`) and `_run_in_image()` bind-mounts it into every
+natmod container, PYTHONPATH pointed at it. Safe because neither package has a C
+extension -- nothing here is coupled to a particular image's glibc the way mpy-cross's
+own compiled binary is. Bumping either pin is now `pyproject.toml`'s own edit, same as
+any other cibuildmp dependency, never a Dockerfile change or a republish.
+`python3-pyelftools` stays in every toolchain image regardless -- redundant now that the
+mount also carries `elftools`, but removing it would be its own Dockerfile edit and
+republish for a package that costs nothing left in place.

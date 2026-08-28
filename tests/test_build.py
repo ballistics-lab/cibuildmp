@@ -129,6 +129,22 @@ def test_pre_build_command_runs_in_the_same_image_as_the_build(tmp_path, monkeyp
     assert kwargs["image"] == "natmod:test"
 
 
+def test_deps_mount_reaches_every_container(tmp_path, monkeypatch):
+    # `elftools`/`ar` are mounted into the container and put on its own
+    # PYTHONPATH rather than baked into a toolchain image -- a version
+    # bump is `pyproject.toml`'s own pin, not a Dockerfile edit and a
+    # republish (record 0012).
+    calls = _capture_docker(monkeypatch)
+    run_pre_build_command(
+        tmp_path, "make fetch-nanopb", tmp_path / "mpy", tmp_path, "armv7emsp"
+    )
+
+    _command, kwargs = calls[0]
+    deps_dir = build._deps_mount()
+    assert deps_dir in kwargs["mounts"]
+    assert kwargs["env"] == {"PYTHONPATH": deps_dir.as_posix()}
+
+
 def test_pre_build_command_failure_is_a_build_error(tmp_path, monkeypatch):
     monkeypatch.setattr(build, "_natmod_image", lambda arch: "natmod:test")
     monkeypatch.setattr(
