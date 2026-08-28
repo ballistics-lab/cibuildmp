@@ -7,6 +7,16 @@ on:
       - "docs/**"
       - "LICENSE"
   workflow_dispatch:
+    inputs:
+      build:
+        description: "--build override (default: TEST_PLATFORMS_BUILD below)"
+        required: false
+        type: string
+      qemu:
+        description: "register QEMU binfmt_misc handlers (default: USE_QEMU below)"
+        required: false
+        type: boolean
+        default: true
 
 # Not CIBMP_BUILD -- cibuildmp itself already reads that name as its own
 # generic config-override (options.py's own `opt()`); action.yml's own
@@ -17,6 +27,7 @@ on:
 # matrix.yml's own 256-configuration cap (see the job below).
 env:
   TEST_PLATFORMS_BUILD: "v1.29.0-* v1.28.0-* mpy6.3-v1.29.0-* mpy6.3-v1.28.0-*"
+  USE_QEMU: "1"
 
 # Same pattern publish.yml's own concurrency block already uses. A real,
 # live-caught gap this session: without this, several rapid-fire pushes to
@@ -56,12 +67,15 @@ jobs:
 
       - name: Build matrix
         id: build-matrix
+        env:
+          BUILD_INPUT: ${{ inputs.build }}
         run: |
           set -euo pipefail
-          identifiers=$(cibuildmp examples/template --print-build-identifiers --json --build "$TEST_PLATFORMS_BUILD")
+          build="${BUILD_INPUT:-$TEST_PLATFORMS_BUILD}"
+          identifiers=$(cibuildmp examples/template --print-build-identifiers --json --build "$build")
           echo "build=$identifiers" >> "$GITHUB_OUTPUT"
           {
-            echo "### Selected \`$TEST_PLATFORMS_BUILD\`"
+            echo "### Selected \`$build\`"
             echo "$(echo "$identifiers" | jq length) identifiers"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -83,6 +97,13 @@ jobs:
         build: ${{ fromJson(needs.build-matrix.outputs.build) }}
     steps:
       - uses: actions/checkout@v7
+
+      # `qemu` only exists in the `inputs` context on workflow_dispatch runs
+      # (its own `default: true` covers "dispatched, box left checked");
+      # every other trigger falls back to USE_QEMU above, the same
+      # input-overrides-env pattern build-matrix's own BUILD_INPUT uses.
+      - if: github.event_name == 'workflow_dispatch' && inputs.qemu || github.event_name != 'workflow_dispatch' && env.USE_QEMU == '1'
+        uses: docker/setup-qemu-action@v4
 
       - name: Build examples/template (natmod)
         id: build
