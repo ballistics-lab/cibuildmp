@@ -12,11 +12,6 @@ on:
         description: "--build override (default: TEST_PLATFORMS_BUILD below)"
         required: false
         type: string
-      qemu:
-        description: "register QEMU binfmt_misc handlers (default: USE_QEMU below)"
-        required: false
-        type: boolean
-        default: true
 
 # Not CIBMP_BUILD -- cibuildmp itself already reads that name as its own
 # generic config-override (options.py's own `opt()`); action.yml's own
@@ -27,7 +22,6 @@ on:
 # matrix.yml's own 256-configuration cap (see the job below).
 env:
   TEST_PLATFORMS_BUILD: "v1.29.0-* v1.28.0-* mpy6.3-v1.29.0-* mpy6.3-v1.28.0-*"
-  USE_QEMU: "1"
 
 # Same pattern publish.yml's own concurrency block already uses. A real,
 # live-caught gap this session: without this, several rapid-fire pushes to
@@ -43,7 +37,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Its only output is the matrix `test` below fans out over -- see
+  # Its only output is the two matrices `test-amd64`/`test-arm64` below fan
+  # out over -- see
   # targets.py's own docstring ("nothing here touches the filesystem or the
   # network", kept fast enough to run as its own CI job for exactly this).
   # Not run through `uses: ./` (action.yml's own apt-prerequisites step
@@ -52,11 +47,12 @@ jobs:
   # install`) to get the `cibuildmp` binary on PATH.
   build-matrix:
     runs-on: ubuntu-latest
-    # Advisory, not a required check -- see `test`'s own continue-on-error
-    # below for why.
+    # Advisory, not a required check -- see `test-amd64`'s own
+    # continue-on-error below for why.
     continue-on-error: true
     outputs:
-      build: ${{ steps.build-matrix.outputs.build }}
+      build_amd64: ${{ steps.build-matrix.outputs.build_amd64 }}
+      build_arm64: ${{ steps.build-matrix.outputs.build_arm64 }}
     steps:
       - uses: actions/checkout@v7
 
@@ -72,14 +68,39 @@ jobs:
         run: |
           set -euo pipefail
           build="${BUILD_INPUT:-$TEST_PLATFORMS_BUILD}"
+          # No --skip passed -- examples/template/cibuildmp.toml's own
+          # skip = "*_ppc64le *_s390x *_riscv64" (record 0044's descope,
+          # native to no GitHub-hosted runner) already applies, the same
+          # way build-examples.yml's own build-usermod job leaves it in
+          # place rather than re-stating it here.
           identifiers=$(cibuildmp examples/template --print-build-identifiers --json --build "$build")
-          echo "build=$identifiers" >> "$GITHUB_OUTPUT"
+          # The only cells left that are not native to ubuntu-latest:
+          # unix aarch64/armv7l (both libc floors) -- record 0044's own
+          # measurement that GitHub's arm64 runners run AArch32-at-EL0
+          # natively too. Every other identifier (every natmod/usermod
+          # toolchain image, plus unix x86_64/i686/mipsel) is `linux/amd64`
+          # regardless of what target arch it cross-compiles for (record
+          # 0058), so splitting by this one regex, not by guessing from
+          # the port name, is what keeps this correct as ports are added.
+          build_amd64=$(echo "$identifiers" | jq -c '[.[] | select(test("_aarch64$|_armv7l$") | not)]')
+          build_arm64=$(echo "$identifiers" | jq -c '[.[] | select(test("_aarch64$|_armv7l$"))]')
+          echo "build_amd64=$build_amd64" >> "$GITHUB_OUTPUT"
+          echo "build_arm64=$build_arm64" >> "$GITHUB_OUTPUT"
           {
             echo "### Selected \`$build\`"
             echo "$(echo "$identifiers" | jq length) identifiers"
+            echo "-- $(echo "$build_amd64" | jq length) on ubuntu-latest, $(echo "$build_arm64" | jq length) on ubuntu-24.04-arm"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  test:
+  # One job per runner, each building what that runner is native to --
+  # the same shape build-examples.yml's own build-usermod job uses, fanned
+  # out one identifier per leg instead of one batched `build:` string,
+  # since this workflow's own per-identifier result.md/summary mechanism
+  # (below) needs a leg per identifier to attribute a failure to. Neither
+  # job runs docker/setup-qemu-action -- deliberately: every identifier
+  # build-matrix hands each one is already native to it, so there is
+  # nothing here for QEMU to do.
+  test-amd64:
     needs: build-matrix
     runs-on: ubuntu-latest
     # This workflow is meant to run on every PR and surface real breakage,
@@ -94,16 +115,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        build: ${{ fromJson(needs.build-matrix.outputs.build) }}
+        build: ${{ fromJson(needs.build-matrix.outputs.build_amd64) }}
     steps:
       - uses: actions/checkout@v7
-
-      # `qemu` only exists in the `inputs` context on workflow_dispatch runs
-      # (its own `default: true` covers "dispatched, box left checked");
-      # every other trigger falls back to USE_QEMU above, the same
-      # input-overrides-env pattern build-matrix's own BUILD_INPUT uses.
-      - if: github.event_name == 'workflow_dispatch' && inputs.qemu || github.event_name != 'workflow_dispatch' && env.USE_QEMU == '1'
-        uses: docker/setup-qemu-action@v4
 
       - name: Build examples/template (natmod)
         id: build
@@ -133,13 +147,53 @@ jobs:
           path: result.md
           retention-days: 1
 
-  # Aggregates every `test` leg's own result.md into one table on this
-  # workflow run's own Summary page -- `test` itself can't: a matrix job's
-  # outputs: only ever keep the *last* leg to finish, and continue-on-error
-  # means none of the 219 legs turning the PR check red either, so without
-  # this a real failure is visible only by opening that one leg's own log.
+  # Same job, same steps, on GitHub's own arm64 runner -- see the comment
+  # above `test-amd64` for why there are two of these instead of one job
+  # with a runner axis.
+  test-arm64:
+    needs: build-matrix
+    runs-on: ubuntu-24.04-arm
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        build: ${{ fromJson(needs.build-matrix.outputs.build_arm64) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build examples/template (natmod)
+        id: build
+        uses: ./
+        env:
+          CIBMP_VERSION: 0.0.0-ci
+          CIBMP_DISABLE_GITHUB_STEP_SUMMARY: "1"
+        with:
+          package-dir: examples/template
+          build: ${{ matrix.build }}
+
+      - name: Record result
+        if: always()
+        run: |
+          icon="✅"
+          [ "${{ steps.build.outcome }}" = "success" ] || icon="❌"
+          echo "| \`${{ matrix.build }}\` | $icon ${{ steps.build.outcome }} |" > result.md
+
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: result-${{ matrix.build }}
+          path: result.md
+          retention-days: 1
+
+  # Aggregates every test-amd64/test-arm64 leg's own result.md into one
+  # table on this workflow run's own Summary page -- neither job can:
+  # a matrix job's outputs: only ever keep the *last* leg to finish, and
+  # continue-on-error means none of the 219 legs turning the PR check red
+  # either, so without this a real failure is visible only by opening that
+  # one leg's own log.
   summary:
-    needs: test
+    needs: [test-amd64, test-arm64]
     if: always()
     runs-on: ubuntu-latest
     steps:
