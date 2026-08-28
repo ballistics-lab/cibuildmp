@@ -97,7 +97,7 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
       seven runners already proven by `mp-usermod.yml`, not yet owned by
       cibuildmp
 - [ ] [0052] `build-platforms.toml` isn't formalized as an explicit, documented resource (A6) | the `docker_image` runtime-resolution design is done (2026-08-27 addendum), the resource itself isn't written up as one yet
-- [ ] [0052] ~10 usermod ports have verified rows in `build-platforms.toml` but no real `build_<port>()` driver | flagged by the user as the genuinely larger remaining piece
+- [ ] [0053] ten usermod ports have verified rows in `build-platforms.toml` but no real `build_<port>()` driver | `rp2`, `mimxrt`, `samd`, `stm32`, `psoc-edge`, `alif`, `esp8266`, `cc3200`, `renesas-ra`, `nrf` -- flagged by the user as the genuinely larger remaining piece; `rp2` also has its own row under [0022]
 
 ### Implemented
 
@@ -217,3 +217,4 @@ record is added.
 [0050]: records/0050-natmod-is-docker-only.md
 [0051]: records/0051-usermod-identifiers-have-no-version-axis.md
 [0052]: records/0052-config-is-a-tree-not-a-selector-matrix.md
+[0053]: records/0053-usermod-ports-without-a-build-driver.md
