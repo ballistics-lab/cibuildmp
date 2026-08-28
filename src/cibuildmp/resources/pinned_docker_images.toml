@@ -156,7 +156,7 @@ musllinux_1_2_riscv64 = "quay.io/pypa/musllinux_1_2_riscv64@sha256:c81bcd3275ce4
 # image). Recording it beats claiming nothing -- record 0031 found that
 # even this arch's static build still reaches glibc's own `dlopen`-based
 # NSS at runtime, so "no floor" would be the less honest of the two.
-manylinux_2_39_mipsel = "ghcr.io/ballistics-lab/manylinux_2_39_mipsel@sha256:740276d70517fc1041d8949871440ac919a66b14a325806e3f0ec03d772fa307"
+manylinux_2_39_mipsel = "ghcr.io/ballistics-lab/manylinux_2_39_mipsel@sha256:25e3706769e14dc6e453daf118a46a32f9106ba6421b9cc0d39d8e6a3c266b6a"
 
 # ── cross-compiling ports with no image axis of their own ─────────────
 #
@@ -167,8 +167,8 @@ manylinux_2_39_mipsel = "ghcr.io/ballistics-lab/manylinux_2_39_mipsel@sha256:740
 # `dockerrun.py`, since it is a property of the image rather than of any
 # build target) is what lets them run on an arm64 host at all -- emulated,
 # instead of failing with `exec format error`.
-windows = "ghcr.io/ballistics-lab/windows@sha256:7caab34597a3cb2d9f4a412549d4a806134a17a1411aeb612ff61bbbcc151fcd"
-webassembly = "ghcr.io/ballistics-lab/webassembly@sha256:ed489afc6aef801d74d8d3b5673525a24878afc37e6f535cffac60ecff5ce73e"
+windows = "ghcr.io/ballistics-lab/windows@sha256:13a60ccb2bac7a19450d3e4fe41fbddaa42776d3be2c1c4f55e70a1255859f18"
+webassembly = "ghcr.io/ballistics-lab/webassembly@sha256:a0b08d84a27ee720e9ee56299aae1f7107da1400845cfc0be5f06b1d029a3734"
 
 # ── the six toolchain-group images (record 0058) ───────────────────────
 #
