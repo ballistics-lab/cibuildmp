@@ -70,5 +70,23 @@ own nested call rather than by three sibling jobs directly — reusable-workflow
 the same top-level run's artifact storage, so this needed no new plumbing through
 `test-port`'s own outputs.
 
+## Addendum, 2026-08-29 — the per-call 256 cap, confirmed against a real source
+
+GitHub's own limits page states "a job matrix can generate a maximum of 256 jobs per
+workflow run," which read in isolation is ambiguous about whether nested `workflow_call`
+matrices share one 256 budget for the whole run or each get their own. Checked directly
+rather than assumed: GitHub Community Discussion #38704 ("Nesting Matrices in Reusable
+Workflows can Bypass the 256 Jobs per Workflow Run Limit!") documents a real, successful
+run with 129 × 2 = 258 total matrix jobs — over 256 — confirming each reusable-workflow
+call does get its own independent 256, exactly this record's own design assumption. Also
+live-verified in this repo's own first real run of the new orchestrator: `test-port`'s
+seven calls generated their full expected per-port counts with zero truncation (`rp2`:
+75 jobs = 74 identifiers + 1 `build-matrix`; `esp32`: 84 = 83 + 1; `unix`: 31 = 30 + 1),
+238 total. That total alone would not have distinguished a per-call cap from a
+per-run one (238 < 256 either way) -- the external, verified precedent is what closes the
+question, not this run's own numbers. The same discussion notes GitHub's own web UI
+starts timing out loading a run's page past roughly 600 total jobs, worth watching as
+more ports land drivers.
+
 [0060]: 0060-rp2-build-driver.md
 [0061]: 0061-usermod-build-drivers-split-per-port.md
