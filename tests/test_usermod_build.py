@@ -750,6 +750,12 @@ def test_esp32_script_installs_once_then_makes(monkeypatch, tmp_path):
     assert "idf_tools.py install --targets=esp32" in script
     assert "idf_tools.py install-python-env" in script
     assert "idf_tools.py export --format key-value" in script
+    # Real CI (unmapped --user UID, unlike a local UID matching the
+    # image's own /etc/passwd) resolves an unset HOME to "/" -- ESP-IDF's
+    # own CMake ComponentManager then fails to create its cache dir
+    # there, live-caught 2026-08-28. HOME must be exported before
+    # anything that could touch it runs.
+    assert script.index("export HOME=") < script.index("idf_tools.py install")
     assert ".installed" in script
     assert "make -C" in script
     assert "ports/esp32" in script

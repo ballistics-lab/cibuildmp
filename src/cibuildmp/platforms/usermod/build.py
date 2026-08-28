@@ -1083,6 +1083,17 @@ def _esp32_container_script(
     convention every other port's `*_make_command()` already relies on --
     this script needs no rewriting to run the same inside the container as
     the paths already resolve to on the host.
+
+    `HOME` set explicitly, to `tools_dir` -- `dockerrun.run()`'s own
+    `--user <uid>:<gid>` (not root, and not any name `/etc/passwd` inside
+    `esp_idf_base` knows) leaves it unset otherwise. Every other port's
+    script is plain `make`, needing no per-user state; ESP-IDF's own
+    CMake ComponentManager is not, and resolves an unset `HOME` to `/` --
+    live-caught on real CI, not locally: "Failed to create cache
+    directory: /.cache/Espressif/ComponentManager", a directory no
+    non-root container user can create. `tools_dir` is already mounted
+    and already writable by this same user (created host-side, before
+    the container starts), so it costs nothing new to point `HOME` at.
     """
     tools_py = shlex.quote((idf_dir / "tools" / "idf_tools.py").as_posix())
     marker = shlex.quote((tools_dir / ".installed").as_posix())
@@ -1090,6 +1101,7 @@ def _esp32_container_script(
     idf_path = shlex.quote(idf_dir.as_posix())
     make_command = shlex.join(esp32_make_command(opts, mpy_dir, mpy_cross=mpy_cross))
     return f"""set -eux
+export HOME={idf_tools_path}
 export IDF_TOOLS_PATH={idf_tools_path}
 if [ ! -e {marker} ]; then
     python3 {tools_py} install --targets={shlex.quote(opts.idf_target)}
