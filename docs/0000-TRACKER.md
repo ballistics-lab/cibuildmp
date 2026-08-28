@@ -32,64 +32,16 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 - **`reference/`** — living, unnumbered design docs and open questions. Not a decision
   history; kept current with what is true today, cross-linking back to the records that
   explain *why*.
+- **A row's own note is a sentence or two, not an essay.** Found live, three times
+  now: a premise-table cell, a closed-item row, and an epic's own summary row each
+  grew past 1700 characters across repeated same-session edits before being trimmed
+  back down. When a new fact needs recording, prefer editing the row's existing note
+  down to fit the new fact over just appending another clause — the row should read
+  the same length after ten edits as after one.
 
 ## Ideas
 
 ### In progress / Proposed
-
-### Where this actually stands, 2026-08-26
-
-Read this before the list. The branch is **+18.5k lines across 142 files**
-against `main`, and that number is misleading about progress in a specific way
-worth stating rather than discovering.
-
-Measured against the project's own premise -- *cibuildwheel for MicroPython:
-the same behaviour, Docker-only and isolated, no bare-host builds, and a
-foreign runner can still build through emulation* -- three of those four are
-done and the fourth, the one the whole thing is named after, is not:
-
-| premise | state |
-| --- | --- |
-| Docker-only, isolated | done, both modes; `esp32` the one exception ([0028]) |
-| no bare-host builds | done, same exception |
-| a foreign runner still builds | proven live, both directions ([0049]) |
-| **behaves like cibuildwheel** | **[0052] landed** -- config is build/skip glob + `[override]` only now, no per-platform tables or `--platform`/`--only`/`--archs auto`/`--enable`. Open: A6 (docker-image resolver), ~10 unwired usermod ports. See [0052]'s own addenda |
-
-The last row *was* the task, and [0051] -- now fully landed, epic, points
-1-8 -- was why it failed. Upstream's whole shape is that **the identifier
-is the complete description of one build** and `build`/`skip`/`--only`/
-`--archs` are one mechanism over it. natmod always had that
-(`mpy6.3-natmod-x64`); usermod did not -- no version axis at all, so it
-could not build two MicroPython releases, could not select one, and
-silently dropped every tag after the first. [0051] closed that (both
-modes are real lists now) and went considerably further while it was at
-it: the config tree is flat (`[unix]` etc. sibling to `[natmod]`, table
-presence selects a platform, more than one builds in one invocation with
-no flag), `[[overrides]]` is one shared mechanism with `inherit`, and
-`natmod`/`usermod` are physically one `platforms/` package behind a
-registry `cli.py` never special-cases. See its own row below and its
-record's eight addenda for the full account.
-
-What is left is the acceptance test, and it has still never run. [0038]
-is "adopt cibuildmp in the three consuming repos", the only thing that
-answers whether this is cibuildwheel for MicroPython or infrastructure
-that resembles it. Its blast radius grew across this whole session rather
-than shrinking: every `unix` identifier renamed ([0044]), `--toolchain`
-and `--print-build-matrix` deleted ([0049]/[0050]), natmod now requiring
-Docker, and [0051]'s own config-tree/identifier changes on top of all of
-it. That growth is over now, not still happening -- [0051] landing in
-full is exactly what makes this the right moment for [0038], not a reason
-to keep deferring it further.
-
-That ordering is deliberate and is the argument for the list below: finish
-changing the identifiers *before* asking three repos to migrate onto them.
-
-**Listed in execution order, and that order is the plan** -- not by record
-number, not by age. Each row's note says what is true *now*, so the top row is
-where the next session starts. The ordering argument, once, so it can be
-disagreed with rather than guessed at: things that are *broken* beat things that
-are *missing*; work that unblocks verification beats work that gets verified
-later; and cheap-with-strong-evidence beats expensive-and-speculative.
 
 - [ ] [0032] `qemu` has never been built anywhere | wired to `ensure_image()`
       by [0050], and reachable by any `build` glob naming it (e.g.
@@ -144,23 +96,8 @@ later; and cheap-with-strong-evidence beats expensive-and-speculative.
 - [ ] [0040] usermod test-runner axis | not scheduled ([0006] holds); four of
       seven runners already proven by `mp-usermod.yml`, not yet owned by
       cibuildmp
-- [ ] [0052] cibuildmp's config space is a tree, not a selector matrix
-      (epic) | **stale framing, corrected 2026-08-28: read this row as
-      history, not as the current open question.** Track B (an actual
-      tree-addressed config mechanism) was designed here, then reverted
-      the same record -- "table-presence activation, `--platform`/
-      `--only`/... all removed" addendum -- in favour of the far simpler
-      model that actually shipped: every platform always a candidate,
-      `build`/`skip` glob-matching the real identifier the only selector,
-      `[override]` the only per-target override. That is [0051]'s own row
-      above, already `[x]`. What the record's own closing text says is
-      genuinely still left, unrelated to any tree: **A6**, formalizing
-      `build-platforms.toml` as an explicit, documented resource (the
-      runtime `docker_image` resolution *design* is done, addendum
-      2026-08-27; the resource itself isn't formally written up yet) --
-      and the ~10 usermod ports `build-platforms.toml` already has
-      verified rows for but no real `build_<port>()` driver, flagged by
-      the user as the genuinely larger remaining piece
+- [ ] [0052] `build-platforms.toml` isn't formalized as an explicit, documented resource (A6) | the `docker_image` runtime-resolution design is done (2026-08-27 addendum), the resource itself isn't written up as one yet
+- [ ] [0052] ~10 usermod ports have verified rows in `build-platforms.toml` but no real `build_<port>()` driver | flagged by the user as the genuinely larger remaining piece
 
 ### Implemented
 
@@ -169,7 +106,7 @@ later; and cheap-with-strong-evidence beats expensive-and-speculative.
 - [x] [0031] the musllinux column | four of seven cells green, required, and in the default axis -- every musl cell with a runner it is native to. The mechanism is proven end to end and the column is no longer a separate story: its three remaining cells are `ppc64le`/`s390x`/`riscv64`, which is [0044]'s descope question above and not a musl question at all
 - [x] [0045] `--only` is a filter, not a forced identifier; `--archs auto`/`native`/`all` | both halves done -- `--only` resolves against every identifier that exists, and the vocabulary landed with [0049], which is also where the caution about `--print-build-identifiers` and host-dependence was resolved
 - [x] [0042] `windows` wired, verified and required | three arches green three runs running, `verify_windows_output()` reads the COFF machine so a leg asserts something about its output, and the port joined `examples/template`'s own `ports` -- the full lifecycle (`--only` legs allowed to fail -> required -> default axis) that musllinux walked first
-- [x] [0050] natmod builds in a container; the bare-host path and its toolchain resolver are deleted | closes [0049]'s own "still open" and, by force, [0032] -- `qemu` was the only other thing holding the resolver up. One amd64 image for all ten arches (a `.mpy` is relocatable code, nothing is native to anything); `x86` stops being amd64-host-only; `toolchains.py`, `--toolchain` and `[[toolchain]]` deleted; tarball pins moved into the Dockerfile and became sha256-checked. Its own "still open" named the 3.91GB image and natmod's own host mpy-cross build; the latter closed 2026-08-27, `build_mpy_cross()` now runs inside the natmod image (`platforms/natmod/build.py`), mirroring [0044]'s own `container_mpy_cross()`. `action.yml`'s apt step was **not** deletable as a result -- `qemu`/`esp32` still build their own mpy-cross on the host (`_HOST_MPY_CROSS_PORTS`), unrelated to natmod and never part of this item. The image's own layer ordering was fixed 2026-08-28 (`docker/natmod.Dockerfile`: minimal apt -> the 3.38GB toolchain layer -> the rest of apt, so only a change to the four pinned tarball specs can invalidate the big layer now) and `xtensa-lx106` (ESP8266) was explicitly decided kept the same day -- smallest of the four toolchains (~38MB vs 89-433MB), not worth descoping for a size win the layer-reorder already captured. The image itself was republished and CI-confirmed green 2026-08-27 (`publish-docker-images.yml`, `only: natmod`, first real push through `docker/build-push-action` rather than by hand -- surfaced and fixed a second GHCR permission gap, `sha256:d3f6c431…` pinned, `build-examples.yml` proved it live); the two now-superseded hand-pushed digests are registry-UI-only to delete (no API) and left for the user to clear by hand
+- [x] [0050] natmod builds in a container; the bare-host path and its toolchain resolver are deleted | closes [0049]'s own "still open" and, by force, [0032]. Own "still open" (image layering, host mpy-cross, publish/CI, GHCR cleanup) fully closed by five same-topic addenda through 2026-08-28 -- read the record for detail, not this row
 - [x] [0049] cibuildmp generates no matrix and chooses no host; `--archs auto`/`native`/`all` does the work instead | `--print-build-matrix`, both `default_runner`s, natmod's `runs-on` key and the `cibuildmp-matrix` action deleted -- cibuildwheel has no equivalent of any of them. Closes [0045]'s open half and [0044]'s "no per-target `runs-on` override", the latter by deletion. Its own "still open" names natmod's bare-host builds, now the top row above
 - [x] [0032] `qemu` wired to `ensure_image()` | closed by [0050] rather than on its own: `qemu` was the last bare-host build path in usermod and survived only because `toolchains.resolve()` kept working, so deleting that resolver forced it. **Still open above:** wiring it is not building it, and nothing ever has
 - [x] [0043] `unix` adopts cibuildwheel's model in full: native per-target images, PEP 600/656, full arch x libc matrix (epic) | the *decision* shipped -- implemented by [0044], whose row above carries the work that remains. Kept here as the design argument, which is still where the reasoning lives
@@ -209,6 +146,11 @@ later; and cheap-with-strong-evidence beats expensive-and-speculative.
 - [x] [0036] M2 — toolchain resolver | `toolchains.py`, prefix reconciliation, picolibc, `x86` multilib probe
 - [x] [0035] M1 — MicroPython + mpy-cross provisioning | `sources.py`, cache under `~/.cache/cibuildmp/`
 - [x] [0034] M0 — skeleton | CLI, config loader, identifier generation, `--print-build-identifiers`
+
+### Rejected
+
+- [x] [0052] Track B: a tree-addressed config mechanism | designed in detail, then reverted the same record for the build/skip-glob-only model that shipped instead -- [0051]'s own row above
+- [x] [0052] defaults folded into `[override."*"]` as a built-in entry | rejected by explicit user call -- "defaults як `[override."*"]` - зайве"; `default=` stays its own `Options.get()` parameter
 
 ## Reference (living, unnumbered)
 
