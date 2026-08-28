@@ -145,44 +145,22 @@ later; and cheap-with-strong-evidence beats expensive-and-speculative.
       seven runners already proven by `mp-usermod.yml`, not yet owned by
       cibuildmp
 - [ ] [0052] cibuildmp's config space is a tree, not a selector matrix
-      (epic) | surfaced while closing out [0051]'s own last open items --
-      cibuildmp's axes were never a genuine cross product the way
-      cibuildwheel's own are (`boards` only means anything for `esp32`,
-      `variant` on three of five usermod ports, natmod/usermod's schemas
-      almost entirely disjoint), so matching upstream's flat
-      matrix-plus-glob-selector model has been forcing a tree through a
-      flat, string-matched interface the whole time -- the same root
-      cause behind [0048]'s bug class, [0051]'s own key-collision
-      problem, and this session's own family-cascade-tier work, each
-      recurring in a new shape. The divergence from cibuildwheel is
-      argued and decided; the tree/matrix mechanism itself (TOML shape
-      beyond a sketch, whether `[[overrides]]`'s own glob `select`
-      survives alongside tree addressing or is replaced, migration for
-      every existing flat config) is still not designed. A same-day
-      follow-up chat session settled several independent sub-questions
-      along the way, each separately implementable without the tree
-      mechanism landing first: natmod's own identifier grammar
-      (`{tag}-mpy{major.minor}[-{arch}][+0x{flags}]`, tag now real and
-      visible), a `{name}-{version}-` artifact-filename prefix (two new/
-      extended global keys), a pre-build reachability audit as the
-      missing other half of `verify_output()`, an `arch_flags`-list dedup
-      bug, and a correction to [0013] (verified live: same-ABI tags are
-      *not* byte-identical -- `tools/mpy_ld.py`'s own x64 encoding
-      changed between `v1.28.0`/`v1.29.0` with no ABI bump -- but *are*
-      functionally interchangeable, also verified live via cross-loading
-      both tags' output on both tags' own `unix` binaries). Full account,
-      including which other landed records this touches and which it
-      does not, in the record's own text. Genuinely large -- on the
-      order of [0051]'s own Phase F+G combined by this record's own
-      estimate -- and, if it proceeds, likely needs to land **before**
-      [0038] rather than after, the same "don't tell three repos to
-      migrate twice" reasoning [0051] itself was sequenced by. **A full
-      step-by-step implementation plan (Track A: five independent
-      sub-items; Track B: the tree mechanism itself, B0-B6, sequenced
-      B4.1-B4.5) was added to the record 2026-08-26, later the same
-      session** -- still Proposed, not reviewed or accepted, no code
-      changed; read the record's own "Implementation plan" section
-      before picking this up
+      (epic) | **stale framing, corrected 2026-08-28: read this row as
+      history, not as the current open question.** Track B (an actual
+      tree-addressed config mechanism) was designed here, then reverted
+      the same record -- "table-presence activation, `--platform`/
+      `--only`/... all removed" addendum -- in favour of the far simpler
+      model that actually shipped: every platform always a candidate,
+      `build`/`skip` glob-matching the real identifier the only selector,
+      `[override]` the only per-target override. That is [0051]'s own row
+      above, already `[x]`. What the record's own closing text says is
+      genuinely still left, unrelated to any tree: **A6**, formalizing
+      `build-platforms.toml` as an explicit, documented resource (the
+      runtime `docker_image` resolution *design* is done, addendum
+      2026-08-27; the resource itself isn't formally written up yet) --
+      and the ~10 usermod ports `build-platforms.toml` already has
+      verified rows for but no real `build_<port>()` driver, flagged by
+      the user as the genuinely larger remaining piece
 
 ### Implemented
 

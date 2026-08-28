@@ -1,37 +1,23 @@
 # 0052 — cibuildmp's config space is a tree, not a selector matrix; the divergence from cibuildwheel is deliberate
 
-Status: Proposed — the divergence itself is argued and decided, and a wide
-follow-up chat session (2026-08-26, same day as [0051]'s own ninth
-addendum) settled several concrete sub-questions along the way: natmod's
-own identifier grammar (`mpy{major.minor}[-{arch}][+0x{flags}]`, dropping
-the literal word `natmod`; tag never part of it, kept out of the
-selector-facing name entirely and recorded as build provenance instead —
-`resolve_micropython_tags()` also now rejects two distinct tags sharing
-one ABI rather than silently picking one), that usermod's own identifier needs
-no equivalent change, a `{name}-{version}-` artifact-filename prefix (two
-new/extended global config keys), a pre-build companion to `verify_output()`'s
-own post-build audit, and a correction to [0013] (byte-identical is false,
-functional interchangeability is real and now verified) — all written up
-below and in [0013]'s own addendum. **The tree/matrix mechanism itself —
-TOML nesting depth and syntax, whether `[[overrides]]`'s own glob `select`
-is fully replaced by path-globbing or keeps a residual flattened-string
-fallback, migration from today's flat sibling tables — is still not
-designed.** Needs its own dedicated Explore/Plan pass before any code
-changes. Not scheduled. No code has changed as a result of this record;
-everything below is documentation for whichever session picks this up
-next.
-
-**Addendum (2026-08-26, later the same session): a full step-by-step
-implementation plan now exists** — see "Implementation plan" below, added
-in response to a direct request to turn this record's own open design
-questions into an actionable plan rather than leave them as a list.
-It is itself still **Proposed, not reviewed or accepted** — it proposes
-concrete answers to every item this record's own "not decided" section
-lists, argued from a fresh, direct rereading of every file the mechanism
-touches, but a proposal is not a decision: whoever reads it next still
-has to accept, amend or reject each one, the same way this record's own
-earlier sections distinguish "Decided" from "not decided" throughout. No
-code has changed.
+Status: In progress — **superseded framing, corrected 2026-08-28: read
+the paragraphs below (and "Track B" in the Implementation plan) as
+history, not the current design.** A tree-addressed config mechanism
+(Track B) was proposed here, then designed in detail, then reverted
+outright the same record ("table-presence activation, `--platform`/
+`--only`/... all removed" addendum, 2026-08-27) in favour of the far
+simpler model that actually shipped: every platform always a build
+candidate, `build`/`skip` glob-matching the real identifier as the only
+selector, `[override]` the only per-target override. Everything else
+Track A proposed (natmod's identifier grammar, `{name}-{version}-`
+filenames, the pre-build reachability audit, the [0013] correction) did
+land, unaffected by Track B's reversal. Two real items remain open, per
+this record's own closing text: **A6**, formalizing
+`build-platforms.toml` as an explicit, documented resource (the runtime
+`docker_image` resolution design is done, addendum below; the resource
+itself isn't formally written up as one yet), and the ~10 usermod ports
+`build-platforms.toml` already has verified rows for but no real
+`build_<port>()` driver.
 
 ## Where this came from
 
