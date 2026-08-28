@@ -110,17 +110,21 @@ tried and rejected) lives in `docs/records/`, not here.
   layers are ordered minimal-apt → toolchains → the rest of apt, so a
   package addition to the volatile half no longer invalidates the
   3.38GB toolchain layer. `build-essential` stays in `action.yml`'s apt
-  step regardless: `qemu`/`esp32` still build their own `mpy-cross` on
-  the host, unrelated to any of this. Records 0050, 0052.
+  step regardless: `qemu` still builds its own `mpy-cross` on the host,
+  unrelated to any of this -- `esp32` no longer does (see the esp32
+  bullet above). Records 0050, 0052.
 - **`pre-build-command` runs inside the build's own container**, the shape
   cibuildwheel's `before-all` has. It therefore runs unprivileged and cannot
   install system packages -- a project that needs a tool should fetch it, as
   `examples/wasm2mpy` now does for `wabt`.
-- **`esp32` has no Docker image and provisions ESP-IDF onto the host** --
-  the one platform that cannot satisfy the Docker-only rule. Still a
-  real identifier, still reachable by naming it in `build`, still built
-  by a config that does. `qemu` runs in its own published image like
-  every other usermod port.
+- **`esp32` now builds in a container too, closing the one remaining
+  exception to the Docker-only rule.** `build_esp32()` runs entirely
+  inside `esp_idf_base`; only ESP-IDF's own `git clone` stays host-side
+  (source, not a binary, the same reasoning `mpy_dir` mounts straight
+  into every image already relies on). `idf_version`/`idf_target` are
+  now resolved from each target's own real `build-platforms.toml` row
+  rather than a fixed default, so a RISC-V board (`esp32c2`/`c3`/`c6`)
+  installs the right toolchain, not Xtensa's. Records 0028, 0058.
 
 ### Removed
 
