@@ -188,7 +188,14 @@ def build_all(options: Options, targets: list[Target]) -> int:
     print(f"\ncibuildmp: {total} target(s) built in {total_duration:.1f}s")
     for result in results:
         print(f"  {result.identifier}: {result.output.name} ({result.size} bytes)")
-    write_step_summary(results, total_duration)
+    write_step_summary(
+        results,
+        total_duration,
+        build=options.build,
+        skip=options.skip,
+        overrides=options.overrides,
+        override_error=ConfigError,
+    )
     return 0
 
 

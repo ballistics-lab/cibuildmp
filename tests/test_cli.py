@@ -190,9 +190,9 @@ def test_real_build_writes_github_step_summary_when_set(monkeypatch, tmp_path):
     assert main([str(package_dir)]) == 0
 
     text = summary_path.read_text()
-    assert "1 target(s) built in 0.5s" in text
+    assert "1 target built in 0.5 seconds" in text
     assert "mpy6.3-x64" in text
-    assert "42 bytes" in text
+    assert "42 Bytes" in text
 
 
 def test_output_is_line_buffered_and_survives_a_stream_without_reconfigure(

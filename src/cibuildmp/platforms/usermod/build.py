@@ -107,6 +107,7 @@ import struct
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from . import espidf
 
@@ -659,7 +660,9 @@ def verify_unix_output(target: str, binary: Path) -> None:
     # EI_DATA (e_ident[5]) declares -- decoding it little-endian
     # unconditionally would misread every big-endian target, which for
     # this matrix means s390x.
-    byteorder = "big" if header[5] == _ELFDATA2MSB else "little"
+    byteorder: Literal["big", "little"] = (
+        "big" if header[5] == _ELFDATA2MSB else "little"
+    )
     actual = (int.from_bytes(header[18:20], byteorder), header[4], header[5])
     if actual != expected:
         raise UsermodBuildError(

@@ -67,11 +67,12 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
       corrected 2026-08-28 against an installed cibuildwheel 4.1.0: the folds
       are per *step* inside a build, not per build identifier -- the
       `[ n/m ] <identifier>` spine stays unfolded, and one active group at a
-      time is enforced, not conventional. `stepsummary.py` joined the scope by
-      the user's own call; it has parity of intent, not of content (no
-      per-target time, no SHA256, no resolved-options block). Both halves argue
-      for one module holding one accumulated result list, the way upstream's
-      `Logger` does. Nothing implemented yet
+      time is enforced, not conventional. **`stepsummary.py` half shipped
+      2026-08-28**: HTML table (Output/Size/Build identifier/Time/SHA256),
+      options `<details>` block, right-aligned footer -- append-not-truncate
+      and hand-formatted sizes/durations (no `humanize` dep) kept as
+      deliberate departures. Terminal log folding, colour/symbols and
+      `::error::`/`::warning::`/`::notice::` annotations still not started
 - [ ] [0046] nothing notices when a pin goes stale, except container images |
       independent of everything above, no urgency. `bin/update_docker.py` covers
       both image tables; emsdk is the cheapest thing left (its own

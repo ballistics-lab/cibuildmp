@@ -129,7 +129,14 @@ def run_resolved(
     )
     for result in results:
         print(f"  {result.identifier}: {result.output.name} ({result.size} bytes)")
-    write_step_summary(results, total_duration)
+    write_step_summary(
+        results,
+        total_duration,
+        build=options.build,
+        skip=options.skip,
+        overrides=options.overrides,
+        override_error=UsermodConfigError,
+    )
     return 0
 
 

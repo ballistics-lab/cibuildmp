@@ -191,8 +191,8 @@ class Board:
         board.variants.extend(
             sorted(
                 [
-                    Variant(*v, board=board)
-                    for v in board_json.get("variants", {}).items()
+                    Variant(name=name, text=text, board=board)
+                    for name, text in board_json.get("variants", {}).items()
                 ]
             )
         )
