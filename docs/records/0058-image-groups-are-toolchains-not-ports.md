@@ -218,6 +218,37 @@ The worst case a build now pulls is 2.06 GB against `natmod.Dockerfile`'s 4.09 G
   second, older `arm-none-eabi-gcc` on PATH. A C++ translation unit compiles for Cortex-M0+
   and yields ELF32/ARM — which is [0054]'s own "unverified" C++ question, answered for ARM.
 
+### Why `natmod_host` is not just a manylinux image
+
+The obvious objection, and it was measured rather than argued. natmod's `x86`/`x64` are
+native builds; pypa already publishes native images; `manylinux_2_28_x86_64` is already a
+cell in this project's own `unix` matrix. Reusing it would delete a Dockerfile and a pin.
+
+It does not work out, for four reasons, three of them found by running the image:
+
+- **Size, and no sharing to offset it.** `manylinux_2_28_x86_64` is 1.69 GB against
+  `natmod_host`'s 689 MB. The "it is pulled anyway" argument does not survive contact with
+  the consuming repos: natmod and usermod are *separate workflows* in both of them
+  (`mp-natmod.yml`/`mp-usermod.yml` in a7p, `natmod.yml`/`usermod.yml` in
+  micropython-bclibc), so a natmod job never pulls a `unix` image and there is nothing to
+  share with. The reuse is 2.5x more bytes for the same build.
+- **pyelftools is too old there.** `dnf` offers `python3-pyelftools 0.27` from EPEL;
+  [0012] sets the floor at `>=0.29` deliberately, and argues for it — the pin is shared
+  across every tag a user's config builds. Meeting it means `pip` into one of
+  `/opt/python/*/bin`, since the image has no system `pip3`.
+- **The `cross` prefixes do not exist on RHEL.** `py/dynruntime.mk` at v1.28.0 sets
+  `CROSS =` empty for both host arches and adds `-m32` for `x86`, but this table records
+  `i686-linux-gnu-`/`x86_64-linux-gnu-` for v1.29.0 and v1.30.0-preview. A Red Hat base has
+  no such prefixed binaries, so they would have to be symlinked — and the `i686` one would
+  have to genuinely target 32-bit, not just be plain `gcc` under another name.
+  `natmod_host` gets both from real Debian packages (`gcc-i686-linux-gnu`,
+  `gcc-13-multilib`) instead.
+- **It couples natmod's requirements into an image whose job is `unix`.**
+
+What the experiment did establish, and worth keeping: `gcc -m32` works in
+`manylinux_2_28_x86_64` and yields ELF32. Nothing about the 32-bit path is fragile or
+distribution-specific; `natmod_host` is a size and packaging choice, not a workaround.
+
 ### What the old `qemu.Dockerfile` could never do
 
 It installs `gcc-arm-none-eabi` and `libnewlib-arm-none-eabi` and nothing else, while
