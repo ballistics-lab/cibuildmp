@@ -67,7 +67,7 @@ def test_build_one_unix_writes_into_output_dir_identifier(tmp_path, monkeypatch)
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
 
-    monkeypatch.setattr(build_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
     (mpy_dir / "ports" / "unix").mkdir(parents=True)
 
     result = build_one(options, target, mpy_dir)
@@ -127,7 +127,7 @@ def test_build_one_threads_name_and_version_into_the_output_filename(
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
 
-    monkeypatch.setattr(build_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
     (mpy_dir / "ports" / "unix").mkdir(parents=True)
 
     result = build_one(options, target, mpy_dir)
@@ -200,7 +200,7 @@ def test_build_one_writes_combined_manifest_when_present(tmp_path, monkeypatch):
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
 
-    monkeypatch.setattr(build_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
     (mpy_dir / "ports" / "unix").mkdir(parents=True)
 
     build_one(options, target, mpy_dir)
@@ -235,19 +235,21 @@ def test_build_one_esp32_passes_board_through(tmp_path, monkeypatch):
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython.bin").write_bytes(FAKE_X86_64_ELF)
 
-    class _FakeIdf:
-        def env(self):
-            return {}
-
-    monkeypatch.setattr(build_module.subprocess, "run", fake_run)
+    monkeypatch.setenv("CIBMP_ESP32_DOCKER_IMAGE", "cibuildmp-esp32:local")
+    monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", fake_run)
     monkeypatch.setattr(
-        build_module.espidf, "resolve_esp_idf", lambda *a, **k: _FakeIdf()
+        build_module,
+        "container_mpy_cross",
+        lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build-stub" / "mpy-cross",
+    )
+    monkeypatch.setattr(
+        build_module.espidf, "fetch_esp_idf", lambda version, **k: tmp_path / "idf"
     )
     (mpy_dir / "ports" / "esp32").mkdir(parents=True)
 
     result = build_one(options, target, mpy_dir)
 
-    assert "BOARD=ESP32_GENERIC_S3" in captured["cmd"]
+    assert "BOARD=ESP32_GENERIC_S3" in " ".join(captured["cmd"])
     assert result.identifier == "esp32-ESP32_GENERIC_S3"
 
 
@@ -280,7 +282,7 @@ def test_build_fetches_micropython_and_skips_the_host_mpy_cross(tmp_path, monkey
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
 
-    monkeypatch.setattr(build_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
 
     results = build(
         options,
@@ -334,7 +336,7 @@ def test_build_groups_by_tag_and_fetches_once_per_group(tmp_path, monkeypatch):
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
 
-    monkeypatch.setattr(build_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
 
     targets = [
         UsermodTarget(port="unix", arch="manylinux_2_28_x86_64", tag="v1.28.0"),
@@ -377,7 +379,7 @@ def test_build_one_resolves_relative_output_dir_against_package_dir(
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
 
-    monkeypatch.setattr(build_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
     (mpy_dir / "ports" / "unix").mkdir(parents=True)
 
     result = build_one(options, target, mpy_dir)
@@ -410,7 +412,7 @@ def test_build_one_preserves_executable_bit(tmp_path, monkeypatch):
         produced.write_bytes(FAKE_X86_64_ELF)
         produced.chmod(0o755)
 
-    monkeypatch.setattr(build_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
     (mpy_dir / "ports" / "unix").mkdir(parents=True)
 
     result = build_one(options, target, mpy_dir)

@@ -57,9 +57,10 @@ It never builds an image itself — it pulls pre-built, pinned images
 (`ghcr.io/ballistics-lab/<target>`) and launches sibling containers, one
 per target, the same way cibuildwheel's own container runtime does. That
 covers natmod (a single `docker/natmod.Dockerfile` for all ten arches) and
-all of usermod except `esp32`, the one port that still provisions its own
-toolchain directly on the host (ESP-IDF, self-cloned and installed,
-pending a Dockerfile of its own — see Roadmap below). There is no
+every usermod port, `esp32` included — only the ESP-IDF `git clone` itself
+stays on the host (source, not a binary, the same reasoning `mpy_dir`
+mounts straight in everywhere else); installing ESP-IDF's own tools and
+building both run inside `esp_idf_base`. There is no
 "run `cibuildmp` itself inside Docker" story any more — a previous root
 `Dockerfile` offered that and was deleted once usermod needed to launch
 sibling containers of its own (Docker-in-Docker was ruled out); `uv tool
@@ -329,6 +330,11 @@ path for it.
   <td><code>qemu</code></td>
   <td>
     <code>MPS2_AN385</code><br>
+    <code>MICROBIT</code><br>
+    <code>MPS2_AN500</code><br>
+    <code>MPS3_AN547</code><br>
+    <code>NETDUINO2</code><br>
+    <code>SABRELITE</code>
   </td>
   <td>
     <code>arm-none-eabi-</code></td>
@@ -347,26 +353,10 @@ path for it.
 <tr>
   <td><code>qemu</code></td>
   <td>
-    <code>MICROBIT</code><br>
-    <code>MPS2_AN500</code><br>
-    <code>MPS3_AN547</code><br>
-    <code>NETDUINO2</code><br>
-    <code>SABRELITE</code> (5 other ARM boards)
-  </td>
-  <td><code>arm-none-eabi-</code></td>
-  <td>
-
-  ❌ not supported yet[^qemuboards]
-
-  </td>
-</tr>
-<tr>
-  <td><code>qemu</code></td>
-  <td>
     <code>POWERNV9</code> (PowerPC)
   </td>
   <td><code>powerpc64le-linux-gnu-</code></td>
-  <td>❌ not attempted</td>
+  <td>✅</td>
 </tr>
 <tr>
   <td><code>webassembly</code></td>
@@ -381,13 +371,13 @@ path for it.
   <td>
     <code>ESP32_GENERIC</code>
   </td>
-  <td>ESP-IDF v5.5.1, self-cloned + installed</td>
+  <td><code>esp_idf_base</code> (Docker) -- ESP-IDF cloned on the host, installed in-container</td>
   <td>✅</td>
 </tr>
 <tr>
   <td><code>esp32</code></td>
   <td>other ESP32-family boards</td>
-  <td>same ESP-IDF resolver</td>
+  <td>same, per-board <code>idf_target</code></td>
   <td>⚠️ unverified</td>
 </tr>
 <tr>
@@ -455,8 +445,6 @@ path for it.
 [^emulated]: `ppc64le`/`s390x`/`riscv64`, both libcs — published (`resources/pinned_docker_images.toml` has a real digest for each) and reachable by naming them in `build`, but native to no runner GitHub offers, so no real build has ever run through one: the six-cell equivalent of `qemu`'s own gap before it got a dedicated CI leg. Point `CIBMP_UNIX_<TARGET>_DOCKER_IMAGE` at a locally-built image, or an emulated one, to work on one of these.
 
 [^nodriver]: `resources/build-platforms.toml` has real, independently-verified rows for each of these ports (walked against a real MicroPython checkout the same way every ✅ row above was); a config can name their identifiers today. What's missing is a `build_<port>()` driver in `platforms/usermod/build.py` to actually run one — not a scope decision, just not built yet.
-
-[^qemuboards]: `resources/build-platforms.toml` has real, independently-verified rows for these boards too; `build_qemu()`'s own board list (`platforms/usermod/build.py`) only knows `MPS2_AN385`/`VIRT_RV32`/`VIRT_RV64` and raises `qemu board '<board>' not supported yet` for the rest ([0058]'s own note: "`QEMU_BOARD_CROSS` itself, three boards out of the nine in the table, is what `images.<board>` replaces"). Live-caught 2026-08-28 by `test-platforms.yml`'s own broad sweep, the first run ever to build a qemu identifier beyond the one leg `build-examples.yml` proves.
 
 No Windows or macOS host is needed for any of the ✅/⚠️ usermod targets
 above, `windows`'s own three arches included — every toolchain there is

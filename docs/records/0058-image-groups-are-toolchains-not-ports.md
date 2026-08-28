@@ -332,6 +332,27 @@ fifteen `ghcr.io/ballistics-lab/...` images — a registry-side content loss und
 were never touched, not a staleness question ([0046]'s own subject) but a closely related one,
 written up as its own record: [0059].
 
+## Addendum, 2026-08-28 (second) — `QEMU_BOARD_CROSS` closes: nine boards, not three
+
+The header's own "still open" line and the "the split closes a latent gap rather than moving
+one" section above both name this exactly: `platforms/usermod/build.py`'s `QEMU_BOARD_CROSS`
+only had toolchain prefixes for `MPS2_AN385`/`VIRT_RV32`/`VIRT_RV64`, while this table's own
+`images.<board>` map (above) already resolved a real image for all nine boards. Every remaining
+prefix was already sitting in this table's own per-row `cross` field, verified stable across
+v1.24.0..v1.29.0 -- nothing new to derive, just not yet copied into the dict. Closed by copying
+it: `MICROBIT`/`MPS2_AN500`/`MPS3_AN547`/`NETDUINO2`/`SABRELITE` (`arm-none-eabi-`, `arm_embedded`)
+and `POWERNV9` (`powerpc64le-linux-gnu-`, `ppc64le_linux`) added.
+
+`POWERNV9` needed its own real proof rather than trusting the table: no qemu board had ever built
+through `ppc64le_linux` before ([0058]'s own verification table above only ever ran a bare
+`gcc`/`#include` smoke test against it). Confirmed live: `cibuildmp examples/template --build
+v1.29.0-qemu-POWERNV9` produced a genuine PowerPC64 `firmware.elf` (584640 bytes). All eight
+other boards confirmed live the same way, individually, not inferred from the table alone --
+`MICROBIT` first, then `MPS2_AN500`/`MPS3_AN547`/`NETDUINO2`/`SABRELITE` in one invocation, all
+nine boards across both `v1.28.0`/`v1.29.0` tags green in a real `test-platforms.yml` run the same
+session (previously the only qemu identifier that workflow's own broad sweep could build at all
+was `MPS2_AN385`, the one board CI already proved via `build-examples.yml`'s own dedicated leg).
+
 [0010]: 0010-pinned-data-in-resources.md
 [0012]: 0012-pyelftools-ar-own-deps.md
 [0026]: 0026-one-docker-image-per-port.md

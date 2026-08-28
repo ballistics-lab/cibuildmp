@@ -1,7 +1,8 @@
 # 0028. Full migration plan: container-per-port for usermod
 
-- Status: Implemented (steps 1-3 substantially landed; `esp32.Dockerfile` still not started; superseded in part by [0033])
-- Related: [0019], [0025], [0026], [0029], [0030], [0031], [0032], [0033]
+- Status: Implemented. **Closed 2026-08-28** (second addendum, below): `esp32` was the last
+  bare-host port, now migrated to `esp_idf_base` ([0058]). Superseded in part by [0033]
+- Related: [0019], [0025], [0026], [0029], [0030], [0031], [0032], [0033], [0053], [0058]
 
 <!-- migrated verbatim from docs/BACKLOG.md lines 1943-2654 -->
 
@@ -711,3 +712,56 @@ not after:**
   the right shape to keep following -- `windows` is the natural next
   slice (apt-only toolchain, no large download like `esp32`'s
   ESP-IDF or `webassembly`'s emsdk, closest in shape to `unix`).
+
+## Addendum, 2026-08-28 — closed: `esp32` was the last bare-host port
+
+`unix` ([0043]/[0044]), `windows` ([0042]), `webassembly` and `qemu` ([0032]/[0058]) all
+migrated to per-port containers in the sessions after this plan was written. `esp32` stayed
+bare-host the whole time -- [0050] even took it out of the default port set specifically
+because it was the one remaining bare-host build path -- until now: `build_esp32()`
+(`usermod/build.py`) runs entirely inside `esp_idf_base` ([0058], the image this plan's own
+D19 already flagged Docker for and then dropped after live-testing found the bare-host path
+"just worked"). Only `espidf.fetch_esp_idf()`'s `git clone` stays host-side, on the same
+"source, not a binary" reasoning `mpy_dir` itself is mounted straight into every image with
+no rebuild -- see `usermod/espidf.py`'s own module docstring for the full account of why the
+bare-host path finally broke (ESP-IDF's own `install-python-env` refusing to run from inside
+cibuildmp's own `uv tool install` venv, once `esp32` was exercised broadly rather than by
+hand) and what changed.
+
+Two more real bugs this session's own live run found, neither visible from review:
+
+- **`examples/template` had no `micropython.cmake` at all.** Every other usermod port here is
+  a Make port, whose `USER_C_MODULES=` value (a directory, D16) happens to also cover this
+  project's own `manifest = "usermod/manifest.py"` as a mount side effect. `esp32` is a CMake
+  port -- `USER_C_MODULES=` there is a single `.cmake` *file* -- so mounting just that file
+  left the sibling `usermod/manifest.py` unreachable inside the container the first time
+  `esp32` ever really built through it (`CMake Error ... [Errno 2] No such file or
+  directory`), and once that was fixed, a second error showed `examples/template` had simply
+  never had a `micropython.cmake` to find in the first place -- `esp32` (and `rp2` and every
+  other CMake port [0053] still has no driver for) had never been exercised against this
+  project's own fixture at all before this session. Fixed by mounting
+  `Path(opts.user_c_modules).parent` instead of the bare file (bringing esp32 up to the same
+  directory-level mount coverage every Make port already had) and by writing a real
+  `examples/template/micropython.cmake`, mirrored from upstream's own
+  `examples/usercmodule/usercmodule.cmake`.
+- **`fetch_esp_idf()`'s plain `--recursive` clone was needlessly slow.** MicroPython's own
+  `ports/esp32/README.md` says so directly: "You don't need a full recursive clone; see the
+  `ci_esp32_setup` function in `tools/ci.sh`." That function clones `--depth 1` with no
+  `--recursive` at all, then `git submodule update --init --recursive --filter=tree:0` as a
+  separate step -- a treeless partial clone, its own comment explaining the choice over the
+  more obvious `--shallow-submodules`: "works when the submodule commit isn't a head."
+  `fetch_esp_idf()` now does the same two-step clone.
+
+Live-verified, not just implemented: a real `examples/template --build v1.29.0-esp32-*`
+invocation produced a genuine `micropython.bin` with the project's own C module
+(`template_usermod.c`/`template_core.c`) linked into it, through the full container path --
+install, `mpy-cross` (moved out of `orchestrate.py`'s own `_HOST_MPY_CROSS_PORTS`, matching
+`unix`/`windows`/`webassembly`), and `make` itself, none of it touching the bare host.
+
+[0032]: 0032-unix-docker-default-and-webassembly-wiring.md
+[0042]: 0042-windows-docker-wiring-and-resolver-removal.md
+[0043]: 0043-unix-adopts-cibuildwheel-native-image-model.md
+[0044]: 0044-unix-native-images-landed.md
+[0050]: 0050-natmod-is-docker-only.md
+[0053]: 0053-usermod-ports-without-a-build-driver.md
+[0058]: 0058-image-groups-are-toolchains-not-ports.md

@@ -1,43 +1,58 @@
-"""ESP-IDF provisioning for `esp32`-family usermod ports (D19): the same
-official recipe `build-usermod-esp32`'s own composite action already uses
-(`git clone --recursive` + `install.sh` + `export.sh`), not Docker.
+"""ESP-IDF provisioning for `esp32`-family usermod ports (D19).
 
-Docker was the original plan D19 flagged as worth revisiting for this port
--- usermod ports have real system dependencies a cross-toolchain tarball
-cannot express, unlike every natmod arch. Dropped after live-testing, not
-assumed: Docker does not even run in this project's own dev sandbox (no
-daemon), and the official clone+install path works there directly with no
-isolation layer needed -- the same "a cross-compile that runs fine on the
-build host costs nothing extra from a container" reasoning **M2**'s own
-"why not docker for x86" note already made, just confirmed here for a
-second port rather than re-litigated. The one real gap this fixes is
-D19's actual complaint -- "No caching yet... Left as a known follow-up" --
-not the toolchain mechanism itself, which already works.
+**Went Docker 2026-08-28** ([0028]/[0053]'s own still-open gap, closed for
+this port): `build_esp32()` (`usermod/build.py`) now runs entirely inside
+`esp_idf_base` ([0058]), not on the bare host. The bare-host path this
+module used to own -- `git clone --recursive` + `idf_tools.py install` +
+`install-python-env`, the same recipe `build-usermod-esp32`'s own
+composite action already used -- broke the moment `esp32` was exercised
+broadly rather than by hand: `idf_tools.py install-python-env` refuses to
+create a venv from inside one that is already active, and cibuildmp's own
+`uv tool install` puts every invocation inside exactly that (live-caught
+2026-08-28, `test-platforms.yml`'s own broad sweep -- 83 of 94 real
+failures in one run were this single cause). Docker sidesteps it by
+construction: the container's own `python3` is never inside cibuildmp's
+venv to begin with.
 
-Verified live: a real `v5.5.1` clone, `idf_tools.py install
---targets=esp32` + `install-python-env`, then a full `make -C
-ports/esp32 BOARD=ESP32_GENERIC` produced a genuine `micropython.bin`.
-One real environment finding along the way: `openocd-esp32`'s own binary
-needs `libusb-1.0.so.0` to run its post-install self-check, missing in a
-minimal sandbox -- an ordinary Linux runtime dependency any real dev
-machine or CI image already has (`apt install libusb-1.0-0` fixed it),
-not something a toolchain tarball could supply either way.
+This is also the same class of bug `usermod/build.py`'s own
+`container_mpy_cross()` already exists to prevent, the other direction:
+`idf_tools.py install` downloads real compiled binaries (an xtensa or
+riscv32 gcc, `openocd`, ...), not source -- installing them on the host
+and mounting the result into a *different* base image risks the exact
+"built against one glibc, run against another" mismatch
+`container_mpy_cross()`'s own docstring documents hitting for real.
+`esp_idf_base.Dockerfile`'s own comment already says so: "the cache must
+be populated from inside this image, not on the host."
+
+What stays host-side: `fetch_esp_idf()` below, since a `git clone` is
+source, not a binary -- the same reasoning that lets `mpy_dir` itself, and
+`pyelftools`/`ar` ([0012]), mount straight from the host into any image
+with no rebuild. Only the *tools* (`idf_tools.py install`, and by
+extension `make` itself, which needs them on `PATH`) need to run where
+they were installed.
 
 Deliberately not `toolchains.py`'s `ToolchainSpec`/`resolve()` shape, the
 same reason the since-deleted `usermod/emsdk.py` wasn't: there is no
-single `<prefix>gcc` to find on `PATH` here, and `idf_tools.py export`'s own env additions (PATH,
-IDF_PYTHON_ENV_PATH, OPENOCD_SCRIPTS, ESP_ROM_ELF_DIR, ...) are resolved
-by asking ESP-IDF's own tool for them -- delegated, not reimplemented,
-the same D2 "delegate the compile, own the environment" split every other
-port here already follows.
+single `<prefix>gcc` to find on `PATH` here, and `idf_tools.py export`'s
+own env additions (PATH, IDF_PYTHON_ENV_PATH, OPENOCD_SCRIPTS,
+ESP_ROM_ELF_DIR, ...) are resolved by asking ESP-IDF's own tool for them
+-- delegated, not reimplemented, the same D2 "delegate the compile, own
+the environment" split every other port here already follows. `build_esp32()`
+now does that delegation *inside* the container too (a `bash -c` script,
+not a second Python-side parse of `idf_tools.py export`'s output) --
+[0052]'s own "`pre_checkout`/`post_checkout` stay documentation, not
+something executed as a shell string at build time" is about *stored
+config* driving execution, not about this module's own code constructing
+one; the script below is built from real paths this module resolves, the
+same way every other port's `*_make_command()` builds a typed
+`list[str]`, just wrapped in `bash -c` because installing (once, cached)
+and building both need to happen in the one container invocation that has
+this cell's own tools on `PATH`.
 """
 
 from __future__ import annotations
 
-import os
 import subprocess
-import sys
-from dataclasses import dataclass
 from pathlib import Path
 
 from ...sources import cache_root, cached_dir
@@ -45,23 +60,15 @@ from ...sources import cache_root, cached_dir
 IDF_GIT_URL = "https://github.com/espressif/esp-idf.git"
 
 
-# The last host-side toolchain resolver in usermod. `emsdk.py` and
-# `llvmmingw.py` were both deleted once `webassembly` and `windows` went
-# Docker-only (D30/D32) and their pins moved into the port Dockerfiles
-# that bake those toolchains in. This one survives only because `esp32`
-# has no Docker image yet (D28's own not-started `esp32.Dockerfile`) --
-# when it gets one, this module follows them.
-
-
 class EspIdfError(Exception):
     pass
 
 
-def _idf_dir(version: str, root: Path | None) -> Path:
+def idf_dir(version: str, root: Path | None = None) -> Path:
     return (root or cache_root()) / "esp-idf" / version / "idf"
 
 
-def _tools_dir(version: str, idf_target: str, root: Path | None) -> Path:
+def tools_dir(version: str, idf_target: str, root: Path | None = None) -> Path:
     return (root or cache_root()) / "esp-idf" / version / "tools" / idf_target
 
 
@@ -73,26 +80,48 @@ def fetch_esp_idf(
     usermod compiles into a firmware built against IDF's own components,
     while a natmod only ever borrows the xtensa compiler `install.sh`
     downloads (**M2**'s own `xtensawin` finding).
+
+    Two `git` calls, not `clone --recursive` in one -- MicroPython's own
+    `tools/ci.sh` (`ci_esp32_idf_setup`), read directly rather than
+    guessed: a plain `--depth 1` clone of the superproject, then `git -C
+    esp-idf submodule update --init --recursive --filter=tree:0` for the
+    submodules. That script's own comment explains the `--filter=tree:0`
+    choice over the more obvious `--shallow-submodules`: "isn't quite as
+    good as --shallow-submodules, but is smaller than full clones and
+    works when the submodule commit isn't a head" -- a submodule pinned to
+    a non-tip commit is exactly the case `--recursive` alone hits hardest,
+    since every one of its dozens of submodules then clones full history.
     """
-    dest = _idf_dir(version, root)
+    dest = idf_dir(version, root)
 
     def populate(staging: Path) -> Path:
         target = staging / "idf"
-        command = [
+        clone_command = [
             "git",
             "clone",
             "--depth",
             "1",
-            "--recursive",
             "--branch",
             version,
             IDF_GIT_URL,
             str(target),
         ]
+        submodule_command = [
+            "git",
+            "-C",
+            str(target),
+            "submodule",
+            "update",
+            "--init",
+            "--recursive",
+            "--filter=tree:0",
+        ]
         if quiet:
-            command.insert(2, "--quiet")
+            clone_command.insert(2, "--quiet")
+            submodule_command.insert(4, "--quiet")
         try:
-            subprocess.run(command, check=True)
+            subprocess.run(clone_command, check=True)
+            subprocess.run(submodule_command, check=True)
         except subprocess.CalledProcessError as exc:
             raise EspIdfError(f"cloning esp-idf {version} failed: {exc}") from exc
         return target
@@ -101,87 +130,3 @@ def fetch_esp_idf(
     if was_cached and not quiet:
         print(f"  esp-idf {version}: cached at {result}")
     return result
-
-
-def _resolve_esp_idf_tools(
-    idf_dir: Path, version: str, idf_target: str, *, root: Path | None, quiet: bool
-) -> Path:
-    """Install (or reuse a cached) toolchain + Python env for
-    `idf_target`, cached by `(version, idf_target)` -- the real gap D19
-    flagged: the composite action's own recipe re-downloads both on every
-    run.
-    """
-    dest = _tools_dir(version, idf_target, root)
-
-    def populate(staging: Path) -> Path:
-        tools_dir = staging / "tools"
-        tools_dir.mkdir()
-        env = {**os.environ, "IDF_TOOLS_PATH": str(tools_dir)}
-        tools_py = idf_dir / "tools" / "idf_tools.py"
-        for command in (
-            [sys.executable, str(tools_py), "install", f"--targets={idf_target}"],
-            [sys.executable, str(tools_py), "install-python-env"],
-        ):
-            try:
-                subprocess.run(command, env=env, check=True)
-            except subprocess.CalledProcessError as exc:
-                raise EspIdfError(
-                    f"esp-idf tool install failed: `{' '.join(command)}`: {exc}"
-                ) from exc
-        return tools_dir
-
-    result, was_cached = cached_dir(dest, populate, force=False)
-    if was_cached and not quiet:
-        print(f"  esp-idf tools ({version}, {idf_target}): cached at {result}")
-    return result
-
-
-@dataclass(frozen=True)
-class ResolvedEspIdf:
-    idf_dir: Path
-    tools_dir: Path
-
-    def env(self, base: dict[str, str] | None = None) -> dict[str, str]:
-        """The environment `make -C ports/esp32` needs to run under --
-        asks `idf_tools.py export` for it (PATH, `IDF_PYTHON_ENV_PATH`,
-        `OPENOCD_SCRIPTS`, `ESP_ROM_ELF_DIR`, ...) rather than
-        reconstructing that resolution by hand, plus `IDF_PATH` itself,
-        which `export.sh` sets as a separate step before ever calling
-        that tool.
-        """
-        base_env = dict(os.environ if base is None else base)
-        export_env = {**base_env, "IDF_TOOLS_PATH": str(self.tools_dir)}
-        tools_py = self.idf_dir / "tools" / "idf_tools.py"
-        try:
-            result = subprocess.run(
-                [sys.executable, str(tools_py), "export", "--format", "key-value"],
-                env=export_env,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-        except subprocess.CalledProcessError as exc:
-            raise EspIdfError(f"esp-idf export failed: {exc}") from exc
-
-        merged = dict(base_env)
-        merged["IDF_PATH"] = str(self.idf_dir)
-        for line in result.stdout.splitlines():
-            key, sep, value = line.partition("=")
-            if not sep:
-                continue
-            if key == "IDF_DEACTIVATE_FILE_PATH":
-                # Only meaningful for later `export --deactivate` in an
-                # interactive shell -- nothing here reactivates a shell.
-                continue
-            merged[key] = value.replace("$PATH", base_env.get("PATH", ""))
-        return merged
-
-
-def resolve_esp_idf(
-    version: str, idf_target: str, *, root: Path | None = None, quiet: bool = False
-) -> ResolvedEspIdf:
-    idf_dir = fetch_esp_idf(version, root=root, quiet=quiet)
-    tools_dir = _resolve_esp_idf_tools(
-        idf_dir, version, idf_target, root=root, quiet=quiet
-    )
-    return ResolvedEspIdf(idf_dir=idf_dir, tools_dir=tools_dir)

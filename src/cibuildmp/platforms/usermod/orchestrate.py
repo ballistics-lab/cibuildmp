@@ -205,21 +205,24 @@ def _dest_name(
 # `MICROPY_MPYCROSS=` at the one built inside the image instead, so the
 # host copy is dead weight for them: seven seconds of compiling, plus a
 # bare-host build in a mode whose whole point is that it does not do
-# those.
+# those. `esp32` joined them 2026-08-28 (`build_esp32()` went Docker,
+# `usermod/espidf.py`'s own docstring has the full reasoning) -- it is no
+# longer in this set.
 #
-# `esp32` and `qemu` still need it. `esp32`'s `make` runs outside Docker
-# entirely (ESP-IDF is provisioned, not containerised -- D19), and
-# `qemu` passes no `MICROPY_MPYCROSS`, so both reach
-# `mpy-cross/build/mpy-cross` on the host through `py/mkrules.mk`'s own
-# default. `qemu` *is* wired to `ensure_image()` (`build_qemu()`), same
-# as every other port here -- this frozenset is about which port still
-# needs a *host* mpy-cross alongside the containerised build, not about
-# which ports reach a container at all. `esp32` is the one still out of
-# scope, pending [0028] (no Dockerfile for it yet).
+# `qemu` is the one port left here: it passes no `MICROPY_MPYCROSS`, so it
+# reaches `mpy-cross/build/mpy-cross` on the host through
+# `py/mkrules.mk`'s own default even though `build_qemu()` *is* wired to
+# `ensure_image()` like every other port -- this frozenset is about which
+# port still needs a *host* mpy-cross alongside its containerised build,
+# not about which ports reach a container at all. Whether this is exactly
+# the mismatch `container_mpy_cross()` exists to prevent, just not yet hit
+# for `qemu` specifically, or a real difference between its targets and
+# `esp32`'s, is not established here -- not touched by this change,
+# flagged rather than assumed either way.
 #
 # Built once for the whole run rather than per target, unchanged -- this
 # only stops building it for runs that will never look at it.
-_HOST_MPY_CROSS_PORTS = frozenset({"esp32", "qemu"})
+_HOST_MPY_CROSS_PORTS = frozenset({"qemu"})
 
 
 def build_one(
