@@ -211,11 +211,11 @@ path for it.
             <code>manylinux_2_39_mipsel</code>
         </td>
         <td>
-            native image[^fn1]<br>
-            native image[^fn1]<br>
-            native image[^fn1]<br>
-            native image[^fn1]<br>
-            cross image[^fn3]
+            native image<a href="#fn1"><sup>[1]</sup></a><br>
+            native image<a href="#fn1"><sup>[1]</sup></a><br>
+            native image<a href="#fn1"><sup>[1]</sup></a><br>
+            native image<a href="#fn1"><sup>[1]</sup></a><br>
+            cross image<a href="#fn1"><sup>[3]</sup></a>
         </td>
         <td>✅</td>
     </tr>
@@ -227,7 +227,7 @@ path for it.
             <code>musllinux_1_2_aarch64</code><br>
             <code>musllinux_1_2_armv7l</code>
         </td>
-        <td>native image[^fn1]</td>
+        <td>native image<a href="#fn1"><sup>[1]</sup></a></td>
         <td>✅</td>
     </tr>
     <tr>
@@ -237,8 +237,8 @@ path for it.
             <code>manylinux_2_28_s390x</code><br>
             <code>manylinux_2_39_riscv64</code>
         </td>
-        <td>native image[^fn1]</td>
-        <td>⚠️[^fn2]</td>
+        <td>native image<a href="#fn1"><sup>[1]</sup></a></td>
+        <td>⚠️<a href="#fn1"><sup>[2]</sup></a></td>
     </tr>
     <tr>
         <td><code>unix / musllinux</code></td>
@@ -247,8 +247,8 @@ path for it.
             <code>musllinux_1_2_s390x</code><br>
             <code>musllinux_1_2_riscv64</code>
         </td>
-        <td>native image[^fn1]</td>
-        <td>⚠️[^fn2]</td>
+        <td>native image<a href="#fn1"><sup>[1]</sup></a></td>
+        <td>⚠️<a href="#fn1"><sup>[2]</sup></a></td>
     </tr>
     <tr>
         <td><code>qemu</code></td>
@@ -308,7 +308,7 @@ path for it.
         <td>
             <code>rp2</code> / <code>mimxrt</code> / <code>samd</code> / <code>stm32</code> / <code>psoc-edge</code> / <code>alif</code> / <code>esp8266</code> / <code>cc3200</code> / <code>renesas-ra</code> / <code>nrf</code>
         </td>
-        <td>verified <code>(tag, board)</code> rows exist[^fn4]</td>
+        <td>verified <code>(tag, board)</code> rows exist<a href="#fn1"><sup>[4]</sup></a></td>
         <td>—</td>
         <td>❌ no build driver yet</td>
     </tr>
