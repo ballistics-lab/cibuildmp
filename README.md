@@ -32,8 +32,9 @@ action any more (moved off that on purpose: `cibuildmp` itself launches
 sibling Docker containers for usermod's own per-port builds, which needs
 to run on the bare runner rather than inside one already, see
 `docs/BACKLOG.md`'s own D26/D28). See
-[`docs/BACKLOG.md`](docs/BACKLOG.md) for the design decisions and what
-is implemented so far.
+[`docs/0000-TRACKER.md`](docs/0000-TRACKER.md) for the design decisions and what
+is implemented so far -- `docs/BACKLOG.md` is a redirect into
+[`docs/records/`](docs/records/) now, not itself the plan of record (record 0041).
 
 ```console
 $ cibuildmp --dry-run
@@ -431,9 +432,10 @@ one.
 
 ## Roadmap
 
-`cibuildmp` is the roadmap. [`docs/BACKLOG.md`](docs/BACKLOG.md) is the
-plan of record: the decisions taken (and why), what is implemented, and
-what is deliberately deferred.
+`cibuildmp` is the roadmap. [`docs/0000-TRACKER.md`](docs/0000-TRACKER.md) is the
+plan of record: the decisions taken (and why, in [`docs/records/`](docs/records/)),
+what is implemented, and what is deliberately deferred. `docs/BACKLOG.md` is a
+short redirect into that scheme now (record 0041), not itself the plan.
 
 Where it stands: target selection, MicroPython and `mpy-cross`
 provisioning, cross-toolchain resolution, and the natmod build itself

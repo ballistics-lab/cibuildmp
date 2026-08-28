@@ -96,12 +96,12 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 - [ ] [0040] usermod test-runner axis | not scheduled ([0006] holds); four of
       seven runners already proven by `mp-usermod.yml`, not yet owned by
       cibuildmp
-- [ ] [0052] `build-platforms.toml` isn't formalized as an explicit, documented resource (A6) | the `docker_image` runtime-resolution design is done (2026-08-27 addendum), the resource itself isn't written up as one yet
 - [ ] [0053] ten usermod ports have verified rows in `build-platforms.toml` but no real `build_<port>()` driver | `rp2`, `mimxrt`, `samd`, `stm32`, `psoc-edge`, `alif`, `esp8266`, `cc3200`, `renesas-ra`, `nrf` -- flagged by the user as the genuinely larger remaining piece; `rp2` also has its own row under [0022]
 
 ### Implemented
 
 - [x] [0051] one selector for both modes, and an identifier that names what a build is compatible with (epic, points 1-8, phased E-I) | landed 2026-08-26: both modes' version axes are real lists, `select()`/`matches()` unified in `cibuildmp/selector.py`, config flattened to sibling per-platform tables reached via a `PLATFORM_FAMILY` registry, one shared `[[overrides]]` with `inherit`. Nine addenda; superseded by [0052]'s own later retraction of the table/registry layer itself -- see that record
+- [x] [0052] config is build/skip glob + `[override]` only -- no per-platform tables, `--platform`/`--only`/`--archs auto`/`--enable` | Track A (natmod identifier grammar, `{name}-{version}-` filenames, per-tag arch availability) and the table/`[[overrides]]`-retraction addenda all landed 2026-08-27/28; Track B (a tree config mechanism) rejected, see Rejected below; A6 closed the same way
 - [x] [0048] `build`/`skip` are top-level in both modes, and a misplaced or misspelt key in a mode table is an error | fixed 2026-08-26; the audit it asked for also found `CIBMP_MICROPYTHON`/`CIBMP_OUTPUT_DIR` silently ignored in usermod mode, and `UsermodConfigError` never caught by the CLI -- both fixed alongside
 - [x] [0031] the musllinux column | four of seven cells green, required, and in the default axis -- every musl cell with a runner it is native to. The mechanism is proven end to end and the column is no longer a separate story: its three remaining cells are `ppc64le`/`s390x`/`riscv64`, which is [0044]'s descope question above and not a musl question at all
 - [x] [0045] `--only` is a filter, not a forced identifier; `--archs auto`/`native`/`all` | both halves done -- `--only` resolves against every identifier that exists, and the vocabulary landed with [0049], which is also where the caution about `--print-build-identifiers` and host-dependence was resolved

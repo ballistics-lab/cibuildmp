@@ -1,16 +1,26 @@
 # The real natmod/usermod build-eligibility fact table (record 0052, Track
-# A6). Not yet read by any resolver code -- resources.py has no loader for
-# this file yet, and nothing in src/ consumes it. It exists on its own first,
-# built up section by section, reviewed before anything is wired to it.
+# C) -- the source of truth `resources.build_platforms_data()` loads and
+# `platforms/natmod/targets.py`/`platforms/usermod/targets.py` resolve every
+# tag, arch and board against. Neither module computes an axis product:
+# every `Target`/`UsermodTarget` is one real row here, and a tag or arch
+# this file has never walked is a loud `UnknownTagError`/`UnknownArchError`
+# at resolution time, not a silent guess. `[natmod]` covers five ports'
+# worth of natmod arches across every MicroPython tag since v1.12;
+# `[usermod.<port>]` covers fifteen usermod ports, of which
+# `platforms/usermod/targets.py`'s own `KNOWN_PORTS` wires five with a real
+# `build_<port>()` driver -- the other ten have verified rows here but no
+# build pipeline yet (record 0053).
 #
-# Every row is a verified fact, not a computed cross product. [natmod]'s rows
-# come straight from walking each real MicroPython tag's own
-# py/persistentcode.h enum and py/dynruntime.mk (bin/refresh_natmod_archs.py,
-# re-run against these exact tags -- not hand-written, not extrapolated from a
-# sample). [usermod.unix]/[usermod.windows]'s arch lists are flat axes, not
-# per-tag rows, because both -- unlike natmod's -- were independently verified
-# to be genuine cross products across every one of these tags (no
-# dynruntime.mk-style gate found in either one's own port source).
+# Kept current by `bin/refresh_natmod_archs.py`/`bin/refresh_usermod_boards.py`,
+# re-run against real MicroPython checkouts on each new tag -- never hand-
+# written, never extrapolated from a sample.
+#
+# [natmod]'s rows come straight from walking each real MicroPython tag's own
+# py/persistentcode.h enum and py/dynruntime.mk. [usermod.unix]/
+# [usermod.windows]'s arch lists are flat axes, not per-tag rows, because
+# both -- unlike natmod's -- were independently verified to be genuine cross
+# products across every one of these tags (no dynruntime.mk-style gate found
+# in either one's own port source).
 #
 # `date` is resolvable for every row in every section, via [tags] below,
 # not only natmod's or only the preview tag's -- a lone preview row is
