@@ -126,7 +126,8 @@ jobs:
           CIBMP_VERSION: 0.0.0-ci
           # Disables cibuildmp's own native per-target step summary
           # (stepsummary.py) -- 219 legs each writing their own table would
-          # bury the one aggregate table `summary` below builds instead.
+          # bury the one aggregate table `aggregate-results` below builds
+          # instead.
           CIBMP_DISABLE_GITHUB_STEP_SUMMARY: "1"
         with:
           package-dir: examples/template
@@ -137,14 +138,22 @@ jobs:
         run: |
           icon="✅"
           [ "${{ steps.build.outcome }}" = "success" ] || icon="❌"
-          echo "| \`${{ matrix.build }}\` | $icon ${{ steps.build.outcome }} |" > result.md
+          echo "| \`${{ matrix.build }}\` | $icon ${{ steps.build.outcome }} |" > "result-${{ matrix.build }}.md"
 
+      # The file inside each artifact must itself carry the identifier, not
+      # just the artifact's own name -- `aggregate-results`'s own `merge-multiple:
+      # true` below flattens every one of these ~150 artifacts into one
+      # directory by *filename*. A plain `result.md` in every one of them
+      # collided there (live-caught 2026-08-28: 146 artifacts uploaded,
+      # `results/*.md` resolved to exactly 1 after the merge, so the final
+      # table showed only the very last leg written) -- each leg's own file
+      # needs a name no other leg can produce.
       - name: Upload result
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: result-${{ matrix.build }}
-          path: result.md
+          path: result-${{ matrix.build }}.md
           retention-days: 1
 
   # Same job, same steps, on GitHub's own arm64 runner -- see the comment
@@ -176,23 +185,35 @@ jobs:
         run: |
           icon="✅"
           [ "${{ steps.build.outcome }}" = "success" ] || icon="❌"
-          echo "| \`${{ matrix.build }}\` | $icon ${{ steps.build.outcome }} |" > result.md
+          echo "| \`${{ matrix.build }}\` | $icon ${{ steps.build.outcome }} |" > "result-${{ matrix.build }}.md"
 
+      # The file inside each artifact must itself carry the identifier, not
+      # just the artifact's own name -- `aggregate-results`'s own `merge-multiple:
+      # true` below flattens every one of these ~150 artifacts into one
+      # directory by *filename*. A plain `result.md` in every one of them
+      # collided there (live-caught 2026-08-28: 146 artifacts uploaded,
+      # `results/*.md` resolved to exactly 1 after the merge, so the final
+      # table showed only the very last leg written) -- each leg's own file
+      # needs a name no other leg can produce.
       - name: Upload result
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: result-${{ matrix.build }}
-          path: result.md
+          path: result-${{ matrix.build }}.md
           retention-days: 1
 
-  # Aggregates every test-amd64/test-arm64 leg's own result.md into one
+  # Aggregates every test-amd64/test-arm64 leg's own result-*.md into one
   # table on this workflow run's own Summary page -- neither job can:
   # a matrix job's outputs: only ever keep the *last* leg to finish, and
   # continue-on-error means none of the 219 legs turning the PR check red
   # either, so without this a real failure is visible only by opening that
   # one leg's own log.
-  summary:
+  #
+  # Job id `aggregate-results`, not `summary` -- GitHub's own Summary page
+  # headers each job's section "<job id> summary" (live-caught 2026-08-28:
+  # a job literally id'd `summary` renders as "summary summary" there).
+  aggregate-results:
     needs: [test-amd64, test-arm64]
     if: always()
     runs-on: ubuntu-latest
