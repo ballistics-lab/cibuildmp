@@ -108,13 +108,13 @@
 [image_group]
 
 # ── unix -- one native image per (arch, libc floor), identity-keyed ────
-manylinux_2_28_x86_64 = "ghcr.io/ballistics-lab/manylinux_2_28_x86_64@sha256:44c282830770b3852d1311dfe862e3834c57e9d558bacfc4926f11b46b57d8db"
+manylinux_2_28_x86_64 = "ghcr.io/ballistics-lab/manylinux_2_28_x86_64@sha256:849c8669a3e13c1402d43e1361dc750cc0560197b84574ddd5a595308beb2365"
 musllinux_1_2_x86_64 = "quay.io/pypa/musllinux_1_2_x86_64@sha256:75327606c7666fc971bd9239c6b220fd205b4bb9563b588075164622609219ca"
 
 manylinux_2_28_i686 = "ghcr.io/ballistics-lab/manylinux_2_28_i686@sha256:d8c6ccf0fdb01161f79fe4e883196c5a17a5e0ad97982927094edf09e0c058f1"
 musllinux_1_2_i686 = "quay.io/pypa/musllinux_1_2_i686@sha256:8ca1be90979cb290909c1c945573ccdc7114505d66c563567ee6c78927fb215f"
 
-manylinux_2_28_aarch64 = "ghcr.io/ballistics-lab/manylinux_2_28_aarch64@sha256:498ac072047f94dce34e42636629dade70fe2c9c13a8b7f21c169852e0dbd97a"
+manylinux_2_28_aarch64 = "ghcr.io/ballistics-lab/manylinux_2_28_aarch64@sha256:166c369630ab42573898ed737cf920ac77a72bc80a85ecf7c899e2dec242abb3"
 musllinux_1_2_aarch64 = "quay.io/pypa/musllinux_1_2_aarch64@sha256:cea133e28484a93e9c40fc661256e8f1ec69b2887d0b64acbfaf48f26bbab103"
 
 manylinux_2_28_ppc64le = "ghcr.io/ballistics-lab/manylinux_2_28_ppc64le@sha256:f6dc11a9dd6ba10b1c1a0370c984d3428aecb5ce37914597ec7b81656e7cfb3a"
