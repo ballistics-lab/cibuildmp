@@ -57,9 +57,9 @@ It never builds an image itself — it pulls pre-built, pinned images
 (`ghcr.io/ballistics-lab/<target>`) and launches sibling containers, one
 per target, the same way cibuildwheel's own container runtime does. That
 covers natmod (a single `docker/natmod.Dockerfile` for all ten arches) and
-most of usermod (`unix`, `windows`, `webassembly`); the `qemu` and `esp32`
-usermod ports are the two exceptions still building directly on the host
-(`arm-none-eabi-`/ESP-IDF, self-provisioned, same as before). There is no
+all of usermod except `esp32`, the one port that still provisions its own
+toolchain directly on the host (ESP-IDF, self-cloned and installed,
+pending a Dockerfile of its own — see Roadmap below). There is no
 "run `cibuildmp` itself inside Docker" story any more — a previous root
 `Dockerfile` offered that and was deleted once usermod needed to launch
 sibling containers of its own (Docker-in-Docker was ruled out); `uv tool
