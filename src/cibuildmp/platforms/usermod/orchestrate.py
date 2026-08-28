@@ -211,10 +211,11 @@ def _dest_name(
 # entirely (ESP-IDF is provisioned, not containerised -- D19), and
 # `qemu` passes no `MICROPY_MPYCROSS`, so both reach
 # `mpy-cross/build/mpy-cross` on the host through `py/mkrules.mk`'s own
-# default. Neither is in the default port set any more -- `esp32` is out
-# of it entirely pending [0028], and `qemu` has no `ensure_image()`
-# caller yet ([0032]) -- so in practice this now skips for every default
-# invocation, which is the point.
+# default. `qemu` *is* wired to `ensure_image()` (`build_qemu()`), same
+# as every other port here -- this frozenset is about which port still
+# needs a *host* mpy-cross alongside the containerised build, not about
+# which ports reach a container at all. `esp32` is the one still out of
+# scope, pending [0028] (no Dockerfile for it yet).
 #
 # Built once for the whole run rather than per target, unchanged -- this
 # only stops building it for runs that will never look at it.

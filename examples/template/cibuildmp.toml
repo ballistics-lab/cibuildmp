@@ -72,7 +72,12 @@ manifest = "usermod/manifest.py"
 # three of those nine are emulated on an amd64 runner, which is why
 # build-examples.yml's own usermod job sets up binfmt first. Plus
 # webassembly (no per-build axis of its own) and windows (all three
-# arches, one amd64 image).
+# arches, one amd64 image). qemu -- MPS2_AN385, the one board its own
+# axis defaults to (build.py's own QEMU_BOARD_CROSS/targets.py's
+# _PORT_AXES) -- was wired to ensure_image() by record 0032 but never
+# actually built anywhere, here or by hand (tracker row [0032]); added
+# now that this file's own rule ("every target cibuildmp claims to
+# support should build here, or the claim is wrong") applies to it too.
 build = """
 mpy6.3-v1.29.0-*
 v1.29.0-manylinux*
@@ -81,6 +86,7 @@ v1.29.0-wasm32
 v1.29.0-win32
 v1.29.0-win_amd64
 v1.29.0-win_arm64
+v1.29.0-qemu-MPS2_AN385
 """
 skip = "*_ppc64le *_s390x *_riscv64"
 

@@ -210,8 +210,13 @@ jobs:
           # x86_64 is this runner's own native arch; i686 (32-bit x86) and
           # mipsel (no published mipsel image at all, so it cross-compiles
           # from the same amd64 base -- record 0044) both run natively in
-          # an amd64 container too. webassembly/windows are native here
-          # for the same reason.
+          # an amd64 container too. webassembly/windows/qemu are native
+          # here for the same reason -- qemu's own image is `linux/amd64`
+          # per verify-docker-images.yml's matrix, confirmed live via
+          # `dockerrun.platform_for("qemu")`. First real build of a qemu
+          # identifier anywhere (tracker row [0032]): `ensure_image()` was
+          # wired in record 0032 but nothing ever exercised it, here or by
+          # hand.
           - os: ubuntu-latest
             build: >-
               v1.29.0-manylinux_2_28_x86_64 v1.29.0-musllinux_1_2_x86_64
@@ -219,6 +224,7 @@ jobs:
               v1.29.0-manylinux_2_39_mipsel
               v1.29.0-wasm32
               v1.29.0-win32 v1.29.0-win_amd64 v1.29.0-win_arm64
+              v1.29.0-qemu-MPS2_AN385
           # aarch64 is this runner's own native arch; armv7l (32-bit ARM)
           # runs natively on it too, on the AArch32-at-EL0 CPUs GitHub's
           # own arm64 runners use (measured, record 0044).
