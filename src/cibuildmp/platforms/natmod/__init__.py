@@ -144,7 +144,12 @@ def build_all(options: Options, targets: list[Target]) -> int:
         # in it -- see build()'s own docstring and D9.
         print(f"\ncibuildmp: preparing MicroPython {tag}")
         mpy_dir = fetch_micropython(tag, submodules=options.micropython_submodules)
-        build_mpy_cross(mpy_dir)
+        # Any arch in this tag group's own image builds mpy-cross
+        # identically (see build_mpy_cross()'s own docstring -- it is a
+        # host tool, portable across every natmod toolchain-group image
+        # alike), so the first one picks which already-required image
+        # pays for it rather than pulling a fifth image just for this.
+        build_mpy_cross(mpy_dir, group[0].target.arch)
 
         # The checkout is authoritative about the ABI; targets.MPY_ABI's
         # table (resources/build-platforms.toml, record 0052 Track C) is

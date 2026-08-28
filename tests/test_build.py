@@ -100,7 +100,7 @@ def test_make_command_carries_python_and_arch(tmp_path):
 
 def _capture_docker(monkeypatch):
     calls = []
-    monkeypatch.setattr(build, "_natmod_image", lambda: "natmod:test")
+    monkeypatch.setattr(build, "_natmod_image", lambda arch: "natmod:test")
     monkeypatch.setattr(
         dockerrun, "run", lambda command, **kw: calls.append((command, kw))
     )
@@ -109,7 +109,7 @@ def _capture_docker(monkeypatch):
 
 def test_pre_build_command_noop_when_empty(tmp_path, monkeypatch):
     calls = _capture_docker(monkeypatch)
-    run_pre_build_command(tmp_path, "", tmp_path / "mpy", tmp_path)
+    run_pre_build_command(tmp_path, "", tmp_path / "mpy", tmp_path, "armv7emsp")
     assert calls == []  # no container started at all
 
 
@@ -119,7 +119,9 @@ def test_pre_build_command_runs_in_the_same_image_as_the_build(tmp_path, monkeyp
     # different set of tools than the compile that follows is the kind of
     # difference that surfaces as a link error several steps later.
     calls = _capture_docker(monkeypatch)
-    run_pre_build_command(tmp_path, "make fetch-nanopb", tmp_path / "mpy", tmp_path)
+    run_pre_build_command(
+        tmp_path, "make fetch-nanopb", tmp_path / "mpy", tmp_path, "armv7emsp"
+    )
 
     command, kwargs = calls[0]
     assert command == ["bash", "-c", "make fetch-nanopb"]
@@ -128,16 +130,16 @@ def test_pre_build_command_runs_in_the_same_image_as_the_build(tmp_path, monkeyp
 
 
 def test_pre_build_command_failure_is_a_build_error(tmp_path, monkeypatch):
-    monkeypatch.setattr(build, "_natmod_image", lambda: "natmod:test")
+    monkeypatch.setattr(build, "_natmod_image", lambda arch: "natmod:test")
     monkeypatch.setattr(
         dockerrun, "run", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
     )
     with pytest.raises(BuildError, match="pre-build-command"):
-        run_pre_build_command(tmp_path, "exit 1", tmp_path / "mpy", tmp_path)
+        run_pre_build_command(tmp_path, "exit 1", tmp_path / "mpy", tmp_path, "armv7emsp")
 
 
 def test_run_make_failure_names_the_target(tmp_path, monkeypatch):
-    monkeypatch.setattr(build, "_natmod_image", lambda: "natmod:test")
+    monkeypatch.setattr(build, "_natmod_image", lambda arch: "natmod:test")
     monkeypatch.setattr(
         dockerrun,
         "run",

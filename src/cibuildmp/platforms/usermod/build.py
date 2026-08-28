@@ -868,12 +868,12 @@ def build_qemu(
     # that resolver along with natmod's dependence on it, so what kept
     # this port off Docker is gone and the wiring is what D30 has
     # required of every port since it was written.
-    docker_image = dockerrun.ensure_image("qemu")
+    docker_image = dockerrun.ensure_image("qemu", opts.board)
     if docker_image is None:
         raise UsermodBuildError(
-            "no image registered for qemu -- see "
+            f"no image registered for qemu board {opts.board!r} -- see "
             "`resources/pinned_docker_images.toml`, or point "
-            "CIBMP_QEMU_DOCKER_IMAGE at a local tag"
+            f"CIBMP_QEMU_{opts.board.upper()}_DOCKER_IMAGE at a local tag"
         )
 
     command = qemu_make_command(opts, mpy_dir, cross)
@@ -882,12 +882,12 @@ def build_qemu(
         mounts=[mpy_dir, Path(opts.user_c_modules)],
         workdir=mpy_dir / "ports" / "qemu",
         image=docker_image,
-        timeout=dockerrun.timeout_for("qemu"),
+        timeout=dockerrun.timeout_for("qemu", opts.board),
         # `linux/amd64`: a statement about the image, not about the build
         # target. qemu cross-compiles to bare metal, which no Linux
         # container is native to (0043) -- so on an arm64 host this runs
         # emulated, like `windows` and `webassembly` do.
-        oci_platform=dockerrun.platform_for("qemu"),
+        oci_platform=dockerrun.platform_for("qemu", opts.board),
     )
 
     firmware = opts.build_dir / "firmware.elf"
