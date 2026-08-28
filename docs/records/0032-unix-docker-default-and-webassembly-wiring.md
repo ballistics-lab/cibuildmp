@@ -1,6 +1,6 @@
 # 0032. Closing D28's own gap: unix usermod now defaults to Docker via ensure_image()
 
-- Status: Implemented for `unix`/`webassembly`; `windows`/`qemu` never wired to `ensure_image()` — superseded in part by [0033]
+- Status: Implemented for `unix`/`webassembly`/`windows`(wired by [0042])/`qemu` (wired by [0050], actually built live 2026-08-28 — see the addendum) — superseded in part by [0033]
 - Related: [0026], [0028], [0030], [0033]
 
 <!-- migrated verbatim from docs/BACKLOG.md lines 2655-2903 -->
@@ -253,3 +253,28 @@ registered (still empty -- `ensure_image()`'s local build is the thing
 proving the path works at all now, registering a maintained default on
 top of that is a separate, later step) remain open, same as D28 left
 them.
+
+## Addendum, 2026-08-28 — `qemu` actually built, not just wired
+
+`windows` was wired by [0042]. `qemu`'s own `ensure_image()` call was wired
+later still, by [0050] ("qemu, closed by force") -- deleting the toolchain
+resolver `qemu` had quietly kept relying on forced the same Docker wiring
+`unix`/`webassembly` already had. That closed the *code* gap, but not the
+one this record's own closing paragraph names above: wiring it is not
+building it, and for weeks after [0050] nothing had -- here or by hand,
+tracked as this record's own open row in the tracker.
+
+Closed live, not assumed: `build-examples.yml`'s `build-usermod` job now
+carries a dedicated `v1.29.0-qemu-MPS2_AN385` matrix leg -- its own leg,
+not folded into the nine already-green cells sharing the amd64 batch,
+since `usermod.orchestrate.build()` has no per-target try/except and a
+never-proven cell has no business risking nine settled ones on a shared
+job's exit code. Two independent runs confirm it, not one: run 33156958747
+(the leg's first ever run) and run 33157279355 (the very next push) both
+produced a real `firmware-v1.29.0-qemu-MPS2_AN385.elf` (330404 bytes) in
+under two minutes each, pulling the exact `ghcr.io/ballistics-lab/qemu`
+digest `resources/pinned_docker_images.toml` already pinned.
+
+`PORT_IMAGES` registration (this record's other still-open item) is
+unaffected by any of this -- `qemu` reaches its image through the same
+pinned-digest table every other port does, and that was never in question.
