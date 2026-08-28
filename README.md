@@ -369,17 +369,10 @@ path for it.
 <tr>
   <td><code>esp32</code></td>
   <td>
-    <code>ESP32_GENERIC</code> (Xtensa)<br>
-    <code>ESP32_GENERIC_C3</code> (RISC-V)
+    every board across <code>v1.28.0</code>/<code>v1.29.0</code>[^esp32ci]
   </td>
   <td><code>esp_idf_base</code> (Docker) -- ESP-IDF cloned on the host, installed in-container, per-board <code>idf_target</code>/<code>idf_version</code></td>
   <td>✅</td>
-</tr>
-<tr>
-  <td><code>esp32</code></td>
-  <td>other ESP32-family boards</td>
-  <td>same, per-board <code>idf_target</code></td>
-  <td>⚠️ unverified</td>
 </tr>
 <tr>
   <td><code>windows</code></td>
@@ -446,6 +439,8 @@ path for it.
 [^emulated]: `ppc64le`/`s390x`/`riscv64`, both libcs — published (`resources/pinned_docker_images.toml` has a real digest for each) and reachable by naming them in `build`, but native to no runner GitHub offers, so no real build has ever run through one: the six-cell equivalent of `qemu`'s own gap before it got a dedicated CI leg. Point `CIBMP_UNIX_<TARGET>_DOCKER_IMAGE` at a locally-built image, or an emulated one, to work on one of these.
 
 [^nodriver]: `resources/build-platforms.toml` has real, independently-verified rows for each of these ports (walked against a real MicroPython checkout the same way every ✅ row above was); a config can name their identifiers today. What's missing is a `build_<port>()` driver in `platforms/usermod/build.py` to actually run one — not a scope decision, just not built yet.
+
+[^esp32ci]: `build_esp32()` went Docker 2026-08-28 (`esp_idf_base`, [0058]), closing the venv conflict that made every real esp32 build fail on the bare host; `idf_version`/`idf_target` are threaded from each board's own real row rather than a fixed default, and `HOME` is exported explicitly for the same reason `esp32`'s own `ports/esp32` needs a real per-user cache dir that `dockerrun.run()`'s `--user <uid>:<gid>` doesn't otherwise give it (unmapped on GitHub's own runners specifically, live-caught on real CI). `test-platforms.yml`'s own broad sweep is what actually proves this across the whole board matrix, not a spot check — Xtensa and RISC-V both, both MicroPython tags this project currently tracks.
 
 No Windows or macOS host is needed for any of the ✅/⚠️ usermod targets
 above, `windows`'s own three arches included — every toolchain there is
