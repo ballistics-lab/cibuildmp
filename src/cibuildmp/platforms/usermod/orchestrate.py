@@ -335,7 +335,9 @@ def build(
         # tarball path already vendors every lib/ submodule for every
         # port, rp2 included. Threaded here, not hardcoded into
         # `fetch_micropython()` itself, since no other port needs one yet.
-        rp2_submodules = list(RP2_SUBMODULES) if any(t.port == "rp2" for t in group) else None
+        rp2_submodules = (
+            list(RP2_SUBMODULES) if any(t.port == "rp2" for t in group) else None
+        )
         mpy_dir = sources.fetch_micropython(tag, submodules=rp2_submodules)
         if any(t.port in _HOST_MPY_CROSS_PORTS for t in group):
             sources.build_mpy_cross(mpy_dir, quiet=quiet)

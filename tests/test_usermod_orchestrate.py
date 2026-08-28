@@ -242,9 +242,7 @@ def test_build_one_esp32_passes_board_through(tmp_path, monkeypatch):
         "container_mpy_cross",
         lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build-stub" / "mpy-cross",
     )
-    monkeypatch.setattr(
-        espidf, "fetch_esp_idf", lambda version, **k: tmp_path / "idf"
-    )
+    monkeypatch.setattr(espidf, "fetch_esp_idf", lambda version, **k: tmp_path / "idf")
     (mpy_dir / "ports" / "esp32").mkdir(parents=True)
 
     result = build_one(options, target, mpy_dir)
