@@ -52,8 +52,10 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
       identifiers were renamed by [0044], `--toolchain`/`--print-build-matrix`
       were deleted by [0049]/[0050], and natmod became Docker-only. [0044]'s
       own row is now closed, so nothing is left to wait for -- and the longer
-      HEAD moves, the bigger the one migration gets. `esp32` stays on its
-      composite action deliberately until [0028]
+      HEAD moves, the bigger the one migration gets. **`esp32` no longer
+      needs to stay on its own composite action** -- [0028] closed
+      2026-08-28 (`build_esp32()` went Docker), so the repin can cover all
+      five usermod ports now, not four
 - [ ] [0038] reduce `.github/actions/build-natmod` to a wrapper over
       `cibuildmp --only <id>` | split out of the row above 2026-08-28 because
       it is this repo's own work, not the consuming repos'. It grew teeth
