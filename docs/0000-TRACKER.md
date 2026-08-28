@@ -43,35 +43,34 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### In progress / Proposed
 
-- [ ] [0044] the six emulated-everywhere cells: build them or descope | the
-      **decision**: [0051] point 8 first gated them behind an opt-in
-      `EnableGroup`-style `--enable` group; [0052]'s own later retraction
-      removed that mechanism entirely along with every other opt-in/keyword
-      layer -- reaching them now is an ordinary `build`/`skip` glob naming
-      them directly (e.g. `build = "*_ppc64le *_s390x *_riscv64"`), the same
-      as any other cell, with nothing left implicitly excluding them from a
-      bare `build = "*"` any more either. The **work** this row was also
-      about is still open, unchanged by any of that: `ppc64le`, `s390x`,
-      `riscv64` in both columns are native to no runner GitHub offers, have
-      never been built, and Alpine's own `community/micropython` excludes
-      the first two outright. [0031] is the same question for its own three
-      cells and is answered by the same sentence
 - [ ] [0038] M5 -- adopt cibuildmp in the three consuming repos | the only item
-      with external blast radius, and it grew this session: `unix` identifiers
-      were renamed by [0044], `--toolchain` and `--print-build-matrix` were
-      deleted outright by [0049]/[0050], and natmod now requires Docker. Those
-      repos pin cibuildmp and name identifiers and flags in their own
-      workflows. *Checking* the breakage is cheap; fixing it wants the rows
-      above settled, since telling three repos to migrate twice is worse than
-      telling them once. Archiving `micropython-native-ci` and reducing
-      `build-natmod` to a wrapper are the original, still-open items
-- [ ] [0047] run output should look exactly like cibuildwheel's | the half that
-      was actively *wrong* is fixed -- every `print()` was block-buffered and
-      landed at interpreter exit, out of order with `make`'s own output. What
-      is left is the missing mechanism: log folding, and the fact that a
-      typical CI job's own `build` glob now names several cells at once (e.g.
-      `build-examples.yml`'s own per-runner globs, [0052]) and prints them in
-      sequence, which is precisely the shape folding exists for
+      with external blast radius. Archiving `micropython-native-ci` is **done**
+      (verified 2026-08-28: `archived: true`, and all three repos' `origin/main`
+      carry zero `uses:` of it -- the one a7p hit is a comment). What remains is
+      the repin: the repos pin `cibuildmp@v0.3.0`, and since that tag `unix`
+      identifiers were renamed by [0044], `--toolchain`/`--print-build-matrix`
+      were deleted by [0049]/[0050], and natmod became Docker-only. [0044]'s
+      own row is now closed, so nothing is left to wait for -- and the longer
+      HEAD moves, the bigger the one migration gets. `esp32` stays on its
+      composite action deliberately until [0028]
+- [ ] [0038] reduce `.github/actions/build-natmod` to a wrapper over
+      `cibuildmp --only <id>` | split out of the row above 2026-08-28 because
+      it is this repo's own work, not the consuming repos'. It grew teeth
+      since it was written: the action is 133 lines that never mention
+      cibuildmp, carrying per-`ARCH` apt packages, an xtensa install and an
+      esp-idf install of its own -- and [0050] deleted cibuildmp's bare-host
+      toolchain path outright, so this is now the *only* bare-host natmod
+      toolchain implementation left in the project, a second implementation
+      with no first left to agree with
+- [ ] [0047] run output should look exactly like cibuildwheel's | design
+      corrected 2026-08-28 against an installed cibuildwheel 4.1.0: the folds
+      are per *step* inside a build, not per build identifier -- the
+      `[ n/m ] <identifier>` spine stays unfolded, and one active group at a
+      time is enforced, not conventional. `stepsummary.py` joined the scope by
+      the user's own call; it has parity of intent, not of content (no
+      per-target time, no SHA256, no resolved-options block). Both halves argue
+      for one module holding one accumulated result list, the way upstream's
+      `Logger` does. Nothing implemented yet
 - [ ] [0046] nothing notices when a pin goes stale, except container images |
       independent of everything above, no urgency. `bin/update_docker.py` covers
       both image tables; emsdk is the cheapest thing left (its own
@@ -97,13 +96,14 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 - [x] [0051] one selector for both modes, and an identifier that names what a build is compatible with (epic, points 1-8, phased E-I) | landed 2026-08-26: both modes' version axes are real lists, `select()`/`matches()` unified in `cibuildmp/selector.py`, config flattened to sibling per-platform tables reached via a `PLATFORM_FAMILY` registry, one shared `[[overrides]]` with `inherit`. Nine addenda; superseded by [0052]'s own later retraction of the table/registry layer itself -- see that record
 - [x] [0052] config is build/skip glob + `[override]` only -- no per-platform tables, `--platform`/`--only`/`--archs auto`/`--enable` | Track A (natmod identifier grammar, `{name}-{version}-` filenames, per-tag arch availability) and the table/`[[overrides]]`-retraction addenda all landed 2026-08-27/28; Track B (a tree config mechanism) rejected, see Rejected below; A6 closed the same way
 - [x] [0048] `build`/`skip` are top-level in both modes, and a misplaced or misspelt key in a mode table is an error | fixed 2026-08-26; the audit it asked for also found `CIBMP_MICROPYTHON`/`CIBMP_OUTPUT_DIR` silently ignored in usermod mode, and `UsermodConfigError` never caught by the CLI -- both fixed alongside
-- [x] [0031] the musllinux column | four of seven cells green, required, and in the default axis -- every musl cell with a runner it is native to. The mechanism is proven end to end and the column is no longer a separate story: its three remaining cells are `ppc64le`/`s390x`/`riscv64`, which is [0044]'s descope question above and not a musl question at all
+- [x] [0031] the musllinux column | four of seven cells green, required, and in the default axis -- every musl cell with a runner it is native to. The mechanism is proven end to end and the column is no longer a separate story: its three remaining cells are `ppc64le`/`s390x`/`riscv64`, answered 2026-08-28 by [0044]'s own descope addendum and never a musl question at all
 - [x] [0045] `--only` is a filter, not a forced identifier; `--archs auto`/`native`/`all` | both halves done -- `--only` resolves against every identifier that exists, and the vocabulary landed with [0049], which is also where the caution about `--print-build-identifiers` and host-dependence was resolved
 - [x] [0042] `windows` wired, verified and required | three arches green three runs running, `verify_windows_output()` reads the COFF machine so a leg asserts something about its output, and the port joined `examples/template`'s own `ports` -- the full lifecycle (`--only` legs allowed to fail -> required -> default axis) that musllinux walked first
 - [x] [0050] natmod builds in a container; the bare-host path and its toolchain resolver are deleted | closes [0049]'s own "still open" and, by force, [0032]. Own "still open" (image layering, host mpy-cross, publish/CI, GHCR cleanup) fully closed by five same-topic addenda through 2026-08-28 -- read the record for detail, not this row
 - [x] [0049] cibuildmp generates no matrix and chooses no host; `--archs auto`/`native`/`all` does the work instead | `--print-build-matrix`, both `default_runner`s, natmod's `runs-on` key and the `cibuildmp-matrix` action deleted -- cibuildwheel has no equivalent of any of them. Closes [0045]'s open half and [0044]'s "no per-target `runs-on` override", the latter by deletion. Its own "still open" names natmod's bare-host builds, now the top row above
 - [x] [0032] `qemu` wired to `ensure_image()`, and actually built | wired by [0050] (`toolchains.resolve()` kept working until that record deleted it, forcing the move) but unexercised for weeks after; `build-examples.yml` gained its own dedicated `v1.29.0-qemu-MPS2_AN385` leg 2026-08-28, confirmed live across two independent runs (33156958747, 33157279355), see [0032]'s own addendum
-- [x] [0043] `unix` adopts cibuildwheel's model in full: native per-target images, PEP 600/656, full arch x libc matrix (epic) | the *decision* shipped -- implemented by [0044], whose row above carries the work that remains. Kept here as the design argument, which is still where the reasoning lives
+- [x] [0044] landing [0043]: pypa native images, the full arch x libc matrix, and the two things it broke | the last open question closed 2026-08-28 -- the six emulated-everywhere cells (`ppc64le`/`s390x`/`riscv64`, both libcs) are **descoped from CI, kept in the matrix**: real digests, nameable by any glob, maintained by `bin/update_docker.py`, README-marked ⚠️, and deliberately given no CI leg. Building them is possible (cibuildwheel does it under QEMU), just not worth per-push emulated minutes nobody has asked for. Same answer closes [0031]'s own three remaining cells
+- [x] [0043] `unix` adopts cibuildwheel's model in full: native per-target images, PEP 600/656, full arch x libc matrix (epic) | the *decision* shipped -- implemented by [0044], whose own row now sits directly above, closed. Kept here as the design argument, which is still where the reasoning lives
 - [x] [0042] `windows` wired to `ensure_image()`; `emsdk.py`/`llvmmingw.py` deleted | all three arches verified live, including an anonymous pull of the published digest; that image was pushed by hand rather than by `publish-docker-images.yml` — see the record. **Still open above:** none of it was ever re-run by CI, which is what the row in "In progress" is about
 - [x] [0041] documentation restructure — this scheme | supersedes the monolithic `docs/BACKLOG.md`
 - [x] [0033] cibuildmp never builds a Docker image itself, only pulls a published one | separate `docker/` + `publish-docker-images.yml`; `ensure_image()`'s local-build fallback removed

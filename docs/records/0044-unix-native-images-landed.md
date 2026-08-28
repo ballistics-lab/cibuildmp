@@ -1,8 +1,9 @@
 # 0044 — landing [0043]: pypa-based native images, the full arch × libc matrix, and the two things it broke
 
 Status: Implemented (code, tests and tooling landed; the matrix is published and all
-six default cells are green on CI as of 2026-08-26 -- see the addendum; the ten opt-in
-cells remain unbuilt)
+six default cells are green on CI as of 2026-08-26 -- see the addendum. The six
+emulated-everywhere cells are **descoped from CI, kept in the matrix** by the
+2026-08-28 addendum, which closes this record's last open question)
 
 Supersedes nothing. This is the implementation record for [0043], which was
 accepted as a plan with "nothing here is verified live yet" written into its own
@@ -366,7 +367,12 @@ from the archive when superseded.
 [0025]: 0025-dockerfiles-bake-unix-cross-toolchains.md
 [0031]: 0031-unix-musllinux-libc-axis.md
 [0038]: 0038-m5-adopt-in-three-repos.md
+[0042]: 0042-windows-docker-wiring-and-resolver-removal.md
 [0043]: 0043-unix-adopts-cibuildwheel-native-image-model.md
+[0046]: 0046-pin-staleness-checker.md
+[0047]: 0047-run-output-parity-with-cibuildwheel.md
+[0049]: 0049-no-matrix-generation-archs-vocabulary.md
+[0052]: 0052-config-is-a-tree-not-a-selector-matrix.md
 
 ---
 
@@ -641,3 +647,104 @@ arches and usermod ports onto a small number of shared toolchain images (the
 `arm_embedded`/`riscv_embedded`/`xtensa_lx106`/`esp_idf` consolidation sketched but not
 built this session). That is a resolver-shape redesign, not a data cleanup, and stays
 open.
+
+## Addendum, 2026-08-28 — the six emulated-everywhere cells: descoped from CI, kept in the matrix
+
+Closes the row this record carried in the tracker's "In progress / Proposed" since
+2026-08-26 ("build them or descope"). The answer is **descope**, and the word needs
+qualifying, because it does not mean what it usually means here: nothing is deleted,
+nothing becomes unnameable, and no digest goes stale on purpose. What is descoped is
+the *promise*, not the target.
+
+### What the six actually are today
+
+`ppc64le`, `s390x` and `riscv64`, both libc columns — the ⚠️ rows in `README.md`'s own
+usermod table. They are not uniform, which the tracker row flattened and this addendum
+should not:
+
+| Cell | What `[image.<arch>]` names | Layer |
+| --- | --- | --- |
+| `manylinux_2_28_ppc64le` | `ghcr.io/ballistics-lab/…@sha256:f6dc11a9…` | cibuildmp's own (`libffi-devel`) |
+| `manylinux_2_28_s390x` | `ghcr.io/ballistics-lab/…@sha256:575a7d5c…` | cibuildmp's own (`libffi-devel`) |
+| `manylinux_2_39_riscv64` | `quay.io/pypa/…@sha256:9fa1bc38…` | pypa's, mirrored verbatim |
+| `musllinux_1_2_ppc64le` | `quay.io/pypa/…@sha256:d70f4708…` | pypa's, mirrored verbatim |
+| `musllinux_1_2_s390x` | `quay.io/pypa/…@sha256:97af923e…` | pypa's, mirrored verbatim |
+| `musllinux_1_2_riscv64` | `quay.io/pypa/…@sha256:c81bcd32…` | pypa's, mirrored verbatim |
+
+Two of the six carry a real cibuildmp-published layer; four point straight at pypa,
+by the 2026-08-27 addendum's own rule — their Dockerfiles were a bare `FROM` and
+nothing else, so a second copy bought nothing. All six have an immutable digest, all
+six are reachable by an ordinary `build`/`skip` glob naming them
+(`build = "*_ppc64le *_s390x *_riscv64"`), and since [0052] retracted every opt-in and
+keyword layer, nothing implicitly excludes them from a bare `build = "*"` either.
+
+### Why not build them, stated honestly
+
+The tracker row's reason — "native to no runner GitHub offers" — is true but is *not*
+on its own a reason they cannot be built. cibuildwheel builds wheels for these exact
+architectures on GitHub Actions today, through QEMU binfmt emulation, and simply
+accepts what that costs. cibuildmp could do the same thing tomorrow; the machinery
+(`dockerrun.run()` on an already-pinned image) needs nothing new.
+
+So the real reasons are these, and they are about cost and demand, not capability:
+
+- **The cost is per-run and recurring.** Each cell is a full emulated MicroPython
+  `make`, not a single compile. Six of them on every push is the wrong shape for a
+  gate — cibuildwheel's own emulated legs are release-time work, not per-commit work.
+- **Nobody is asking.** None of [0038]'s three consuming repos names any of the six in
+  its own workflow, and no consumer has asked for one. A target built only to keep a
+  matrix square is a maintenance cost with no reader.
+- **Upstream's own support signal is weakest exactly here.** Alpine's
+  `community/micropython` excludes `ppc64le` and `s390x` outright. That is a fact
+  about MicroPython on those arches, not about cibuildmp, and it argues against
+  spending emulated CI minutes proving something upstream itself does not ship.
+
+### What "descoped" commits this project to
+
+- The six stay in `resources/pinned_docker_images.toml`, stay listed by
+  `--print-build-identifiers`, and stay buildable by anyone who names them.
+- Their digests stay maintained by `bin/update_docker.py` alongside every other cell —
+  they are not frozen, and they are not exempt from [0046] when it lands.
+- `README.md` marks them ⚠️ with a footnote saying, in as many words, that no real
+  build has ever run through one. **That footnote is the descope.** It was already
+  written before this decision; this addendum makes it the recorded position rather
+  than an observation about the present.
+- **No CI leg is added, and none is planned.** This is the part that is actually being
+  decided. `qemu`'s own gap closed on 2026-08-28 by getting a dedicated leg; these six
+  deliberately do not get the same treatment, and the difference is that `qemu` is
+  native on the runner it builds on and these are not.
+
+### What would reopen it
+
+Any one of: GitHub offering a runner native to one of the three architectures; a real
+consumer naming one of the six; or a release-time (not per-push) workflow existing for
+other reasons, at which point adding six emulated cells to something that already runs
+rarely is cheap. Until then, local work goes through the documented per-cell override —
+`CIBMP_UNIX_MANYLINUX_2_28_PPC64LE_DOCKER_IMAGE=<tag>` and friends — pointed at a
+locally-built or emulated image.
+
+### This closes [0031]'s equivalent sentence too
+
+[0031]'s row records that its own three remaining cells "are `ppc64le`/`s390x`/`riscv64`,
+which is this record's descope question above and not a musl question at all". Same six cells,
+same answer, no separate decision needed: the musllinux column is complete at four of
+seven, and the three it is missing are missing for a reason that has nothing to do with
+musl.
+
+### The rest of this record's own "Still open", for the record
+
+Closing the tracker row means saying where the other items went, since none of them is
+this question:
+
+- Publishing the matrix and filling `[image.*]` — **done**; every cell holds a real
+  digest. (The file's own "Everything is empty right now, on purpose" section header is
+  now stale prose describing a state that no longer exists.)
+- Consuming repos' `unix` identifiers changing — **still open**, and it is [0038]'s row,
+  not this one.
+- `default_runner` / per-target `runs-on` — **closed by deletion** in [0049]; cibuildmp
+  generates no matrix and chooses no host any more, so the `armv7l` AArch32-EL0 bet is
+  no longer cibuildmp's bet to make.
+- `--only` cannot reach an opt-in cell — **closed** by [0045]/[0049], and then made
+  moot by [0052] removing the opt-in concept entirely.
+- The `unix` default axis being the old five translated one-for-one — **superseded**:
+  there is no default axis any more, only what a `build` glob names.

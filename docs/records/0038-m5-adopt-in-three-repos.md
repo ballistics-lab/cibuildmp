@@ -35,3 +35,46 @@
 - [ ] Reduce `build-natmod` to a wrapper over `cibuildmp --only <id>` so
       there is one implementation of the toolchain logic, not two. Do not let
       the two coexist for long.
+
+---
+
+## Addendum, 2026-08-28 — the archive item is closed; the wrapper item got worse
+
+Verified rather than assumed, since both open items above were written months of
+sessions ago and one of them had quietly become true.
+
+**`ballistics-lab/micropython-native-ci` is archived** — `archived: true` from the
+API, last touched 2026-08-24. Its precondition ("once all three have repinned") was
+met at the same time: every one of the three repos' `origin/main` carries only
+`ballistics-lab/cibuildmp@v0.3.0` references and not one `uses:` of
+`micropython-native-ci`. `micropython-bclibc` 13, `micropython-wasm3` 15, `a7p` its
+own set; a7p's single remaining textual mention is a comment explaining the move.
+(Worth recording that a stale local checkout of `micropython-bclibc` showed the
+opposite — `main` one commit behind `Ci/cibuildmp (#17)` — which is exactly the shape
+of a false "this was never done" conclusion.)
+
+**The `build-natmod` wrapper item is still open, and the reason to do it is stronger
+than when it was written.** The action moved into this repo with [0011] and is now
+`.github/actions/build-natmod/action.yml`: 133 lines that do not mention `cibuildmp`
+once, carrying their own per-`ARCH` apt package list, their own xtensa toolchain
+install, their own esp-idf install, and a bare `make ARCH=<arch> dist`.
+
+The original argument was "one implementation of the toolchain logic, not two". That
+argument has since inverted: [0050] deleted cibuildmp's bare-host toolchain path
+entirely and made natmod Docker-only, so this action is no longer the *second*
+implementation of something — it is the *only* remaining bare-host natmod toolchain
+implementation in the project, and nothing tests, pins or updates it. The four
+toolchain tarballs it would have shared with cibuildmp now live in
+`docker/natmod.Dockerfile` and are themselves unwatched ([0046]).
+
+Also still open, and unchanged: the repin itself. All three repos pin `v0.3.0`, and
+HEAD has since renamed every `unix` identifier ([0044]), deleted `--toolchain` and
+`--print-build-matrix` ([0049]/[0050]), and made natmod require Docker. With [0044]'s
+own row closed on 2026-08-28 there is nothing left to wait for, and every further
+commit on HEAD widens the single migration these repos should have to do once.
+
+[0011]: 0011-one-repo-absorbs-micropython-native-ci.md
+[0044]: 0044-unix-native-images-landed.md
+[0046]: 0046-pin-staleness-checker.md
+[0049]: 0049-no-matrix-generation-archs-vocabulary.md
+[0050]: 0050-natmod-is-docker-only.md
