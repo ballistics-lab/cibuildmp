@@ -1125,16 +1125,23 @@ class WindowsArchSettings:
     # CLANGARM64 environment already needed (D18's own history): this
     # clang's -dumpmachine doesn't contain "mingw" either, which
     # ports/windows/Makefile's own .exe-suffix and post-link strip logic
-    # both grep for. Empty for x64/x86 -- a plain GNU cross-gcc needs none.
+    # both grep for. Empty for win32/win_amd64 -- a plain GNU cross-gcc
+    # needs none.
     extra_make_args: tuple[str, ...] = ()
 
 
-# CROSS_COMPILE prefixes for each Windows arch this project builds. All
-# three now come from docker/windows.Dockerfile's own image, not from the
-# host: x64/x86 as the same apt mingw-w64 GCC packages upstream's own
-# tools/ci.sh (ci_windows_setup/ci_windows_build) and
-# .github/workflows/ports_windows.yml's own cross-build-on-linux job use,
-# arm64 as a pinned llvm-mingw tarball baked into that same image (no
+# CROSS_COMPILE prefixes for each Windows arch this project builds, keyed
+# by the real identifier's own arch component (win32/win_amd64/win_arm64,
+# matching resources/build-platforms.toml -- the Python/PEP wheel-tag
+# vocabulary the rest of the identifier scheme uses, not the bare
+# x64/x86/arm64 names this dict used before the identifier scheme moved
+# onto that vocabulary; a stale key here was rejecting every real windows
+# build with "unknown windows arch 'win32'" until this was caught by a
+# real CI run). All three now come from docker/windows.Dockerfile's own
+# image, not from the host: win32/win_amd64 as the same apt mingw-w64 GCC
+# packages upstream's own tools/ci.sh (ci_windows_setup/ci_windows_build)
+# and .github/workflows/ports_windows.yml's own cross-build-on-linux job
+# use, win_arm64 as a pinned llvm-mingw tarball baked into that same image (no
 # Debian/Ubuntu package targets aarch64-w64-mingw32 at all -- llvm-mingw
 # is the one Linux-hosted alternative mingw-w64's own docs point at by
 # name, verified live with a real custom C module producing a genuine
@@ -1160,11 +1167,11 @@ _IMAGE_FILE_MACHINE_AMD64 = 0x8664
 _IMAGE_FILE_MACHINE_ARM64 = 0xAA64
 
 WINDOWS_ARCH_SETTINGS: dict[str, WindowsArchSettings] = {
-    "x64": WindowsArchSettings(
+    "win_amd64": WindowsArchSettings(
         "x86_64-w64-mingw32-", machine=_IMAGE_FILE_MACHINE_AMD64
     ),
-    "x86": WindowsArchSettings("i686-w64-mingw32-", machine=_IMAGE_FILE_MACHINE_I386),
-    "arm64": WindowsArchSettings(
+    "win32": WindowsArchSettings("i686-w64-mingw32-", machine=_IMAGE_FILE_MACHINE_I386),
+    "win_arm64": WindowsArchSettings(
         "aarch64-w64-mingw32-",
         machine=_IMAGE_FILE_MACHINE_ARM64,
         extra_cflags=(

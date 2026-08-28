@@ -148,7 +148,20 @@ tried and rejected) lives in `docs/records/`, not here.
 - A `workflow_dispatch` input on `publish-docker-images.yml` to republish one
   image instead of all nineteen.
 
-## [0.3.0] - 2026-08-24
+### Fixed
+
+- **`windows` rejected every real identifier with `unknown windows arch
+  'win32'`.** `WINDOWS_ARCH_SETTINGS` was still keyed by the old bare
+  `x64`/`x86`/`arm64` tokens from before the identifier scheme moved onto
+  the Python/PEP wheel-tag vocabulary (`win32`/`win_amd64`/`win_arm64`,
+  `resources/build-platforms.toml`'s own arch column) the rest of the
+  scheme uses — `build_windows()` reads `target.arch` straight off the
+  identifier, so every real `windows` build failed this lookup outright.
+  Caught live: `build-examples.yml` run 33150753588 failed on
+  `v1.29.0-win32` with exit code 2. Renamed the dict's three keys to
+  match; no other caller keys off the old names (`dockerrun.image_for()`
+  shares one pinned image across all three regardless of the value
+  passed).
 
 First release where `cibuildmp` actually builds a module — `v0.3.0a1` could
 only plan the target matrix. Validated against three real consuming repos

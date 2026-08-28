@@ -743,35 +743,35 @@ def test_esp32_custom_board_and_target():
 
 def windows_opts(**overrides) -> WindowsBuildOptions:
     defaults = {
-        "arch": "x64",
+        "arch": "win_amd64",
         "user_c_modules": "/gh/ws/micropython/usermod",
         "frozen_manifest": "/gh/ws/a7p_manifest.py",
-        "build_dir": Path("/gh/ws/usermod/build/windows-x64"),
+        "build_dir": Path("/gh/ws/usermod/build/windows-win_amd64"),
     }
     defaults.update(overrides)
     return WindowsBuildOptions(**defaults)
 
 
-def test_windows_x64_command_matches_upstream_cross_build_shape():
+def test_windows_win_amd64_command_matches_upstream_cross_build_shape():
     # tools/ci.sh's own ci_windows_build: CROSS_COMPILE=x86_64-w64-mingw32-,
     # no MSYS2-specific overrides (STRIP/SIZE/COMPILER_TARGET) -- a plain
     # GNU mingw-w64 cross-gcc needs none of them.
-    command = windows_make_command(windows_opts(arch="x64"), Path("/gh/ws/mpy"))
+    command = windows_make_command(windows_opts(arch="win_amd64"), Path("/gh/ws/mpy"))
 
     assert command == [
         "make",
         "-C",
         "/gh/ws/mpy/ports/windows",
         "VARIANT=standard",
-        "BUILD=/gh/ws/usermod/build/windows-x64",
+        "BUILD=/gh/ws/usermod/build/windows-win_amd64",
         "CROSS_COMPILE=x86_64-w64-mingw32-",
         "USER_C_MODULES=/gh/ws/micropython/usermod",
         "FROZEN_MANIFEST=/gh/ws/a7p_manifest.py",
     ]
 
 
-def test_windows_x86_command_uses_i686_prefix():
-    command = windows_make_command(windows_opts(arch="x86"), Path("/gh/ws/mpy"))
+def test_windows_win32_command_uses_i686_prefix():
+    command = windows_make_command(windows_opts(arch="win32"), Path("/gh/ws/mpy"))
 
     assert "CROSS_COMPILE=i686-w64-mingw32-" in command
 
@@ -781,17 +781,18 @@ def test_windows_unknown_arch_rejected(tmp_path):
         build_windows(windows_opts(arch="riscv64"), tmp_path / "mpy")
 
 
-# ── windows/arm64 (llvm-mingw) ───────────────────────────────────────────
+# ── windows/win_arm64 (llvm-mingw) ───────────────────────────────────────
 
 
-def test_windows_arm64_command_matches_verified_shape():
+def test_windows_win_arm64_command_matches_verified_shape():
     # Verified live: COMPILER_TARGET=/STRIP=/SIZE= and the three
     # CFLAGS_EXTRA suppressions are load-bearing (see
     # WINDOWS_ARCH_SETTINGS' own comments for exactly why), not
     # cosmetic.
     command = windows_make_command(
         windows_opts(
-            arch="arm64", build_dir=Path("/gh/ws/usermod/build/windows-arm64")
+            arch="win_arm64",
+            build_dir=Path("/gh/ws/usermod/build/windows-win_arm64"),
         ),
         Path("/gh/ws/mpy"),
     )
@@ -801,7 +802,7 @@ def test_windows_arm64_command_matches_verified_shape():
         "-C",
         "/gh/ws/mpy/ports/windows",
         "VARIANT=standard",
-        "BUILD=/gh/ws/usermod/build/windows-arm64",
+        "BUILD=/gh/ws/usermod/build/windows-win_arm64",
         "CROSS_COMPILE=aarch64-w64-mingw32-",
         "COMPILER_TARGET=mingw-forced",
         "STRIP=",
@@ -840,7 +841,7 @@ def _mock_windows_image(monkeypatch, image=_FAKE_WINDOWS_IMAGE):
     )
 
 
-@pytest.mark.parametrize("arch", ["x64", "x86", "arm64"])
+@pytest.mark.parametrize("arch", ["win_amd64", "win32", "win_arm64"])
 def test_windows_no_image_registered_is_a_clear_error(monkeypatch, tmp_path, arch):
     # D32's own closing gap: `windows` used to have pinned entries
     # nothing ever read. All three arches now resolve through
@@ -862,7 +863,7 @@ def test_windows_no_image_registered_is_a_clear_error(monkeypatch, tmp_path, arc
     assert calls == []
 
 
-@pytest.mark.parametrize("arch", ["x64", "x86", "arm64"])
+@pytest.mark.parametrize("arch", ["win_amd64", "win32", "win_arm64"])
 def test_windows_runs_make_inside_the_container(monkeypatch, tmp_path, arch):
     # Every arch, arm64 included: the llvm-mingw toolchain arm64 needs is
     # baked into docker/windows.Dockerfile now, so there is no host-side
@@ -913,7 +914,7 @@ def test_windows_mounts_mpy_dir_and_user_c_modules(monkeypatch, tmp_path):
     build_dir.mkdir()
     (build_dir / "micropython.exe").write_bytes(_pe(0x8664))
 
-    opts_ = windows_opts(arch="x64", build_dir=build_dir)
+    opts_ = windows_opts(arch="win_amd64", build_dir=build_dir)
     build_windows(opts_, tmp_path / "mpy")
 
     mounts = [calls[0][i + 1] for i, part in enumerate(calls[0]) if part == "-v"]
@@ -929,7 +930,9 @@ def test_windows_missing_exe_after_success_is_an_error(monkeypatch, tmp_path):
     build_dir.mkdir()
 
     with pytest.raises(UsermodBuildError, match="build reported success but"):
-        build_windows(windows_opts(arch="arm64", build_dir=build_dir), tmp_path / "mpy")
+        build_windows(
+            windows_opts(arch="win_arm64", build_dir=build_dir), tmp_path / "mpy"
+        )
 
 
 def test_windows_build_failure_names_the_command(monkeypatch, tmp_path):
@@ -944,7 +947,7 @@ def test_windows_build_failure_names_the_command(monkeypatch, tmp_path):
 
     with pytest.raises(UsermodBuildError, match="failed with exit code"):
         build_windows(
-            windows_opts(arch="arm64", build_dir=tmp_path / "build-arm64"),
+            windows_opts(arch="win_arm64", build_dir=tmp_path / "build-arm64"),
             tmp_path / "mpy",
         )
 
@@ -1073,7 +1076,8 @@ def test_a_cell_needing_nothing_gets_nothing():
 
 
 @pytest.mark.parametrize(
-    ("arch", "machine"), [("x64", 0x8664), ("x86", 0x014C), ("arm64", 0xAA64)]
+    ("arch", "machine"),
+    [("win_amd64", 0x8664), ("win32", 0x014C), ("win_arm64", 0xAA64)],
 )
 def test_each_windows_arch_accepts_its_own_machine(arch, machine, tmp_path):
     binary = tmp_path / "micropython.exe"
@@ -1090,7 +1094,7 @@ def test_another_arch_machine_is_rejected(tmp_path):
     binary.write_bytes(_pe(0x8664))
 
     with pytest.raises(UsermodBuildError, match="0x8664, expected 0xaa64"):
-        build.verify_windows_output("arm64", binary)
+        build.verify_windows_output("win_arm64", binary)
 
 
 def test_an_elf_named_exe_is_rejected(tmp_path):
@@ -1101,7 +1105,7 @@ def test_an_elf_named_exe_is_rejected(tmp_path):
     binary.write_bytes(b"\x7fELF" + bytes(0x100))
 
     with pytest.raises(UsermodBuildError, match="not a PE executable at all"):
-        build.verify_windows_output("x64", binary)
+        build.verify_windows_output("win_amd64", binary)
 
 
 def test_a_dos_header_pointing_nowhere_is_rejected(tmp_path):
@@ -1111,7 +1115,7 @@ def test_a_dos_header_pointing_nowhere_is_rejected(tmp_path):
     binary.write_bytes(bytes(data))
 
     with pytest.raises(UsermodBuildError, match="no PE signature"):
-        build.verify_windows_output("x64", binary)
+        build.verify_windows_output("win_amd64", binary)
 
 
 def test_every_windows_arch_declares_a_machine():
