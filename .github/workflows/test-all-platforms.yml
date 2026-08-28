@@ -57,6 +57,10 @@ jobs:
             build: "mpy6.3-v1.29.0-* mpy6.3-v1.28.0-*"
           - port: unix
             build: "v1.29.0-*linux* v1.28.0-*linux*"
+            skip: "*_ppc64le *_s390x *_riscv64"
+          - port: unix-emulated
+            build: "v1.29.0-*linux* v1.28.0-*linux*"
+            skip: "*_x86_64 *_i686 *_aarch64 *_armv7l *_mipsel"
           - port: windows
             build: "v1.29.0-win* v1.28.0-win*"
           - port: webassembly
@@ -71,7 +75,7 @@ jobs:
     with:
       label: ${{ matrix.port }}
       build: ${{ inputs.build || matrix.build }}
-      skip: ${{ inputs.skip || 'v1.28.0-qemu-NETDUINO2' }}
+      skip: ${{ inputs.skip || matrix.skip || 'v1.28.0-qemu-NETDUINO2' }}
 
   # Aggregates every port's own call's result-*.md into one table on this
   # workflow run's own Summary page -- no single job can: a matrix job's

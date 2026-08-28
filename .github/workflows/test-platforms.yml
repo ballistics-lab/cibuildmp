@@ -171,6 +171,7 @@ jobs:
         with:
           package-dir: examples/template
           build: ${{ matrix.build }}
+          skip: ${{ inputs.skip }}
 
       - name: Record result
         if: always()
@@ -222,6 +223,7 @@ jobs:
         with:
           package-dir: examples/template
           build: ${{ matrix.build }}
+          skip: ${{ inputs.skip }}
 
       - name: Record result
         if: always()
@@ -277,6 +279,7 @@ jobs:
         with:
           package-dir: examples/template
           build: ${{ matrix.build }}
+          skip: ${{ inputs.skip }}
 
       - name: Record result
         if: always()
