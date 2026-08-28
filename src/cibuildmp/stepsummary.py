@@ -39,9 +39,21 @@ def write_step_summary(results: Sequence[_Result], total_duration: float) -> Non
     of never requiring GitHub Actions specifically). Runs *in addition to*
     the caller's own plain-text stdout summary, not instead of it -- that
     stays what a local run or a non-GitHub CI system sees.
+
+    Also a no-op when CIBMP_DISABLE_GITHUB_STEP_SUMMARY is set -- a caller
+    that fans out across many jobs against the same `$GITHUB_STEP_SUMMARY`
+    convention (a matrix leg, one per real identifier) gets one native
+    per-target table per leg whether it wants that or a single aggregated
+    summary built some other way; this is the escape hatch for the latter.
+    Same ad hoc os.environ.get(...) not in {"", "0"} parsing as
+    CIBMP_DEBUG_TRACEBACK (cli.py) -- a behaviour toggle, not a
+    `cibuildmp.toml` config key, so it deliberately skips options.py's own
+    `opt()`.
     """
     path = os.environ.get("GITHUB_STEP_SUMMARY")
     if not path:
+        return
+    if os.environ.get("CIBMP_DISABLE_GITHUB_STEP_SUMMARY", "") not in {"", "0"}:
         return
 
     lines = [

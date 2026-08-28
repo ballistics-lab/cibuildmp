@@ -72,3 +72,25 @@ def test_empty_results_still_writes_a_header(monkeypatch, tmp_path):
     write_step_summary([], 0.0)
 
     assert "0 target(s) built in 0.0s" in summary_path.read_text()
+
+
+def test_noop_when_disabled(monkeypatch, tmp_path):
+    summary_path = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_path))
+    monkeypatch.setenv("CIBMP_DISABLE_GITHUB_STEP_SUMMARY", "1")
+    result = FakeResult("mpy6.3-x64", tmp_path / "out.mpy", 229)
+
+    write_step_summary([result], 1.5)
+
+    assert not summary_path.exists()
+
+
+def test_disabled_with_0_is_still_enabled(monkeypatch, tmp_path):
+    summary_path = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_path))
+    monkeypatch.setenv("CIBMP_DISABLE_GITHUB_STEP_SUMMARY", "0")
+    result = FakeResult("mpy6.3-x64", tmp_path / "out.mpy", 229)
+
+    write_step_summary([result], 1.5)
+
+    assert "mpy6.3-x64" in summary_path.read_text()

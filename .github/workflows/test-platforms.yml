@@ -8,6 +8,16 @@ on:
       - "LICENSE"
   workflow_dispatch:
 
+# Not CIBMP_BUILD -- cibuildmp itself already reads that name as its own
+# generic config-override (options.py's own `opt()`); action.yml's own
+# ACTION_* vs CIBMP_* comment documents the real collision this project hit
+# once from reusing a CIBMP_-prefixed name for unrelated plumbing.
+#
+# 219 of the 738 identifiers `--build "*"` would otherwise select --
+# matrix.yml's own 256-configuration cap (see the job below).
+env:
+  TEST_PLATFORMS_BUILD: "v1.29.0-* v1.28.0-* mpy6.3-*"
+
 # Same pattern publish.yml's own concurrency block already uses. A real,
 # live-caught gap this session: without this, several rapid-fire pushes to
 # the same branch left multiple runs of this workflow racing each other,
@@ -48,7 +58,12 @@ jobs:
         id: build-matrix
         run: |
           set -euo pipefail
-          echo "build=$(cibuildmp examples/template --print-build-identifiers --json --build "*")" >> "$GITHUB_OUTPUT"
+          identifiers=$(cibuildmp examples/template --print-build-identifiers --json --build "$TEST_PLATFORMS_BUILD")
+          echo "build=$identifiers" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Selected \`$TEST_PLATFORMS_BUILD\`"
+            echo "$(echo "$identifiers" | jq length) identifiers"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   test:
     needs: build-matrix
@@ -70,10 +85,53 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Build examples/template (natmod)
+        id: build
         uses: ./
         env:
           CIBMP_VERSION: 0.0.0-ci
+          # Disables cibuildmp's own native per-target step summary
+          # (stepsummary.py) -- 219 legs each writing their own table would
+          # bury the one aggregate table `summary` below builds instead.
+          CIBMP_DISABLE_GITHUB_STEP_SUMMARY: "1"
         with:
           package-dir: examples/template
           build: ${{ matrix.build }}
 
+      - name: Record result
+        if: always()
+        run: |
+          icon="✅"
+          [ "${{ steps.build.outcome }}" = "success" ] || icon="❌"
+          echo "$icon \`${{ matrix.build }}\`" > result.md
+
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: result-${{ matrix.build }}
+          path: result.md
+          retention-days: 1
+
+  # Aggregates every `test` leg's own result.md into one table on this
+  # workflow run's own Summary page -- `test` itself can't: a matrix job's
+  # outputs: only ever keep the *last* leg to finish, and continue-on-error
+  # means none of the 219 legs turning the PR check red either, so without
+  # this a real failure is visible only by opening that one leg's own log.
+  summary:
+    needs: test
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: result-*
+          path: results
+          merge-multiple: true
+
+      - name: Build summary
+        run: |
+          {
+            echo "### Test platforms (\`$TEST_PLATFORMS_BUILD\`)"
+            echo
+            cat results/*.md | sort
+          } >> "$GITHUB_STEP_SUMMARY"
