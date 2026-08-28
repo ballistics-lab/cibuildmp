@@ -22,12 +22,83 @@
 # Upstream wasm2mpy presumably handles this in its own CI toolchain choice
 # or an unmerged dynruntime.mk difference (see its now-obsolete
 # mpy-ld-link-archives fork); not something to guess a fix for here.
-micropython = "v1.28.0"
+#
+# No [natmod] table any more (record 0052's own live-caught retraction --
+# it carried no settable content of its own once every key here moved to
+# global-only, and no activation meaning either, once natmod became always
+# in scope). No archs key either -- what it used to filter is now spelled
+# out directly in `build` below, one identifier per arch this Makefile
+# documents.
+#
+# Pinned to a literal tag (v1.29.0, matching examples/template's own
+# choice and its reasoning), not a bare `mpy6.3-*` ABI wildcard: this
+# example exists specifically to prove the natmod contract holds against
+# real dynruntime.mk (D2/D13) -- and dynruntime.mk itself is what varies
+# between tags sharing one ABI, not just the ABI number. A wildcard would
+# let narrow_to_newest_tag() silently drift onto whichever tag happens to
+# be newest for ABI 6.3, which today is v1.30.0-preview -- an unstable
+# preview tag, not the kind of thing a dynruntime-sensitive test should
+# drift onto unnoticed. There is no implicit default build value at all
+# any more either (record 0052's own live-caught correction) -- an
+# unconfigured build selects nothing, so naming the tag here is what
+# keeps this building at all. Needs bumping by hand when this project
+# wants to track a newer stable release, the same way examples/template's
+# own tag pin does.
+build = "mpy6.3-v1.29.0-{x64,x86,armv6m,armv7m,armv7emsp,armv7emdp,xtensawin}"
 
-[natmod]
-archs = ["x64", "x86", "armv6m", "armv7m", "armv7emsp", "armv7emdp",
-         "xtensawin"]
 # wasm2mpy's own layout has no natmod/ subdirectory -- its Makefile is
-# vendored at this module's own root (unlike examples/template's).
+# vendored at this module's own root (unlike examples/template's). Lives
+# at the bare top level now, not inside a retired [natmod] table.
 module-dir = "."
 extra-make-args = ["APP=zig"]
+# wasm2c (wabt) is this module's own dependency, not cibuildmp's --
+# action.yml's own apt-prerequisites step used to bundle it for every
+# consumer regardless of whether they build anything WebAssembly-sourced
+# at all, the same "one project's own need leaking into shared
+# infrastructure" shape D30 already flagged for usermod's bare-host
+# cross-toolchains. pre-build-command is exactly what this config knob
+# exists for -- a7p's own real cibuildmp.toml already uses it the same
+# way for its own nanopb fetch.
+#
+# **It fetches wabt rather than apt-installing it** (record 0050). The
+# command used to be `… || sudo apt-get install -y wabt`, written for a
+# bare host: `pre-build-command` runs inside the build's own container
+# now, where there is no `sudo` and the process is the caller's own uid
+# (`dockerrun.run`'s `--user`, so output lands host-owned), which is
+# exactly the shape cibuildwheel's `before-all` has and the right one --
+# a pre-build step should meet the same tools as the compile it precedes.
+#
+# What it cannot do is install system packages, and that is a feature
+# here: it keeps this example's own dependency out of a shared image the
+# same way cutting it from `action.yml` kept it off every consumer's
+# runner. A pinned release tarball into the module directory needs no
+# privileges at all and pins a version, which the apt package never did.
+#
+# **A `.deb`, unpacked with `dpkg-deb -x` -- which needs no root.** Two
+# attempts got here, and both failures are worth the space because they
+# are about downloaded binaries generally.
+#
+# wabt's own release assets do not work. The newest with an `ubuntu-*`
+# name (1.0.37) links against OpenSSL 1.1, so on this Ubuntu 24.04 image
+# `wasm2c` dies with `error while loading shared libraries:
+# libcrypto.so.1.1` -- an asset name says which CI produced it, not which
+# system can run it. The plain `linux-x64` builds that start at 1.0.39
+# run fine and then fail to *compile*: `wasm_rt_allocate_memory` gained a
+# `page_size` parameter, and this example's `runtime/wasm-rt.h` predates
+# it. Those runtime files are not verbatim upstream (220 lines differ in
+# that header alone), so they cannot simply be replaced.
+#
+# The distro package is the one build whose codegen matches them, which
+# is unsurprising: `sudo apt-get install wabt` is what this line used to
+# say, and it worked. Fetching that same `.deb` and unpacking it in place
+# keeps the version that works while dropping the privilege that a
+# containerised `pre-build-command` does not have.
+pre-build-command = """
+command -v wasm2c >/dev/null && exit 0
+test -x .wabt/usr/bin/wasm2c || {
+  mkdir -p .wabt
+  curl -fsSL -o .wabt/wabt.deb \\
+    http://archive.ubuntu.com/ubuntu/pool/universe/w/wabt/wabt_1.0.34%2bdsfg2%2b~cs1.0.32-1ubuntu2_amd64.deb
+  dpkg-deb -x .wabt/wabt.deb .wabt
+}
+"""

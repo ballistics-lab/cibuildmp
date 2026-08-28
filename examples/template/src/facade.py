@@ -6,7 +6,7 @@
 # Real-world equivalent: ../micropython-bclibc's ffimod/ffi.py (see
 # docs/BACKLOG.md D14).
 
-from template import add
+from template import add  # type: ignore
 
 
 def add_three(a, b, c):

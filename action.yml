@@ -16,12 +16,23 @@ inputs:
     description: "File containing the config, defaults to {package-dir}/cibuildmp.toml"
     required: false
     default: ""
-  only:
+  build:
     description: >
-      Build exactly this one identifier (e.g. mpy6.3-natmod-armv7emsp),
-      ignoring the config's own build/skip selectors. This is what a matrix
-      leg passes back in -- see the cibuildmp-matrix action, which generates
-      the list.
+      Override the config's own build selector -- space-separated
+      glob(s) matched against the real identifier (e.g.
+      "mpy6.3-v1.29.0-armv7emsp", or "*manylinux*" for every unix cell).
+      Replaces the old only/archs inputs (record 0052): name a glob
+      specific enough to match one identifier for "build exactly this
+      one thing", or list several runs-on-specific globs by hand to
+      spread work across a matrix -- there is no more auto/native/all
+      keyword vocabulary computing that for you. See the README for the
+      full real identifier list.
+    required: false
+    default: ""
+  skip:
+    description: >
+      Override the config's own skip selector -- same glob syntax as
+      build above.
     required: false
     default: ""
   extras:
@@ -29,41 +40,204 @@ inputs:
     required: false
     default: ""
 
+# Composite, not Docker -- docs/BACKLOG.md's own D28/D30 (container-per-port
+# migration, step 1). The Docker action this used to be ran *inside* one
+# container; cibuildmp itself is meant to launch sibling per-port containers
+# for usermod builds (D26's own "no Docker-in-Docker" reasoning), which needs
+# this action to run directly on the bare runner instead, where the runner's
+# own Docker daemon is reachable from a plain step with no setup at all --
+# confirmed live, not assumed (a real `docker info`/`docker run --rm
+# hello-world` from an ordinary `run:` step on ubuntu-latest, D28's own former
+# "open question", now resolved).
+#
+# The apt list below traces back to action.Dockerfile's own (the old
+# Docker-action image, since deleted -- D33 removed it and its
+# publish.yml own publish-docker job entirely, once action.yml stopped
+# being a Docker action at all and nothing else referenced it), every
+# one of D25's six real bugs and D20/D24's own findings still apply --
+# this step is deliberately scoped to the shell conversion alone,
+# not yet the toolchain-isolation payoff that conversion unlocks (D28's own
+# step 2: the usermod docker-image resolver becoming real/config-driven, and
+# D30's own point 2: most of this apt list moving into per-port sibling
+# images so a natmod-only caller stops paying for windows/esp32/unix cross
+# toolchains it never uses). Slimming this list before that wiring exists
+# would break every existing usermod-unix build outright -- kept in full
+# here on purpose, one verified increment at a time, the same discipline
+# every fix in D25 already followed.
 runs:
-  using: composite
+  using: "composite"
   steps:
-    - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
+    # This apt step is the slow part of every run today (~12 minutes),
+    # independent of the D28/D30 Docker migration above and not waiting on
+    # it: that migration moves *which* toolchains this step installs
+    # (D30's own point 2), but caching the packages this step already
+    # installs is a real win on its own, right now, on every push --
+    # /var/cache/apt/archives holds the downloaded .deb files apt-get
+    # install below unpacks; restoring them here skips re-downloading
+    # every package (including the large mingw-w64/cross-gcc ones) from
+    # apt's own mirrors on every single run, the same
+    # azure.archive.ubuntu.com flakiness/slowness already flagged
+    # elsewhere. Keyed on this file's own hash so any future change to the
+    # package list below busts the cache automatically rather than
+    # silently serving a stale set.
+    #
+    # `v2-` prefix: the original (unprefixed) key got genuinely stuck, not
+    # just raced. Seven commits landed in ~15 minutes while this was being
+    # built, most sharing an unchanged action.yml (hence an identical
+    # cache key) -- every single save attempt since, on every run checked
+    # (including a real concurrency: group added specifically to stop
+    # runs racing each other, and a run with no other run active at all)
+    # failed with "Unable to reserve cache with key ..., another job may
+    # be creating this cache." Conclusive, not just suspected: a later
+    # run's own *restore* (early in the job, uncontested by any
+    # same-job-save timing collision, unlike the saves) never once found
+    # anything either -- if any save had genuinely completed, some later
+    # run sharing that key would have hit it. GitHub's own cache API
+    # documents no way to clear a stuck reservation directly, so this
+    # prefix exists purely to mint a fresh, never-reserved key -- bump it
+    # again (v3-, v4-, ...) if this one ever ends up in the same state.
+    - name: Cache apt archives
+      uses: actions/cache@v6 # v4.3.0
       with:
-        python-version: "3.14"
+        path: /var/cache/apt/archives/*.deb
+        # `runner.arch` is in the key, not just `runner.os`: both an
+        # `ubuntu-latest` and an `ubuntu-24.04-arm` runner report
+        # `runner.os == 'Linux'`, so without it the two share one cache and
+        # an arm64 job restores amd64 `.deb` files it can never install.
+        # Harmless-looking and invisible -- the restore "succeeds", the
+        # packages are simply wrong. Only reachable since records
+        # 0043/0044 started asking for arm64 runners at all.
+        key: v2-apt-archives-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('action.yml') }}
 
-    - id: cibmp
+    # **The i386/multilib half is gone** (record 0050). Everything the
+    # `HOST_ARCH` branch here did existed for natmod's own `x86` arch --
+    # `gcc -m32`, D25's own second real bug -- and natmod builds in a
+    # container now, where the host is `linux/amd64` by construction and
+    # multilib is correct without asking. That branch was also the last
+    # place in this action that treated an arm64 runner as a special
+    # case, and it is why `x86` could not be built on one at all.
+    #
+    # What is left is for the *host*. natmod no longer needs it: its own
+    # mpy-cross now builds inside the natmod image (natmod/build.py's
+    # `build_mpy_cross()`), closing [0050]'s "still builds mpy-cross on
+    # the host" item -- but `build-essential` still stays, because
+    # usermod's `qemu`/`esp32` ports build *their* mpy-cross on the host
+    # too (`_HOST_MPY_CROSS_PORTS`, usermod/orchestrate.py) and were never
+    # part of this item. Closing that pair the same way `unix`/`windows`/
+    # `webassembly` already were in [0044] is what would let this step go.
+    - name: Install cibuildmp's own apt prerequisites
+      # Slimmed live, D33: every package this used to install beyond
+      # what's left below (mingw-w64 x64/x86, aarch64/armhf/mipsel-
+      # linux-gnu, libffi-dev/libffi-dev:arm64/libc6-dev-*-cross,
+      # libltdl-dev, libtool, pkg-config, libusb-1.0-0) existed only for
+      # usermod's own bare-host cross-compiles -- gone since D30 made
+      # usermod Docker-only (each sibling container now carries its own
+      # copy of exactly this list, see docker/*.Dockerfile). The
+      # `dpkg --add-architecture arm64` + its own ports.ubuntu.com
+      # deb822 stanza block existed only to make libffi-dev:arm64
+      # installable -- gone with it. `wabt` also cut, separately: it
+      # was `examples/wasm2mpy`'s own dependency (`wasm2c`), not
+      # cibuildmp's -- every consumer of this action was paying for it
+      # whether or not they build anything WebAssembly-sourced, the
+      # same "one project's own need leaking into shared infrastructure"
+      # shape as the usermod toolchains above. Moved to that example's
+      # own `pre-build-command` instead (`cibuildmp.toml`'s own config
+      # knob exactly for this -- a7p's own real config already uses it
+      # the same way for its nanopb fetch).
+      #
+      # **The i386/multilib story that lived here is gone entirely**
+      # (record 0050), and it is worth one line rather than none, because
+      # it was hard-won: natmod's `x86` really did need
+      # `linux-libc-dev:i386`, not just `gcc-13-multilib` --
+      # `py/dynruntime.h`'s include chain pulls `<asm/errno.h>`, and
+      # amd64's own copy does not satisfy it under `-m32`. It also cost a
+      # live failure on `ubuntu-24.04-arm`, where forcing
+      # `Architectures: amd64,i386` into sources pointing at
+      # ports.ubuntu.com guarantees a 404 for indices that do not exist
+      # there. All of it is the image's problem now, where the host is
+      # amd64 by construction -- see docker/natmod.Dockerfile.
       shell: bash
       run: |
-        set -euo pipefail
+        set -eu
 
-        # Install cibuildmp from this action's own checkout, so the version
-        # that runs is exactly the ref the caller pinned -- no separate
-        # package index to keep in sync with the action tag, and no way for
-        # the two to disagree. github.action_path is where the runner put
-        # this repo at that ref.
-        SPEC="${{ github.action_path }}"
-        if [ -n "${{ inputs.extras }}" ]; then
-          SPEC="${SPEC}[${{ inputs.extras }}]"
-        fi
-        uv tool install "$SPEC"
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          build-essential git ca-certificates curl python3
 
-        # `if` blocks, not `[ -n x ] && ARGS+=(...)`: under `set -e` a
-        # false test makes the whole && list return non-zero and kills the
-        # step, since it is not in a condition context.
-        ARGS=("${{ inputs.package-dir }}")
-        if [ -n "${{ inputs.output-dir }}" ]; then
-          ARGS+=(--output-dir "${{ inputs.output-dir }}")
-        fi
-        if [ -n "${{ inputs.config-file }}" ]; then
-          ARGS+=(--config-file "${{ inputs.config-file }}")
-        fi
-        if [ -n "${{ inputs.only }}" ]; then
-          ARGS+=(--only "${{ inputs.only }}")
-        fi
+    - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
 
-        cibuildmp "${ARGS[@]}"
+    - name: Install cibuildmp
+      shell: bash
+      # Installed from this exact checkout, not a git fetch --
+      # github.action_path is already the pinned ref's own source (GitHub
+      # Actions checks out a composite action's own repo before running it,
+      # the same guarantee the old, now-deleted action.Dockerfile's own
+      # `COPY .` used to rely on for a Docker action): no separate
+      # network round-trip, no
+      # version-drift risk. extras (unknowable at publish time) get folded
+      # into this one install directly -- no separate reinstall pass, unlike
+      # the old Docker action's own two-step dance, since this installs
+      # fresh on every job regardless.
+      run: |
+        set -eu
+        spec="$GITHUB_ACTION_PATH"
+        if [ -n "$ACTION_EXTRAS" ]; then
+          spec="${spec}[${ACTION_EXTRAS}]"
+        fi
+        uv tool install "$spec"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      env:
+        ACTION_EXTRAS: ${{ inputs.extras }}
+
+    - name: Run cibuildmp
+      shell: bash
+      # Clean, explicitly-chosen env var names, `ACTION_*` -- a composite
+      # action's own step-level env: block can map ${{ inputs.package-dir }}
+      # to any name it wants, sidestepping entirely the hyphen problem the
+      # old Docker action's own entrypoint.sh had to work around with
+      # `printenv 'INPUT_PACKAGE-DIR'` (GitHub's own Docker-action
+      # INPUT_<NAME> auto-generation keeps input hyphens verbatim,
+      # undocumented, found the hard way). Confirmed against
+      # pypa/cibuildwheel's own real action.yml, which does exactly this.
+      #
+      # `ACTION_*`, deliberately NOT `CIBMP_*` -- a real bug, caught live on
+      # the very first CI run of this conversion: `cibuildmp` itself already
+      # has its own generic `CIBMP_<KEY>` config-override convention
+      # (options.py's own `opt()`, checked before the config file and
+      # before any default -- `CIBMP_VERSION`, `CIBMP_CACHE_PATH`, etc. are the
+      # same mechanism). Naming this step's own plumbing variable
+      # `CIBMP_OUTPUT_DIR` collided with it outright: GitHub Actions always
+      # *sets* an env: block's own vars, even for an empty-string input, so
+      # every push silently exported `CIBMP_OUTPUT_DIR=""` -- which
+      # `opt()` reads as "the user explicitly wants an empty output-dir"
+      # (its own `environ.get(...) is not None` check has no way to tell
+      # "empty" from "unset"), overriding `DEFAULT_OUTPUT_DIR` ("mpyhouse")
+      # to nothing at all. Every natmod example built successfully but
+      # collected its output one directory up from where `build-examples.yml`
+      # went looking for it (`examples/template/mpy6.3-natmod-x64/...`
+      # instead of `examples/template/mpyhouse/mpy6.3-natmod-x64/...`) --
+      # confirmed directly from the real build's own "done in Xs -> <path>"
+      # log line. `ACTION_*` cannot collide with any real `cibuildmp.toml`
+      # key, present or future.
+      run: |
+        set -eu
+        args=("$ACTION_PACKAGE_DIR")
+        if [ -n "$ACTION_OUTPUT_DIR" ]; then
+          args+=(--output-dir "$ACTION_OUTPUT_DIR")
+        fi
+        if [ -n "$ACTION_CONFIG_FILE" ]; then
+          args+=(--config-file "$ACTION_CONFIG_FILE")
+        fi
+        if [ -n "$ACTION_BUILD" ]; then
+          args+=(--build "$ACTION_BUILD")
+        fi
+        if [ -n "$ACTION_SKIP" ]; then
+          args+=(--skip "$ACTION_SKIP")
+        fi
+        cibuildmp "${args[@]}"
+      env:
+        ACTION_PACKAGE_DIR: ${{ inputs.package-dir }}
+        ACTION_OUTPUT_DIR: ${{ inputs.output-dir }}
+        ACTION_CONFIG_FILE: ${{ inputs.config-file }}
+        ACTION_BUILD: ${{ inputs.build }}
+        ACTION_SKIP: ${{ inputs.skip }}

@@ -1,8 +1,33 @@
 # cibuildmp's own integration test bed -- see
 # .github/workflows/build-examples.yml. natmod/template.c is a trivial
 # module whose only job is to build cleanly, so this config deliberately
-# doesn't override archs/skip: every target cibuildmp claims to support
-# should build here, or the claim is wrong.
+# doesn't narrow build down further than it has to: every target cibuildmp
+# claims to support should build here, or the claim is wrong.
+#
+# natmod/, usermod/ and src/ are siblings under this one directory -- the
+# real downstream layout (see micropython-bclibc's and a7p/micropython's
+# own cibuildmp.toml), not a separate example directory per platform, and
+# not two independent module implementations either -- natmod/template.c
+# and usermod/template/template.c both wrap the exact same
+# src/template_core.c (see that file's own header comment), and
+# src/facade.py is the shared Python-level API layer on top: copied
+# alongside template.mpy on the natmod side ([publish] extra-files
+# below), frozen into the firmware image on the usermod side
+# (usermod/manifest.py). Every platform below builds in one invocation --
+# there is no more per-platform table, and no `--platform` to disambiguate
+# a mode with (record 0052's own live-caught retraction): build-examples.yml
+# still uses --build/CIBMP_BUILD to narrow which of these platforms *that
+# job* wants, not to disambiguate a mode.
+#
+# No [usermod] table here, deliberately, in keeping with this file's own
+# "no override that isn't needed" discipline: user-c-modules defaults to
+# "." (record 0051's ninth addendum) -- the whole project root, which is
+# exactly what every port below already wants (src/template_core.c is a
+# sibling of usermod/, not a descendant of it, so USER_C_MODULES has to
+# reach one level above usermod/ to see it at all). [usermod]'s own
+# mechanism -- shared defaults for every port at once -- is covered
+# directly by tests/test_cli_multi_family.py's own
+# test_usermod_family_table_still_works_as_shared_defaults, not here.
 #
 # version is deliberately not set here -- CI sets CIBMP_VERSION so every
 # push exercises D14's packaging step (extra-files + package.json) too,
@@ -17,23 +42,53 @@
 # -Werror=unterminated-string-initialization rejects. Nothing cibuildmp can
 # fix (mpy-cross is a host build, not a cross-compile), so this CI stays on
 # one tag; D13's multi-tag path is covered by tests/test_options.py and
-# tests/test_targets.py instead.
+# tests/test_targets.py instead. Pinned literally, once, in `build` below
+# for both natmod and usermod -- there is no more separate `micropython =`
+# key at all (record 0052's own live-caught correction, mirroring natmod's
+# own earlier A2 retraction): every real identifier already carries its own
+# tag, so naming it is what a `build` glob does directly.
+#
+# Genuinely shared across every usermod port below -- natmod's own schema
+# has no `manifest` key at all, so this is harmless to it. Still written at
+# the bare top level, not [usermod] -- record 0051's sixth addendum decided
+# the module-dir/user-c-modules key split specifically to make *that* key
+# promotable; whether manifest itself should move to [usermod] too was
+# deliberately left open the same day, so this stays exactly where it
+# always was until that's decided.
+manifest = "usermod/manifest.py"
 
-micropython = "v1.28.0"
-
-[natmod]
-archs = [
-    "x64",
-    "x86",
-    "armv6m",
-    "armv7m",
-    "armv7emsp",
-    "armv7emdp",
-    "rv32imc",
-    "rv64imc",
-    "xtensa",
-    "xtensawin",
-]
+# natmod: every arch dynruntime.mk supports, one MicroPython tag -- module-
+# dir/make-target/extra-make-args used to live inside a retired [natmod]
+# table; they are natmod-only keys but live at the bare top level like
+# every other global option now, the same as the root cibuildmp.toml's own
+# reference config already shows.
+#
+# usermod: unix's own real default cells (record 0043's platform-tag
+# identifiers), minus the six emulated-everywhere ones (ppc64le/s390x/
+# riscv64, both libcs) -- `skip` below excludes them explicitly now that
+# there is no more opt-in GROUPS/`--enable` mechanism doing it implicitly;
+# proves each published image really is native to its own architecture
+# inside the real Docker action, rather than only in a bare dev sandbox --
+# three of those nine are emulated on an amd64 runner, which is why
+# build-examples.yml's own usermod job sets up binfmt first. Plus
+# webassembly (no per-build axis of its own) and windows (all three
+# arches, one amd64 image). qemu -- MPS2_AN385, the one board its own
+# axis defaults to (build.py's own QEMU_BOARD_CROSS/targets.py's
+# _PORT_AXES) -- was wired to ensure_image() by record 0032 but never
+# actually built anywhere, here or by hand (tracker row [0032]); added
+# now that this file's own rule ("every target cibuildmp claims to
+# support should build here, or the claim is wrong") applies to it too.
+build = """
+mpy6.3-v1.29.0-*
+v1.29.0-manylinux*
+v1.29.0-musllinux*
+v1.29.0-wasm32
+v1.29.0-win32
+v1.29.0-win_amd64
+v1.29.0-win_arm64
+v1.29.0-qemu-MPS2_AN385
+"""
+skip = "*_ppc64le *_s390x *_riscv64"
 
 [publish]
 # facade.py is not part of natmod/'s own SRC, so dynruntime.mk never merges

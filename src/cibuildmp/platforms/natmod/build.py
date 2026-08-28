@@ -5,8 +5,8 @@ Fails fast, one target at a time -- matching cibuildwheel's own
 build-in-container loop (platforms/linux.py), which lets a
 `subprocess.CalledProcessError` from one identifier abort the whole
 invocation rather than collecting per-target failures into a report.
-`cli.build()` already handles that: this module raises, cli.main() catches
-alongside SourceError/ToolchainError.
+`build_all()` already handles that: this module raises, cli.main() catches
+alongside SourceError.
 
 Also cibuildwheel-shaped: `collect_output()`/`verify_output()` mirror its
 "exactly one artifact, or a named error" check (BuildProducedNoWheelError/
@@ -24,8 +24,7 @@ step, the same way cibuildwheel never runs `twine upload` itself.
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
+import os
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -33,7 +32,6 @@ from pathlib import Path
 
 from .options import BuildOptions
 from .targets import NATIVE_ARCH_CODE
-from .toolchains import ResolvedToolchain
 
 MPY_HEADER_MAGIC = ord("M")
 MPY_ARCH_FLAGS_BIT = 0x40
@@ -59,48 +57,182 @@ def make_command(
 ) -> list[str]:
     """The make invocation for one target.
 
-    PYTHON=<sys.executable> is what makes pyelftools/ar cibuildmp's own
-    dependencies rather than something installed at build time (D12):
-    py/dynruntime.mk assigns PYTHON with a plain `=`, never `override`, so
-    this wins over the `python3` it would otherwise default to -- the same
-    mechanism already used for CROSS= in toolchains.ResolvedToolchain.
+    Every path here is written `.as_posix()` and every one of them is
+    bind-mounted at its own identical absolute path inside the image, so
+    this list is the same whether it is read on the host or run in the
+    container -- D26's own reason for mounting that way.
     """
     return [
         "make",
         "-C",
-        str(module_root),
+        module_root.as_posix(),
         f"ARCH={build_options.target.arch}",
-        f"MPY_DIR={mpy_dir}",
-        f"PYTHON={sys.executable}",
+        f"MPY_DIR={mpy_dir.as_posix()}",
+        # `python3`, not `sys.executable`. D12 made pyelftools and `ar`
+        # cibuildmp's own dependencies and `PYTHON=<sys.executable>` was
+        # how that reached make -- dynruntime.mk assigns PYTHON with a
+        # plain `=`, so naming cibuildmp's own interpreter won over the
+        # `python3` it would otherwise use.
+        #
+        # That mechanism cannot cross a container boundary: the path
+        # `sys.executable` names is in the *host's* virtual environment
+        # and does not exist inside the image. Record 0049 moved the
+        # requirement into the image instead --
+        # `docker/natmod.Dockerfile` installs `python3-pyelftools` and
+        # `ar` comes with build-essential -- so the plain interpreter is
+        # now sufficient, and it is the only one that is addressable
+        # from both sides of the mount.
+        "PYTHON=python3",
         *build_options.extra_make_args,
         build_options.make_target,
     ]
 
 
-def run_pre_build_command(module_root: Path, command: str, env: dict[str, str]) -> None:
+def _natmod_image() -> str:
+    """The image every natmod build runs in, or a clear error.
+
+    **There is no bare-host path any more** (record 0049). natmod resolved
+    a toolchain onto whatever machine invoked it until then -- apt
+    packages, downloaded tarballs, the host gcc's own multilib -- which is
+    exactly the mutation D30 had already ruled out for usermod, and the
+    reason `x86` could not be built on an arm64 runner at all. One
+    `linux/amd64` image holds all ten arches' toolchains now, so the
+    machine underneath stops mattering: what is not native to it is
+    emulated, like every other port.
+    """
+    from ... import dockerrun
+
+    image = dockerrun.ensure_image("natmod")
+    if image is None:
+        raise BuildError(
+            "no image registered for natmod -- `pinned_docker_images.toml`'s "
+            "own `[port] natmod` entry is empty until a real "
+            "publish-docker-images.yml run fills it. Point "
+            "CIBMP_NATMOD_DOCKER_IMAGE at a locally built tag to work "
+            "without one."
+        )
+    return image
+
+
+def _run_in_image(
+    command: list[str], *, mounts: list[Path], workdir: Path, what: str
+) -> None:
+    from ... import dockerrun
+
+    try:
+        dockerrun.run(
+            command,
+            mounts=mounts,
+            workdir=workdir,
+            image=_natmod_image(),
+            oci_platform=dockerrun.platform_for("natmod"),
+        )
+    except Exception as exc:  # UsermodBuildError, and anything docker raises
+        raise BuildError(f"{what}: {exc}") from exc
+
+
+def build_mpy_cross(mpy_dir: Path) -> Path:
+    """Build mpy-cross **inside the natmod image** and return the binary.
+
+    `py/dynruntime.mk` hardcodes `MPY_CROSS = $(MPY_DIR)/mpy-cross/build/mpy-cross`
+    with no override (unlike ports/unix's `MICROPY_MPYCROSS=`) -- confirmed
+    directly against v1.29.0's own dynruntime.mk, not assumed -- so the
+    binary must exist at that exact path before `run_make()` invokes it.
+
+    Building it on the host (`sources.build_mpy_cross()`, still used for
+    usermod's `qemu`) worked here only because host glibc happened to
+    match `docker/natmod.Dockerfile`'s own glibc -- the same coincidence
+    `usermod/build.py`'s own `container_mpy_cross()` already documents and
+    fixed for the port builds (a real `GLIBC_2.34' not found` failure). No
+    `slug` scoping here the way that function needs: natmod has exactly
+    one image for every arch, so there is only ever one binary to build,
+    at the fixed path dynruntime.mk itself expects -- no `MPY_CROSS=`
+    override to pass, unlike `MICROPY_MPYCROSS=`.
+
+    Cached by existence, like `sources.build_mpy_cross()`/
+    `usermod.build.container_mpy_cross()`: rebuilt only when the image
+    itself changes (the image is digest-pinned).
+    """
+    binary = mpy_dir / "mpy-cross" / "build" / "mpy-cross"
+    if binary.exists():
+        return binary
+    _run_in_image(
+        ["make", "-C", (mpy_dir / "mpy-cross").as_posix(), f"-j{os.cpu_count() or 1}"],
+        mounts=[mpy_dir],
+        workdir=mpy_dir / "mpy-cross",
+        what="mpy-cross",
+    )
+    if not binary.exists():
+        raise BuildError(f"mpy-cross build reported success but {binary} is missing")
+    return binary
+
+
+def run_pre_build_command(
+    module_root: Path,
+    command: str,
+    mpy_dir: Path,
+    package_dir: Path,
+) -> None:
+    """A project's own `pre-build-command`, inside the same image the
+    build itself runs in.
+
+    On the host until record 0049, which is where it stopped making
+    sense: a7p's own `make fetch-nanopb` is a *build* step, and running
+    it against a different set of tools than the compile that follows is
+    the kind of difference that shows up as a link error three steps
+    later. Same image, same mounts, same working directory.
+    """
     if not command:
         return
-    try:
-        subprocess.run(command, shell=True, cwd=module_root, env=env, check=True)
-    except subprocess.CalledProcessError as exc:
-        raise BuildError(f"pre-build-command failed: {command!r} ({exc})") from exc
+    # Absolute, because a bind mount and a container workdir both have to
+    # be. `module_root` is routinely relative on the host -- it is
+    # `options.package_dir / module_dir` and `package_dir` is very often
+    # "." -- which the old bare-host `subprocess.run` never cared about.
+    # Docker cares: it refuses a relative `-w` outright.
+    module_root = module_root.resolve()
+    _run_in_image(
+        ["bash", "-c", command],
+        mounts=[mpy_dir.resolve(), package_dir.resolve()],
+        workdir=module_root,
+        what=f"pre-build-command {command!r}",
+    )
 
 
 def run_make(
-    build_options: BuildOptions, mpy_dir: Path, module_root: Path, env: dict[str, str]
+    build_options: BuildOptions,
+    mpy_dir: Path,
+    module_root: Path,
+    package_dir: Path,
 ) -> None:
-    # No cwd= here: `-C module_root` in the command itself already makes
-    # make chdir there, and module_root can be relative (it usually is --
-    # options.package_dir is often "."), so also passing it as cwd would
-    # chdir twice and have make look for module_root nested inside itself.
+    # Both paths are mounted at their own identical absolute paths inside
+    # the container (dockerrun's own contract), so the command built for a
+    # bare-host invocation needs no rewriting -- the same property that
+    # let usermod's own make/deplibs command lists move into containers
+    # untouched (D26).
+    #
+    # No cwd/workdir subtlety left either: `-C module_root` already makes
+    # make chdir there, and the workdir below is only where the container
+    # starts.
+    mpy_dir = mpy_dir.resolve()
+    module_root = module_root.resolve()
+    # **The package root, not the module directory.** A project's own
+    # Makefile is entitled to reach outside `natmod/` -- the documented
+    # downstream layout has `natmod/`, `usermod/` and `src/` as siblings,
+    # and `examples/template/natmod/Makefile` compiles
+    # `../src/template_core.c` precisely to prove the two modes share one
+    # implementation. Mounting only the module directory made that file
+    # not exist, which surfaced as "No rule to make target
+    # '../src/template_core.c'" -- a missing *mount* reported as a
+    # missing rule, three layers down.
+    #
+    # `module_root` is not mounted separately: it is underneath this.
     command = make_command(build_options, mpy_dir, module_root)
-    try:
-        subprocess.run(command, env=env, check=True)
-    except subprocess.CalledProcessError as exc:
-        raise BuildError(
-            f"{build_options.identifier}: `{' '.join(command)}` failed with exit "
-            f"code {exc.returncode}"
-        ) from exc
+    _run_in_image(
+        command,
+        mounts=[mpy_dir, package_dir.resolve()],
+        workdir=module_root,
+        what=build_options.identifier,
+    )
 
 
 def collect_output(build_options: BuildOptions, module_root: Path) -> Path:
@@ -199,13 +331,24 @@ def verify_output(build_options: BuildOptions, mpy_path: Path) -> None:
         )
 
 
-def output_name(build_options: BuildOptions, mpy_path: Path) -> str:
+def output_name(
+    build_options: BuildOptions, mpy_path: Path, *, name: str = "", version: str = ""
+) -> str:
     # Identifier-qualified even though the file already lives in its own
     # identifier/ directory: package.json's own urls stay unambiguous even
     # if a caller later flattens several identifiers' directories into one
     # namespace (e.g. a GitHub Release's own asset list, which cannot nest
     # directories -- see D14's "still open" deployment note).
-    return f"{mpy_path.stem}-{build_options.identifier}{mpy_path.suffix}"
+    #
+    # `name`/`version` (record 0052, A3) give the file real project
+    # identity -- `mpy_path.stem` alone is a side effect of the user's own
+    # Makefile, not a config value. Gated on `name` being set at all: a
+    # project that has not set it yet keeps exactly today's filename
+    # rather than gaining a bare leading `-`.
+    if not name:
+        return f"{mpy_path.stem}-{build_options.identifier}{mpy_path.suffix}"
+    prefix = f"{name}-{version}-" if version else f"{name}-"
+    return f"{prefix}{build_options.identifier}{mpy_path.suffix}"
 
 
 def _write_package_json(path: Path, urls: list[tuple[str, str]], version: str) -> None:
@@ -258,12 +401,13 @@ def package_target(
 
 def build_target(
     build_options: BuildOptions,
-    chain: ResolvedToolchain,
     mpy_dir: Path,
     module_root: Path,
     output_dir: Path,
     *,
+    package_dir: Path,
     extra_files: Sequence[Path] = (),
+    name: str = "",
     version: str = "",
 ) -> BuildResult:
     """Run one target's build end to end: pre-build-command, make, collect,
@@ -278,17 +422,20 @@ def build_target(
     identifiers and therefore distinct directories.
     """
     start = time.time()
-    env = chain.env()
 
-    run_pre_build_command(module_root, build_options.pre_build_command, env)
-    run_make(build_options, mpy_dir, module_root, env)
+    run_pre_build_command(
+        module_root, build_options.pre_build_command, mpy_dir, package_dir
+    )
+    run_make(build_options, mpy_dir, module_root, package_dir)
 
     produced = collect_output(build_options, module_root)
     verify_output(build_options, produced)
 
     identifier_dir = output_dir / build_options.identifier
     identifier_dir.mkdir(parents=True, exist_ok=True)
-    dest = identifier_dir / output_name(build_options, produced)
+    dest = identifier_dir / output_name(
+        build_options, produced, name=name, version=version
+    )
     dest.write_bytes(produced.read_bytes())
 
     package_target(

@@ -1,267 +1,301 @@
-"""Config loading and option resolution.
+"""Cascade-based option resolution (record 0051, points 4/6 -- Phase E).
 
-Precedence, lowest to highest:
-    defaults -> config file -> matching [[overrides]] -> environment -> CLI
+Record 0048 fixed "a key placed in the wrong table is silently ignored"
+(`build`/`skip` read from the top level by natmod and from `[usermod]` by
+usermod) by giving every key exactly one correct location and making every
+other location a loud error (`TOP_LEVEL_ONLY_KEYS`, `NATMOD_TABLE_KEYS`,
+`check_table_keys()` in `natmod/options.py`). That works, but it does not
+generalise to six platforms sharing option keys (`module-dir`, `manifest`,
+`extra-make-args`) the way natmod and the five usermod ports would need to
+once natmod stops being "a mode with its own table" and becomes one of six
+platform tables, all structurally identical.
 
-Config lives in cibuildmp.toml at the package root, with the same tree
-accepted under [tool.cibuildmp] in pyproject.toml for the rare MicroPython
-C-module repo that has one. cibuildmp.toml wins when both exist.
+Read from `cibuildwheel/options.py` directly this session, not recalled:
+upstream's own `Options.get()` -> `_resolve_cascade()` resolves every
+option as `default -> global config -> platform config -> environment ->
+CLI`, most-specific-wins, and nothing is an error to place at any layer --
+there is no "wrong location" to begin with. That is a different, more
+general way to satisfy 0048's own constraint (a misplaced key must never
+silently do nothing): under a cascade, every placement is *some* real
+layer, so "misplaced" stops being a category. What stays a real error is a
+key unknown to *every* layer's own schema at once -- a genuine typo, not a
+placement choice. See `docs/records/0048-build-skip-live-in-opposite-tables.md`'s
+own addendum for the full argument, and
+`docs/records/0051-usermod-identifiers-have-no-version-axis.md`'s addendum
+for how this fits points 4/6.
+
+Wired into `natmod/options.py`'s and `usermod/options.py`'s own
+`build_options()` as of Phase G (record 0051's own fourth/fifth addenda):
+`matching_overrides()`/`override_extra_layers()` below turn a config's
+`[override]` list into the `(value, inherit_rule)` layers `Options.get()`'s
+own `extra_layers` parameter already knew how to consume -- the whole
+mechanism was built ahead of having a real caller for it (Phase E), and
+this is that caller.
 """
 
 from __future__ import annotations
 
-import os
-import shlex
-import tomllib
-from collections.abc import Mapping
+import difflib
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
-from .targets import (
-    NATMOD_ARCHS,
-    Target,
-    matches,
-    natmod_targets,
-    parse_arch_flags,
-    parse_selector,
-    resolve_micropython_tags,
-    select,
-)
-
-CONFIG_FILENAME = "cibuildmp.toml"
-
-DEFAULT_MICROPYTHON = "v1.28.0"
-DEFAULT_OUTPUT_DIR = "mpyhouse"
-DEFAULT_MODULE_DIR = "natmod"
-DEFAULT_MAKE_TARGET = "dist"
+from .selector import matches, parse_selector
 
 
 class ConfigError(Exception):
     pass
 
 
-def _as_list(value: Any, key: str) -> list[str]:
-    """Accept a list, or a shell-ish string, for list-valued options.
-
-    The string form exists for the environment layer -- CIBMP_EXTRA_MAKE_ARGS
-    can only ever be a string -- and is accepted in the file too so the two
-    layers do not disagree about what a valid value looks like.
+class InheritRule:
+    """Upstream's own `InheritRule` (`cibuildwheel/options.py`), the same
+    three values, spelled as plain strings rather than an enum since every
+    caller here already works with kebab-case TOML strings elsewhere in
+    this project. `NONE` (the default) replaces the running value; the
+    other two only apply when both the running value and the new layer
+    are lists -- `extra-make-args` is the one option this project has that
+    is genuinely list-shaped across every platform's own override surface
+    (Phase G); scalar options (`module-dir`, `manifest`, ...) only ever
+    take `NONE`.
     """
-    if value is None:
-        return []
-    if isinstance(value, str):
-        return shlex.split(value)
-    if isinstance(value, list):
-        return [str(v) for v in value]
-    raise ConfigError(f"{key}: expected a list or a string, got {type(value).__name__}")
+
+    NONE = "none"
+    APPEND = "append"
+    PREPEND = "prepend"
+    ALL: frozenset[str] = frozenset({NONE, APPEND, PREPEND})
 
 
-@dataclass
-class BuildOptions:
-    """Fully resolved options for a single target."""
+def resolve_cascade(*layers: tuple[Any | None, str]) -> Any | None:
+    """Resolve `(value, inherit_rule)` pairs, lowest priority first, into
+    one final value -- upstream's own `_resolve_cascade()` shape, adapted:
+    no `OptionFormat` class hierarchy, just Python `str`/`list[str]`
+    values, since that already covers every option shape this project has.
 
-    target: Target
-    micropython: str
-    output_dir: Path
-    module_dir: str
-    make_target: str
-    runs_on: str = ""
-    extra_make_args: list[str] = field(default_factory=list)
-    pre_build_command: str = ""
+    A `None` value means "this layer did not set anything" and is skipped
+    entirely -- not the same as an explicit empty string/list, which does
+    replace. Layers evaluate left to right; `NONE` fully replaces the
+    running result, `APPEND`/`PREPEND` only apply when both the running
+    result and the new layer are lists (a scalar layer requesting append
+    is a config error, not silently coerced).
+    """
+    result: Any | None = None
+    for value, rule in layers:
+        if value is None:
+            continue
+        if rule not in InheritRule.ALL:
+            raise ConfigError(
+                f"unknown inherit rule {rule!r}. Known: "
+                f"{', '.join(sorted(InheritRule.ALL))}"
+            )
+        if result is None or rule == InheritRule.NONE:
+            result = value
+            continue
+        if not (isinstance(result, list) and isinstance(value, list)):
+            raise ConfigError(
+                f"inherit={rule!r} only applies to list-valued options, got "
+                f"{type(value).__name__}"
+            )
+        result = result + value if rule == InheritRule.APPEND else value + result
+    return result
 
-    @property
-    def identifier(self) -> str:
-        return self.target.identifier
+
+def known_option_names(
+    schemas: Mapping[str, frozenset[str]], generic: frozenset[str] = frozenset()
+) -> frozenset[str]:
+    """The union of every platform's own known option keys plus the
+    generic (platform-agnostic) ones -- replaces 0048's
+    `TOP_LEVEL_ONLY_KEYS`/`NATMOD_TABLE_KEYS`/`USERMOD_TABLE_KEYS` as the
+    "is this a real key at all" check. `schemas` maps a platform name to
+    that platform's own option-key set (e.g. `{"natmod": NATMOD_KEYS,
+    "unix": UNIX_KEYS, ...}`); under the cascade every one of those keys
+    is nominally valid at the global level too, since the global layer is
+    just every platform's own default.
+    """
+    names = set(generic)
+    for keys in schemas.values():
+        names |= keys
+    return frozenset(names)
 
 
-@dataclass
+def suggest(name: str, known: frozenset[str]) -> str | None:
+    """A close-match suggestion for an unknown key, the same
+    `difflib.get_close_matches` upstream's own `_validate_global_option()`
+    uses (`cibuildwheel/options.py`, confirmed this session) -- and the
+    same library `check_table_keys()` could adopt but does not yet."""
+    matches = difflib.get_close_matches(name, known, n=1, cutoff=0.7)
+    return matches[0] if matches else None
+
+
+def check_known_keys(
+    table: Mapping[str, Any], known: frozenset[str], *, where: str
+) -> None:
+    """Reject any key in `table` that is not in `known` anywhere -- the
+    one placement-independent error the cascade still needs: a key no
+    platform's schema recognises at all is a typo, not a location choice.
+    """
+    for key in table:
+        if key in known:
+            continue
+        msg = f"{where}: unknown key `{key}`."
+        hint = suggest(key, known)
+        if hint:
+            msg += f" Perhaps you meant `{hint}`?"
+        raise ConfigError(msg)
+
+
+def matching_overrides(
+    overrides: Sequence[Mapping[str, Any]],
+    identifier: str,
+    *,
+    error: type[Exception] = ConfigError,
+) -> list[Mapping[str, Any]]:
+    """Every override table (file order) whose `select` matches
+    `identifier` -- shared by `natmod/options.py`'s and
+    `usermod/options.py`'s own `build_options()`, replacing the hand-rolled
+    loop each had before Phase G. `error` lets each caller raise its own
+    exception class for a missing `select` (`natmod.options.ConfigError`
+    / `usermod.options.UsermodConfigError`), since existing tests assert
+    the specific class each mode already raises.
+    """
+    result = []
+    for override in overrides:
+        selector = override.get("select")
+        if selector is None:
+            raise error("every override needs a `select` key")
+        if matches(identifier, parse_selector(selector)):
+            result.append(override)
+    return result
+
+
+def check_selector_reachable(
+    patterns: Sequence[str],
+    where: str,
+    identifiers: Sequence[str],
+    *,
+    error: type[Exception] = ConfigError,
+) -> None:
+    """Raise unless every pattern in `patterns` matches at least one of
+    `identifiers` (record 0052, A5) -- checked individually per pattern
+    rather than as one OR'd whole, so a group with one working pattern
+    and one typo'd one does not hide the typo behind the pattern that
+    still matches something. Shared by `natmod/options.py`'s and
+    `usermod/options.py`'s own `check_reachable()`, each of which calls
+    this once for `build`, once for `skip`, and once per `[override]`
+    table's own `select` -- `identifiers` is always that caller's own
+    `all_targets()`, the full, unfiltered domain, never the already-
+    selected result, so a deliberate `skip = "*"` narrowing a real domain
+    to zero *selected* targets stays legitimate and is never confused
+    with a pattern that could never have matched anything in the first
+    place.
+    """
+    for pattern in patterns:
+        if not any(matches(identifier, [pattern]) for identifier in identifiers):
+            raise error(
+                f"{where}: {pattern!r} matches no known identifier -- a typo, "
+                f"or an axis value this project has never verified"
+            )
+
+
+def override_extra_layers(
+    matching: Sequence[Mapping[str, Any]], key: str
+) -> list[tuple[Any | None, str]]:
+    """`(value, inherit_rule)` per matching override that sets `key`, in
+    file order -- exactly the shape `Options.get()`'s own `extra_layers`
+    wants. `inherit` defaults to `InheritRule.NONE` (replace) when a
+    matching override has none, so every override written before `inherit`
+    existed keeps its exact "last matching override wins outright" result.
+    """
+    layers: list[tuple[Any | None, str]] = []
+    for override in matching:
+        if key not in override:
+            continue
+        rule = (override.get("inherit") or {}).get(key, InheritRule.NONE)
+        layers.append((override[key], rule))
+    return layers
+
+
+@dataclass(frozen=True)
 class Options:
-    """The whole config, before it is narrowed to a single target."""
+    """One config's worth of cascade-resolvable option tables.
 
-    package_dir: Path
-    config_path: Path | None
-    micropython: list[str]
-    output_dir: Path
-    build: list[str]
-    skip: list[str]
-    archs: list[str]
-    micropython_submodules: list[str]
-    mpy_abi: str | None
-    arch_flags: list[str]
-    version: str
-    natmod: dict[str, Any]
-    overrides: list[dict[str, Any]]
-    publish: dict[str, Any]
+    `global_table` is the top-level config dict, meaningful to *every*
+    family (natmod included). `family_table` sits above it: one dict
+    shared by every platform in *one* family and no other (record 0051's
+    ninth addendum) -- usermod's own `[usermod]` table
+    (`user-c-modules`/`manifest`/`extra-make-args`, defaults for all five
+    ports at once), empty for natmod, whose one platform already *is* its
+    only family, so it has nothing a separate family tier would add.
+    `env` is the environment mapping (`os.environ` by default, injectable
+    so tests never touch the real process environment). Neither
+    CLI-supplied values nor `[override]` matches live here -- both are
+    the caller's own, layered in via `get()`'s own `extra_layers`, so
+    this class stays config-file-and-environment-only, the same split
+    upstream keeps between its own `Options` (file + env) and `argparse`
+    (CLI).
 
-    # ── Loading ───────────────────────────────────────────────────────────
+    **There is no `platform_tables` tier any more** (record 0052's own
+    live-caught correction, retracting the "per-platform build/skip"
+    addendum this docstring used to describe): a per-platform TOML table
+    (`[unix] key = "..."`) is always exactly a sufficiently-scoped global
+    value restated, since every platform's own real identifier already
+    carries a marker a `build`/`skip` glob or an `[override]` entry can
+    address directly (`manylinux`/`musllinux` for unix, `win32` for
+    windows, the literal `mpy` prefix for natmod, ...) -- a second way to
+    say the same thing this project keeps refusing to build, the same
+    argument that already removed natmod's own `archs` config key one
+    axis over. What replaces it: option values resolve from
+    `default -> global -> family -> env -> extra_layers` only, and
+    per-target customisation goes through `[override]`'s own glob match
+    (`extra_layers`), never a per-platform table.
+    """
 
-    @classmethod
-    def load(
-        cls,
-        package_dir: Path,
-        config_file: Path | None = None,
-        env: Mapping[str, str] | None = None,
-    ) -> Options:
-        environ: Mapping[str, str] = os.environ if env is None else env
-        config_path, raw = _read_config(package_dir, config_file)
+    global_table: Mapping[str, Any]
+    family_table: Mapping[str, Any] = field(default_factory=dict)
+    env: Mapping[str, str] = field(default_factory=dict)
 
-        natmod = dict(raw.get("natmod") or {})
-        overrides = list(raw.get("overrides") or [])
-        if not isinstance(overrides, list):
-            raise ConfigError("[[overrides]] must be an array of tables")
-        publish = dict(raw.get("publish") or {})
+    def get(
+        self,
+        name: str,
+        *,
+        platform: str | None = None,
+        default: Any = None,
+        env_plat: bool = True,
+        extra_layers: Sequence[tuple[Any | None, str]] = (),
+    ) -> Any:
+        """`default -> global -> family -> env -> env(platform) ->
+        extra_layers`, most-specific-wins. `extra_layers` is where a
+        caller threads in CLI-supplied values or matching `[override]`
+        entries (Phase G), each with its own inherit rule -- this method
+        does not know about either.
 
-        def opt(key: str, default: Any = None) -> Any:
-            # Environment beats the file for every global option. Keys are
-            # kebab-case in TOML (matching cibuildwheel) and
-            # CIBMP_SCREAMING_SNAKE in the environment.
-            env_value = environ.get("CIBMP_" + key.replace("-", "_").upper())
-            if env_value is not None:
-                return env_value
-            return raw.get(key, default)
+        `family_table` sits strictly between `global` and `env`: more
+        specific than "every platform's own default" (natmod never sees
+        it -- its own `Options` instance is always constructed with an
+        empty one), less specific than the environment. A caller with no
+        real family tier (natmod, or a direct test construction) passes
+        nothing and gets exactly today's three-layer behaviour -- an
+        empty `Mapping.get()` always contributes `None`, which
+        `resolve_cascade()` skips.
 
-        archs_value = opt("archs") or natmod.get("archs") or list(NATMOD_ARCHS)
-        arch_flags_value = opt("arch-flags") or natmod.get("arch-flags") or []
-
-        return cls(
-            package_dir=package_dir,
-            config_path=config_path,
-            micropython=_as_list(
-                opt("micropython", DEFAULT_MICROPYTHON), "micropython"
-            ),
-            output_dir=Path(str(opt("output-dir", DEFAULT_OUTPUT_DIR))),
-            build=parse_selector(opt("build", "*")),
-            skip=parse_selector(opt("skip", "")),
-            archs=_as_list(archs_value, "archs"),
-            micropython_submodules=_as_list(
-                opt("micropython-submodules"), "micropython-submodules"
-            ),
-            mpy_abi=(str(opt("mpy-abi")) if opt("mpy-abi") is not None else None),
-            arch_flags=_as_list(arch_flags_value, "arch-flags"),
-            version=str(opt("version", "")),
-            natmod=natmod,
-            overrides=overrides,
-            publish=publish,
-        )
-
-    # ── Resolution ────────────────────────────────────────────────────────
-
-    def tag_groups(self) -> list[tuple[str, str]]:
-        """One (tag, abi) pair per distinct ABI `micropython` resolves to.
-
-        See resolve_micropython_tags(): almost always a single pair, since
-        that is the common case (**D13**), but never fewer than the number
-        of distinct ABIs actually requested.
+        `platform` no longer selects a TOML table (there is none left to
+        select) -- it is kept purely to build the env var's own
+        per-platform name: `CIBMP_<KEY>` always, and `CIBMP_<KEY>_
+        <PLATFORM>` too when `platform` is given and `env_plat` is true
+        -- upstream's own two-tier `CIBW_<NAME>`/`CIBW_<NAME>_<PLATFORM>`
+        shape. A real, still-useful capability distinct from the TOML
+        question above: CI can inject a one-off `CIBMP_BUILD_NATMOD=...`
+        without touching the config file at all, something no sufficiently
+        -scoped global glob can substitute for.
         """
-        return resolve_micropython_tags(self.micropython, self.mpy_abi)
-
-    def extra_files(self) -> list[str]:
-        """`[publish] extra-files` -- files copied into every identifier's
-        own output directory alongside its `.mpy`, for a facade or anything
-        else meant to install regardless of target arch (**D14**)."""
-        return _as_list(self.publish.get("extra-files"), "extra-files")
-
-    def targets(self) -> list[Target]:
-        """Every target this config selects.
-
-        One ABI group per `tag_groups()` entry, archs in NATMOD_ARCHS order
-        within each group. `arch_flags` (rv32imc only) is resolved here,
-        before selection, since it is part of the identifier that
-        `build`/`skip`/`[[overrides]]` glob against. A list produces one
-        rv32imc target *per entry* -- "build every arch-flags variant" is
-        its own request, distinct from "build every arch", so
-        `arch-flags = ["", "zba,zcmp"]` is two rv32imc identifiers, not one.
-        """
-        arch_flags = (
-            [parse_arch_flags("rv32imc", value) for value in self.arch_flags]
-            if self.arch_flags
-            else [0]
-        )
-        all_targets = [
-            target
-            for tag, abi in self.tag_groups()
-            for target in natmod_targets(self.archs, abi, tag, arch_flags)
+        env_key = "CIBMP_" + name.replace("-", "_").upper()
+        layers: list[tuple[Any | None, str]] = [
+            (default, InheritRule.NONE),
+            (self.global_table.get(name), InheritRule.NONE),
+            (self.family_table.get(name), InheritRule.NONE),
+            (self.env.get(env_key), InheritRule.NONE),
         ]
-        return select(all_targets, self.build, self.skip)
-
-    def build_options(
-        self, target: Target, env: Mapping[str, str] | None = None
-    ) -> BuildOptions:
-        """Resolve per-target options: file -> overrides -> environment."""
-        environ: Mapping[str, str] = os.environ if env is None else env
-
-        layers: list[dict[str, Any]] = [self.natmod]
-        for override in self.overrides:
-            selector = override.get("select")
-            if selector is None:
-                raise ConfigError("every [[overrides]] table needs a `select` key")
-            if matches(target.identifier, parse_selector(selector)):
-                layers.append(override)
-
-        def opt(key: str, default: Any = None) -> Any:
-            env_value = environ.get("CIBMP_" + key.replace("-", "_").upper())
-            if env_value is not None:
-                return env_value
-            # Later layers win: a matching override beats [natmod].
-            for layer in reversed(layers):
-                if key in layer:
-                    return layer[key]
-            return default
-
-        extra_make_args = _as_list(opt("extra-make-args"), "extra-make-args")
-        if target.arch_flags:
-            # The packed int as hex, not the config's own raw string: with
-            # arch-flags now a list (one rv32imc Target per entry), the
-            # Target itself is the only place that still knows which entry
-            # produced it. mpy_ld.py's validate_arch_flags() accepts a
-            # numeric string exactly as well as a named-flag list, so this
-            # round-trips to the same value either way.
-            extra_make_args = [
-                f"ARCH_FLAGS=0x{target.arch_flags:x}",
-                *extra_make_args,
-            ]
-
-        return BuildOptions(
-            target=target,
-            micropython=target.tag,
-            output_dir=self.output_dir,
-            module_dir=str(opt("module-dir", DEFAULT_MODULE_DIR)),
-            make_target=str(opt("make-target", DEFAULT_MAKE_TARGET)),
-            runs_on=str(opt("runs-on", target.default_runner)),
-            extra_make_args=extra_make_args,
-            pre_build_command=str(opt("pre-build-command", "")),
-        )
-
-
-def _read_config(
-    package_dir: Path, config_file: Path | None
-) -> tuple[Path | None, dict[str, Any]]:
-    if config_file is not None:
-        if not config_file.is_file():
-            raise ConfigError(f"config file not found: {config_file}")
-        return config_file, _load_toml_tree(config_file)
-
-    standalone = package_dir / CONFIG_FILENAME
-    if standalone.is_file():
-        return standalone, _load_toml_tree(standalone)
-
-    pyproject = package_dir / "pyproject.toml"
-    if pyproject.is_file():
-        with pyproject.open("rb") as f:
-            data = tomllib.load(f)
-        tool = (data.get("tool") or {}).get("cibuildmp")
-        if tool is not None:
-            return pyproject, dict(tool)
-
-    # No config at all is legitimate: every option has a default, so a repo
-    # following the conventional natmod/ layout builds with none.
-    return None, {}
-
-
-def _load_toml_tree(path: Path) -> dict[str, Any]:
-    with path.open("rb") as f:
-        data = tomllib.load(f)
-    if path.name == "pyproject.toml":
-        return dict((data.get("tool") or {}).get("cibuildmp") or {})
-    return data
+        if platform is not None and env_plat:
+            plat_env_key = f"{env_key}_{platform.upper()}"
+            layers.append((self.env.get(plat_env_key), InheritRule.NONE))
+        layers.extend(extra_layers)
+        return resolve_cascade(*layers)
