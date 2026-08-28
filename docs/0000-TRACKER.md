@@ -117,13 +117,18 @@ later; and cheap-with-strong-evidence beats expensive-and-speculative.
       ever built it, here or by hand. It is the only port in that position;
       `windows` at least had [0042]'s by-hand session behind it. Cheap to find
       out, and the answer is binary
-- [ ] [0050] the natmod image's expensive layer is in the wrong place | 3.38GB
-      of toolchains sits *after* the apt layer, so adding one package
-      re-downloads all of it (measured: ten minutes, for
-      `gcc-i686-linux-gnu`). Minimal apt (`curl`, `xz-utils`,
-      `ca-certificates`) -> toolchains -> the rest would make that free. Also
-      worth deciding whether `xtensa-lx106` (ESP8266, crosstool-NG 4.8.5)
-      earns its share of a 3.91GB image
+- [x] [0050] the natmod image's expensive layer was in the wrong place | fixed
+      2026-08-28: `docker/natmod.Dockerfile` now runs minimal apt
+      (`ca-certificates`/`curl`/`xz-utils`) -> the 3.38GB toolchain layer ->
+      the rest of apt (`build-essential`/`git`/`gcc-13-multilib`/
+      `gcc-i686-linux-gnu`/`linux-libc-dev:i386`/`python3`), so only a change
+      to the four pinned tarball specs can invalidate the big layer now
+- [ ] [0050] does `xtensa-lx106` (ESP8266) earn its share of the natmod image |
+      confirmed small, not the thing worth descoping for size: ~38MB
+      compressed, smallest of the four toolchains by a wide margin (`riscv-
+      none-elf` ~433MB, `arm-none-eabi` ~307MB, `xtensa-esp-elf` ~89MB) --
+      dropping it loses one of ten supported natmod arches (real ESP8266 HW)
+      for a size win the layer-reorder above already captured. Left as-is
 - [ ] [0044] the six emulated-everywhere cells: build them or descope | the
       **decision**: [0051] point 8 first gated them behind an opt-in
       `EnableGroup`-style `--enable` group; [0052]'s own later retraction

@@ -274,6 +274,36 @@ all; `qemu` passes no `MICROPY_MPYCROSS=`). `build-essential` stays in
 not-yet-scoped piece of work, since neither port's own build is
 containerized the way `unix`/`windows`/`webassembly`'s already are.
 
+## Addendum, 2026-08-28 — the toolchain layer moves ahead of the volatile apt layer
+
+The "Still open" item about the 3.38GB toolchain layer sitting in the wrong
+place is fixed. `docker/natmod.Dockerfile`'s single apt-install `RUN` (ten
+packages: `build-essential`, `ca-certificates`, `curl`, `git`,
+`gcc-13-multilib`, `gcc-i686-linux-gnu`, `linux-libc-dev:i386`, `python3`,
+`xz-utils`, plus the i386 multiarch setup) sat *before* the toolchain
+download layer -- so changing that one `RUN` for any reason (adding
+`gcc-i686-linux-gnu` live, closing one of [0025]'s own six bugs, was the
+actual case that surfaced this) invalidated Docker's cache for every layer
+after it, forcing a full re-download and re-extract of all four toolchains
+even though none of their own pinned URLs or hashes had changed. Measured:
+ten minutes, for one added package.
+
+Split in three now: a minimal, rarely-changing apt layer
+(`ca-certificates`/`curl`/`xz-utils` -- exactly what fetching and
+extracting the four tarballs needs) first; the toolchain download
+unchanged, second; everything else apt-installs (`build-essential`, `git`,
+the x86-multilib pair, `python3`) third, after it. Only a change to the
+first layer -- essentially never, once set -- can invalidate the big one
+now; the volatile half moved to where a cache miss is cheap.
+
+Whether `xtensa-lx106` (the ESP8266 toolchain) is worth keeping at all
+stayed a separate, still-open question (tracker's own row): at ~38MB
+compressed it is the smallest of the four by a wide margin (`riscv-none-elf`
+~433MB, `arm-none-eabi` ~307MB, `xtensa-esp-elf` ~89MB), so dropping it
+would not have meaningfully addressed the layer-ordering problem this
+addendum fixes -- only cost one of ten supported natmod arches for real
+ESP8266 hardware. Left as-is.
+
 [0012]: 0012-pyelftools-ar-own-deps.md
 [0030]: 0030-container-approach-natmod-and-docker-vs-qemu.md
 [0032]: 0032-unix-docker-default-and-webassembly-wiring.md

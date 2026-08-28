@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`docker/natmod.Dockerfile`'s apt/toolchain layers are reordered so a
+  package addition no longer invalidates the 3.38GB toolchain layer.**
+  Docker cache-invalidates every layer after the one that changed, so the
+  toolchain layer sitting *after* the full apt-install layer meant adding
+  a single package (e.g. `gcc-i686-linux-gnu`) forced a full ten-minute
+  re-download+re-extract of four toolchains whose own content had not
+  changed. Now: minimal apt (`ca-certificates`/`curl`/`xz-utils`) ->
+  toolchains -> the rest of apt.
 - **natmod's own `mpy-cross` now builds inside the natmod image, not on
   the host.** `py/dynruntime.mk` hardcodes the path it invokes
   (`mpy-cross/build/mpy-cross`, no override), so a host-built binary only
