@@ -1,8 +1,9 @@
 # 0056 — building upstream MicroPython through the usermod path with no user C module at all
 
-- Status: Accepted (decided by the user: patch the five port drivers, add an optional
-  flag. Nothing built yet. Upstream turns out to need nothing at all -- see the
-  verified answer below)
+- Status: Accepted (decided by the user: patch the five port drivers, add
+  `no-user-c-modules = true` as a flag mutually exclusive with `user-c-modules`,
+  erroring when both are given. Nothing built yet. Upstream needs nothing at all — see
+  the verified answer below)
 - Related: [0021], [0023], [0051], [0053]
 
 ## What this is
@@ -65,10 +66,8 @@ Upstream's own side is the easy half — `py/mkrules.mk` guards on
 `ifneq ($(USER_C_MODULES),)`, so an unset value is already a clean no-op there. The
 work is entirely on cibuildmp's side:
 
-- a way to express absence in config (`user-c-modules = false`, an explicit `none`, or
-  a mode that never reads the key — not the empty string, for the `Path("")` reason
-  above),
-- the same for `manifest`, which has the identical shape and the same problem,
+- a way to express absence in config — not the empty string, for the `Path("")` reason
+  above (settled below as `no-user-c-modules = true`),
 - skipping the corresponding `mounts` entry rather than mounting the project root for
   no reason,
 - and `verify_output()`'s expectations, several of which currently assert that a real
@@ -131,27 +130,83 @@ Passing `USER_C_MODULES=` on the make command line is therefore sufficient and c
 for all five current drivers and for every port [0053] would add. The entire remaining
 job is on cibuildmp's own side.
 
-## The decision: patch the drivers, add an optional flag
+## The decision: `no-user-c-modules`, mutually exclusive, an error when combined
 
-Settled by the user. Concretely, and now with no upstream unknown left in it:
+Settled by the user. The spelling is `no-user-c-modules = true` — kebab-case, matching
+every other key in this config (`user-c-modules`, `extra-make-args`, `pre-build-command`)
+rather than the snake_case it was first sketched in. It follows the same three-form
+pattern every option here has: the TOML key, a `--no-user-c-modules` CLI flag, and the
+`CIBMP_NO_USER_C_MODULES` env override `Options.get()` already builds for free.
+
+**It is mutually exclusive with `user-c-modules`, and giving both is a load-time error**,
+not a precedence rule. That is the part worth arguing rather than transcribing.
+
+A precedence rule has to pick a winner, and either choice is silently wrong for somebody:
+`no-user-c-modules` winning means an explicitly written `user-c-modules` is ignored;
+`user-c-modules` winning means an explicitly written `no-user-c-modules` is. Both are the
+shape of bug this project keeps catching the hard way — [0048] is an entire record about
+a misplaced key being silently ignored, and [0044]'s own "a declared cell with an empty
+value is a real target" paragraph is the same argument about a different table. An error
+cannot be silently wrong. There is also no sensible reading of "build with no modules,
+using these modules", so nothing is lost by refusing it.
+
+### The check has to test *explicitly set*, not *has a value*
+
+The trap in implementing it: `user-c-modules` always has a value, because it defaults to
+`"."` ([0051]'s ninth addendum). A naive `if user_c_modules and no_user_c_modules: error`
+would fire on every single use of the flag.
+
+`Options.get()` already gives the distinction, because `default=` is just the bottom
+layer of its `default -> global -> family -> env -> env(platform) -> extra_layers`
+cascade: calling it **without** a `default=` returns `None` when the key is set at no
+layer at all. So the rule is
+
+```python
+# not opt("user-c-modules", DEFAULT_USER_C_MODULES) -- that can never be None
+if opt("no-user-c-modules") and opt("user-c-modules") is not None:
+    raise UsermodConfigError(...)
+```
+
+and it belongs at load time with the rest of the config validation, not in a driver.
+
+### `manifest` does *not* need the same treatment
+
+The neighbouring key looks like it has the identical problem and does not. `manifest` is
+already `str(opt("manifest", ""))`, so its default *is* absence: `FROZEN_MANIFEST=` goes
+out empty on every build that does not set one, and that already works. Nothing to
+express, no second flag.
+
+The asymmetry is entirely about the default — `"."` versus `""` — and saying so is the
+clearest way to explain why one key needs a flag and its neighbour does not.
+
+It also means **a stock MicroPython build with a frozen Python manifest is a legitimate
+combination**, not a contradiction: no C modules, some pure-Python ones.
+`no-user-c-modules` must not imply `manifest = ""`.
+
+### Which surfaces a mount that only works by accident today
+
+`mounts=[mpy_dir, Path(opts.user_c_modules)]` is the whole mount list. **The manifest file
+is not in it.** It reaches the container only because `user-c-modules` defaults to `"."`,
+so the project root gets bind-mounted and the manifest happens to be underneath.
+
+Drop that mount for a stock build and `FROZEN_MANIFEST=usermod/manifest.py` names a path
+that does not exist inside the image — the legitimate combination above breaks on the
+first port that tries it. So the driver change is not "drop the second mount" but "mount
+what is actually needed": the module directory when there is one, the manifest's own
+directory when there is a manifest, and `mpy_dir` always.
+
+### The rest of the driver work, unchanged
 
 - **Five driver edits.** Each of the five `build.py` paths passes
   `f"USER_C_MODULES={opts.user_c_modules}"` unconditionally; each becomes conditional,
-  emitting `USER_C_MODULES=` (or omitting the argument) when no module is configured.
-- **The mount is the part that actually needs care**, not the argument.
-  `mounts=[mpy_dir, Path(opts.user_c_modules)]` must drop the second entry entirely —
-  not pass an empty string, because `Path("")` is `Path(".")` and would bind-mount the
-  project root for no reason, which is exactly the silent-wrong-thing this record was
-  written to avoid.
-- **An optional flag**, plus the config value it mirrors. The flag is what a check
-  wants; the config value is the only form that survives into
-  `--print-build-identifiers` and into a consuming repo's committed workflow.
-- **`manifest` gets the same treatment.** It has the identical shape and the identical
-  problem, and a stock-MicroPython build wants neither.
+  emitting `USER_C_MODULES=` (or omitting the argument) when the flag is set.
+- **Never `Path("")`.** It is `Path(".")`, which would bind-mount the project root for no
+  reason — exactly the silent-wrong-thing this record exists to avoid.
 - **`verify_output()` becomes conditional.** Several paths currently assert that a real
   user module's symbols are present in the result — `build.py`'s own `windows` path says
   so directly. Those checks stay for a with-module build and are skipped, not deleted,
   for a stock one.
+
 
 ## The awkward question this raises about identifiers
 
@@ -169,14 +224,14 @@ invented in a hurry when someone first wants one.
 
 ## Not decided here
 
-- The exact spelling of the flag and of the config value it mirrors. Both, not one --
-  see the decision above.
-- Whether it should run in `build-examples.yml` across every port on every push, or on
-  the schedule leg only. It is the cheapest build in the project per port and the
-  broadest in coverage, which argues for often.
+- Whether this runs in `build-examples.yml` across every port on every push, or on the
+  schedule leg only. It is the cheapest build in the project per port and the broadest
+  in coverage, which argues for often.
 
 [0016]: 0016-usermod-user-c-modules-dir-vs-cmake.md
 [0021]: 0021-usermod-execution-central-value.md
 [0023]: 0023-usermod-identifier-scheme-config-output.md
+[0044]: 0044-unix-native-images-landed.md
+[0048]: 0048-build-skip-live-in-opposite-tables.md
 [0051]: 0051-usermod-identifiers-have-no-version-axis.md
 [0053]: 0053-usermod-ports-without-a-build-driver.md
