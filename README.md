@@ -180,13 +180,16 @@ is listed below for orientation, not just the ones this project covers.
 all — the other 10 have verified facts a config can already *name*, but
 nothing yet to actually build them. Every ✅ row below is live-verified
 against a real MicroPython checkout, including a real custom
-`USER_C_MODULES` module — `unix`, `windows` and `webassembly` are
+`USER_C_MODULES` module — `unix`, `windows`, `webassembly` and `qemu` are
 additionally exercised end to end through the real `action.yml` on every
 push (`build-examples.yml`), producing genuine linked binaries with their
 executable bit intact, Docker-only (`unix`: one native image per
-arch/libc; `windows`/`webassembly`: one image each). `qemu`/`esp32` aren't
-wired into `action.yml` yet; the composite actions remain the supported,
-verified production path for the ports `action.yml` doesn't cover.
+arch/libc; `windows`/`webassembly`/`qemu`: one image each — `qemu`'s own
+`v1.29.0-qemu-MPS2_AN385` runs in its own matrix leg rather than sharing
+a job with already-proven cells, since it was the first build ever run
+through that path). `esp32` is the one port not wired into `action.yml`
+yet; its own composite action remains the supported, verified production
+path for it.
 
 | Port          | Target                                           | Provisioning                            | Status              |
 | ------------- | ------------------------------------------------ | ---------------------------------------- | -------------------- |
