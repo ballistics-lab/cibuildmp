@@ -43,12 +43,6 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### In progress / Proposed
 
-- [ ] [0032] `qemu` has never been built anywhere | wired to `ensure_image()`
-      by [0050], and reachable by any `build` glob naming it (e.g.
-      `build-examples.yml`'s own per-runner globs, [0052]) -- and nothing has
-      ever built it, here or by hand. It is the only port in that position;
-      `windows` at least had [0042]'s by-hand session behind it. Cheap to find
-      out, and the answer is binary
 - [ ] [0044] the six emulated-everywhere cells: build them or descope | the
       **decision**: [0051] point 8 first gated them behind an opt-in
       `EnableGroup`-style `--enable` group; [0052]'s own later retraction
@@ -108,7 +102,7 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 - [x] [0042] `windows` wired, verified and required | three arches green three runs running, `verify_windows_output()` reads the COFF machine so a leg asserts something about its output, and the port joined `examples/template`'s own `ports` -- the full lifecycle (`--only` legs allowed to fail -> required -> default axis) that musllinux walked first
 - [x] [0050] natmod builds in a container; the bare-host path and its toolchain resolver are deleted | closes [0049]'s own "still open" and, by force, [0032]. Own "still open" (image layering, host mpy-cross, publish/CI, GHCR cleanup) fully closed by five same-topic addenda through 2026-08-28 -- read the record for detail, not this row
 - [x] [0049] cibuildmp generates no matrix and chooses no host; `--archs auto`/`native`/`all` does the work instead | `--print-build-matrix`, both `default_runner`s, natmod's `runs-on` key and the `cibuildmp-matrix` action deleted -- cibuildwheel has no equivalent of any of them. Closes [0045]'s open half and [0044]'s "no per-target `runs-on` override", the latter by deletion. Its own "still open" names natmod's bare-host builds, now the top row above
-- [x] [0032] `qemu` wired to `ensure_image()` | closed by [0050] rather than on its own: `qemu` was the last bare-host build path in usermod and survived only because `toolchains.resolve()` kept working, so deleting that resolver forced it. **Still open above:** wiring it is not building it, and nothing ever has
+- [x] [0032] `qemu` wired to `ensure_image()`, and actually built | wired by [0050] (`toolchains.resolve()` kept working until that record deleted it, forcing the move) but unexercised for weeks after; `build-examples.yml` gained its own dedicated `v1.29.0-qemu-MPS2_AN385` leg 2026-08-28, confirmed live across two independent runs (33156958747, 33157279355), see [0032]'s own addendum
 - [x] [0043] `unix` adopts cibuildwheel's model in full: native per-target images, PEP 600/656, full arch x libc matrix (epic) | the *decision* shipped -- implemented by [0044], whose row above carries the work that remains. Kept here as the design argument, which is still where the reasoning lives
 - [x] [0042] `windows` wired to `ensure_image()`; `emsdk.py`/`llvmmingw.py` deleted | all three arches verified live, including an anonymous pull of the published digest; that image was pushed by hand rather than by `publish-docker-images.yml` — see the record. **Still open above:** none of it was ever re-run by CI, which is what the row in "In progress" is about
 - [x] [0041] documentation restructure — this scheme | supersedes the monolithic `docs/BACKLOG.md`

@@ -226,6 +226,25 @@ jobs:
             build: >-
               v1.29.0-manylinux_2_28_aarch64 v1.29.0-musllinux_1_2_aarch64
               v1.29.0-manylinux_2_31_armv7l v1.29.0-musllinux_1_2_armv7l
+          # qemu, its own leg, deliberately not folded into the amd64
+          # batch above -- unlike every other cell already in that batch
+          # (all long green), this is the first real build of a qemu
+          # identifier anywhere (tracker row [0032]: `ensure_image()` was
+          # wired in record 0032 but nothing ever exercised it, here or by
+          # hand). `usermod.orchestrate.build()` has no per-target
+          # try/except -- one failing target aborts the whole invocation
+          # -- so bundling a never-proven cell in with nine settled ones
+          # would risk the batch's own signal on every push, and bury a
+          # real qemu failure in a combined log instead of its own check.
+          # Same reasoning `build-usermod-emulated` already gives for one
+          # leg per cell, and the same "one port, proven live, before the
+          # next" precedent unix/webassembly/windows each went through
+          # (records 0032/0042/0043) before ever sharing a job. Image is
+          # `linux/amd64` per verify-docker-images.yml's matrix, confirmed
+          # live via `dockerrun.platform_for("qemu")` -- still this
+          # runner, just its own job.
+          - os: ubuntu-latest
+            build: v1.29.0-qemu-MPS2_AN385
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read

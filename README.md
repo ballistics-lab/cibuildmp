@@ -57,9 +57,9 @@ It never builds an image itself — it pulls pre-built, pinned images
 (`ghcr.io/ballistics-lab/<target>`) and launches sibling containers, one
 per target, the same way cibuildwheel's own container runtime does. That
 covers natmod (a single `docker/natmod.Dockerfile` for all ten arches) and
-most of usermod (`unix`, `windows`, `webassembly`); the `qemu` and `esp32`
-usermod ports are the two exceptions still building directly on the host
-(`arm-none-eabi-`/ESP-IDF, self-provisioned, same as before). There is no
+all of usermod except `esp32`, the one port that still provisions its own
+toolchain directly on the host (ESP-IDF, self-cloned and installed,
+pending a Dockerfile of its own — see Roadmap below). There is no
 "run `cibuildmp` itself inside Docker" story any more — a previous root
 `Dockerfile` offered that and was deleted once usermod needed to launch
 sibling containers of its own (Docker-in-Docker was ruled out); `uv tool
@@ -104,14 +104,14 @@ platform.**
 
 Identifier shapes, one per platform:
 
-| Platform               | Shape                 | Example                        |
-| ----------------------- | ---------------------- | -------------------------------- |
-| natmod                  | `mpy{abi}-{tag}-{arch}` | `mpy6.3-v1.29.0-armv7emsp`      |
-| usermod `unix`          | `{tag}-{arch}`          | `v1.29.0-manylinux_2_28_x86_64` |
-| usermod `windows`       | `{tag}-{arch}`          | `v1.29.0-win_amd64`             |
-| usermod `webassembly`   | `{tag}-{arch}`          | `v1.29.0-wasm32`                |
-| usermod `qemu`          | `{tag}-qemu-{board}`    | `v1.24.0-qemu-MICROBIT`         |
-| usermod `esp32`         | `{tag}-esp32-{board}`   | `v1.29.0-esp32-ESP32_GENERIC`   |
+| Platform              | Shape                   | Example                         |
+| --------------------- | ----------------------- | ------------------------------- |
+| natmod                | `mpy{abi}-{tag}-{arch}` | `mpy6.3-v1.29.0-armv7emsp`      |
+| usermod `unix`        | `{tag}-{arch}`          | `v1.29.0-manylinux_2_28_x86_64` |
+| usermod `windows`     | `{tag}-{arch}`          | `v1.29.0-win_amd64`             |
+| usermod `webassembly` | `{tag}-{arch}`          | `v1.29.0-wasm32`                |
+| usermod `qemu`        | `{tag}-qemu-{board}`    | `v1.24.0-qemu-MICROBIT`         |
+| usermod `esp32`       | `{tag}-esp32-{board}`   | `v1.29.0-esp32-ESP32_GENERIC`   |
 
 The shape genuinely differs per usermod port — `unix`/`windows`/
 `webassembly` carry no port name at all in the identifier, only `qemu`/
@@ -159,16 +159,16 @@ repos and verified on real CI, arch by arch, not just `--dry-run`.
 
 | Arch        | Toolchain              | Status |
 | ----------- | ---------------------- | ------ |
-| `x64`       | host gcc               | ✅     |
-| `x86`       | host gcc (`-m32`)      | ✅     |
-| `armv6m`    | `arm-none-eabi-`       | ✅     |
-| `armv7m`    | `arm-none-eabi-`       | ✅     |
-| `armv7emsp` | `arm-none-eabi-`       | ✅     |
-| `armv7emdp` | `arm-none-eabi-`       | ✅     |
-| `xtensa`    | `xtensa-lx106-elf-`    | ✅     |
-| `xtensawin` | `xtensa-esp32-elf-`    | ✅     |
-| `rv32imc`   | `riscv64-unknown-elf-` | ✅     |
-| `rv64imc`   | `riscv64-unknown-elf-` | ✅     |
+| `x64`       | host gcc               | ✅      |
+| `x86`       | host gcc (`-m32`)      | ✅      |
+| `armv6m`    | `arm-none-eabi-`       | ✅      |
+| `armv7m`    | `arm-none-eabi-`       | ✅      |
+| `armv7emsp` | `arm-none-eabi-`       | ✅      |
+| `armv7emdp` | `arm-none-eabi-`       | ✅      |
+| `xtensa`    | `xtensa-lx106-elf-`    | ✅      |
+| `xtensawin` | `xtensa-esp32-elf-`    | ✅      |
+| `rv32imc`   | `riscv64-unknown-elf-` | ✅      |
+| `rv64imc`   | `riscv64-unknown-elf-` | ✅      |
 
 ### Usermod, per port/arch
 
@@ -180,41 +180,203 @@ is listed below for orientation, not just the ones this project covers.
 all — the other 10 have verified facts a config can already *name*, but
 nothing yet to actually build them. Every ✅ row below is live-verified
 against a real MicroPython checkout, including a real custom
-`USER_C_MODULES` module — `unix`, `windows` and `webassembly` are
+`USER_C_MODULES` module — `unix`, `windows`, `webassembly` and `qemu` are
 additionally exercised end to end through the real `action.yml` on every
 push (`build-examples.yml`), producing genuine linked binaries with their
 executable bit intact, Docker-only (`unix`: one native image per
-arch/libc; `windows`/`webassembly`: one image each). `qemu`/`esp32` aren't
-wired into `action.yml` yet; the composite actions remain the supported,
-verified production path for the ports `action.yml` doesn't cover.
+arch/libc; `windows`/`webassembly`/`qemu`: one image each — `qemu`'s own
+`v1.29.0-qemu-MPS2_AN385` runs in its own matrix leg rather than sharing
+a job with already-proven cells, since it was the first build ever run
+through that path). `esp32` is the one port not wired into `action.yml`
+yet; its own composite action remains the supported, verified production
+path for it.
 
-| Port          | Target                                           | Provisioning                            | Status              |
-| ------------- | ------------------------------------------------ | ---------------------------------------- | -------------------- |
-| `unix`        | `manylinux_2_28_x86_64`                          | native image[^native-image]              | ✅                   |
-| `unix`        | `manylinux_2_28_i686`                            | native image[^native-image]              | ⚠️[^unverified-cell] |
-| `unix`        | `manylinux_2_28_aarch64`                         | native image[^native-image]              | ⚠️[^unverified-cell] |
-| `unix`        | `manylinux_2_28_ppc64le`                         | native image[^native-image]              | ⚠️[^unverified-cell] |
-| `unix`        | `manylinux_2_28_s390x`                           | native image[^native-image]              | ⚠️[^unverified-cell] |
-| `unix`        | `manylinux_2_31_armv7l`                          | native image[^native-image]              | ⚠️[^unverified-cell] |
-| `unix`        | `manylinux_2_39_riscv64`                         | native image[^native-image]              | ⚠️[^unverified-cell] |
-| `unix`        | `musllinux_1_2_*` (7 arches)                     | native image[^native-image]              | ⚠️[^unverified-cell] |
-| `unix`        | `manylinux_2_39_mipsel`                          | cross image[^mipsel-cross]               | ⚠️[^unverified-cell] |
-| `qemu`        | `MPS2_AN385` (Cortex-M3, and 5 other ARM boards) | `arm-none-eabi-`                         | ✅                   |
-| `qemu`        | `VIRT_RV32`/`VIRT_RV64`, `POWERNV9` (PowerPC)    | `riscv64-unknown-elf-`/`powerpc64le-linux-gnu-` | ❌ not attempted |
-| `webassembly` | `pyscript` variant                               | `emsdk` (Linux x64 host only)             | ✅                   |
-| `esp32`       | `ESP32_GENERIC`                                  | ESP-IDF v5.5.1, self-cloned + installed  | ✅                   |
-| `esp32`       | other ESP32-family boards                        | same ESP-IDF resolver                    | ⚠️ unverified        |
-| `windows`     | `x64`                                            | `apt install gcc-mingw-w64-x86-64`       | ✅                   |
-| `windows`     | `x86`                                            | `apt install gcc-mingw-w64-i686`         | ✅                   |
-| `windows`     | `arm64`                                          | `llvm-mingw` (Linux x64 host only)        | ✅                   |
-| `rp2` / `mimxrt` / `samd` / `stm32` / `psoc-edge` / `alif` / `esp8266` / `cc3200` / `renesas-ra` / `nrf` | verified `(tag, board)` rows exist[^verified-no-driver] | — | ❌ no build driver yet |
-| `zephyr`      | Zephyr RTOS (any board)                          | —                                         | ❌ no build driver yet |
-| `pic16bit` / `powerpc` (as a standalone port) / `bare-arm` / `minimal` / `embed` | no verified rows at all — reference builds or CPU families with no matching natmod/usermod facts | — | ❌ out of scope |
+<table>
+<thead>
+<tr>
+  <th>Port</th>
+  <th>Target</th>
+  <th>Provisioning</th>
+  <th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td><code>unix / manylinux</code></td>
+  <td>
+    <code>manylinux_2_28_x86_64</code><br>
+    <code>manylinux_2_28_i686</code><br>
+    <code>manylinux_2_28_aarch64</code><br>
+    <code>manylinux_2_31_armv7l</code><br>
+    <code>manylinux_2_39_mipsel</code>
+  </td>
+  <td>
 
-[^native-image]: Nothing to provision. The image is `ghcr.io/ballistics-lab/<target>`, a thin layer over pypa's own `quay.io/pypa/<target>` (the same images cibuildwheel builds wheels in), carrying a native compiler for that architecture. Non-native targets run emulated. The binary is checked against its target's real platform tag after every build.
-[^unverified-cell]: Declared and Dockerfile-backed, but not yet published or verified live — point `CIBMP_UNIX_<TARGET>_DOCKER_IMAGE` at a locally-built image to work on one of these.
-[^mipsel-cross]: The one target that still cross-compiles: pypa publishes no mipsel image and there's no Docker official image for 32-bit mipsel, so there's nothing to be native to.
-[^verified-no-driver]: `resources/build-platforms.toml` has real, independently-verified rows for each of these ports (walked against a real MicroPython checkout the same way every ✅ row above was); a config can name their identifiers today. What's missing is a `build_<port>()` driver in `platforms/usermod/build.py` to actually run one — not a scope decision, just not built yet.
+  native image[^native]<br>
+  native image[^native]<br>
+  native image[^native]<br>
+  native image[^native]<br>
+  cross image[^cross]
+
+  </td>
+  <td>✅</td>
+</tr>
+<tr>
+  <td><code>unix / musllinux</code></td>
+  <td>
+    <code>musllinux_1_2_x86_64</code><br>
+    <code>musllinux_1_2_i686</code><br>
+    <code>musllinux_1_2_aarch64</code><br>
+    <code>musllinux_1_2_armv7l</code>
+  </td>
+  <td>
+
+  native image[^native]
+
+  </td>
+  <td>✅</td>
+</tr>
+<tr>
+  <td><code>unix / manylinux</code></td>
+  <td>
+    <code>manylinux_2_28_ppc64le</code><br>
+    <code>manylinux_2_28_s390x</code><br>
+    <code>manylinux_2_39_riscv64</code>
+  </td>
+  <td>
+
+  native image[^native]
+
+  </td>
+  <td>
+
+  ⚠️[^emulated]
+
+  </td>
+</tr>
+<tr>
+  <td><code>unix / musllinux</code></td>
+  <td>
+    <code>musllinux_1_2_ppc64le</code><br>
+    <code>musllinux_1_2_s390x</code><br>
+    <code>musllinux_1_2_riscv64</code>
+  </td>
+  <td>
+
+  native image[^native]
+
+  </td>
+  <td>
+
+  ⚠️[^emulated]
+
+  </td>
+</tr>
+<tr>
+  <td><code>qemu</code></td>
+  <td>
+    <code>MPS2_AN385</code> (Cortex-M3, and 5 other ARM boards)
+  </td>
+  <td><code>arm-none-eabi-</code></td>
+  <td>✅</td>
+</tr>
+<tr>
+  <td><code>qemu</code></td>
+  <td>
+    <code>VIRT_RV32</code><br>
+    <code>VIRT_RV64</code><br>
+    <code>POWERNV9</code> (PowerPC)
+  </td>
+  <td><code>riscv64-unknown-elf-</code>/<code>powerpc64le-linux-gnu-</code></td>
+  <td>❌ not attempted</td>
+</tr>
+<tr>
+  <td><code>webassembly</code></td>
+  <td>
+    <code>pyscript</code> variant
+  </td>
+  <td><code>emsdk</code> (Linux x64 host only)</td>
+  <td>✅</td>
+</tr>
+<tr>
+  <td><code>esp32</code></td>
+  <td>
+    <code>ESP32_GENERIC</code>
+  </td>
+  <td>ESP-IDF v5.5.1, self-cloned + installed</td>
+  <td>✅</td>
+</tr>
+<tr>
+  <td><code>esp32</code></td>
+  <td>other ESP32-family boards</td>
+  <td>same ESP-IDF resolver</td>
+  <td>⚠️ unverified</td>
+</tr>
+<tr>
+  <td><code>windows</code></td>
+  <td>
+    <code>x64</code><br>
+    <code>x86</code><br>
+    <code>arm64</code>
+  </td>
+  <td>
+    <code>apt install gcc-mingw-w64-x86-64</code><br>
+    <code>apt install gcc-mingw-w64-i686</code><br>
+    <code>llvm-mingw</code> (Linux x64 host only)
+  </td>
+  <td>✅</td>
+</tr>
+<tr>
+  <td>
+    <code>rp2</code><br>
+    <code>mimxrt</code><br>
+    <code>samd</code><br>
+    <code>stm32</code><br>
+    <code>psoc-edge</code><br>
+    <code>alif</code><br>
+    <code>esp8266</code><br>
+    <code>cc3200</code><br>
+    <code>renesas-ra</code><br>
+    <code>nrf</code>
+  </td>
+  <td>
+
+  verified `(tag, board)` rows exist[^nodriver]
+
+  </td>
+  <td>—</td>
+  <td>❌ no build driver yet</td>
+</tr>
+<tr>
+  <td>
+    <code>zephyr</code>
+  </td>
+  <td>Zephyr RTOS (any board)</td>
+  <td>—</td>
+  <td>❌ no build driver yet</td>
+</tr>
+<tr>
+  <td>
+    <code>pic16bit</code><br>
+    <code>powerpc</code> (as a standalone port)<br>
+    <code>bare-arm</code><br>
+    <code>minimal</code><br>
+    <code>embed</code>
+  </td>
+  <td>no verified rows at all — reference builds or CPU families with no matching natmod/usermod facts</td>
+  <td>—</td>
+  <td>❌ out of scope</td>
+</tr>
+</tbody>
+</table>
+
+[^native]: Nothing to provision. The image is `ghcr.io/ballistics-lab/<target>`, a thin layer over pypa's own `quay.io/pypa/<target>` (the same images cibuildwheel builds wheels in), carrying a native compiler for that architecture. Non-native targets run emulated. The binary is checked against its target's real platform tag after every build.
+
+[^cross]: The one target that still cross-compiles: pypa publishes no mipsel image and there's no Docker official image for 32-bit mipsel, so there's nothing to be native to.
+
+[^emulated]: `ppc64le`/`s390x`/`riscv64`, both libcs — published (`resources/pinned_docker_images.toml` has a real digest for each) and reachable by naming them in `build`, but native to no runner GitHub offers, so no real build has ever run through one: the six-cell equivalent of `qemu`'s own gap before it got a dedicated CI leg. Point `CIBMP_UNIX_<TARGET>_DOCKER_IMAGE` at a locally-built image, or an emulated one, to work on one of these.
+
+[^nodriver]: `resources/build-platforms.toml` has real, independently-verified rows for each of these ports (walked against a real MicroPython checkout the same way every ✅ row above was); a config can name their identifiers today. What's missing is a `build_<port>()` driver in `platforms/usermod/build.py` to actually run one — not a scope decision, just not built yet.
 
 No Windows or macOS host is needed for any of the ✅/⚠️ usermod targets
 above, `windows`'s own three arches included — every toolchain there is

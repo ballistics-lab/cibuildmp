@@ -147,6 +147,19 @@ tried and rejected) lives in `docs/records/`, not here.
   identifier names. `windows` previously checked only that the file existed.
 - A `workflow_dispatch` input on `publish-docker-images.yml` to republish one
   image instead of all nineteen.
+- **`qemu` actually exercised in CI for the first time.** `build_qemu()` was
+  wired to `ensure_image()` back in record 0032, and
+  `resources/pinned_docker_images.toml` already carried a real published
+  digest for it, but no build had ever run through that path — here or by
+  hand, per the tracker's own [0032] row. `build-examples.yml`'s
+  `build-usermod` job now carries a dedicated `v1.29.0-qemu-MPS2_AN385`
+  matrix leg, deliberately its own job rather than folded into the nine
+  already-green cells sharing the amd64 batch: `usermod.orchestrate.build()`
+  has no per-target try/except, so one failing target aborts the whole
+  invocation, and a never-proven cell has no business risking nine settled
+  ones. Confirmed live, not assumed: `build-examples.yml` run 33156958747
+  produced a real `firmware-v1.29.0-qemu-MPS2_AN385.elf` (330404 bytes) in
+  40 seconds.
 
 ### Fixed
 
