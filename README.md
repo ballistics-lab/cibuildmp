@@ -157,18 +157,71 @@ any kind any more, `x86`'s 32-bit multilib included, which is exactly what
 makes it buildable on an arm64 runner too. Adopted in all three consuming
 repos and verified on real CI, arch by arch, not just `--dry-run`.
 
-| Arch        | Toolchain              | Status |
-| ----------- | ---------------------- | ------ |
-| `x64`       | host gcc               | ✅      |
-| `x86`       | host gcc (`-m32`)      | ✅      |
-| `armv6m`    | `arm-none-eabi-`       | ✅      |
-| `armv7m`    | `arm-none-eabi-`       | ✅      |
-| `armv7emsp` | `arm-none-eabi-`       | ✅      |
-| `armv7emdp` | `arm-none-eabi-`       | ✅      |
-| `xtensa`    | `xtensa-lx106-elf-`    | ✅      |
-| `xtensawin` | `xtensa-esp32-elf-`    | ✅      |
-| `rv32imc`   | `riscv64-unknown-elf-` | ✅      |
-| `rv64imc`   | `riscv64-unknown-elf-` | ✅      |
+<table>
+<thead>
+<tr>
+  <th>Arch</th>
+  <th>Toolchain</th>
+  <th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>
+    <code>x64</code><br>
+  </td>
+  <td>host gcc</td>
+  <td>✅</td>
+</tr>
+<tr>
+  <td>
+    <code>x86</code><br>
+  </td>
+  <td>host gcc (<code>-m32</code>)</td>
+  <td>✅</td>
+</tr>
+<tr>
+  <td>
+    <code>armv6m</code><br>
+    <code>armv7m</code><br>
+    <code>armv7emsp</code><br>
+    <code>armv7emdp</code><br>
+  </td>
+  <td>
+    <code>arm-none-eabi-</code><br>
+  </td>
+  <td>✅</td>
+</tr>
+<tr>
+  <td>
+    <code>xtensa</code><br>
+  </td>
+  <td>
+    <code>xtensa-lx106-elf-</code><br>
+  </td>
+  <td>✅</td>
+</tr>
+<tr>
+  <td>
+    <code>xtensawin</code><br>
+  </td>
+  <td>
+    <code>xtensa-esp32-elf-</code><br>
+  </td>
+  <td>✅</td>
+</tr>
+<tr>
+  <td>
+    <code>rv32imc</code><br>
+    <code>rv64imc</code><br>
+  </td>
+  <td>
+    <code>riscv64-unknown-elf-</code><br>
+  </td>
+  <td>✅</td>
+</tr>
+</tbody>
+</table>
 
 ### Usermod, per port/arch
 

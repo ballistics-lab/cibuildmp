@@ -1,0 +1,79 @@
+name: Test platforms
+
+on:
+  pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "LICENSE"
+  workflow_dispatch:
+
+# Same pattern publish.yml's own concurrency block already uses. A real,
+# live-caught gap this session: without this, several rapid-fire pushes to
+# the same branch left multiple runs of this workflow racing each other,
+# all sharing the identical apt-archives-<hash> GHA cache key (D28's own
+# apt-cache step) -- every one of them failed to save it ("Failed to save:
+# Unable to reserve cache with key ..., another job may be creating this
+# cache"), confirmed directly from real job logs, not guessed. Cancelling
+# a superseded run outright (rather than merely serializing them) means
+# only the latest commit's own run ever gets to actually save that cache.
+concurrency:
+  group: test-platforms-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Its only output is the matrix `test` below fans out over -- see
+  # targets.py's own docstring ("nothing here touches the filesystem or the
+  # network", kept fast enough to run as its own CI job for exactly this).
+  # Not run through `uses: ./` (action.yml's own apt-prerequisites step
+  # installs cross-compilers this job never needs) -- just enough of
+  # action.yml's own "Install cibuildmp" step (astral-sh/setup-uv, `uv tool
+  # install`) to get the `cibuildmp` binary on PATH.
+  build-matrix:
+    runs-on: ubuntu-latest
+    # Advisory, not a required check -- see `test`'s own continue-on-error
+    # below for why.
+    continue-on-error: true
+    outputs:
+      build: ${{ steps.build-matrix.outputs.build }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+
+      - name: Install cibuildmp
+        run: uv tool install .
+
+      - name: Build matrix
+        id: build-matrix
+        run: |
+          set -euo pipefail
+          echo "build=$(cibuildmp examples/template --print-build-identifiers --json --build "*")" >> "$GITHUB_OUTPUT"
+
+  test:
+    needs: build-matrix
+    runs-on: ubuntu-latest
+    # This workflow is meant to run on every PR and surface real breakage,
+    # but not gate merging on it -- continue-on-error reports the job's
+    # conclusion as success to the Checks API (and to any `needs:`) even
+    # when its steps fail, so a real failure still shows up (a step in the
+    # log, a warning triangle on the job) without turning the PR check red.
+    # fail-fast: false alongside it: fail-fast cancellation is driven by a
+    # matrix job's real (pre-override) result, not the reported one, so
+    # without this one failing leg would still cancel every other leg.
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        build: ${{ fromJson(needs.build-matrix.outputs.build) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build examples/template (natmod)
+        uses: ./
+        env:
+          CIBMP_VERSION: 0.0.0-ci
+        with:
+          package-dir: examples/template
+          build: ${{ matrix.build }}
+
