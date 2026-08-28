@@ -305,3 +305,63 @@ jobs:
 
       - name: List built artifacts
         run: ls -laR examples/template/mpyhouse
+
+  # ── usermod: the six emulated-everywhere cells ──────────────────────
+  #
+  # ppc64le/s390x/riscv64, manylinux and musllinux both -- native to no
+  # runner GitHub offers at all (record 0044's own addendum: "emulated on
+  # every runner GitHub offers, and never built"), which is exactly why
+  # examples/template/cibuildmp.toml's own `skip = "*_ppc64le *_s390x
+  # *_riscv64"` excludes them from every push-triggered job above. That
+  # keeps push cheap, same reasoning `build-usermod-foreign-host` above
+  # already uses -- but it also means these six had zero CI coverage at
+  # all, not even nightly: `build-usermod-foreign-host` only proves the
+  # emulation *mechanism* (one webassembly leg, one unix leg), it was
+  # never meant to stand in for these three arches specifically.
+  #
+  # CIBMP_SKIP="" is load-bearing, not decorative: `build:`/`skip:` on
+  # the `uses: ./` step below only forward to `--build`/`--skip` when
+  # non-empty (action.yml's own `[ -n ... ]` guard), so passing an empty
+  # `skip:` input would silently do nothing and the config file's own
+  # skip would still apply, matching nothing at all every leg. Setting
+  # the env var directly instead reaches `Options.get()`'s own cascade
+  # (`src/cibuildmp/options.py`), which does distinguish an unset layer
+  # from an explicitly empty one -- confirmed against that module's own
+  # `resolve_cascade()` docstring, not assumed.
+  #
+  # One identifier per matrix leg, not one job building all six
+  # sequentially in a single `cibuildmp` invocation the way `build`/
+  # `build-usermod` above do: `fail-fast: false` plus a separate leg per
+  # cell means one arch's failure neither blocks nor delays the other
+  # five, and each leg's own timing shows up on its own rather than
+  # buried inside one job's combined log.
+  build-usermod-emulated:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        build:
+          - v1.29.0-manylinux_2_28_ppc64le
+          - v1.29.0-manylinux_2_28_s390x
+          - v1.29.0-manylinux_2_39_riscv64
+          - v1.29.0-musllinux_1_2_ppc64le
+          - v1.29.0-musllinux_1_2_s390x
+          - v1.29.0-musllinux_1_2_riscv64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v4
+
+      - name: Build ${{ matrix.build }}
+        uses: ./
+        env:
+          CIBMP_SKIP: ""
+        with:
+          package-dir: examples/template
+          build: ${{ matrix.build }}
+
+      - name: List built artifacts
+        run: ls -laR examples/template/mpyhouse
