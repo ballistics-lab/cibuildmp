@@ -39,18 +39,18 @@ autoconf/automake/libtool alone do not ship `ltdl.m4` at all; only
 was checked against, found only by actually running deplibs for real
 rather than assuming the pinned settings alone were enough.
 
-`qemu` (armv7m, riscv32, riscv64) is the second port here:
-`ports/qemu/Makefile`'s own default-board `CROSS_COMPILE ?=
+`qemu` (nine real boards across three toolchains) is the second port
+here: `ports/qemu/Makefile`'s own default-board `CROSS_COMPILE ?=
 arm-none-eabi-` (`MPS2_AN385`, Cortex-M3) is the exact toolchain natmod's
 own `armv7m` arch already resolves -- reused rather than pinning it a
 second time. `ports/qemu` also has RISC-V boards, `VIRT_RV32`/`VIRT_RV64`
 (`CROSS_COMPILE ?= riscv64-unknown-elf-`, natmod's own `rv32imc`/
-`rv64imc` toolchain) -- `QEMU_BOARD_CROSS` below resolves whichever
-one `opts.board` names. `MPS2_AN385` stays the only board `qemu`'s own
-axis defaults to (targets.py's own `_PORT_AXES`); the RISC-V boards are
-selectable via `[usermod.qemu] boards = [...]`, not defaulted to, the
-same "default = everything actually proven at the time it became the
-default" rule `unix`/`esp32` already follow for their own axes.
+`rv64imc` toolchain), and one PowerPC board, `POWERNV9`
+(`CROSS_COMPILE ?= powerpc64le-linux-gnu-`) -- `QEMU_BOARD_CROSS` below
+resolves whichever one `opts.board` names. No board-level default
+narrowing any more (record 0052 retracted the whole `boards = [...]`
+axis-config concept along with every other one): every real identifier a
+`build`/`skip` glob names is reachable the same way, uniformly.
 
 `webassembly` is the third port here: Docker-only (**D30**), with its
 toolchain (`emsdk`) baked into `docker/webassembly.Dockerfile` at
@@ -781,21 +781,28 @@ def build_unix(
 
 # ── qemu (armv7m, riscv32, riscv64) ─────────────────────────────────────
 
-# board -> the natmod arch whose toolchain (`toolchains.resolve()`) links
-# it. VIRT_RV32/VIRT_RV64 both resolve to `riscv-none-elf` under the hood
-# (natmod.toml pins the identical `cross = "riscv64-unknown-elf-"` for
-# both rv32imc/rv64imc -- one multilib toolchain covers both -march/-mabi
-# combinations), same as `ports/qemu/Makefile` itself: both boards'
-# `CROSS_COMPILE ?= riscv64-unknown-elf-` defaults are the exact same
-# string, verified directly against a real v1.28.0 checkout's own
-# `boards/VIRT_RV32/mpconfigboard.mk`/`VIRT_RV64/mpconfigboard.mk`.
-# Passing the arch-appropriate key to resolve() anyway (rv32imc for
-# VIRT_RV32, rv64imc for VIRT_RV64) keeps this call's own intent legible
-# and its error messages honest, even though either would work today.
+# board -> `ports/qemu/Makefile`'s own `CROSS_COMPILE ?=` for it, keyed by
+# `QEMU_ARCH`, not by board directly. Every value here is copied straight
+# from `resources/build-platforms.toml`'s own per-row `cross` field for
+# `[usermod.qemu]` -- verified stable across v1.24.0..v1.29.0 for every
+# board present in both, not re-derived or guessed here. Six boards added
+# 2026-08-28 (MICROBIT/MPS2_AN500/MPS3_AN547/NETDUINO2/SABRELITE/POWERNV9)
+# -- `dockerrun.ensure_image("qemu", board)` already resolved an image for
+# all nine via that same table's own `images.<board>` map ([0058]), this
+# dict was the only thing still gating them to "not supported yet".
+# POWERNV9 needs its own real proof before this is trusted: no qemu board
+# has ever built through `ppc64le_linux` before (only a bare `gcc`/
+# `#include` smoke test in [0058]'s own verification table).
 QEMU_BOARD_CROSS: dict[str, str] = {
+    "MICROBIT": "arm-none-eabi-",
     "MPS2_AN385": "arm-none-eabi-",
+    "MPS2_AN500": "arm-none-eabi-",
+    "MPS3_AN547": "arm-none-eabi-",
+    "NETDUINO2": "arm-none-eabi-",
+    "SABRELITE": "arm-none-eabi-",
     "VIRT_RV32": "riscv64-unknown-elf-",
     "VIRT_RV64": "riscv64-unknown-elf-",
+    "POWERNV9": "powerpc64le-linux-gnu-",
 }
 
 
@@ -846,10 +853,12 @@ def build_qemu(
     """Build ports/qemu for `opts.board`, returning the produced firmware.
 
     The toolchain is always one natmod already resolves -- `armv7m`
-    (`arm-none-eabi-`) for `MPS2_AN385`, `rv32imc`/`rv64imc`
+    (`arm-none-eabi-`) for the six ARM boards, `rv32imc`/`rv64imc`
     (`riscv-none-elf`) for `VIRT_RV32`/`VIRT_RV64` -- via
     `QEMU_BOARD_CROSS` above, rather than pinning a second copy of
-    any of them.
+    any of them. `POWERNV9` (`powerpc64le-linux-gnu-`) is the one
+    exception: no natmod arch cross-compiles to PowerPC, so
+    `ppc64le_linux` ([0058]) is a `qemu`-only image.
 
     The output path is `opts.build_dir / "firmware.elf"` --
     ports/qemu/Makefile's own `all: $(BUILD)/firmware.elf` target, again

@@ -418,9 +418,15 @@ def test_qemu_unsupported_board_rejected(tmp_path):
 @pytest.mark.parametrize(
     ("board", "expected_cross"),
     [
+        ("MICROBIT", "arm-none-eabi-"),
         ("MPS2_AN385", "arm-none-eabi-"),
+        ("MPS2_AN500", "arm-none-eabi-"),
+        ("MPS3_AN547", "arm-none-eabi-"),
+        ("NETDUINO2", "arm-none-eabi-"),
+        ("SABRELITE", "arm-none-eabi-"),
         ("VIRT_RV32", "riscv64-unknown-elf-"),
         ("VIRT_RV64", "riscv64-unknown-elf-"),
+        ("POWERNV9", "powerpc64le-linux-gnu-"),
     ],
 )
 def test_qemu_uses_its_boards_own_cross_prefix(

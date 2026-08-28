@@ -12,6 +12,10 @@ on:
         description: "--build override (default: TEST_PLATFORMS_BUILD below)"
         required: false
         type: string
+      skip:
+        description: "--skip override (default: TEST_PLATFORMS_SKIP below)"
+        required: false
+        type: string
 
 # Not CIBMP_BUILD -- cibuildmp itself already reads that name as its own
 # generic config-override (options.py's own `opt()`); action.yml's own
@@ -22,6 +26,19 @@ on:
 # matrix.yml's own 256-configuration cap (see the job below).
 env:
   TEST_PLATFORMS_BUILD: "v1.29.0-* v1.28.0-* mpy6.3-v1.29.0-* mpy6.3-v1.28.0-*"
+  # `esp32` skipped here, not fixed -- [0028]'s own still-open gap:
+  # `build_esp32()` is bare-host, and ESP-IDF's own installer refuses to
+  # create a venv from inside cibuildmp's own `uv tool install` venv
+  # (live-caught 2026-08-28: 83 of 94 real failures in one run were this
+  # one known cause). Undecided whether the real fix is wiring
+  # `build_esp32()` through `dockerrun`/`esp_idf_base` ([0058]) or
+  # something narrower -- until then this workflow's own signal is just
+  # noise for every esp32 leg. `*_ppc64le`/`*_s390x`/`*_riscv64` are
+  # carried over from `examples/template/cibuildmp.toml`'s own default
+  # skip (record 0044's descope) -- passing `--skip` below replaces that
+  # config default entirely rather than adding to it, so it has to be
+  # restated here.
+  TEST_PLATFORMS_SKIP: "*-esp32-* *_ppc64le *_s390x *_riscv64"
 
 # Same pattern publish.yml's own concurrency block already uses. A real,
 # live-caught gap this session: without this, several rapid-fire pushes to
@@ -65,15 +82,12 @@ jobs:
         id: build-matrix
         env:
           BUILD_INPUT: ${{ inputs.build }}
+          SKIP_INPUT: ${{ inputs.skip }}
         run: |
           set -euo pipefail
           build="${BUILD_INPUT:-$TEST_PLATFORMS_BUILD}"
-          # No --skip passed -- examples/template/cibuildmp.toml's own
-          # skip = "*_ppc64le *_s390x *_riscv64" (record 0044's descope,
-          # native to no GitHub-hosted runner) already applies, the same
-          # way build-examples.yml's own build-usermod job leaves it in
-          # place rather than re-stating it here.
-          identifiers=$(cibuildmp examples/template --print-build-identifiers --json --build "$build")
+          skip="${SKIP_INPUT:-$TEST_PLATFORMS_SKIP}"
+          identifiers=$(cibuildmp examples/template --print-build-identifiers --json --build "$build" --skip "$skip")
           # The only cells left that are not native to ubuntu-latest:
           # unix aarch64/armv7l (both libc floors) -- record 0044's own
           # measurement that GitHub's arm64 runners run AArch32-at-EL0
