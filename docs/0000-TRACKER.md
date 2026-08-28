@@ -18,7 +18,8 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
   order — `D32` appears before `D29`/`D30`/`D31` in the original document, for instance.
 - **Status** line at the top of each record: `Accepted` for a locked design decision,
   `Implemented` / `Implemented (done)` for a build phase that shipped, `In progress` where
-  real work remains, `Not scheduled` for explicitly deferred work.
+  real work remains, `Proposed` for a record that scopes work and names what is in the way
+  without deciding it (`0054`-`0057`), `Not scheduled` for explicitly deferred work.
 - **A record whose code landed is not automatically fully closed.** Several records
   document a decision that shipped but still carry their own "still open" / "not started"
   items inside (`0038`'s two open M5 checkboxes, `0022`'s unstarted `rp2` build driver,
@@ -90,6 +91,10 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
       seven runners already proven by `mp-usermod.yml`, not yet owned by
       cibuildmp
 - [ ] [0053] ten usermod ports have verified rows in `build-platforms.toml` but no real `build_<port>()` driver | `rp2`, `mimxrt`, `samd`, `stm32`, `psoc-edge`, `alif`, `esp8266`, `cc3200`, `renesas-ra`, `nrf` -- flagged by the user as the genuinely larger remaining piece; `rp2` also has its own row under [0022]
+- [ ] [0054] an `examples/` usermod fixture on upstream's own `examples/usercmodule` | `template/`'s usermod side proves a module cibuildmp wrote for itself; upstream's proves the contract. Three things it adds that nothing here covers: C++ (`cppexample` needs `SRC_USERMOD_CXX` and `-lstdc++`, unverified on `windows`/`webassembly`/`qemu`), a separate `qstrdefs*.h`, and a dotted package. Ships both `micropython.mk` and `micropython.cmake` for one tree -- [0016]'s own reference implementation of both halves
+- [ ] [0055] an `examples/` natmod fixture on upstream's own `examples/natmod` | checking it first turned up the real finding: **upstream's own natmod modules do not satisfy cibuildmp's contract**. `py/dynruntime.mk` declares only `all`/`clean`, `all` leaves `$(MOD).mpy` at module root, and `BUILD ?= build` is not arch-scoped -- so `dist` plus `build/<arch>*/` is a *downstream* convention inherited from `micropython-native-ci`, not "every natmod Makefile in the wild". Shim, or teach `collect_output()` a fallback, or narrow the contract on purpose
+- [ ] [0056] build upstream MicroPython through the usermod path with no user C module | **decided**: patch the five port drivers, add an optional flag plus the config value mirroring it. Upstream needs nothing -- verified in a real checkout that empty is a clean no-op on both sides (`ifneq ($(USER_C_MODULES),)` in `py/py.mk`; the CMake ports guard their forward with `ifdef`, which is false for an empty value, so `-DUSER_C_MODULES=` never reaches cmake). The care is in the *mount*, not the argument: `Path("")` is `Path(".")`, so the entry must be dropped, not emptied. Same for `manifest`; `verify_output()`'s module-symbol assertions become conditional. Separates "cibuildmp can build port X" from "can build a module into port X", which every ✅ currently welds into one -- and is the cheapest bring-up path for [0053]'s ten
+- [ ] [0057] more than one module per build | **decided, both halves, and both are documentation rather than mechanism.** natmod: one config per module -- `examples/template` and `examples/wasm2mpy` already demonstrate it, and `collect_output()`'s two-`.mpy` refusal becomes the guard for a mis-scoped config. usermod: `user-c-modules` stays one path; N modules live in the consumer's own layout -- subdirectories on Make ports (`py/py.mk` globs `*/micropython.mk`), an aggregating `micropython.cmake` that `include()`s the others on CMake ports. No list, because the aggregator is the consumer's file rather than one cibuildmp generates ([0002]) and one key keeps one meaning ([0052]). The trap the docs must name: upstream's own `examples/usercmodule/micropython.cmake` lists only `cexample`/`cppexample`, so the same directory yields three modules on a Make port and two on a CMake one. [0054]'s fixture is what tests both forms -- neither has ever run here
 
 ### Implemented
 
@@ -212,3 +217,7 @@ record is added.
 [0051]: records/0051-usermod-identifiers-have-no-version-axis.md
 [0052]: records/0052-config-is-a-tree-not-a-selector-matrix.md
 [0053]: records/0053-usermod-ports-without-a-build-driver.md
+[0054]: records/0054-usermod-example-from-upstream-usercmodule.md
+[0055]: records/0055-natmod-example-from-upstream-natmod.md
+[0056]: records/0056-usermod-with-no-user-c-module.md
+[0057]: records/0057-multiple-modules-per-build.md
