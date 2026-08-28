@@ -285,6 +285,53 @@ three boards out of the nine in the table, is what `images.<board>` replaces.
 - **Whether `windows`'s single image is right.** Carried over unresolved from [0052]; its
   three arches share one image today and nothing here re-examines that.
 
+## Addendum, 2026-08-28 — resolver cutover landed; two bugs only running it for real found
+
+Everything the header above still lists as "Not started" is done. `pinned_docker_images.toml`
+is one flat `[image_group]` table (the old two-level `[image.<arch>].<floor>` plus separate
+`[port]` table are gone); `dockerrun.image_for()` lost its `if port == "unix"` branch and now
+resolves every port through `_image_group_for()` reading `build-platforms.toml`'s own
+`image`/`images` keys, uniformly; `unix_targets()` reads its fifteen declared cells straight
+from `build-platforms.toml` instead of the pin file, so "what targets exist" and "what has a
+published image" are the two separate questions the record's own "not decided" section asked
+for; `natmod.Dockerfile`/`qemu.Dockerfile` are deleted, superseded by the six toolchain images
+plus `esp_idf_base`, all seven built, published and pinned. Of the record's own five "not
+decided" items, two are therefore closed by this: **deletion order** (the Dockerfiles are
+gone, `_pins()["port"]` no longer exists to break) and **`unix_targets()`'s new source**. The
+other three are still genuinely open and are carried forward, not dropped: where the toolchain
+pins live (`resources/pinned_toolchains.toml` is still not written — four `ARG` pairs in four
+Dockerfiles), whether a natmod sweep should pull per-arch or up front, and whether `windows`'s
+single shared image is right.
+
+Two real bugs surfaced only by actually running the cutover, neither found by review:
+
+- **`natmod`/`qemu` briefly resolved to no image at all.** `_image_group_for(port, None)`
+  correctly returns `None` for a port whose row is an `images` map when no target is given —
+  but the call sites (`natmod/build.py`, `usermod/build.py`'s `build_qemu()`) weren't yet
+  passing their own `arch`/`board` through, so `ensure_image("natmod")`/`("qemu")` silently
+  resolved to nothing. Caught by CI within one push (`build-examples.yml`'s natmod and qemu
+  legs both failed), fixed by threading `arch` through `run_pre_build_command()`/`run_make()`/
+  `build_mpy_cross()` into `_natmod_image()`, and `opts.board` through `build_qemu()`'s own
+  `ensure_image()`/`timeout_for()`/`platform_for()` calls.
+- **`[usermod.webassembly]`'s own `image` key named a group that was never real.** It said
+  `image = "emsdk"`; `pinned_docker_images.toml`'s flat table has only ever had a `webassembly`
+  key, matching every other row's own convention (`windows`, `esp_idf_base`, `arm_embedded`,
+  `xtensa_lx106` all name a real key). `dockerrun.ensure_image("webassembly")` therefore always
+  resolved to `None`, and `build_webassembly()`'s own `UsermodBuildError` fired every time —
+  just never observed, because `webassembly` hadn't been exercised in `build-examples.yml`
+  since before this bug was introduced (`033bce2`, itself titled "0058 — docker image id's",
+  predates this session). Found the moment `webassembly`'s image was actually republished (see
+  [0059]) and the leg ran for real. Fixed by one-line correction to the row's own `image` key —
+  no other row has this mismatch, checked by grepping every `image = "..."` value against
+  `pinned_docker_images.toml`'s real keys.
+
+Also folded in from the same wave of pushes, recorded at their own more specific homes: `ar`'s
+restoration to `pyproject.toml` and the mount-not-bake mechanism for it and `pyelftools`
+([0012]'s own second addendum), and the GHCR "manifest unknown" incident across seven of the
+fifteen `ghcr.io/ballistics-lab/...` images — a registry-side content loss underneath pins that
+were never touched, not a staleness question ([0046]'s own subject) but a closely related one,
+written up as its own record: [0059].
+
 [0010]: 0010-pinned-data-in-resources.md
 [0012]: 0012-pyelftools-ar-own-deps.md
 [0026]: 0026-one-docker-image-per-port.md
@@ -295,3 +342,4 @@ three boards out of the nine in the table, is what `images.<board>` replaces.
 [0048]: 0048-build-skip-live-in-opposite-tables.md
 [0050]: 0050-natmod-is-docker-only.md
 [0052]: 0052-config-is-a-tree-not-a-selector-matrix.md
+[0059]: 0059-ghcr-untagged-cleanup-deletes-referenced-manifests.md
