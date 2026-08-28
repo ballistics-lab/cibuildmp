@@ -199,6 +199,21 @@ tried and rejected) lives in `docs/records/`, not here.
 
 ### Added
 
+- **`rp2` usermod builds, live-verified.** `build_rp2()` closes [0022]'s own
+  last unstarted item ("no Pico SDK resolver, no live verification") --
+  config and the `arm_embedded` Docker image were already in place, only
+  the driver itself was missing. No provisioning step runs inside the
+  container: the Pico SDK and everything under it it needs
+  (`lib/pico-sdk`/`lib/tinyusb`/`lib/lwip`/`lib/btstack`/`lib/cyw43-driver`)
+  are plain git submodules of the MicroPython checkout, already vendored
+  for free by the release tarball `sources.fetch_micropython()` prefers --
+  running `ports/rp2`'s own `make ... submodules` target instead was tried
+  first and failed live against a real tarball checkout ("fatal: not a
+  git repository"), since it is a bare `git submodule update` and a
+  release tarball is not a git checkout at all. Confirmed live: a real
+  `examples/template` build against `v1.29.0-rp2-RPI_PICO` producing a
+  genuine 681984-byte `firmware.uf2` with the fixture's own C module
+  linked in. Record 0060.
 - `verify_windows_output()` — reads the COFF `Machine` out of the produced
   `micropython.exe` and rejects a binary that is not the architecture its
   identifier names. `windows` previously checked only that the file existed.

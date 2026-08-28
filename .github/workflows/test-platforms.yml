@@ -22,7 +22,7 @@ on:
 # ACTION_* vs CIBMP_* comment documents the real collision this project hit
 # once from reusing a CIBMP_-prefixed name for unrelated plumbing.
 #
-# 219 of the 738 identifiers `--build "*"` would otherwise select --
+# 231 of the 1112 identifiers `--build "*"` would otherwise select --
 # matrix.yml's own 256-configuration cap (see the job below).
 env:
   TEST_PLATFORMS_BUILD: "v1.29.0-* v1.28.0-* mpy6.3-v1.29.0-* mpy6.3-v1.28.0-*"
@@ -35,6 +35,16 @@ env:
   # live-verified for one board each of Xtensa (`ESP32_GENERIC`) and
   # RISC-V (`ESP32_GENERIC_C3`) -- this workflow's own broad sweep is what
   # proves the rest of the ~40-board matrix for real.
+  #
+  # `rp2` is not skipped either, deliberately, the same call as `esp32`
+  # above -- [0060] live-verified exactly one board (`RPI_PICO`,
+  # `v1.29.0`) by hand; this workflow's own broad sweep across all 38
+  # boards this project pins (WiFi and non-WiFi, RP2040 and RP2350,
+  # third-party clones) is what is meant to prove the rest, the same way
+  # it did for esp32's own ~40-board matrix. First run through this
+  # workflow, not yet observed -- a real per-board failure here would be
+  # exactly the kind of thing worth its own follow-up record, not a
+  # reason to have skipped the sweep instead of running it.
   #
   # `ppc64le`/`s390x`/`riscv64` are *not* skipped either -- native to no
   # GitHub-hosted runner (record 0044's own descope), they route to

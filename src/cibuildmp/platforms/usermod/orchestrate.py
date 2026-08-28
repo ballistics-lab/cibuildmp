@@ -29,23 +29,17 @@ from typing import Any
 
 from ... import sources
 from . import manifests, portinfo
-from .build import (
-    Esp32BuildOptions,
-    QemuBuildOptions,
-    UnixBuildOptions,
-    UsermodBuildError,
-    WebassemblyBuildOptions,
-    WindowsBuildOptions,
-    build_esp32,
-    build_qemu,
-    build_unix,
-    build_webassembly,
-    build_windows,
-)
+from .build_common import UsermodBuildError
+from .build_esp32 import Esp32BuildOptions, build_esp32
+from .build_qemu import QemuBuildOptions, build_qemu
+from .build_rp2 import RP2_SUBMODULES, Rp2BuildOptions, build_rp2
+from .build_unix import UnixBuildOptions, build_unix
+from .build_webassembly import WebassemblyBuildOptions, build_webassembly
+from .build_windows import WindowsBuildOptions, build_windows
 from .options import UsermodBuildOptions, UsermodOptions
 from .targets import UsermodTarget, esp32_idf_info
 
-# port -> the build_<port>() function, uniform signature across all five:
+# port -> the build_<port>() function, uniform signature across all six:
 # build_x(opts, mpy_dir, *, toolchain_root=None, quiet=False) -> Path.
 _BUILD_FN: dict[str, Callable[..., Path]] = {
     "unix": build_unix,
@@ -53,6 +47,7 @@ _BUILD_FN: dict[str, Callable[..., Path]] = {
     "qemu": build_qemu,
     "webassembly": build_webassembly,
     "esp32": build_esp32,
+    "rp2": build_rp2,
 }
 
 
@@ -84,7 +79,7 @@ def _port_build_options(
     mpy_dir: Path,
     package_dir: Path,
 ) -> Any:
-    """The port-specific `*BuildOptions` `usermod/build.py` wants, built
+    """The port-specific `*BuildOptions` each `usermod/build_<port>.py` wants, built
     from `build_options`' own generic ingredients: `user_c_modules`
     resolved (D16), a combined manifest written to a real file (D17,
     empty -- and no file at all -- when neither the port nor the config
@@ -178,6 +173,16 @@ def _port_build_options(
             board=target.arch,
             extra_make_args=extra_make_args,
             **idf_kwargs,
+        )
+    if port == "rp2":
+        # Same "" -> real default fallback qemu's own branch above uses --
+        # a hand-built target with no board names none, and `Rp2BuildOptions`'
+        # own default ("PICO") should apply rather than an empty BOARD=.
+        return Rp2BuildOptions(
+            user_c_modules=resolved_user_c_modules,
+            frozen_manifest=frozen_manifest,
+            board=target.arch or "PICO",
+            extra_make_args=extra_make_args,
         )
     raise UsermodBuildError(f"no build_options builder wired for port {port!r}")
 
@@ -325,7 +330,13 @@ def build(
     build_tags = list(dict.fromkeys(t.tag for t in targets))
     for tag in build_tags:
         group = [t for t in targets if t.tag == tag]
-        mpy_dir = sources.fetch_micropython(tag)
+        # `RP2_SUBMODULES` only ever matters on `fetch_micropython()`'s own
+        # clone path (a preview tag with no release tarball) -- the
+        # tarball path already vendors every lib/ submodule for every
+        # port, rp2 included. Threaded here, not hardcoded into
+        # `fetch_micropython()` itself, since no other port needs one yet.
+        rp2_submodules = list(RP2_SUBMODULES) if any(t.port == "rp2" for t in group) else None
+        mpy_dir = sources.fetch_micropython(tag, submodules=rp2_submodules)
         if any(t.port in _HOST_MPY_CROSS_PORTS for t in group):
             sources.build_mpy_cross(mpy_dir, quiet=quiet)
         for target in group:

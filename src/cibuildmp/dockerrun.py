@@ -88,7 +88,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from .platforms.usermod.build import UsermodBuildError
+from .platforms.usermod.build_common import UsermodBuildError
 from .resources import build_platforms_data, pinned_docker_images, pinned_pypa_images
 
 

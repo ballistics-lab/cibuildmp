@@ -32,8 +32,9 @@ the same way [docs/0000-TRACKER.md](../0000-TRACKER.md) folds resolved
     behaviour under test (does it run in `module_root`, with the given
     `env`) doesn't require that. Fixed to `echo hi > marker`, which
     `/bin/sh -c` and `cmd.exe /c` both understand identically.
-  - `usermod/build.py`'s `unix_make_command()`/`run_unix_deplibs()`/
-    `qemu_make_command()`/`webassembly_make_command()` all embedded `Path`
+  - `unix_make_command()`/`run_unix_deplibs()`/`qemu_make_command()`/
+    `webassembly_make_command()` (now split across `usermod/build_unix.py`/
+    `build_qemu.py`/`build_webassembly.py`) all embedded `Path`
     objects via bare `str()`, which is backslash-separated on Windows --
     real breakage, not a test artifact, since GNU Make (native or MSYS2)
     wants forward slashes regardless of host OS. This is the exact bug

@@ -5,8 +5,15 @@ from cibuildmp.platforms.usermod.targets import (
 )
 
 
-def test_known_ports_matches_the_five_wired_drivers():
-    assert set(KNOWN_PORTS) == {"unix", "windows", "qemu", "webassembly", "esp32"}
+def test_known_ports_matches_the_six_wired_drivers():
+    assert set(KNOWN_PORTS) == {
+        "unix",
+        "windows",
+        "qemu",
+        "webassembly",
+        "esp32",
+        "rp2",
+    }
 
 
 def test_identifier_bare_port_name_when_no_axis_and_no_tag():

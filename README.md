@@ -113,10 +113,11 @@ Identifier shapes, one per platform:
 | usermod `webassembly` | `{tag}-{arch}`          | `v1.29.0-wasm32`                |
 | usermod `qemu`        | `{tag}-qemu-{board}`    | `v1.24.0-qemu-MICROBIT`         |
 | usermod `esp32`       | `{tag}-esp32-{board}`   | `v1.29.0-esp32-ESP32_GENERIC`   |
+| usermod `rp2`         | `{tag}-rp2-{board}`     | `v1.29.0-rp2-RPI_PICO`          |
 
 The shape genuinely differs per usermod port — `unix`/`windows`/
 `webassembly` carry no port name at all in the identifier, only `qemu`/
-`esp32` do. `--print-build-identifiers --json` against a broad `build`
+`esp32`/`rp2` do. `--print-build-identifiers --json` against a broad `build`
 glob is the fastest way to see the real list for yourself rather than
 guessing one by hand:
 
@@ -229,9 +230,9 @@ repos and verified on real CI, arch by arch, not just `--dry-run`.
 Upstream MicroPython has 20 ports (`ports/*` in a real checkout); every one
 is listed below for orientation, not just the ones this project covers.
 `resources/build-platforms.toml` carries independently-verified
-`(tag, arch/board)` rows for 15 of them; only 5 (`unix`, `windows`, `qemu`,
-`webassembly`, `esp32`) have a real build driver wired into the CLI at
-all — the other 10 have verified facts a config can already *name*, but
+`(tag, arch/board)` rows for 15 of them; only 6 (`unix`, `windows`, `qemu`,
+`webassembly`, `esp32`, `rp2`) have a real build driver wired into the CLI
+at all — the other 9 have verified facts a config can already *name*, but
 nothing yet to actually build them. Every ✅ row below is live-verified
 against a real MicroPython checkout, including a real custom
 `USER_C_MODULES` module — `unix`, `windows`, `webassembly` and `qemu` are
@@ -241,9 +242,11 @@ executable bit intact, Docker-only (`unix`: one native image per
 arch/libc; `windows`/`webassembly`/`qemu`: one image each — `qemu`'s own
 `v1.29.0-qemu-MPS2_AN385` runs in its own matrix leg rather than sharing
 a job with already-proven cells, since it was the first build ever run
-through that path). `esp32` is the one port not wired into `action.yml`
-yet; its own composite action remains the supported, verified production
-path for it.
+through that path). `esp32` and `rp2` are the two ports not wired into
+this project's own `action.yml` yet; `esp32`'s own composite action
+remains the supported, verified production path for it, and `rp2`'s
+driver was only just live-verified directly against `examples/template`
+(record 0060) -- not yet exercised through `action.yml`.
 
 <table>
 <thead>
@@ -389,8 +392,15 @@ path for it.
   <td>✅</td>
 </tr>
 <tr>
+  <td><code>rp2</code></td>
   <td>
-    <code>rp2</code><br>
+    every board across <code>v1.20.0</code>-<code>v1.30.0-preview</code>
+  </td>
+  <td><code>arm_embedded</code> (Docker) -- Pico SDK + every <code>lib/</code> it needs are vendored by the MicroPython release tarball itself[^rp2ci]</td>
+  <td>✅</td>
+</tr>
+<tr>
+  <td>
     <code>mimxrt</code><br>
     <code>samd</code><br>
     <code>stm32</code><br>
@@ -438,7 +448,8 @@ path for it.
 
 [^emulated]: `ppc64le`/`s390x`/`riscv64`, both libcs — published (`resources/pinned_docker_images.toml` has a real digest for each) and reachable by naming them in `build`, but native to no runner GitHub offers, so no real build has ever run through one: the six-cell equivalent of `qemu`'s own gap before it got a dedicated CI leg. Point `CIBMP_UNIX_<TARGET>_DOCKER_IMAGE` at a locally-built image, or an emulated one, to work on one of these.
 
-[^nodriver]: `resources/build-platforms.toml` has real, independently-verified rows for each of these ports (walked against a real MicroPython checkout the same way every ✅ row above was); a config can name their identifiers today. What's missing is a `build_<port>()` driver in `platforms/usermod/build.py` to actually run one — not a scope decision, just not built yet.
+[^nodriver]: `resources/build-platforms.toml` has real, independently-verified rows for each of these ports (walked against a real MicroPython checkout the same way every ✅ row above was); a config can name their identifiers today. What's missing is a `build_<port>()` driver (`platforms/usermod/build_<port>.py`) to actually run one — not a scope decision, just not built yet.
+[^rp2ci]: `build_rp2()` runs no provisioning step inside the container at all — the Pico SDK and everything it needs (`lib/pico-sdk`/`lib/tinyusb`/`lib/lwip`/`lib/btstack`/`lib/cyw43-driver`) are plain git submodules of the MicroPython checkout, already vendored as real files by the release tarball this project prefers. Running the port's own `make ... submodules` target was tried first and failed live against a real tarball checkout ("fatal: not a git repository", since a release tarball is not a git checkout at all); those submodules are threaded into `sources.fetch_micropython()` instead, reached only on its clone path (a preview tag with no tarball). Live-verified: a real `examples/template` build against `v1.29.0-rp2-RPI_PICO` producing a genuine 681984-byte `firmware.uf2` with the project's own C module linked in. Record 0060.
 
 [^esp32ci]: `build_esp32()` went Docker 2026-08-28 (`esp_idf_base`, [0058]), closing the venv conflict that made every real esp32 build fail on the bare host; `idf_version`/`idf_target` are threaded from each board's own real row rather than a fixed default, and `HOME` is exported explicitly for the same reason `esp32`'s own `ports/esp32` needs a real per-user cache dir that `dockerrun.run()`'s `--user <uid>:<gid>` doesn't otherwise give it (unmapped on GitHub's own runners specifically, live-caught on real CI). `test-platforms.yml`'s own broad sweep is what actually proves this across the whole board matrix, not a spot check — Xtensa and RISC-V both, both MicroPython tags this project currently tracks.
 
@@ -515,7 +526,7 @@ The pre-CLI building blocks — one GitHub Action per build step
 (`fetch-micropython`, `build-natmod`, `build-usermod-unix`/`-windows`/
 `-webassembly`/`-rp2040`/`-armv7m`/`-esp32`, …). Still fully supported for
 CI, but no longer where new work starts — new usermod ports and arches
-land in the CLI's own `usermod/build.py` first. Full input/output
+land in the CLI's own `usermod/build_<port>.py` first. Full input/output
 reference and a usage example: [`docs/ACTIONS.md`](docs/ACTIONS.md).
 
 ## Versioning

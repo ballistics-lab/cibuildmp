@@ -1,7 +1,7 @@
 """ESP-IDF provisioning for `esp32`-family usermod ports (D19).
 
 **Went Docker 2026-08-28** ([0028]/[0053]'s own still-open gap, closed for
-this port): `build_esp32()` (`usermod/build.py`) now runs entirely inside
+this port): `build_esp32()` (`usermod/build_esp32.py`) now runs entirely inside
 `esp_idf_base` ([0058]), not on the bare host. The bare-host path this
 module used to own -- `git clone --recursive` + `idf_tools.py install` +
 `install-python-env`, the same recipe `build-usermod-esp32`'s own
@@ -14,7 +14,7 @@ failures in one run were this single cause). Docker sidesteps it by
 construction: the container's own `python3` is never inside cibuildmp's
 venv to begin with.
 
-This is also the same class of bug `usermod/build.py`'s own
+This is also the same class of bug `usermod/build_common.py`'s own
 `container_mpy_cross()` already exists to prevent, the other direction:
 `idf_tools.py install` downloads real compiled binaries (an xtensa or
 riscv32 gcc, `openocd`, ...), not source -- installing them on the host

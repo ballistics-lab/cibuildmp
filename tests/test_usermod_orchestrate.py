@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from cibuildmp import dockerrun
-from cibuildmp.platforms.usermod import build as build_module
+from cibuildmp.platforms.usermod import build_common, espidf
 from cibuildmp.platforms.usermod.options import UsermodOptions
 from cibuildmp.platforms.usermod.orchestrate import _dest_name, build, build_one
 from cibuildmp.platforms.usermod.targets import UsermodTarget
@@ -21,7 +21,7 @@ def _resolved_image(monkeypatch):
     monkeypatch.setattr(dockerrun, "ensure_image", lambda *a, **k: "stub-image:local")
     monkeypatch.setattr(dockerrun, "_probe_platform", lambda *a, **k: "")
     monkeypatch.setattr(
-        build_module,
+        build_common,
         "container_mpy_cross",
         lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build-stub" / "mpy-cross",
     )
@@ -238,12 +238,12 @@ def test_build_one_esp32_passes_board_through(tmp_path, monkeypatch):
     monkeypatch.setenv("CIBMP_ESP32_DOCKER_IMAGE", "cibuildmp-esp32:local")
     monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", fake_run)
     monkeypatch.setattr(
-        build_module,
+        build_common,
         "container_mpy_cross",
         lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build-stub" / "mpy-cross",
     )
     monkeypatch.setattr(
-        build_module.espidf, "fetch_esp_idf", lambda version, **k: tmp_path / "idf"
+        espidf, "fetch_esp_idf", lambda version, **k: tmp_path / "idf"
     )
     (mpy_dir / "ports" / "esp32").mkdir(parents=True)
 
@@ -279,12 +279,12 @@ def test_build_one_esp32_threads_real_idf_version_and_target(tmp_path, monkeypat
     monkeypatch.setenv("CIBMP_ESP32_DOCKER_IMAGE", "cibuildmp-esp32:local")
     monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", fake_run)
     monkeypatch.setattr(
-        build_module,
+        build_common,
         "container_mpy_cross",
         lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build-stub" / "mpy-cross",
     )
     monkeypatch.setattr(
-        build_module.espidf,
+        espidf,
         "fetch_esp_idf",
         lambda version, **k: fetch_calls.append(version) or tmp_path / "idf" / version,
     )

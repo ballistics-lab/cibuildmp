@@ -35,13 +35,21 @@ from typing import Any
 
 from ...resources import build_platforms_data
 
-# The five ports with a real `build_<port>()` driver in usermod/build.py --
-# the other ten `resources/build-platforms.toml` already carries real,
-# verified rows for (rp2, mimxrt, samd, stm32, psoc-edge, alif, esp8266,
+# The six ports with a real `build_<port>()` driver in
+# usermod/build_<port>.py --
+# the other nine `resources/build-platforms.toml` already carries real,
+# verified rows for (mimxrt, samd, stm32, psoc-edge, alif, esp8266,
 # cc3200, renesas-ra, nrf) are a separate, much larger piece of unstarted
 # work (writing each one's own build pipeline), not a config-surface gap
 # this module could close by itself.
-KNOWN_PORTS: tuple[str, ...] = ("unix", "windows", "qemu", "webassembly", "esp32")
+KNOWN_PORTS: tuple[str, ...] = (
+    "unix",
+    "windows",
+    "qemu",
+    "webassembly",
+    "esp32",
+    "rp2",
+)
 
 _USERMOD_ROWS: dict[str, list[dict[str, Any]]] = {
     port: build_platforms_data()["usermod"][port]["identifiers"] for port in KNOWN_PORTS
