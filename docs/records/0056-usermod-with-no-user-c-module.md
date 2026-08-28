@@ -1,9 +1,10 @@
 # 0056 — building upstream MicroPython through the usermod path with no user C module at all
 
-- Status: Accepted (decided by the user: patch the five port drivers, add
-  `no-user-c-modules = true` as a flag mutually exclusive with `user-c-modules`,
-  erroring when both are given. Nothing built yet. Upstream needs nothing at all — see
-  the verified answer below)
+- Status: Accepted in intent, open in shape. Wanted, and the driver work is settled:
+  the five port drivers stop passing `USER_C_MODULES=` unconditionally, the mount list
+  is rebuilt rather than shortened, `verify_output()`'s module-symbol assertions become
+  conditional. **Undecided: how absence is expressed** — two options below, both from
+  the user, neither chosen. Nothing built yet. Upstream needs nothing either way
 - Related: [0021], [0023], [0051], [0053]
 
 ## What this is
@@ -130,16 +131,17 @@ Passing `USER_C_MODULES=` on the make command line is therefore sufficient and c
 for all five current drivers and for every port [0053] would add. The entire remaining
 job is on cibuildmp's own side.
 
-## The decision: `no-user-c-modules`, mutually exclusive, an error when combined
+## Option A — `no-user-c-modules`, mutually exclusive, an error when combined
 
-Settled by the user. The spelling is `no-user-c-modules = true` — kebab-case, matching
-every other key in this config (`user-c-modules`, `extra-make-args`, `pre-build-command`)
-rather than the snake_case it was first sketched in. It follows the same three-form
-pattern every option here has: the TOML key, a `--no-user-c-modules` CLI flag, and the
-`CIBMP_NO_USER_C_MODULES` env override `Options.get()` already builds for free.
+The user's first proposal. The spelling would be `no-user-c-modules = true` — kebab-case,
+matching every other key in this config (`user-c-modules`, `extra-make-args`,
+`pre-build-command`) rather than the snake_case it was first sketched in. It would follow
+the same three-form pattern every option here has: the TOML key, a `--no-user-c-modules`
+CLI flag, and the `CIBMP_NO_USER_C_MODULES` env override `Options.get()` already builds
+for free.
 
-**It is mutually exclusive with `user-c-modules`, and giving both is a load-time error**,
-not a precedence rule. That is the part worth arguing rather than transcribing.
+**It would be mutually exclusive with `user-c-modules`, and giving both a load-time
+error**, not a precedence rule. That is the part worth arguing rather than transcribing.
 
 A precedence rule has to pick a winner, and either choice is silently wrong for somebody:
 `no-user-c-modules` winning means an explicitly written `user-c-modules` is ignored;
@@ -195,11 +197,12 @@ first port that tries it. So the driver change is not "drop the second mount" bu
 what is actually needed": the module directory when there is one, the manifest's own
 directory when there is a manifest, and `mpy_dir` always.
 
-### The rest of the driver work, unchanged
+### The driver work, which is the same under either option
 
 - **Five driver edits.** Each of the five `build.py` paths passes
   `f"USER_C_MODULES={opts.user_c_modules}"` unconditionally; each becomes conditional,
-  emitting `USER_C_MODULES=` (or omitting the argument) when the flag is set.
+  emitting `USER_C_MODULES=` (or omitting the argument) when no module is configured —
+  whichever of the two options above ends up defining "not configured".
 - **Never `Path("")`.** It is `Path(".")`, which would bind-mount the project root for no
   reason — exactly the silent-wrong-thing this record exists to avoid.
 - **`verify_output()` becomes conditional.** Several paths currently assert that a real
@@ -207,6 +210,87 @@ directory when there is a manifest, and `mpy_dir` always.
   so directly. Those checks stay for a with-module build and are skipped, not deleted,
   for a stock one.
 
+
+## Option B — drop the default instead of negating it
+
+Raised by the user straight after the first proposal, and it deserves the space
+because measuring its cost changed what the cost is. The proposal: make
+`user-c-modules` genuinely optional — no `DEFAULT_USER_C_MODULES = "."` — so **unset
+means no user C modules**, and no flag exists at all. Nothing to be mutually exclusive
+with, no validation rule, one key with one meaning.
+
+### The consistency argument is the strong one
+
+`manifest` already works exactly this way: `str(opt("manifest", ""))`, unset is absence,
+and it has never needed a flag. Two neighbouring keys of the same shape currently behave
+differently for no reason a reader could derive — one defaults to a real value, the other
+to absence. Dropping the default makes them the same key twice, which is the outcome that
+needs no documentation at all.
+
+Against the flag: `no-user-c-modules` is a boolean whose entire job is to negate a default
+that could simply not exist. That is a real smell, and the record should say so rather
+than defend the decision it happens to have reached first.
+
+### The blast radius, measured rather than assumed
+
+The obvious objection is that dropping a default silently changes behaviour for every
+config relying on it. Counting who that actually is:
+
+- **`examples/template/cibuildmp.toml`** — this repo's own, and its comment says so in as
+  many words: "No `[usermod]` table here, deliberately … `user-c-modules` defaults to `.`
+  … the whole project root, which is exactly what every port below already wants".
+- **`a7p/micropython/cibuildmp.toml`** — sets neither key, but is natmod-only
+  (`module-dir = "natmod"`), so `user-c-modules` never applies to it.
+- **`micropython-bclibc`, `micropython-wasm3`** — no root `cibuildmp.toml` at all. Their
+  usermod builds still go through the `build-usermod-*` composite actions.
+- **The `build-usermod-*` composite actions themselves** — they never reach
+  `usermod/options.py`. Each calls `make USER_C_MODULES=…` directly from its own input,
+  with its own separately-documented default ("Defaults to the workspace root",
+  "Defaults to `usermod/micropython.cmake`"). `DEFAULT_USER_C_MODULES` is invisible to
+  them.
+
+So exactly **one** config in existence depends on this default, and it is in this
+repository. That is not the migration the objection assumes; it is a one-line edit
+(`user-c-modules = "."`) to a file that already explains why it wants that value.
+
+Worth noting in passing: those composite-action defaults are a second, independent
+implementation of the same convention, documented separately and drifting on their own —
+the same two-implementations shape [0038] records for `build-natmod`.
+
+### The one real risk, and what to do about it
+
+A config that relied on the default would, after the change, build stock MicroPython and
+*succeed*. `verify_output()` catches this on at least some ports — `build.py`'s own
+`windows` path asserts a real user module's symbols are present — but "at least some" is
+not a guarantee, and a green build that quietly contains none of the user's code is worse
+than any error.
+
+So if this route is taken, **absence should be a load-time error for one release**, with
+a message naming both ways forward, rather than silently meaning "none" from day one.
+After that the error can be dropped and absence can simply mean absence. With a blast
+radius of one file the transition is nearly free, and [0038]'s repin — which has to touch
+those repos anyway — is the natural moment.
+
+### What survives either way
+
+[0051]'s ninth addendum chose `"."` for a real reason: `src/` is a sibling of `usermod/`,
+so `USER_C_MODULES` has to reach one level above `usermod/` to see the shared core at all.
+That reasoning is untouched. It stops being an implicit default and becomes a line
+`examples/template` writes down — which arguably documents the layout better than a
+default ever did.
+
+### Where this record's own guess lands, which is not a decision
+
+**No choice has been made — the user has explicitly left this open, and both options above
+are on record precisely so it can be made later on the evidence rather than on whichever
+was written first.**
+
+For what it is worth, the reading here leans to Option B: it removes a key and a
+validation rule instead of adding them, it makes `user-c-modules` and `manifest` behave
+identically, and the migration it was assumed to require turns out to be one line in this
+repository. The counter-case for Option A is that it changes nothing for anyone and needs
+no transition at all, which is worth real money if the counting above ever turns out to
+have missed a config.
 
 ## The awkward question this raises about identifiers
 
@@ -224,6 +308,9 @@ invented in a hurry when someone first wants one.
 
 ## Not decided here
 
+- **Option A or Option B** — how absence is expressed. Explicitly left open by the user;
+  both are written up above with their evidence so the choice can be made on that rather
+  than on which was proposed first.
 - Whether this runs in `build-examples.yml` across every port on every push, or on the
   schedule leg only. It is the cheapest build in the project per port and the broadest
   in coverage, which argues for often.
@@ -231,6 +318,7 @@ invented in a hurry when someone first wants one.
 [0016]: 0016-usermod-user-c-modules-dir-vs-cmake.md
 [0021]: 0021-usermod-execution-central-value.md
 [0023]: 0023-usermod-identifier-scheme-config-output.md
+[0038]: 0038-m5-adopt-in-three-repos.md
 [0044]: 0044-unix-native-images-landed.md
 [0048]: 0048-build-skip-live-in-opposite-tables.md
 [0051]: 0051-usermod-identifiers-have-no-version-axis.md
