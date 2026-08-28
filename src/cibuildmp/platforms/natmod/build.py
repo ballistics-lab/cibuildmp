@@ -68,8 +68,8 @@ def make_command(
         module_root.as_posix(),
         f"ARCH={build_options.target.arch}",
         f"MPY_DIR={mpy_dir.as_posix()}",
-        # `python3`, not `sys.executable`. D12 made pyelftools and `ar`
-        # cibuildmp's own dependencies and `PYTHON=<sys.executable>` was
+        # `python3`, not `sys.executable`. D12 made pyelftools
+        # cibuildmp's own dependency and `PYTHON=<sys.executable>` was
         # how that reached make -- dynruntime.mk assigns PYTHON with a
         # plain `=`, so naming cibuildmp's own interpreter won over the
         # `python3` it would otherwise use.
@@ -77,11 +77,15 @@ def make_command(
         # That mechanism cannot cross a container boundary: the path
         # `sys.executable` names is in the *host's* virtual environment
         # and does not exist inside the image. Record 0049 moved the
-        # requirement into the image instead --
-        # `docker/natmod.Dockerfile` installs `python3-pyelftools` and
-        # `ar` comes with build-essential -- so the plain interpreter is
+        # requirement into the image instead -- `docker/natmod.Dockerfile`
+        # apt-installs `python3-pyelftools` -- so the plain interpreter is
         # now sufficient, and it is the only one that is addressable
         # from both sides of the mount.
+        #
+        # This comment used to add "and `ar` comes with build-essential",
+        # which was wrong twice over: nothing needs an `ar` module, and
+        # the image was pip-installing one rather than getting it from
+        # build-essential. Corrected 2026-08-28, see [0012]'s addendum.
         "PYTHON=python3",
         *build_options.extra_make_args,
         build_options.make_target,

@@ -175,7 +175,7 @@ RUN set -eux; \
 # what replaces it: `sys.executable` names a path in the *host's* virtual
 # environment, which does not exist here. So a containerised natmod build
 # passes `PYTHON=python3` and this image has to be the thing that makes
-# that Python sufficient. `ar` comes from `build-essential` above.
+# that Python sufficient.
 #
 # Its own RUN, deliberately, rather than folded into the apt layer at the
 # top: it is a different concern -- the Python environment mpy_ld.py
@@ -183,21 +183,18 @@ RUN set -eux; \
 # bumping it never invalidates the 3.4GB of toolchains above.
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends python3-pyelftools python3-pip; \
+    apt-get install -y --no-install-recommends python3-pyelftools; \
     rm -rf /var/lib/apt/lists/*; \
-    # `ar` is PyPI-only -- no apt package exists -- and
-    # `--break-system-packages` is what PEP 668 requires on a 24.04 base.
-    # Legitimate here in a way it would not be on a developer's machine:
-    # this image *is* the environment, it holds no other Python
-    # application, and a venv would only add a path for `PYTHON=python3`
-    # to miss.
-    python3 -m pip install --break-system-packages --no-cache-dir ar; \
-    # Both of D12's dependencies, asserted rather than assumed. The list
-    # is exhaustive and was read rather than guessed: `mpy_ld.py` imports
-    # `elftools.elf`, `ar_util` and `makeqstrdata`, and `ar_util` imports
-    # `ar` and `elftools.elf` -- the last two are MicroPython's own tools
-    # and live in the checkout, so `elftools` and `ar` are the whole set.
-    python3 -c "from elftools.elf.elffile import ELFFile; import ar"
+    # D12's dependency list, re-read rather than inherited. It used to say
+    # two packages and pip-install `ar` alongside this one; that was wrong
+    # and was corrected 2026-08-28 (see [0012]'s addendum). `mpy_ld.py`
+    # imports `elftools.elf`, `ar_util` and `makeqstrdata`; `ar_util`
+    # imports `elftools.elf` plus stdlib only. No MicroPython tool imports
+    # a module named `ar` at any tag natmod supports -- v1.12 through
+    # v1.28.0, each grepped in a real checkout. `pyelftools` is the whole
+    # set, and it has an apt package, so `python3-pip` and PEP 668's
+    # `--break-system-packages` are both gone with it.
+    python3 -c "from elftools.elf.elffile import ELFFile"
 
 # Appended, not prepended, for the same reason windows.Dockerfile's own
 # PATH is: these directories ship generically-named helpers that would

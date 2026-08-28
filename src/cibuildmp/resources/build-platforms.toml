@@ -108,6 +108,36 @@ artifacts_dir_name = "{name}-{ver}-mpy{abi}-{arch}[+0x{arch_flags:x}]"
 # module) rather than left conditional on data this table has no way to
 # express.
 post_checkout = "make -C mpy-cross"
+# Which published toolchain image each arch's build runs in. Keyed by
+# `arch`, deliberately NOT by this table's own `cross`: `cross` is a
+# per-tag fact read out of `py/dynruntime.mk`, and it is genuinely
+# absent for arches that plainly are cross-compiled -- `armv6m` through
+# v1.18, `rv32imc` on v1.24.0/v1.24.1, `rv64imc` on v1.27.0. An empty
+# `cross` means "this tag declared no prefix", not "native", so keying
+# images off it would route those rows to the host image and build them
+# with the wrong compiler. `arch` is stable across every tag.
+#
+# This is cibuildmp policy, not an upstream fact, which is why it sits
+# here beside `post_checkout` rather than in `identifiers` -- those rows
+# are regenerated wholesale by `bin/refresh_natmod_archs.py`, which
+# emits only `[tags]` and `identifiers`, so anything added to a row is
+# lost the next time that output is pasted in.
+#
+# Dotted keys rather than one inline table: TOML 1.0 (what `tomllib`
+# implements) has no multi-line inline table, and a `[natmod.images]`
+# header would have to sit after `identifiers`, two hundred lines from
+# the rest of the policy it belongs with.
+images.x86       = "natmod_host"
+images.x64       = "natmod_host"
+images.armv6m    = "arm_embedded"
+images.armv7m    = "arm_embedded"
+images.armv7emsp = "arm_embedded"
+images.armv7emdp = "arm_embedded"
+images.rv32imc   = "riscv_embedded"
+images.rv64imc   = "riscv_embedded"
+images.xtensa    = "xtensa_lx106"
+images.xtensawin = "xtensa_esp"
+# ----------------------------------------------------
 identifiers = [
     { tag = "v1.12", mpy = "5", arch = "x86", arch_code = 1, arch_flags = 0, cross = "", identifier = "mpy5-v1.12-x86" },
     { tag = "v1.12", mpy = "5", arch = "x64", arch_code = 2, arch_flags = 0, cross = "", identifier = "mpy5-v1.12-x64" },
@@ -319,6 +349,29 @@ identifiers = [
 [usermod.unix]
 identifier_format = "{tag}-{arch}"
 artifacts_dir_name = "{name}-{ver}-{identifier}"
+
+# `unix` is the one port whose image axis and target axis coincide: every
+# (arch, libc) cell is built natively for itself under emulation, pypa's
+# own model ([0043]/[0044]), so each target names its own image group and
+# the map is an identity. Written out anyway rather than special-cased in
+# `image_for()` -- one rule for fifteen ports beats fourteen plus a branch,
+# and if a cell ever shares an image with another this is where it says so.
+images.manylinux_2_28_aarch64 = "manylinux_2_28_aarch64"
+images.manylinux_2_28_i686    = "manylinux_2_28_i686"
+images.manylinux_2_28_ppc64le = "manylinux_2_28_ppc64le"
+images.manylinux_2_28_s390x   = "manylinux_2_28_s390x"
+images.manylinux_2_28_x86_64  = "manylinux_2_28_x86_64"
+images.manylinux_2_31_armv7l  = "manylinux_2_31_armv7l"
+images.manylinux_2_39_mipsel  = "manylinux_2_39_mipsel"
+images.manylinux_2_39_riscv64 = "manylinux_2_39_riscv64"
+images.musllinux_1_2_aarch64  = "musllinux_1_2_aarch64"
+images.musllinux_1_2_armv7l   = "musllinux_1_2_armv7l"
+images.musllinux_1_2_i686     = "musllinux_1_2_i686"
+images.musllinux_1_2_ppc64le  = "musllinux_1_2_ppc64le"
+images.musllinux_1_2_riscv64  = "musllinux_1_2_riscv64"
+images.musllinux_1_2_s390x    = "musllinux_1_2_s390x"
+images.musllinux_1_2_x86_64   = "musllinux_1_2_x86_64"
+# ----------------------------------------------------
 pre_checkout = "apt install build-essential git python3 pkg-config libffi-dev"
 post_checkout = "make -C mpy-cross && make -C ports/unix submodules"
 identifiers = [
@@ -558,6 +611,8 @@ identifiers = [
 [usermod.windows]
 identifier_format = "{tag}-{arch}"
 artifacts_dir_name = "{name}-{ver}-{identifier}"
+
+image = "windows"
 pre_checkout = "apt-get install python3 build-essential gcc-mingw-w64"
 post_checkout = "make -C mpy-cross"
 identifiers = [
@@ -646,6 +701,8 @@ identifiers = [
 [usermod.webassembly]
 identifier_format = "{tag}-{arch}"
 artifacts_dir_name = "{name}-{ver}-{identifier}"
+
+image = "emsdk"
 identifiers = [
     { tag = "v1.20.0", arch = "wasm32", identifier = "v1.20.0-wasm32" },
     { tag = "v1.21.0", arch = "wasm32", identifier = "v1.21.0-wasm32" },
@@ -686,6 +743,22 @@ identifiers = [
 [usermod.qemu]
 identifier_format = "{tag}-qemu-{board}"
 artifacts_dir_name = "{name}-{ver}-{identifier}"
+
+# A map, not a scalar: `qemu` is the one usermod port whose boards do
+# not share a toolchain -- six Cortex-M/A boards on `arm-none-eabi-`,
+# two RISC-V, and `POWERNV9` on `powerpc64le-linux-gnu-`. Read straight
+# off this table's own `cross`, which for `qemu` (unlike `[natmod]`) is
+# present on every row.
+images.MICROBIT   = "arm_embedded"
+images.MPS2_AN385 = "arm_embedded"
+images.MPS2_AN500 = "arm_embedded"
+images.MPS3_AN547 = "arm_embedded"
+images.NETDUINO2  = "arm_embedded"
+images.SABRELITE  = "arm_embedded"
+images.VIRT_RV32  = "riscv_embedded"
+images.VIRT_RV64  = "riscv_embedded"
+images.POWERNV9   = "ppc64le_linux"
+# ----------------------------------------------------
 post_checkout = "make -C mpy-cross && make -C ports/qemu BOARD={board} submodules"
 identifiers = [
     { tag = "v1.24.0", board = "MICROBIT", cross = "arm-none-eabi-", identifier = "v1.24.0-qemu-MICROBIT" },
@@ -784,6 +857,15 @@ identifiers = [
 [usermod.esp32]
 identifier_format = "{tag}-esp32-{board}"
 artifacts_dir_name = "{name}-{ver}-{identifier}[-{variant}]"
+
+# Not a toolchain image. `esp32` boards span two instruction sets --
+# Xtensa (`esp32`/`esp32s2`/`esp32s3`) and RISC-V (`esp32c2`/`esp32c3`/
+# `esp32c6`) -- and the compiler for either comes from ESP-IDF's own
+# `install.sh <target>`, run at build time against this row's
+# `idf_version`, not baked in. Eight distinct IDF versions appear in
+# this table, so baking would mean eight images; this is the one base
+# they are all installed into.
+image = "esp_idf_base"
 pre_checkout = "git clone -b {idf_version} --recursive https://github.com/espressif/esp-idf.git && cd esp-idf && ./install.sh esp32"
 post_checkout = "idf.py -D UPDATE_SUBMODULES=1 reconfigure"
 identifiers = [
@@ -1258,6 +1340,8 @@ identifiers = [
 [usermod.rp2]
 identifier_format = "{tag}-rp2-{board}"
 artifacts_dir_name = "{name}-{ver}-{identifier}[-{variant}]"
+
+image = "arm_embedded"
 post_checkout = "make -C mpy-cross && make -C ports/rp2 BOARD={board} submodules"
 identifiers = [
     { tag = "v1.20.0", board = "ADAFRUIT_FEATHER_RP2040", mcu = "rp2040", product = "Feather RP2040", vendor = "Adafruit", variants = [], identifier = "v1.20.0-rp2-ADAFRUIT_FEATHER_RP2040" },
@@ -1660,6 +1744,8 @@ identifiers = [
 [usermod.mimxrt]
 identifier_format = "{tag}-mimxrt-{board}"
 artifacts_dir_name = "{name}-{ver}-{identifier}"
+
+image = "arm_embedded"
 post_checkout = "make -C mpy-cross && make -C ports/mimxrt BOARD={board} submodules"
 identifiers = [
     { tag = "v1.20.0", board = "MIMXRT1010_EVK", mcu = "mimxrt", product = "MIMXRT1010_EVK", vendor = "NXP", variants = [], cross = "arm-none-eabi-", identifier = "v1.20.0-mimxrt-MIMXRT1010_EVK" },
@@ -1880,6 +1966,8 @@ identifiers = [
 [usermod.samd]
 identifier_format = "{tag}-samd-{board}"
 artifacts_dir_name = "{name}-{ver}-{identifier}[-{variant}]"
+
+image = "arm_embedded"
 post_checkout = "make -C mpy-cross && make -C ports/samd BOARD={board} submodules"
 identifiers = [
     { tag = "v1.20.0", board = "ADAFRUIT_FEATHER_M0_EXPRESS", mcu = "samd21", product = "Feather M0 Express", vendor = "Adafruit", variants = [], cross = "arm-none-eabi-", identifier = "v1.20.0-samd-ADAFRUIT_FEATHER_M0_EXPRESS" },
@@ -2122,6 +2210,8 @@ identifiers = [
 [usermod.stm32]
 identifier_format = "{tag}-stm32-{board}"
 artifacts_dir_name = "{name}-{ver}-{identifier}[-{variant}]"
+
+image = "arm_embedded"
 post_checkout = "make -C mpy-cross && make -C ports/stm32 BOARD={board} submodules"
 identifiers = [
     { tag = "v1.20.0", board = "ADAFRUIT_F405_EXPRESS", mcu = "stm32f4", product = "F405 Express", vendor = "Adafruit", variants = [], cross = "arm-none-eabi-", identifier = "v1.20.0-stm32-ADAFRUIT_F405_EXPRESS" },
@@ -3151,6 +3241,8 @@ identifiers = [
 [usermod.psoc-edge]
 identifier_format = "{tag}-psoc-edge-{board}"
 artifacts_dir_name = "{name}-{ver}-{identifier}"
+
+image = "arm_embedded"
 pre_checkout = "sudo apt-get install gcc-arm-none-eabi libnewlib-arm-none-eabi"
 post_checkout = "make -C mpy-cross && make -C ports/psoc-edge BOARD={board} submodules"
 identifiers = [
@@ -3168,6 +3260,8 @@ identifiers = [
 [usermod.alif]
 identifier_format = "{tag}-alif-{board}"
 artifacts_dir_name = "{name}-{ver}-{identifier}"
+
+image = "arm_embedded"
 post_checkout = "make -C mpy-cross && make -C ports/alif BOARD={board} submodules"
 identifiers = [
     { tag = "v1.26.0", board = "ALIF_ENSEMBLE", mcu = "AE722F80F55D5XX", product = "Ensemble E7 DevKit", vendor = "Alif Semiconductor", toolchain_version = "13.3.Rel1", variants = [], identifier = "v1.26.0-alif-ALIF_ENSEMBLE" },
@@ -3194,6 +3288,8 @@ identifiers = [
 [usermod.esp8266]
 identifier_format = "{tag}-esp8266-{board}"
 artifacts_dir_name = "{name}-{ver}-{identifier}[-{variant}]"
+
+image = "xtensa_lx106"
 pre_checkout = "docker pull larsks/esp-open-sdk"
 post_checkout = "make -C ports/esp8266 submodules && make -C mpy-cross"
 identifiers = [
@@ -3241,6 +3337,8 @@ identifiers = [
 [usermod.cc3200]
 identifier_format = "{tag}-cc3200-{board}"
 artifacts_dir_name = "{name}-{ver}-{identifier}"
+
+image = "arm_embedded"
 identifiers = [
     { tag = "v1.18", board = "WIPY", mcu = "cc3200", product = "WiPy Module", vendor = "Pycom", variants = [], cross = "arm-none-eabi-", identifier = "v1.18-cc3200-WIPY" },
     { tag = "v1.19", board = "WIPY", mcu = "cc3200", product = "WiPy Module", vendor = "Pycom", variants = [], cross = "arm-none-eabi-", identifier = "v1.19-cc3200-WIPY" },
@@ -3286,6 +3384,8 @@ identifiers = [
 [usermod.renesas-ra]
 identifier_format = "{tag}-renesas-ra-{board}"
 artifacts_dir_name = "{name}-{ver}-{identifier}"
+
+image = "arm_embedded"
 post_checkout = "make -C mpy-cross && make -C ports/renesas-ra BOARD={board} submodules"
 identifiers = [
     { tag = "v1.19", board = "RA4M1_CLICKER", mcu = "RA4M1", product = "Mikroe RA4M1 Clicker", vendor = "MikroElektronika", variants = [], cross = "arm-none-eabi-", identifier = "v1.19-renesas-ra-RA4M1_CLICKER" },
@@ -3432,6 +3532,8 @@ identifiers = [
 [usermod.nrf]
 identifier_format = "{tag}-nrf-{board}"
 artifacts_dir_name = "{name}-{ver}-{identifier}"
+
+image = "arm_embedded"
 post_checkout = "make -C mpy-cross && make -C ports/nrf BOARD={board} submodules"
 identifiers = [
     { tag = "v1.18", board = "actinius_icarus", mcu = "nrf91", product = "actinius_icarus", vendor = "Actinius", variants = [], cross = "arm-none-eabi-", identifier = "v1.18-nrf-actinius_icarus" },

@@ -39,13 +39,17 @@ classifiers = [
 # Standard library otherwise, deliberately: a build tool that has to resolve
 # its own dependency tree before it can fetch anything is harder to trust,
 # and `wget` not being everywhere is the exact class of problem this
-# replaces. pyelftools/ar are the one exception (docs/BACKLOG.md D12): both
-# are pure Python, both are what tools/mpy_ld.py itself needs to link a
-# native .mpy, and declaring them here -- rather than pip-installing them at
-# build time -- is what lets `make PYTHON=<sys.executable>` just work.
+# replaces. pyelftools is the one exception ([0012]): it is pure Python and
+# it is what tools/mpy_ld.py itself needs to link a native .mpy.
+#
+# `ar` used to sit here beside it and was removed 2026-08-28 -- see [0012]'s
+# own addendum. MicroPython imports no such module at any tag natmod
+# supports (v1.12 through v1.28.0, checked by `grep` against real
+# checkouts): `tools/ar_util.py` uses only `os`/`re`/`hashlib`/`functools`/
+# `pickle`/`collections` plus `elftools.elf.elffile`. The PyPI package was
+# never a dependency of anything.
 dependencies = [
     "pyelftools>=0.29",
-    "ar",
 ]
 dynamic = ["version"]
 
