@@ -18,18 +18,23 @@ cibuildwheel's own script names its pins too. Bumping these is a real
 decision, not routine hygiene -- a new base is a new libc *build*, and for
 `manylinux_2_31_armv7l` versus `_2_35` it can be a different floor
 entirely -- so this only ever rewrites a digest in place. Which floor each
-architecture is curated onto stays where it takes effect: the keys of
-`[image.<arch>]` in `pinned_docker_images.toml`.
+architecture is curated onto stays where it takes effect: `build-platforms.
+toml`'s own `[usermod.unix].images.<tag>` (record 0058 moved it out of this
+file -- it is the *group name* a build target resolves to, not the pin).
 
 `--images` re-resolves cibuildmp's own published layer from GHCR, reading
-the digest each `<tag>:latest` points at. That is the same value
+the digest each `<name>:latest` points at, against
+`pinned_docker_images.toml`'s single flat `[image_group]` table (record
+0058 flattened the old `[image.<arch>]`/`[port]` split into one table keyed
+by group name). That digest is the same value
 `.github/workflows/publish-docker-images.yml` prints in its "Record the
 pinned digest" step; this script exists so a maintainer can recover it
 afterwards -- or fill in a whole freshly-published matrix at once -- rather
-than copying digests out of a job summary by hand. A cell that names no
-`ghcr.io/...` image (nine `unix` cells add nothing over pypa's own base,
-so they were never published at all) is mirrored straight from
-`pinned_pypa_images.toml`'s matching cell instead of queried on GHCR.
+than copying digests out of a job summary by hand. A group name that is
+itself a unix platform tag with no `ghcr.io/...` image (nine cells add
+nothing over pypa's own base, so they were never published at all) is
+mirrored straight from `pinned_pypa_images.toml`'s matching cell instead of
+queried on GHCR.
 
 Neither table is rewritten by CI. Record 0033: cibuildmp never builds one
 of these images itself and never repoints its own pins on its own; a pin
@@ -188,6 +193,24 @@ def repo_url(repo: str) -> str:
     return f"quay.io/{repo}"
 
 
+def _pypa_mirror(name: str, pypa: dict[str, dict[str, str]]) -> str | None:
+    """`name`'s own `pinned_pypa_images.toml` cell, or `None` when `name`
+    is not a unix platform tag pypa has an opinion about.
+
+    `name` is `[image_group]`'s own flat key -- for a unix cell that is a
+    real PEP 600/656 tag, `<floor>_<arch>`, split against pypa's own arch
+    list rather than on a separator (both halves contain underscores).
+    None of the six toolchain groups or `windows`/`webassembly`/
+    `esp_idf_base` end in a pypa arch suffix, so this is also how they are
+    told apart from a unix cell without a second, parallel list of names.
+    """
+    for arch, floors in pypa.items():
+        suffix = f"_{arch}"
+        if name.endswith(suffix) and name[: -len(suffix)] in floors:
+            return floors[name[: -len(suffix)]]
+    return None
+
+
 def update_images(*, check: bool) -> int:
     data = tomllib.loads(IMAGE_PINS.read_text())
     text = IMAGE_PINS.read_text()
@@ -195,16 +218,8 @@ def update_images(*, check: bool) -> int:
     owner = _owner()
     drift = 0
 
-    cells = [
-        (arch, floor, reference)
-        for arch, floors in data.get("image", {}).items()
-        for floor, reference in floors.items()
-    ]
-    cells += [
-        ("port", name, reference) for name, reference in data.get("port", {}).items()
-    ]
-
-    for arch, key, reference in cells:
+    for name, reference in data.get("image_group", {}).items():
+        pypa_reference = _pypa_mirror(name, pypa)
         # A cell whose current reference is not `ghcr.io/...` has no
         # cibuildmp-published image behind it at all: nine `unix` cells
         # (`armv7l`'s `manylinux_2_31`, `riscv64`'s `manylinux_2_39`, every
@@ -214,34 +229,23 @@ def update_images(*, check: bool) -> int:
         # just `pinned_pypa_images.toml`'s own cell, mirrored. Asking GHCR
         # about a package that was never published would only ever print
         # "not published yet" for these nine, forever.
-        if reference and not reference.startswith("ghcr.io/") and arch != "port":
-            pypa_reference = pypa.get(arch, {}).get(key)
-            if not pypa_reference:
-                print(f"  {key}_{arch}: no matching pinned_pypa_images.toml cell")
-                continue
+        if pypa_reference is not None and not reference.startswith("ghcr.io/"):
             if pypa_reference == reference:
                 continue
             drift += 1
-            print(f"  {key}_{arch}: pinned_pypa_images.toml moved -- mirroring")
+            print(f"  {name}: pinned_pypa_images.toml moved -- mirroring")
             if not check:
-                text = _replace_value(text, key, reference, pypa_reference, None)
+                text = _replace_value(text, name, reference, pypa_reference, None)
             continue
 
-        # An empty cell is a declared target with nothing published yet
-        # (every `unix` cell is empty until publish-docker-images.yml has
-        # run under record 0043's names). Its own image name is derivable
-        # -- `<floor>_<arch>` for unix, the port name otherwise -- so this
-        # can fill a whole freshly-published matrix in one pass.
-        name = key if arch == "port" else f"{key}_{arch}"
-        # The repository is derived from the table's own coordinates, not
-        # read back out of whatever the cell currently points at. That
-        # matters during a rename and not only in theory: record 0044
-        # dropped the `cibuildmp-` prefix, so the three `[port]` cells
-        # still held `ghcr.io/<owner>/cibuildmp-windows@...` while the
-        # package that had just been published was `<owner>/windows`.
-        # Trusting the old reference would have refreshed the digest of
-        # the image being replaced -- a successful-looking no-op, which is
-        # the worst kind.
+        # The repository is derived from the table's own key, not read
+        # back out of whatever the cell currently points at. That matters
+        # during a rename and not only in theory: record 0044 dropped the
+        # `cibuildmp-` prefix, so the three cross-compiling cells still
+        # held `ghcr.io/<owner>/cibuildmp-windows@...` while the package
+        # that had just been published was `<owner>/windows`. Trusting the
+        # old reference would have refreshed the digest of the image being
+        # replaced -- a successful-looking no-op, which is the worst kind.
         repo = f"{owner}/{name}"
         current = reference.split("@", 1)[1] if reference else ""
         try:
@@ -255,7 +259,7 @@ def update_images(*, check: bool) -> int:
         print(f"  {name}: {current[:19] or '(unpinned)'} -> {latest[:19]}...")
         if not check:
             text = _replace_value(
-                text, key, reference, f"ghcr.io/{repo}@{latest}", None
+                text, name, reference, f"ghcr.io/{repo}@{latest}", None
             )
     if not check and drift:
         IMAGE_PINS.write_text(text)
@@ -267,11 +271,12 @@ def _owner() -> str:
     already pinned rather than hardcoded -- a fork that republishes under
     its own owner should be able to run this unchanged."""
     data = tomllib.loads(IMAGE_PINS.read_text())
-    for reference in data.get("port", {}).values():
-        if reference:
+    for reference in data.get("image_group", {}).values():
+        if reference and reference.startswith("ghcr.io/"):
             return _repo_of(reference).split("/", 1)[0]
     raise UpdateError(
-        "cannot infer the GHCR owner: no reference in [port] is pinned yet"
+        "cannot infer the GHCR owner: no ghcr.io/ reference in [image_group] "
+        "is pinned yet"
     )
 
 

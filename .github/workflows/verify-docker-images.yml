@@ -77,10 +77,19 @@ jobs:
           - { image: manylinux_2_28_ppc64le, platform: linux/ppc64le }
           - { image: manylinux_2_28_s390x, platform: linux/s390x }
           - { image: manylinux_2_39_mipsel, platform: linux/amd64 }
-          - { image: natmod, platform: linux/amd64 }
           - { image: windows, platform: linux/amd64 }
-          - { image: qemu, platform: linux/amd64 }
           - { image: webassembly, platform: linux/amd64 }
+          # The six toolchain-group images record 0058 splits
+          # natmod.Dockerfile/qemu.Dockerfile into -- see
+          # publish-docker-images.yml's own matrix for why each is
+          # linux/amd64.
+          - { image: arm_embedded, platform: linux/amd64 }
+          - { image: riscv_embedded, platform: linux/amd64 }
+          - { image: xtensa_lx106, platform: linux/amd64 }
+          - { image: xtensa_esp, platform: linux/amd64 }
+          - { image: natmod_host, platform: linux/amd64 }
+          - { image: ppc64le_linux, platform: linux/amd64 }
+          - { image: esp_idf_base, platform: linux/amd64 }
     steps:
       - uses: actions/checkout@v7
 
