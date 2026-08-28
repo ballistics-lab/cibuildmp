@@ -1,8 +1,10 @@
 # 0058 — the image axis is the toolchain, not the port
 
-- Status: Accepted for the data half (the keys are in `build-platforms.toml` as of this
-  record). Not started for the rest: no Dockerfile is written, `pinned_docker_images.toml`
-  still has its `[port]` table, and `dockerrun.image_for()` still branches per port
+- Status: Accepted. **Data half and all seven Dockerfiles landed**; every image is built
+  and verified by running it, two of them by a real firmware build. Not started:
+  `pinned_docker_images.toml` still has its `[port]` table, `dockerrun.image_for()` still
+  branches per port, `QEMU_BOARD_CROSS` is still a hardcoded dict, and nothing is
+  published — so `natmod.Dockerfile`/`qemu.Dockerfile` stay until the resolver moves
 - Related: [0010], [0012], [0026], [0033], [0044], [0046], [0050], [0052]
 
 ## What this decides
@@ -172,16 +174,71 @@ one-image-per-target key here would mean ten Dockerfiles with identical contents
 divergence is in the key, not the mechanism: the pinned table, the digest pinning, the
 `CIBMP_*_DOCKER_IMAGE` override and the pull-only rule ([0033]) are all unchanged.
 
+## The images, built and verified
+
+Written 2026-08-28 and each one run, not just built. All seven are `ubuntu:24.04`, not a
+pypa base: `unix` builds on pypa's own because those targets are genuinely native and need
+manylinux's glibc floor ([0043]/[0044]); nothing here is, and `manylinux_2_28_x86_64` is
+589 MB compressed before a toolchain is added to it.
+
+| image | size | verified by |
+|---|---|---|
+| `riscv_embedded` | 2.06 GB | a real `ports/qemu` `VIRT_RV32` build — `firmware.elf`, 247 637 text bytes |
+| `arm_embedded` | 1.62 GB | a real `ports/qemu` `MPS2_AN385` build — `firmware.elf`, ELF32/ARM/EXEC |
+| `xtensa_esp` | 1.03 GB | gcc 16.1.0, compiles to Tensilica Xtensa, 29 prefixed tools |
+| `natmod_host` | 689 MB | `gcc -m32` produces ELF32; `i686-linux-gnu-gcc` works |
+| `ppc64le_linux` | 620 MB | PowerPC64 object, and `#include <stdio.h>` resolves |
+| `xtensa_lx106` | 558 MB | gcc 4.8.5, compiles to Tensilica Xtensa |
+| `esp_idf_base` | 556 MB | git/cmake/ninja/ccache/venv present, **no toolchain** |
+
+The worst case a build now pulls is 2.06 GB against `natmod.Dockerfile`'s 4.09 GB, and
+`esp8266` pulls 558 MB where it used to pull all 4.09 GB.
+
+### Three things only running them could have found
+
+- **`esp_idf_base` needs `build-essential`, and ESP-IDF's own prerequisite list omits it.**
+  That list assumes a developer machine with a compiler already on it. Built from it
+  literally, the image had no `cc`, no `gcc` and no `make` — and this port needs all three
+  (`ports/esp32` is Makefile-driven, `mpy-cross` is a host C program built before the
+  firmware, IDF's cmake runs host compiler checks). Fixed, and the Dockerfile says why.
+- **A hand-written symlink list is short by exactly one tool.** `riscv_embedded` and
+  `xtensa_esp` alias their xpack/crosstool-NG prefixes to the ones `dynruntime.mk` and
+  `ports/qemu` spell. The list was copied from `natmod.Dockerfile`, where ten names
+  sufficed because `dynruntime.mk` never assembles. A port build does: `VIRT_RV32` died on
+  a missing `riscv64-unknown-elf-as` at `shared/runtime/gchelper_rv32i.s`. Both files now
+  glob the toolchain's own `bin/` — 35 tools for RISC-V, 29 for Xtensa — because a glob
+  cannot be short by one.
+- **picolibc is not needed, and `arm_embedded` needs three fewer apt packages than the
+  composite action installs.** `ports/qemu/Makefile` probes `--print-file-name=picolibc.specs`
+  and upstream's comment warns the Debian bare-metal RISC-V toolchain defaults to `nosys`;
+  xpack ships newlib, the probe finds nothing, and `VIRT_RV32` links anyway. On the ARM
+  side, `build-usermod-rp2040` apt-installs `gcc-arm-none-eabi`, `libnewlib-arm-none-eabi`
+  and `libstdc++-arm-none-eabi-newlib`; checked inside the built image, xpack already ships
+  `libstdc++.a`, the full C++ header set and newlib's `libc.a`. Installing them would put a
+  second, older `arm-none-eabi-gcc` on PATH. A C++ translation unit compiles for Cortex-M0+
+  and yields ELF32/ARM — which is [0054]'s own "unverified" C++ question, answered for ARM.
+
+### What the old `qemu.Dockerfile` could never do
+
+It installs `gcc-arm-none-eabi` and `libnewlib-arm-none-eabi` and nothing else, while
+`build.py`'s `QEMU_BOARD_CROSS` names `VIRT_RV32` and `VIRT_RV64` as supported with
+`riscv64-unknown-elf-`. Those two builds would have failed on a missing compiler in that
+image. Nothing caught it because the only `qemu` leg CI ever runs is `MPS2_AN385` ([0032]).
+So the split closes a latent gap rather than moving one — and `QEMU_BOARD_CROSS` itself,
+three boards out of the nine in the table, is what `images.<board>` replaces.
+
 ## What is not decided here
 
-- **The Dockerfiles.** None of the six is written. All four cross toolchains currently
-  live inline in `docker/natmod.Dockerfile` (moved there by [0050]) as URL + sha256 pairs,
-  which [0046] already flags as a fifth pinned thing nothing watches. Splitting them across
-  six files is the moment to move those pins into `resources/`, per [0010], rather than
-  copy them.
-- **`pyelftools` and `ar` go in all of them.** [0012]'s dependencies are `mpy_ld.py`'s, and
-  `mpy_ld.py` runs for every natmod arch, not just the host ones. Only the multilib/i386
-  packages are `natmod_host`-specific.
+- **Where the toolchain pins live.** Each Dockerfile now declares its own as
+  `ARG TOOLCHAIN_URL` / `ARG TOOLCHAIN_SHA256` rather than burying them in a `RUN`, so a
+  bump is one greppable line and `--build-arg` is a seam a table can feed. They are still
+  four values in four files, which is the copy [0010] argues against and [0046] already
+  counts as a pinned thing nothing watches. `resources/pinned_toolchains.toml` is the
+  answer; it is not written.
+- **Deletion order.** `natmod.Dockerfile` and `qemu.Dockerfile` are superseded but must
+  outlive the resolver change: `_pins()["port"]` still returns them, so removing the files
+  before `image_for()` moves would break `main`. They go once the seven are published and
+  pinned, recorded as an addendum here rather than deleted quietly ([0041]).
 - **A full natmod sweep will pull four images instead of one.** `natmod/build.py` calls
   `ensure_image("natmod")` once for the whole loop today. After the split, `--archs armv7m`
   pulls roughly a quarter of the current 4.09 GB and `--archs all` pulls about the same
