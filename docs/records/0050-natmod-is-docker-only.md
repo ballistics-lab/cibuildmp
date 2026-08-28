@@ -296,13 +296,13 @@ the x86-multilib pair, `python3`) third, after it. Only a change to the
 first layer -- essentially never, once set -- can invalidate the big one
 now; the volatile half moved to where a cache miss is cheap.
 
-Whether `xtensa-lx106` (the ESP8266 toolchain) is worth keeping at all
-stayed a separate, still-open question (tracker's own row): at ~38MB
-compressed it is the smallest of the four by a wide margin (`riscv-none-elf`
-~433MB, `arm-none-eabi` ~307MB, `xtensa-esp-elf` ~89MB), so dropping it
-would not have meaningfully addressed the layer-ordering problem this
-addendum fixes -- only cost one of ten supported natmod arches for real
-ESP8266 hardware. Left as-is.
+Whether `xtensa-lx106` (the ESP8266 toolchain) is worth keeping at all was a
+separate question (tracker's own row): at ~38MB compressed it is the
+smallest of the four by a wide margin (`riscv-none-elf` ~433MB,
+`arm-none-eabi` ~307MB, `xtensa-esp-elf` ~89MB), so dropping it would not
+have meaningfully addressed the layer-ordering problem this addendum fixes
+-- only cost one of ten supported natmod arches for real ESP8266 hardware.
+**Decided: kept.**
 
 [0012]: 0012-pyelftools-ar-own-deps.md
 [0030]: 0030-container-approach-natmod-and-docker-vs-qemu.md
