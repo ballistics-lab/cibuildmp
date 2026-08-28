@@ -16,7 +16,7 @@ on:
 # 219 of the 738 identifiers `--build "*"` would otherwise select --
 # matrix.yml's own 256-configuration cap (see the job below).
 env:
-  TEST_PLATFORMS_BUILD: "v1.29.0-* v1.28.0-* mpy6.3-*"
+  TEST_PLATFORMS_BUILD: "v1.29.0-* v1.28.0-* mpy6.3-v1.29.0-* mpy6.3-v1.28.0-*"
 
 # Same pattern publish.yml's own concurrency block already uses. A real,
 # live-caught gap this session: without this, several rapid-fire pushes to
