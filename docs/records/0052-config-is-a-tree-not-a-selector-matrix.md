@@ -438,6 +438,11 @@ follow-on, not a research question.
 
 ## The proposed shape (sketch, not a finished design)
 
+> **Superseded, 2026-08-27** — this nested-table shape was never built;
+> what shipped is the opposite (every table flattened, table presence
+> alone selects a platform, no path addressing at all). Kept as the
+> sketch that started Track B's own design, not as current guidance.
+
 Nested tables return — a direct, deliberate reversal of record [0051]'s
 own Phase F decision to flatten `[usermod.<port>]` into sibling top-level
 tables, done for different reasons than the shape Phase F removed. Phase
@@ -503,6 +508,14 @@ than one tree depth the way `**` does in a real filesystem glob) is still
 open.
 
 ## What is decided, and what is not
+
+> **Revisited, 2026-08-27.** The "tree, not a matrix" conclusion below
+> was itself reconsidered once Track B was actually built (see the
+> "table-presence activation..." addendum near the end of this file):
+> what shipped narrows a flat, real-row domain by glob, closer to
+> upstream's own matrix-plus-selector shape than to a tree, just without
+> upstream's computed cross product. The "Also decided" paragraph right
+> after this one (Track A) is unaffected and stands.
 
 **Decided:** the matrix-plus-glob-selector model, inherited directly from
 cibuildwheel, does not fit cibuildmp's own genuinely non-rectangular axes,
@@ -661,6 +674,14 @@ architectural question under a record whose own investigation is already
 closed.
 
 ## Implementation plan (addendum, 2026-08-26, later the same session)
+
+> **Navigation note, added 2026-08-28.** Track A below (the five
+> independent sub-items) mostly landed as designed. Track B (the tree
+> config mechanism itself) did not: it was implemented, then reverted
+> two addenda after its own "B4.1–B4.3 reverted" one further down this
+> file, in favour of the plain build/skip-glob model the final
+> "table-presence activation..." addendum describes. Read Track B below
+> as the design that was tried, not the current one.
 
 The Status line above calls for "its own dedicated Explore/Plan pass
 before any code changes." This addendum is that pass: it rereads every
@@ -1071,6 +1092,10 @@ here — but it should be **one file, not two**, to avoid the exact
 two-sources-of-truth drift risk a duplicate would create.
 
 ### Track B — the tree/matrix mechanism
+
+> **Reverted, 2026-08-27** — see this file's own "Track B's own B4.1–B4.3
+> reverted" addendum further down. Kept verbatim as the design that was
+> actually tried, not as current guidance.
 
 This is the part the record's own Status line says still needs a
 dedicated design pass. What follows is that pass's own output: concrete
