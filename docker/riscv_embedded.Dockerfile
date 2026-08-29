@@ -14,7 +14,7 @@
 #
 # Build: docker build -t cibuildmp-riscv_embedded -f docker/riscv_embedded.Dockerfile .
 # Use:   CIBMP_..._DOCKER_IMAGE=cibuildmp-riscv_embedded cibuildmp ...
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 

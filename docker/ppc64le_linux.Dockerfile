@@ -8,7 +8,7 @@
 # glibc floor. Nothing here is.
 #
 # Build: docker build -t cibuildmp-ppc64le_linux -f docker/ppc64le_linux.Dockerfile .
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 

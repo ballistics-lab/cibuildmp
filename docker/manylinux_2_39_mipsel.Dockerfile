@@ -27,7 +27,7 @@
 #          -t manylinux_2_39_mipsel \
 #          -f docker/manylinux_2_39_mipsel.Dockerfile .
 # Use:   CIBMP_UNIX_MANYLINUX_2_39_MIPSEL_DOCKER_IMAGE=manylinux_2_39_mipsel cibuildmp ...
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 
 # `libc6-dev-mipsel-cross` is version-pinned, unlike every other package
 # here, because this image's *name* is a claim about it. `2_39` in the tag

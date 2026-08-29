@@ -14,7 +14,7 @@
 #
 # Build: docker build -t cibuildmp-xtensa_esp -f docker/xtensa_esp.Dockerfile .
 # Use:   CIBMP_..._DOCKER_IMAGE=cibuildmp-xtensa_esp cibuildmp ...
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
