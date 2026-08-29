@@ -96,7 +96,7 @@
 #
 # Build: docker build -t cibuildmp-webassembly -f src/cibuildmp/resources/docker/webassembly.Dockerfile .
 # Use:   CIBMP_WEBASSEMBLY_DOCKER_IMAGE=cibuildmp-webassembly cibuildmp ...
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 
 # python3: ports/webassembly/Makefile includes py/mkenv.mk, whose own
 # `PYTHON = python3` default every port's build shells out to directly

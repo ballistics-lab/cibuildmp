@@ -8,7 +8,7 @@
 # glibc floor. Nothing here is.
 #
 # Build: docker build -t cibuildmp-natmod_host -f docker/natmod_host.Dockerfile .
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
