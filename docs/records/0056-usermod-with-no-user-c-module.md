@@ -315,6 +315,30 @@ invented in a hurry when someone first wants one.
   schedule leg only. It is the cheapest build in the project per port and the broadest
   in coverage, which argues for often.
 
+---
+
+## Addendum, 2026-08-29 — the core claim confirmed live, by accident
+
+**"Empty is a clean no-op everywhere" was a claim read off upstream source. [0067]
+watched it happen for real, unintentionally**, migrating `micropython-wasm3`
+([0038], M5): a wrong-but-non-empty `user-c-modules` value made `py/py.mk`'s own
+`$(wildcard $(USER_C_MODULES)/*/micropython.mk)` resolve to an empty list, and the
+`foreach` over that empty list did exactly what this record's own upstream reading
+said an empty `USER_C_MODULES` would do — nothing, silently, leaving a stock port
+build that reported success. Not the scenario this record analysed (that was a
+genuinely empty/absent value, not a non-empty one whose glob happens to match
+nothing), but the same mechanism and the same observable result: a real, unplanned
+live data point for the premise Option A and Option B both rest on, not a decision
+between them.
+
+It is also the sharpest illustration yet of this record's own closing worry — "a
+green build that quietly contains none of the user's code is worse than any
+error". [0067] closes the *specific* trap that produced it (a flat single-module
+`usermod/` resolving to the wrong make-side value), not the general one this record
+describes (no configured value at all); Option A/Option B are still both open, and
+still worth deciding on the evidence above rather than on whichever gets written
+first.
+
 [0016]: 0016-usermod-user-c-modules-dir-vs-cmake.md
 [0021]: 0021-usermod-execution-central-value.md
 [0023]: 0023-usermod-identifier-scheme-config-output.md
@@ -323,3 +347,4 @@ invented in a hurry when someone first wants one.
 [0048]: 0048-build-skip-live-in-opposite-tables.md
 [0051]: 0051-usermod-identifiers-have-no-version-axis.md
 [0053]: 0053-usermod-ports-without-a-build-driver.md
+[0067]: 0067-user-c-modules-flat-shape-autodetect.md

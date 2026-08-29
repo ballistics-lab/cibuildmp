@@ -44,18 +44,22 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### In progress / Proposed
 
-- [ ] [0038] M5 -- adopt cibuildmp in the three consuming repos | the only item
-      with external blast radius. Archiving `micropython-native-ci` is **done**
-      (verified 2026-08-28: `archived: true`, and all three repos' `origin/main`
-      carry zero `uses:` of it -- the one a7p hit is a comment). What remains is
-      the repin: the repos pin `cibuildmp@v0.3.0`, and since that tag `unix`
-      identifiers were renamed by [0044], `--toolchain`/`--print-build-matrix`
-      were deleted by [0049]/[0050], and natmod became Docker-only. [0044]'s
-      own row is now closed, so nothing is left to wait for -- and the longer
-      HEAD moves, the bigger the one migration gets. **`esp32` no longer
-      needs to stay on its own composite action** -- [0028] closed
-      2026-08-28 (`build_esp32()` went Docker), so the repin can cover all
-      five usermod ports now, not four
+- [ ] [0038] M5 -- adopt cibuildmp in the three consuming repos | this went well
+      past a mechanical repin 2026-08-29: `a7p` and `micropython-wasm3` are both
+      **fully migrated off every `build-usermod-*`/`fetch-micropython` composite
+      action onto the unified CLI/action** (only each repo's own genuine
+      cross-compile-with-no-native-host cell, `unix-mipsel`, stays on the old
+      composite action deliberately -- see [0067]'s own addendum) and green on
+      real CI, natmod and usermod both. `micropython-bclibc` is mid-migration,
+      pushed and awaiting its first CI run. Surfaced two real cibuildmp bugs
+      along the way, both fixed and both closed below: [0066] (no way to hand a
+      CMake-only flag to `rp2`/`esp32`) and [0067] (`resolve_user_c_modules()`
+      silently building zero user modules for a flat single-module `usermod/`
+      layout -- the shape `micropython-wasm3` and `micropython-bclibc` both
+      reach for, unlike `a7p`'s own nested `usermod/a7p/`). What is left: land
+      `micropython-bclibc`'s own CI (green or fixed to green), then this closes
+      alongside archiving `micropython-native-ci` (already done, verified
+      2026-08-28) and the `build-natmod` wrapper item below
 - [ ] [0038] reduce `.github/actions/build-natmod` to a wrapper over
       `cibuildmp --only <id>` | split out of the row above 2026-08-28 because
       it is this repo's own work, not the consuming repos'. It grew teeth
@@ -95,6 +99,28 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 - [ ] [0057] more than one module per build | **decided, both halves, and both are documentation rather than mechanism.** natmod: one config per module -- `examples/template` and `examples/wasm2mpy` already demonstrate it, and `collect_output()`'s two-`.mpy` refusal becomes the guard for a mis-scoped config. usermod: `user-c-modules` stays one path; N modules live in the consumer's own layout -- subdirectories on Make ports (`py/py.mk` globs `*/micropython.mk`), an aggregating `micropython.cmake` that `include()`s the others on CMake ports. No list, because the aggregator is the consumer's file rather than one cibuildmp generates ([0002]) and one key keeps one meaning ([0052]). The trap the docs must name: upstream's own `examples/usercmodule/micropython.cmake` lists only `cexample`/`cppexample`, so the same directory yields three modules on a Make port and two on a CMake one. [0054]'s fixture is what tests both forms -- neither has ever run here
 ### Implemented
 
+- [x] [0067] `resolve_user_c_modules()` auto-detects the flat make-module
+      shape | live-caught migrating `micropython-wasm3` (M5, [0038]): `py/
+      py.mk` globs `<USER_C_MODULES>/*/micropython.mk` for make ports, one
+      directory level *above* the module itself, so a flat single-module
+      `usermod/` (a `micropython.mk` directly inside it -- the shape a new
+      single-module project reaches for first) silently matched nothing and
+      built zero user modules, no error anywhere. Now detects a
+      `micropython.mk` directly inside `module_dir` and resolves to its own
+      parent for make ports only; the existing multi-module shape (`a7p`'s
+      own nested `usermod/a7p/`) and every cmake-port resolution are
+      unaffected, confirmed live against both real repos' own directories
+      before pushing
+- [x] [0066] `extra-cmake-args`, the cmake-side `extra-make-args` | surfaced
+      migrating `micropython-wasm3`'s `rp2` usermod build. Not solvable by
+      reusing `extra-make-args` as a raw command-line token: `rp2`/`esp32`'s
+      own Makefiles accumulate their cmake arguments with a plain `+=` and
+      GNU Make's own precedence means a command-line assignment of the same
+      name *replaces* that accumulation rather than adding to it, verified
+      live twice. Delivered as a container environment variable instead
+      (`CMAKE_ARGS` for `rp2`, `IDFPY_FLAGS` for `esp32`, ESP-IDF's own name
+      for the idea), which sits one precedence tier below a makefile's own
+      assignment so its `+=` still appends onto it correctly
 - [x] [0065] bucketed test-matrix planning | replaces [0062]'s per-port
       `workflow_call` fan-out (which fixed a matrix-*size* ceiling that
       was never the real bottleneck) with `bin/plan_test_matrix.py`:
@@ -286,3 +312,5 @@ record is added.
 [0062]: records/0062-test-platforms-per-port-orchestrator.md
 [0063]: records/0063-keep-going-and-json-build-report.md
 [0065]: records/0065-bucketed-test-matrix-planning.md
+[0066]: records/0066-extra-cmake-args.md
+[0067]: records/0067-user-c-modules-flat-shape-autodetect.md

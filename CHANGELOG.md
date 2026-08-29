@@ -386,6 +386,52 @@ workflows green on every arch, including the RISC-V toolchain fix below.
   `sha256sum` of the tarball itself, not copied blind), removing the
   runtime fetch entirely rather than adding a retry around it.
 
+### Added
+
+- **`extra-cmake-args`, the cmake-side `extra-make-args`.** `rp2`/`esp32`
+  accumulate their own cmake arguments with a plain `+=`
+  (`CMAKE_ARGS`/`IDFPY_FLAGS`), and GNU Make's own precedence means a
+  command-line assignment of that name *replaces* the makefile's own
+  `-DMICROPY_BOARD=`/`-DUSER_C_MODULES=` entirely rather than adding to
+  it, whatever operator the command line itself uses — verified live,
+  twice. Delivered as a container environment variable instead, which
+  sits one precedence tier below the makefile's own assignment so its
+  `+=` still appends correctly on top of it. The four Make-only ports
+  never read it, same as `extra-make-args` is meaningless to a port that
+  never reads whatever name a caller passes it. Surfaced migrating
+  `micropython-wasm3` to the unified CLI ([0038], M5). Record 0066.
+
+### Fixed
+
+- **`resolve_user_c_modules()` silently built zero user modules for a
+  flat, single-module `usermod/` layout.** `py/py.mk` globs
+  `<USER_C_MODULES>/*/micropython.mk` for make ports, one directory
+  level *above* the module itself — a `user-c-modules` value pointing
+  straight at a directory that already contains `micropython.mk`
+  (rather than a directory *of* module subdirectories) made that glob
+  match nothing, with no error anywhere: the port built and linked
+  clean, just without any of the user's own code in it. Now detects a
+  `micropython.mk` directly inside the given directory and resolves to
+  its own parent for make ports only; the pre-existing multi-module
+  shape (module subdirectories, one `*/micropython.mk` per module) and
+  every cmake-port resolution are unaffected, confirmed live against
+  two real consuming repos' own directories. Live-caught migrating
+  `micropython-wasm3` to the unified CLI ([0038], M5) — its own build
+  reported success throughout, and only its test step surfaced the
+  missing module, by accident, through an unrelated `except ImportError`
+  fallback. Record 0067, addendum to record 0056.
+- `build_qemu.py`/`build_webassembly.py`/`build_windows.py` had
+  pre-existing `ruff format` drift (a wrapped `usermod_mounts()` call
+  each) that blocked this branch's own `Tests` workflow at the
+  format-check step, which skips `pyright`/`pytest` entirely on
+  failure — nothing behind it was actually running until this was
+  fixed. A `pyelftools`-typing false positive in `build_unix.py`'s own
+  `DynamicTag.needed` access did the same to `pyright` right after;
+  silenced with a documented `pyright: ignore`, since `DynamicTag`
+  really does set that attribute at runtime (a `setattr()` in its own
+  `__init__`, for `DT_NEEDED` specifically), just never as a declared
+  attribute pyright's static analysis can see.
+
 ## [0.3.0a1] - 2026-08-24
 
 First alpha. Ships the composite actions unchanged and the first working
