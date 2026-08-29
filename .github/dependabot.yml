@@ -50,3 +50,14 @@ updates:
     directory: "/docker"
     schedule:
       interval: "weekly"
+    # Six of the Dockerfiles under here pin a real digest (five
+    # `manylinux_2_28_*` arches + `pypa-tracker`), each under a differently
+    # named `quay.io/pypa/...` image -- to Dependabot that's six distinct
+    # dependencies, so without a group a single upstream pypa bump opened
+    # six separate PRs instead of landing as one. Same fix as the
+    # github-actions entry above: one group, one PR per scan regardless of
+    # how many of the pinned images moved.
+    groups:
+      docker-images:
+        patterns:
+          - "*"
