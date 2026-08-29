@@ -1,0 +1,151 @@
+name: Test target set
+
+# Reusable (`workflow_call`) and directly dispatchable: builds every
+# identifier `build`/`skip` selects on the given runner, with
+# `--keep-going` ([0063]) so one target's own failure never stops the
+# rest, and uploads the resulting JSON build report as this job's own
+# artifact. `test-all-platforms.yml` is the only real caller -- one call
+# per bucket `bin/plan_test_matrix.py` planned, each already sized and
+# runner-assigned so no run ever queues more than `--max-buckets`
+# concurrent jobs against the account's own shared concurrency budget
+# (docs/records/0065).
+#
+# This file used to be the per-port orchestration layer itself (record
+# 0062): one `workflow_call` per port, each fanning out into its own
+# build-matrix/test-amd64/test-arm64/test-emulated jobs, because at the
+# time the only lever this project had against a real 211/256-identifier
+# matrix ceiling was giving each port its own independent 256 budget.
+# [0065] replaces the ceiling this was solving for with a different one
+# (an account-wide concurrent-job cap, measured live: 30/238 legs
+# finished in a real run's first eight minutes, then nothing progressed
+# for 35+ more) -- the fix for *that* ceiling is bucketing by estimated
+# time across every port at once, not per port, so the per-port fan-out
+# this file used to do is gone with it. What is left is the one thing
+# every bucket still needs done identically: run a `--build` selection
+# with `--keep-going`, on the right runner, and hand back a report.
+
+on:
+  workflow_call:
+    inputs:
+      label:
+        description: "Short name for this bucket, used in its own artifact name"
+        required: true
+        type: string
+      build:
+        description: "--build value -- normally an exact, space-separated identifier list from bin/plan_test_matrix.py, not a glob"
+        required: true
+        type: string
+      skip:
+        required: false
+        type: string
+        default: ""
+      runner:
+        description: "runs-on value -- ubuntu-latest or ubuntu-24.04-arm"
+        required: false
+        type: string
+        default: ubuntu-latest
+  # Kept alongside `workflow_call`, deliberately -- lets a maintainer
+  # dispatch this file directly against one target set (e.g. just a
+  # handful of rp2 boards) without going through the full plan/aggregate
+  # pipeline in test-all-platforms.yml.
+  workflow_dispatch:
+    inputs:
+      label:
+        description: "Short name shown in this run's own artifact name"
+        required: false
+        type: string
+        default: manual
+      build:
+        description: "--build glob to test"
+        required: true
+        type: string
+      skip:
+        description: "--skip glob"
+        required: false
+        type: string
+        default: ""
+      runner:
+        required: false
+        type: choice
+        options:
+          - ubuntu-latest
+          - ubuntu-24.04-arm
+        default: ubuntu-latest
+
+jobs:
+  build:
+    runs-on: ${{ inputs.runner }}
+    # Advisory, not a required check -- a real failure inside the batch
+    # is still visible (a step in the log, the report this job uploads),
+    # `test-all-platforms.yml`'s own aggregate-results is what actually
+    # renders it. Without this, one bucket containing a real, expected
+    # failure would turn this whole job -- and by extension the run --
+    # red, which is exactly what `--keep-going`'s own report exists to
+    # make unnecessary.
+    continue-on-error: true
+    # Job-level, not set on the `uses: ./` step itself -- a composite
+    # action's own inner steps are only guaranteed to see `env:` declared
+    # at job/workflow level, not on the specific step that calls `uses:`.
+    env:
+      CIBMP_VERSION: 0.0.0-ci
+      # A real env var, not routed through the `skip:` input/`action.yml`'s
+      # own `[ -n "$ACTION_SKIP" ]` presence check -- that check can't tell
+      # "explicitly empty" from "not set", so an empty `inputs.skip` (this
+      # bucket needed no skip at all) makes `action.yml` omit `--skip` from
+      # the CLI entirely, letting `examples/template/cibuildmp.toml`'s own
+      # `skip = "*_ppc64le *_s390x *_riscv64"` silently re-apply and filter
+      # back out the exact identifiers this bucket was planned around --
+      # live-caught: three buckets made entirely of those suffixes (the
+      # surviving emulated unix cells) failed with "no targets selected"
+      # before `orchestrate.build()`/`build_all()` ever ran, so no report
+      # was written either (docs/records/0065, fourth addendum). Setting it
+      # here reaches `options.py`'s cascade directly as an explicit empty
+      # layer -- which does replace, per `resolve_cascade()`'s own
+      # None-means-unset docstring -- correctly overriding the config
+      # file's default regardless of what `inputs.skip` is.
+      CIBMP_SKIP: ""
+      # Every bucket writes into the same job's own workspace-relative
+      # path -- fine, since each bucket is a separate job/runner/
+      # checkout; nothing shares this directory across buckets. No
+      # leading dot -- live-caught: `actions/upload-artifact@v7` defaults
+      # `include-hidden-files` to `false`, which excludes every file
+      # under a dot-prefixed directory regardless of the `path:` glob
+      # naming it explicitly (confirmed directly from a real run's own
+      # resolved step inputs: `include-hidden-files: false` printed right
+      # next to `path: .cibmp-report/*.json`) -- every bucket's own build
+      # was genuinely successful, and every "Upload report" step still
+      # found nothing to upload.
+      CIBMP_REPORT_PATH: ${{ github.workspace }}/cibmp-report
+      # Disables cibuildmp's own native per-target GitHub step summary
+      # (stepsummary.py) -- every bucket writing its own table would
+      # bury aggregate-results's own single combined one.
+      CIBMP_DISABLE_GITHUB_STEP_SUMMARY: "1"
+    steps:
+      - uses: actions/checkout@v7
+
+      # Cheap and unconditional -- only the small handful of identifiers
+      # this bucket might contain that are genuinely non-native to this
+      # runner (unix's own ppc64le/s390x/riscv64 cells, always on
+      # ubuntu-latest) need it; registering it for a bucket that turns
+      # out to need none of that costs a couple of seconds, and knowing
+      # in advance which buckets need it would mean threading the same
+      # per-identifier classification `bin/plan_test_matrix.py` already
+      # did back through the matrix, for no real saving.
+      - uses: docker/setup-qemu-action@v4
+
+      - name: Build this bucket
+        uses: ./
+        with:
+          package-dir: examples/template
+          build: ${{ inputs.build }}
+          skip: ${{ inputs.skip }}
+          keep-going: "1"
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: report-${{ inputs.label }}
+          path: cibmp-report/*.json
+          retention-days: 1
+          if-no-files-found: error

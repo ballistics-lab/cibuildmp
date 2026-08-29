@@ -6,15 +6,21 @@
 # script or a bot can make and a human can review as a diff, not a patch to
 # resolver logic.
 #
-# Three tables, three different upstreams:
-#   [arch]      transcribed from MicroPython's py/dynruntime.mk
-#   [mpy-abi]   transcribed from MicroPython's py/persistentcode.h, per tag
-#   [[toolchain]]  third-party toolchain releases, pinned by sha256
+# Two tables, both transcribed from MicroPython's own source, neither
+# gated by tag (see below for the table that is):
+#   [arch]              py/dynruntime.mk's own ARCH= vocabulary
+#   [arch-flags.rv32imc]  tools/mpy_ld.py's own RV32_EXTENSIONS
 
 # ── Architectures ─────────────────────────────────────────────────────────
-# The ten ARCH values py/dynruntime.mk accepts, each mapped to the CROSS
-# prefix it hardcodes and the toolchain that supplies it. Ten arches, five
-# toolchains.
+# The ten ARCH values py/dynruntime.mk accepts.
+#
+# Only `native-code` now. Each row used to carry the `CROSS` prefix
+# dynruntime.mk hardcodes and the toolchain that supplied it; record 0050
+# deleted the toolchain resolver, and v1.29.0 then made the prefixes
+# wrong as well -- `x86` moved from an empty prefix to `i686-linux-gnu-`
+# and `x64` to `x86_64-linux-gnu-`. Neither was read by anything but a
+# display column, and a prefix printed beside a make command that does
+# not contain it was never worth keeping accurate.
 #
 # `native-code` is the MP_NATIVE_ARCH_* value tools/mpy_ld.py bakes into
 # every native .mpy's header (byte 2, arch in bits 2-5): the verification
@@ -25,16 +31,16 @@
 # No aarch64: dynruntime.mk has no ARCH=aarch64 branch at all as of
 # MicroPython v1.28, so natmod cannot target it under any configuration.
 [arch]
-x86       = { cross = "",                      toolchain = "host-multilib",   native-code = 1 }
-x64       = { cross = "",                      toolchain = "",                native-code = 2 }
-armv6m    = { cross = "arm-none-eabi-",        toolchain = "arm-none-eabi",   native-code = 4 }
-armv7m    = { cross = "arm-none-eabi-",        toolchain = "arm-none-eabi",   native-code = 5 }
-armv7emsp = { cross = "arm-none-eabi-",        toolchain = "arm-none-eabi",   native-code = 7 }
-armv7emdp = { cross = "arm-none-eabi-",        toolchain = "arm-none-eabi",   native-code = 8 }
-xtensa    = { cross = "xtensa-lx106-elf-",     toolchain = "xtensa-lx106-elf", native-code = 9 }
-xtensawin = { cross = "xtensa-esp32-elf-",     toolchain = "xtensa-esp-elf",  native-code = 10 }
-rv32imc   = { cross = "riscv64-unknown-elf-",  toolchain = "riscv-none-elf",  native-code = 11 }
-rv64imc   = { cross = "riscv64-unknown-elf-",  toolchain = "riscv-none-elf",  native-code = 12 }
+x86       = { native-code = 1 }
+x64       = { native-code = 2 }
+armv6m    = { native-code = 4 }
+armv7m    = { native-code = 5 }
+armv7emsp = { native-code = 7 }
+armv7emdp = { native-code = 8 }
+xtensa    = { native-code = 9 }
+xtensawin = { native-code = 10 }
+rv32imc   = { native-code = 11 }
+rv64imc   = { native-code = 12 }
 
 # ── RISC-V arch-flags (rv32imc only) ───────────────────────────────────────
 # Transcribed from tools/mpy_ld.py's RV32_EXTENSIONS. Only rv32imc accepts
@@ -51,117 +57,20 @@ rv64imc   = { cross = "riscv64-unknown-elf-",  toolchain = "riscv-none-elf",  na
 zba = 1    # 1 << 0
 zcmp = 2   # 1 << 1
 
-# ── .mpy ABI per MicroPython tag ──────────────────────────────────────────
-# "<MPY_VERSION>.<MPY_SUB_VERSION>" from py/persistentcode.h at that tag.
+# ── .mpy ABI per MicroPython tag -- moved (record 0052, Track C) ──────────
 #
-# This is the compatibility axis, and deliberately not the release tag: a
-# native .mpy loads into any runtime where both numbers match, and ABI 6.3
-# alone spans v1.23.0 through v1.29.0-preview. Pinning a matrix to a release
-# tag would claim far narrower compatibility than the artifact has.
+# Used to live here as `[mpy-abi]` (tag -> "<MPY_VERSION>.<MPY_SUB_VERSION>"
+# from py/persistentcode.h), with an unlisted tag silently assumed to be
+# `latest`. That fallback is gone, not just moved: an unrecognised tag is
+# now a loud `UnknownTagError` (platforms/natmod/targets.py), not a guess
+# a real build might or might not catch later.
 #
-# A tag missing here is not an error -- see `latest` below.
-[mpy-abi]
-latest = "6.3"     # assumed for any tag not listed; the built .mpy's own
-                   # header is checked against it before anything ships
-"v1.20.0" = "6.1"
-"v1.21.0" = "6.1"
-"v1.22.0-preview" = "6.1"
-"v1.22.0" = "6.2"
-"v1.22.1" = "6.2"
-"v1.22.2" = "6.2"
-"v1.23.0-preview" = "6.2"
-"v1.23.0" = "6.3"
-"v1.24.0-preview" = "6.3"
-"v1.24.0" = "6.3"
-"v1.24.1" = "6.3"
-"v1.25.0-preview" = "6.3"
-"v1.25.0" = "6.3"
-"v1.26.0-preview" = "6.3"
-"v1.26.0" = "6.3"
-"v1.26.1" = "6.3"
-"v1.27.0-preview" = "6.3"
-"v1.27.0" = "6.3"
-"v1.28.0-preview" = "6.3"
-"v1.28.0" = "6.3"
-"v1.29.0-preview" = "6.3"
-
-# ── Toolchains ────────────────────────────────────────────────────────────
-# `expected-prefix` is what dynruntime.mk hardcodes; `provided-prefix` is
-# what the tarball actually ships. Where they differ, cibuildmp reconciles
-# it with a CROSS= override on the make command line.
-#
-# These pins are newer than what CI apt-installs today (Ubuntu ships GCC
-# 13.x for arm-none-eabi, xpack ships 15.x). That is why the `host` strategy
-# is tried first: on a runner with the apt package present, nothing here is
-# downloaded and behaviour is unchanged from the build-natmod action.
-
-[[toolchain]]
-name = "arm-none-eabi"
-expected-prefix = "arm-none-eabi-"
-provided-prefix = "arm-none-eabi-"
-apt-packages = "gcc-arm-none-eabi libnewlib-arm-none-eabi"
-version = "15.2.1-1.1"   # xpack-dev-tools/arm-none-eabi-gcc-xpack
-url = "https://github.com/xpack-dev-tools/arm-none-eabi-gcc-xpack/releases/download/v15.2.1-1.1/xpack-arm-none-eabi-gcc-15.2.1-1.1-linux-x64.tar.gz"
-sha256 = "da6a49ad4003944b823c6c93702a8787c922ab34bd7e918ec0eaf6933a9b1ff6"
-
-[[toolchain]]
-name = "riscv-none-elf"
-# dynruntime.mk hardcodes Debian's naming; xpack ships its own.
-expected-prefix = "riscv64-unknown-elf-"
-provided-prefix = "riscv-none-elf-"
-apt-packages = "gcc-riscv64-unknown-elf picolibc-riscv64-unknown-elf"
-version = "15.2.0-1"     # xpack-dev-tools/riscv-none-elf-gcc-xpack
-url = "https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack/releases/download/v15.2.0-1/xpack-riscv-none-elf-gcc-15.2.0-1-linux-x64.tar.gz"
-# Pinned literally, same as every other toolchain here -- xpack does publish
-# a `<asset>.sha` sidecar, and this used to rely on fetching that at runtime
-# instead of pinning, but that made every cold-cache build of rv32imc/
-# rv64imc depend on a second live network call with no retry. A real CI
-# failure surfaced it: "no pinned sha256 and its .sha sidecar is unavailable
-# (HTTP Error 500: Internal Server Error)" -- GitHub's release-asset CDN,
-# transient, gone on the next request, but with nothing here to retry it.
-# This value is that same sidecar's own content, cross-checked against a
-# fresh sha256sum of the tarball itself, not just copied blind.
-sha256 = "aaaa8060c914851a3e5ee1ba82cc3d6f80972f90638a05c6e823a37557a33758"
-
-[[toolchain]]
-name = "xtensa-lx106-elf"
-expected-prefix = "xtensa-lx106-elf-"
-provided-prefix = "xtensa-lx106-elf-"
-apt-packages = ""        # no distro packages this target
-version = "standalone"
-# The tarball MicroPython's own ci_esp8266_setup uses, and the one the
-# build-natmod action already fetches.
-url = "https://micropython.org/resources/xtensa-lx106-elf-standalone.tar.gz"
-sha256 = "f45f755ea8021c24c9b36cc3d363973927857fe4e6279f32e6968abfac38d1ba"
-
-[[toolchain]]
-name = "xtensa-esp-elf"
-# dynruntime.mk hardcodes xtensa-esp32-elf-; Espressif's current
-# crosstool-NG builds ship a single unified xtensa-esp-elf- instead.
-expected-prefix = "xtensa-esp32-elf-"
-provided-prefix = "xtensa-esp-elf-"
-apt-packages = ""        # no distro packages this target
-version = "16.1.0_20260609"
-# Straight from espressif/crosstool-NG releases -- this is the artifact
-# esp-idf's own install.sh downloads. The build-natmod action clones the
-# whole of esp-idf just to run that installer, which is the single heaviest
-# step in this repo's CI.
-url = "https://github.com/espressif/crosstool-NG/releases/download/esp-16.1.0_20260609/xtensa-esp-elf-16.1.0_20260609-x86_64-linux-gnu.tar.xz"
-sha256 = "f708752ebb35cab21f184b2574114ed1187619db0edb8a4ba913c06ca2fa675e"
-
-[[toolchain]]
-name = "host-multilib"
-# x86 builds with the host gcc and -m32. What is missing on a bare machine
-# is the host compiler's own 32-bit runtime, which no cross-toolchain
-# tarball can supply -- hence no url, and a resolver error naming the
-# package instead.
-expected-prefix = ""
-provided-prefix = ""
-apt-packages = "gcc-multilib"
-version = ""
-url = ""
-sha256 = ""
-# Finding `gcc` on PATH proves nothing here -- every machine has one. What
-# x86 needs is its 32-bit runtime, so the resolver compiles an empty
-# translation unit with these flags and treats a failure as "not installed".
-probe-args = ["-m32"]
+# The table itself now lives in resources/build-platforms.toml's own
+# `[natmod].identifiers` rows (one row per independently-verified
+# `(tag, arch)` pair, `mpy` field) -- confirmed, not assumed, to already
+# agree with every tag this table used to know about before the table was
+# removed. It also answers the question this table could not: which arches
+# a given tag's own dynruntime.mk source tree actually has (`rv32imc` is
+# not available before v1.24.0, `rv64imc` not before v1.27.0 -- both
+# verified live against the real tags in that table) -- a fact with no
+# per-tag home at all until build-platforms.toml existed.

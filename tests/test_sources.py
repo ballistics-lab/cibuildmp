@@ -42,9 +42,9 @@ def test_read_mpy_abi_incomplete_header(tmp_path):
 
 
 def test_cache_root_honours_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("CIBMP_CACHE", str(tmp_path / "c"))
+    monkeypatch.setenv("CIBMP_CACHE_PATH", str(tmp_path / "c"))
     assert cache_root() == tmp_path / "c"
-    monkeypatch.delenv("CIBMP_CACHE")
+    monkeypatch.delenv("CIBMP_CACHE_PATH")
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "x"))
     assert cache_root() == tmp_path / "x" / "cibuildmp"
 

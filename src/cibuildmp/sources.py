@@ -42,7 +42,7 @@ class SourceError(Exception):
 
 def cache_root() -> Path:
     """Where downloaded sources and toolchains live."""
-    env = os.environ.get("CIBMP_CACHE")
+    env = os.environ.get("CIBMP_CACHE_PATH")
     if env:
         return Path(env).expanduser()
     xdg = os.environ.get("XDG_CACHE_HOME")

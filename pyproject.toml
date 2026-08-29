@@ -39,10 +39,18 @@ classifiers = [
 # Standard library otherwise, deliberately: a build tool that has to resolve
 # its own dependency tree before it can fetch anything is harder to trust,
 # and `wget` not being everywhere is the exact class of problem this
-# replaces. pyelftools/ar are the one exception (docs/BACKLOG.md D12): both
-# are pure Python, both are what tools/mpy_ld.py itself needs to link a
-# native .mpy, and declaring them here -- rather than pip-installing them at
-# build time -- is what lets `make PYTHON=<sys.executable>` just work.
+# replaces. pyelftools and ar are the two exceptions ([0012]): both are pure
+# Python and both are what tools/mpy_ld.py/tools/ar_util.py themselves need
+# to link a native .mpy.
+#
+# `ar` was removed 2026-08-28 by [0012]'s own addendum, on the claim that
+# no MicroPython tool imports it at any tag natmod supports (v1.12 through
+# v1.28.0, checked by `grep` against real checkouts). That check never
+# reached v1.29.0: `tools/ar_util.py` there does `from ar import Archive`
+# (with a try/except that only raises once a build actually links a `.a`
+# archive -- `examples/wasm2mpy`'s own build is exactly that case, found
+# live when this branch's split toolchain images ran it for real). Restored
+# 2026-08-28.
 dependencies = [
     "pyelftools>=0.29",
     "ar",
@@ -65,6 +73,18 @@ include = ["cibuildmp*"]
 # Explicit rather than relying on include-package-data: resources/natmod.toml
 # holds every pinned toolchain URL, checksum and arch table, so a wheel that
 # silently omits it is a wheel that fails at import.
+#
+# The per-port Dockerfiles used to ship here too (resources/docker/*, D28),
+# back when an installed cibuildmp with no image registered would build one
+# itself from a vendored copy. No longer: the user's own call -- cibuildmp
+# should behave like cibuildwheel's own container runtime (oci_container.py),
+# which never builds an image at all, only ever pulls an already-published,
+# pinned one. Building is now a repo-only, CI-only concern
+# (docker/*.Dockerfile at the repo root, published by
+# publish-docker-images.yml, mirroring pypa/manylinux's own top-level
+# docker/ -- that repo has no pyproject.toml either, since it is pure
+# image-building infrastructure, never something `pip install`s), so
+# nothing under docker/ needs to ship inside the wheel any more.
 [tool.setuptools.package-data]
 cibuildmp = ["resources/*.toml"]
 
