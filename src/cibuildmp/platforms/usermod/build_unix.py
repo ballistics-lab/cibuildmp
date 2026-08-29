@@ -44,7 +44,7 @@ from __future__ import annotations
 
 import shlex
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Literal
 
 from . import build_common
@@ -545,10 +545,53 @@ def _dynamic_needed_libs(binary: Path) -> list[str]:
         return []
 
 
+def _elf_interpreter_name(binary: Path) -> str | None:
+    """The basename of `binary`'s own `PT_INTERP` segment -- the dynamic
+    linker the kernel invokes to start it at all (`/lib/ld-linux-
+    armhf.so.3`, `/lib64/ld-linux-x86-64.so.2`, musl's `/lib/ld-musl-
+    <arch>.so.1`) -- or `None` for a static binary, which has no such
+    segment.
+
+    Live-caught on a real `manylinux_2_31_armv7l` build (2026-08-29):
+    32-bit ARM glibc's own `ld.so` also lists itself as a `DT_NEEDED`
+    entry, not just the usual `PT_INTERP` -- `_dynamic_needed_libs()`
+    picked up `ld-linux-armhf.so.3` alongside `libffi.so.7`, and `ldd`'s
+    own output for it carries no `name => path` arrow at all (it maps
+    itself rather than being resolved through the search path the way
+    every other entry is), so the repair script's `awk` pattern found
+    nothing and failed loudly rather than silently mis-copying anything.
+    Excluded here rather than added to either baseline table: the loader
+    is guaranteed present on any host that can execute an ELF at all
+    (the kernel itself won't start the process without it, before any
+    `RPATH` this repair step sets is ever consulted), so it is not a
+    library `_MANYLINUX_BASELINE_LIBS`/`_MUSLLINUX_BASELINE_LIBS` need to
+    know the name of -- that guarantee holds architecture-wide, not just
+    for the one cell that happened to surface it.
+    """
+    from elftools.common.exceptions import ELFError
+    from elftools.elf.elffile import ELFFile
+    from elftools.elf.segments import InterpSegment
+
+    try:
+        with binary.open("rb") as handle:
+            elf = ELFFile(handle)
+            for segment in elf.iter_segments():
+                if isinstance(segment, InterpSegment):
+                    return PurePosixPath(segment.get_interp_name()).name
+    except ELFError:
+        return None
+    return None
+
+
 def _non_baseline_needed_libs(target: str, binary: Path) -> list[str]:
     floor, _arch = _split_target(target)
     baseline = _baseline_libs(floor)
-    return [name for name in _dynamic_needed_libs(binary) if name not in baseline]
+    interpreter = _elf_interpreter_name(binary)
+    return [
+        name
+        for name in _dynamic_needed_libs(binary)
+        if name not in baseline and name != interpreter
+    ]
 
 
 def repair_unix_binary(

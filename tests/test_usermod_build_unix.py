@@ -437,7 +437,19 @@ def test_dynamic_needed_libs_empty_for_a_header_only_stub():
     assert _dynamic_needed_libs(Path("/dev/null")) == []
 
 
+def _stub_no_interpreter(monkeypatch):
+    # `_non_baseline_needed_libs()` always consults `_elf_interpreter_name()`
+    # too now -- stubbed to `None` in every test that fakes
+    # `_dynamic_needed_libs()` against a `Path("/x")` that was never a real
+    # ELF file to begin with, so nothing here tries to actually open it.
+    monkeypatch.setattr(
+        "cibuildmp.platforms.usermod.build_unix._elf_interpreter_name",
+        lambda binary: None,
+    )
+
+
 def test_non_baseline_filters_manylinux_whitelist(monkeypatch):
+    _stub_no_interpreter(monkeypatch)
     monkeypatch.setattr(
         "cibuildmp.platforms.usermod.build_unix._dynamic_needed_libs",
         lambda binary: ["libc.so.6", "libz.so.1", "libffi.so.6", "libm.so.6"],
@@ -451,6 +463,7 @@ def test_non_baseline_filters_musllinux_whitelist(monkeypatch):
     # musl's own baseline is far narrower than glibc's -- libm is *not*
     # in it, unlike manylinux's, so the same DT_NEEDED list produces a
     # different (larger) non-baseline result here.
+    _stub_no_interpreter(monkeypatch)
     monkeypatch.setattr(
         "cibuildmp.platforms.usermod.build_unix._dynamic_needed_libs",
         lambda binary: ["libc.so", "libz.so.1", "libffi.so.6", "libm.so"],
@@ -462,11 +475,49 @@ def test_non_baseline_filters_musllinux_whitelist(monkeypatch):
 
 
 def test_non_baseline_empty_when_nothing_needed(monkeypatch):
+    _stub_no_interpreter(monkeypatch)
     monkeypatch.setattr(
         "cibuildmp.platforms.usermod.build_unix._dynamic_needed_libs",
         lambda binary: ["libc.so.6"],
     )
     assert _non_baseline_needed_libs("manylinux_2_28_x86_64", Path("/x")) == []
+
+
+def test_non_baseline_excludes_the_elf_interpreter_itself(monkeypatch):
+    # Live-caught on a real manylinux_2_31_armv7l build: 32-bit ARM
+    # glibc's own ld.so lists itself as a DT_NEEDED entry, not just as
+    # PT_INTERP -- neither baseline table names it (it is not a fixed
+    # SONAME the way libc.so.6 is; it varies by architecture), so without
+    # this exclusion it would be treated as "needs repair" and the
+    # container script's own ldd/awk parse would fail outright, since
+    # ldd's line for the loader itself carries no `name => path` arrow.
+    monkeypatch.setattr(
+        "cibuildmp.platforms.usermod.build_unix._dynamic_needed_libs",
+        lambda binary: ["libc.so.6", "libffi.so.7", "ld-linux-armhf.so.3"],
+    )
+    monkeypatch.setattr(
+        "cibuildmp.platforms.usermod.build_unix._elf_interpreter_name",
+        lambda binary: "ld-linux-armhf.so.3",
+    )
+    assert _non_baseline_needed_libs("manylinux_2_31_armv7l", Path("/x")) == [
+        "libffi.so.7"
+    ]
+
+
+def test_elf_interpreter_name_reads_a_real_elf(tmp_path):
+    src = tmp_path / "t.c"
+    src.write_text("int main(void) { return 0; }\n")
+    binary = tmp_path / "t"
+    subprocess.run(["gcc", "-o", str(binary), str(src)], check=True)
+
+    interp = build_unix._elf_interpreter_name(binary)
+
+    assert interp is not None
+    assert interp.startswith(("ld-linux", "ld-musl"))
+
+
+def test_elf_interpreter_name_none_for_a_header_only_stub():
+    assert build_unix._elf_interpreter_name(Path("/dev/null")) is None
 
 
 def test_repair_is_a_noop_when_nothing_non_baseline(monkeypatch, tmp_path):
