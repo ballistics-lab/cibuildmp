@@ -191,6 +191,66 @@ Fixed by dropping the leading dot: `CIBMP_REPORT_PATH`/`path:` both renamed
 project's own tooling (`.gitignore`, an editor, a future `find`) that also treats
 a dot-prefixed path specially.
 
+## Addendum, 2026-08-29 (third) — the weight table's own seeding was measuring the wrong thing
+
+Run 33225078049 (the first run whose reports were actually recoverable, once
+the two addenda above landed) built green end to end, but its own real
+per-bucket wall time was nowhere near uniform: 3m21s to 36m59s across twenty
+buckets whose own *estimates* only spanned a 1.3x range (2455s-3216s). The
+user's own read of that run -- "still 43 minutes, not even" -- was exactly
+right, and the cause was not the LPT packing, it was the weight table itself.
+
+Every real bucket's own wall time was divided evenly across its own
+identifiers and cross-checked against `dockerrun.image_for()` (the same
+resolution this module already uses), giving a real, batched-regime
+per-identifier cost for the first time. It disagreed with `_WEIGHTS` by
+1.5-4x, in one direction only -- every real number came in *lower*:
+`esp_idf_base` 144s measured against 268s assumed, `arm_embedded` 55-116s
+(port-dependent) against a single blended 180s, `riscv_embedded`/`windows`/
+`webassembly` each 3-4x lower.
+
+The reason is what `_WEIGHTS` was actually seeded from: run 33220563659, a
+one-job-per-identifier run where each identifier's own measured duration
+included its own full, unshared `fetch_micropython()`/image-pull/ESP-IDF-
+install cost. Batching ([0065]'s own point) makes that cost shared per
+*bucket*, paid once and amortized -- so the real marginal cost of adding one
+more identifier to an already-warm bucket is substantially below what an
+isolated job's own total ever measured. The table conflated "total time
+alone" with "marginal cost inside a batch", which is a category error, not
+a stale constant -- re-measuring from the isolated run again would have
+reproduced the same wrong shape.
+
+`arm_embedded` carried a second, independent error on top: one blended
+weight (180s) across three ports whose own real costs differ by 2x (rp2
+116s, qemu/natmod 54s) meant two buckets estimated identically (16
+identifiers each) could be real-measured at 12 minutes and 37 minutes
+depending on which port happened to dominate each one -- confirmed directly
+(`amd64-04`: mostly natmod-arm, 754s real; `amd64-06`: mostly rp2, 2219s
+real). `_PORT_WEIGHTS` now overrides by port before falling back to the
+per-image table, `rp2` split out at its own 116s rather than folded in.
+
+Re-seeded from the batched numbers throughout (`_WEIGHTS`/`_PORT_WEIGHTS`/
+`_DEFAULT_WEIGHT` all lowered to match); the six emulated-everywhere unix
+cells (`_EMULATED_UNIX_WEIGHT`) are the one deliberate exception, kept at
+the original isolated-run figure (1050s) rather than re-measured the same
+way -- none of them has landed in a bucket small enough yet to isolate a
+trustworthy per-identifier share, and the naive even-split estimate for
+them (30-40s) flatly contradicts every real isolated measurement this
+project has for that class of cell. Re-planning locally against the exact
+same `build`/`skip` this run used drops the worst-case (amd64) bucket
+estimate from ~54 minutes to ~35 minutes -- and the 35-minute floor left is
+the two emulated-unix identifiers LPT still occasionally pairs into one
+bucket, a real, small, remaining packing inefficiency, not a table error.
+
+One thing this addendum does not fix: real bucket **start** times were
+staggered by up to five minutes in that same run (several buckets did not
+start until well after `plan` finished), which is queueing against the
+account's own real concurrent-job limit, not anything `bin/plan_test_matrix.py`
+controls -- 20 was the user's own chosen cap, not a number read from the
+account's real limit ([0065]'s own "what is not decided here" already flags
+this). Whatever that real limit is, if it is below 20, some staggering on
+every run is a residual cost this change does not remove.
+
 [0044]: 0044-unix-native-images-landed.md
 [0058]: 0058-image-groups-are-toolchains-not-ports.md
 [0062]: 0062-test-platforms-per-port-orchestrator.md

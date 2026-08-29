@@ -58,34 +58,61 @@ from cibuildmp.platforms import natmod as natmod_family
 from cibuildmp.platforms.natmod.options import read_config
 
 # Seconds per identifier, by image group name (dockerrun.image_for()'s own
-# return value, last path segment, digest stripped) -- seeded from
-# run 33220563659's own real per-(image, tag) averages, blended across tags
-# and, for arm_embedded, across the three ports that share it (rp2's own
-# 192s dominates its 93-identifier weight; qemu/natmod's much cheaper
-# legs on the same image would be over-weighted by rp2's own average, but
-# under-weighting them costs far less than a lopsided bucket would).
+# return value, last path segment, digest stripped) -- seeded twice, and
+# the two seedings disagree by 1.5-4x, which is itself the finding worth
+# recording. The first seeding (run 33220563659) measured one-job-per-
+# identifier: every identifier paid its own full fetch_micropython()/
+# image-pull/ESP-IDF-install cost in isolation. Once identifiers actually
+# batch into shared buckets ([0065]) that fixed cost is paid once per
+# *bucket* and amortized -- so the real marginal cost per identifier
+# inside a batch is substantially lower than the old isolated measurement,
+# confirmed directly from run 33225078049's own real per-bucket wall time
+# (divided evenly across each bucket's own identifiers, cross-checked
+# against `dockerrun.image_for()` the same way this module resolves it):
+# esp_idf_base dropped from a measured 268s/id to 144s/id, arm_embedded's
+# own rp2 share from 180s to 116s, everything else roughly 2-4x down.
+# These weights are the second (batched) seeding -- conflating "isolated
+# job total" with "marginal cost inside a batch" was the real bug in the
+# first one, not just stale numbers.
 _WEIGHTS: dict[str, float] = {
-    "esp_idf_base": 268,
-    "arm_embedded": 180,
-    "riscv_embedded": 80,
-    "windows": 95,
-    "webassembly": 130,
-    "natmod_host": 60,
-    "xtensa_esp": 70,
-    "xtensa_lx106": 55,
+    "esp_idf_base": 144,
+    "arm_embedded": 55,  # non-rp2 share (qemu/natmod) -- see _PORT_WEIGHTS
+    "riscv_embedded": 26,
+    "windows": 26,
+    "webassembly": 41,
+    "natmod_host": 37,
+    "xtensa_esp": 74,
+    "xtensa_lx106": 96,
     "ppc64le_linux": 85,
+}
+# rp2 alone accounts for 74 of arm_embedded's 93 real identifiers and
+# genuinely costs more per board than qemu/natmod's much smaller legs on
+# the same image (116s vs ~54s, measured the same way as `_WEIGHTS`
+# above) -- checked by port, not folded into one blended arm_embedded
+# number the way the first seeding did, which is exactly what let two
+# same-estimate buckets (16 rp2-heavy identifiers vs 16 natmod-arm-heavy
+# ones) land at 37 real minutes and 12 real minutes respectively.
+_PORT_WEIGHTS: dict[str, float] = {
+    "rp2": 116,
 }
 # unix's own emulated-everywhere cells (ppc64le/s390x/riscv64, both libcs) --
 # real QEMU execution, not just an emulated compile, ~15-20 real minutes
 # each (record 0044's own addendum). Matched by arch suffix, not image name:
 # unix's image *is* the target (record 0043/0044), so there is no shared
 # group name to key these on the way arm_embedded/esp_idf_base have one.
+# Kept at the first (isolated-job) seeding's own number, deliberately not
+# re-measured from a batched run: none of these six cells has landed in a
+# small enough, single-port bucket yet to isolate a trustworthy per-id
+# share the way arm_embedded's own port split could -- the crude
+# even-split-per-bucket estimate for them come out an implausible 30-40s,
+# contradicted outright by every real isolated measurement this project
+# has (800-1200s), so it is not trusted here.
 _EMULATED_UNIX_SUFFIXES = ("_ppc64le", "_s390x", "_riscv64")
 _EMULATED_UNIX_WEIGHT = 1050.0
 # Every unix native image (fifteen of them, one per cell) and anything this
-# table has never seen (a future port) -- close to the measured range for
-# every unmatched cell in the real run (100-150s).
-_DEFAULT_WEIGHT = 125.0
+# table has never seen (a future port) -- the batched seeding's own
+# measured range for every unmatched cell was 32-91s; 55 sits in it.
+_DEFAULT_WEIGHT = 55.0
 
 # unix identifiers are the only ones ever native to GitHub's own arm64
 # runner (record 0044's own measurement: AArch32-at-EL0 covers armv7l too)
@@ -109,7 +136,9 @@ def _image_short_name(image: str | None) -> str | None:
     return image.rsplit("/", 1)[-1].split("@", 1)[0]
 
 
-def _weight_for(image: str | None, identifier: str) -> float:
+def _weight_for(port: str, image: str | None, identifier: str) -> float:
+    if port in _PORT_WEIGHTS:
+        return _PORT_WEIGHTS[port]
     name = _image_short_name(image)
     if name in _WEIGHTS:
         return _WEIGHTS[name]
@@ -158,7 +187,7 @@ def resolve_entries(
             entries.append(
                 _Entry(
                     identifier=target.identifier,
-                    weight=_weight_for(image, target.identifier),
+                    weight=_weight_for(port, image, target.identifier),
                     runner=_runner_for(port, target.identifier),
                     group=(image, target.tag),
                 )
