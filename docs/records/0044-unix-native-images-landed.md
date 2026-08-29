@@ -2,8 +2,10 @@
 
 Status: Implemented (code, tests and tooling landed; the matrix is published and all
 six default cells are green on CI as of 2026-08-26 -- see the addendum. The six
-emulated-everywhere cells are **descoped from CI, kept in the matrix** by the
-2026-08-28 addendum, which closes this record's last open question)
+emulated-everywhere cells were **descoped from CI** by the 2026-08-28 addendum, then
+given a real CI leg after all one day later -- the 2026-08-29 addendum has nine of
+the twelve (cell, tag) pairs green in CI now, three skipped by name for a real,
+per-cell reason each)
 
 Supersedes nothing. This is the implementation record for [0043], which was
 accepted as a plan with "nothing here is verified live yet" written into its own
@@ -748,3 +750,85 @@ this question:
   moot by [0052] removing the opt-in concept entirely.
 - The `unix` default axis being the old five translated one-for-one — **superseded**:
   there is no default axis any more, only what a `build` glob names.
+
+## Addendum, 2026-08-29 — reversed: `unix-emulated` gets a real CI leg after all, and finds two genuine breakages
+
+The addendum immediately above says, in its own words, "No CI leg is added, and none is
+planned." That held for about a day. `test-all-platforms.yml` (record [0062]'s own
+per-port orchestrator) grew a dedicated `unix-emulated` matrix entry, `skip`-complementing
+`unix`'s own entry so the six emulated-everywhere cells get their own `test-emulated` leg
+on every `pull_request` instead of never running at all. Nothing in the reasoning above
+was wrong — the cost/demand argument still holds in general — this is simply the user's
+own call to pay that per-push cost anyway, reached independently of this record.
+
+First real run through all twelve (six cells × two tags), and the "no real build has ever
+run through one" footnote this addendum's own text called "the descope" is now false for
+nine of them:
+
+| Identifier | Result |
+| --- | --- |
+| `v1.28.0-manylinux_2_28_ppc64le` | ✅ |
+| `v1.29.0-manylinux_2_28_ppc64le` | ✅ |
+| `v1.28.0-manylinux_2_28_s390x` | ❌ |
+| `v1.29.0-manylinux_2_28_s390x` | ✅ |
+| `v1.28.0-manylinux_2_39_riscv64` | ✅ |
+| `v1.29.0-manylinux_2_39_riscv64` | ✅ |
+| `v1.28.0-musllinux_1_2_ppc64le` | ❌ |
+| `v1.29.0-musllinux_1_2_ppc64le` | ❌ |
+| `v1.28.0-musllinux_1_2_s390x` | ✅ |
+| `v1.29.0-musllinux_1_2_s390x` | ✅ |
+| `v1.28.0-musllinux_1_2_riscv64` | ✅ |
+| `v1.29.0-musllinux_1_2_riscv64` | ✅ |
+
+(run [33220563659], `feat/usermod`, both tags of `*_riscv64` and `manylinux_2_28_ppc64le`
+fully green, `musllinux_1_2_s390x` fully green too — the "emulated, therefore untested and
+presumably shaky" framing this whole descope was built on turns out to be true for exactly
+two cells, not six.)
+
+**`musllinux_1_2_ppc64le`, both tags — a real QEMU limitation, not a cibuildmp bug.**
+`mpy-cross` builds fine inside the image (`container_mpy_cross()` does what it is supposed
+to), then fails the moment it is *run* under QEMU user-mode emulation to freeze
+`argparse.py` into `frozen_content.c`:
+
+```
+error compiling argparse.py:
+Error relocating .../mpy-cross: unsupported relocation type 4
+Error relocating .../mpy-cross: unsupported relocation type 5
+make: *** [...frozen_content.c] Error 1
+```
+
+Reproduced identically on both `v1.28.0` and `v1.29.0` — the same binary shape, not a
+version-specific regression. QEMU's own ppc64le user-mode target not implementing every
+relocation type a real PIE binary can carry is a documented category of gap (the manylinux
+`ppc64le` cell above, on the same emulator, is a plain non-PIE-sensitive build and passes
+clean), not something a Dockerfile or a build flag fixes. Fixing it for real would mean
+either a statically-linked/non-PIE `mpy-cross` for this one cell or a different emulation
+path — neither attempted here.
+
+**`manylinux_2_28_s390x`, `v1.28.0` only — a real, tag-specific GCC diagnostic.** Fails at
+`mpy-cross`'s own `main.c` compile, not at emulated execution:
+
+```
+main.c: In function 'parse_integer.constprop':
+main.c:237:9: error: variable 'base' might be clobbered by 'longjmp' or 'vfork' [-Werror=clobbered]
+main.c:248:10: error: variable 'valid' might be clobbered by 'longjmp' or 'vfork' [-Werror=clobbered]
+cc1: all warnings being treated as errors
+```
+
+`-Wclobbered` is real GCC output for s390x's own register-allocation shape around
+`setjmp`/`longjmp` call sites in this function, promoted to a hard error by `-Werror` --
+the same category as [0044]'s own `musllinux_1_2_x86_64` `-Wno-error=cpp` finding above,
+a warning that only fires on one target's own codegen. **`v1.29.0` of the identical cell
+passed clean** — MicroPython's own `v1.28.0..v1.29.0` `main.c` diff apparently touches
+`parse_integer()` enough to avoid tripping this warning, unconfirmed beyond "the newer tag
+does not reproduce it, checked directly, not assumed."
+
+**Descoped again, narrower and by name this time.** `test-all-platforms.yml`'s own
+`unix-emulated` entry now skips exactly these three identifiers
+(`*musllinux_1_2_ppc64le v1.28.0-manylinux_2_28_s390x`) rather than the whole six-cell
+group — the nine cells that are actually green stay in CI, on every push, going forward.
+`README.md`'s own ⚠️ footnote is corrected to match: no longer "no real build has ever run
+through one", but "nine of twelve run in CI today; three have a real, open, per-cell
+reason they don't."
+
+[33220563659]: https://github.com/ballistics-lab/cibuildmp/actions/runs/33220563659

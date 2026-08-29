@@ -153,7 +153,7 @@ already carries its own explicit tag.
 The default is fail-fast: the first target to fail stops the whole
 invocation, and nothing selected after it is even attempted — the same
 behaviour `cibuildwheel` itself has, unconditionally, with no keep-going
-concept of its own. `--keep-going` (record [0063]) is a deliberate cibuildmp
+concept of its own. `--keep-going` (record 0063) is a deliberate cibuildmp
 divergence for the opposite case — a `--build` glob wide enough to span a
 real coverage sweep, where the point is to find out *every* target's own
 outcome rather than stop at the first one that fails.
@@ -350,7 +350,9 @@ driver was only just live-verified directly against `examples/template`
   </td>
   <td>
 
-  ⚠️[^emulated]
+  ✅[^emulatedci]<br>
+  ⚠️[^s390xclobbered]<br>
+  ✅[^emulatedci]
 
   </td>
 </tr>
@@ -368,7 +370,9 @@ driver was only just live-verified directly against `examples/template`
   </td>
   <td>
 
-  ⚠️[^emulated]
+  ⚠️[^ppc64lerelocation]<br>
+  ✅[^emulatedci]<br>
+  ✅[^emulatedci]
 
   </td>
 </tr>
@@ -489,7 +493,11 @@ driver was only just live-verified directly against `examples/template`
 
 [^cross]: The one target that still cross-compiles: pypa publishes no mipsel image and there's no Docker official image for 32-bit mipsel, so there's nothing to be native to.
 
-[^emulated]: `ppc64le`/`s390x`/`riscv64`, both libcs — published (`resources/pinned_docker_images.toml` has a real digest for each) and reachable by naming them in `build`, but native to no runner GitHub offers, so no real build has ever run through one: the six-cell equivalent of `qemu`'s own gap before it got a dedicated CI leg. Point `CIBMP_UNIX_<TARGET>_DOCKER_IMAGE` at a locally-built image, or an emulated one, to work on one of these.
+[^emulatedci]: `ppc64le`/`s390x`/`riscv64`, both libcs — native to no runner GitHub offers, so still QEMU-emulated, but no longer untested: `test-all-platforms.yml`'s own `unix-emulated` entry gives all six a real `test-emulated` CI leg on every push now (nine of the twelve (cell, tag) pairs green; the other three are the two ⚠️ rows below). Point `CIBMP_UNIX_<TARGET>_DOCKER_IMAGE` at a locally-built image, or an emulated one, to work on one of these locally. Record 0044's own 2026-08-29 addendum.
+
+[^s390xclobbered]: `v1.28.0` only — `v1.29.0` of the identical cell is the ✅ above it. `mpy-cross`'s own `main.c` fails a real GCC `-Werror=clobbered` diagnostic specific to s390x's own register allocation around a `longjmp` call site (`parse_integer()`'s locals); `v1.29.0`'s `main.c` does not trip it. Skipped by exact identifier (`v1.28.0-manylinux_2_28_s390x`) in `test-all-platforms.yml` until fixed — not a QEMU/emulation problem, a real compile-time diagnostic. Record 0044's own 2026-08-29 addendum.
+
+[^ppc64lerelocation]: Both tags. `mpy-cross` builds cleanly inside the image; it fails when QEMU actually *executes* it to freeze `argparse.py`: `Error relocating .../mpy-cross: unsupported relocation type 4/5`. A real gap in QEMU's own ppc64le user-mode emulation of this PIE binary's relocations, not a cibuildmp or MicroPython bug — the `manylinux_2_28_ppc64le` cell above, same emulator, is unaffected. Skipped by glob (`*musllinux_1_2_ppc64le`) in `test-all-platforms.yml` until fixed. Record 0044's own 2026-08-29 addendum.
 
 [^nodriver]: `resources/build-platforms.toml` has real, independently-verified rows for each of these ports (walked against a real MicroPython checkout the same way every ✅ row above was); a config can name their identifiers today. What's missing is a `build_<port>()` driver (`platforms/usermod/build_<port>.py`) to actually run one — not a scope decision, just not built yet.
 [^rp2ci]: `build_rp2()` runs no provisioning step inside the container at all — the Pico SDK and everything it needs (`lib/pico-sdk`/`lib/tinyusb`/`lib/lwip`/`lib/btstack`/`lib/cyw43-driver`) are plain git submodules of the MicroPython checkout, already vendored as real files by the release tarball this project prefers. Running the port's own `make ... submodules` target was tried first and failed live against a real tarball checkout ("fatal: not a git repository", since a release tarball is not a git checkout at all); those submodules are threaded into `sources.fetch_micropython()` instead, reached only on its clone path (a preview tag with no tarball). Live-verified: a real `examples/template` build against `v1.29.0-rp2-RPI_PICO` producing a genuine 681984-byte `firmware.uf2` with the project's own C module linked in. Record 0060.

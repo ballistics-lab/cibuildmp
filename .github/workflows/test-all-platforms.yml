@@ -60,7 +60,10 @@ jobs:
             skip: "*_ppc64le *_s390x *_riscv64"
           - port: unix-emulated
             build: "v1.29.0-*linux* v1.28.0-*linux*"
-            skip: "*_x86_64 *_i686 *_aarch64 *_armv7l *_mipsel"
+            # `*_musllinux_1_2_ppc64le`/`v1.28.0-manylinux_2_28_s390x`: real,
+            # confirmed-live breakage, not the native/emulated axis the rest
+            # of this skip is about -- see docs/records/0064.
+            skip: "*_x86_64 *_i686 *_aarch64 *_armv7l *_mipsel *musllinux_1_2_ppc64le v1.28.0-manylinux_2_28_s390x"
           - port: windows
             build: "v1.29.0-win* v1.28.0-win*"
           - port: webassembly
