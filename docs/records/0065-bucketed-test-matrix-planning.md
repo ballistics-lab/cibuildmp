@@ -122,6 +122,42 @@ for it.
   running workflow). Real headroom varies; this plans against a fixed
   assumption.
 
+## Addendum, 2026-08-29 — every bucket built green, zero reports uploaded
+
+The first real run (33225078049, PR#7) came back exactly as designed on paper: 20
+buckets, every one `success`, `aggregate-results` itself green. And the summary it
+rendered showed "no report" for every single one of 228 identifiers -- the failure
+mode the render step exists to make visible rather than hide, doing exactly that,
+just for a reason that had nothing to do with any build actually failing.
+
+`actions/download-artifact`'s own log said it plainly: `Found 0 artifact(s)`. Every
+bucket's own "Upload report" step had already warned and moved on: `No files were
+found with the provided path: .cibmp-report/*.json`. The builds themselves were
+real and successful -- one esp32 bucket's own log shows "12 usermod target(s) built
+in 1794.7s" with real byte sizes -- so `report.write_report()` did run, in its own
+`finally`, exactly as designed. It just never wrote where `CIBMP_REPORT_PATH` said
+to.
+
+The cause: `CIBMP_REPORT_PATH` (and `CIBMP_DISABLE_GITHUB_STEP_SUMMARY`,
+`CIBMP_VERSION`) were set as `env:` on `test-platforms.yml`'s own `Build this
+bucket` step -- the step that calls `uses: ./`. A composite action's own inner
+steps do not reliably inherit `env:` declared on the *calling* step; only
+job-level (or workflow-level) `env:` is guaranteed to reach them. So the Python
+process actually running `cibuildmp` never saw `CIBMP_REPORT_PATH` at all, fell
+through to its own real default (`report.py`'s own `cache_root() / "reports"`,
+inside this ephemeral runner's own cache -- gone the moment the job ends), and
+`upload-artifact`'s `path: .cibmp-report/*.json` matched nothing, on every one of
+twenty buckets, for the exact same reason each time.
+
+Doubly silent because `if-no-files-found` was `warn`, not `error` -- the correct
+default for a step whose whole point is "there might genuinely be nothing to
+upload", but wrong here, where a bucket with any real identifiers at all should
+*always* produce a report. Fixed both ways: the three `CIBMP_*` vars moved to the
+`build` job's own top-level `env:` (guaranteed to reach every step, composite or
+not), and `if-no-files-found` changed to `error` -- so the same class of bug
+would now fail the step loudly instead of a report silently going missing behind
+a green check.
+
 [0044]: 0044-unix-native-images-landed.md
 [0058]: 0058-image-groups-are-toolchains-not-ports.md
 [0062]: 0062-test-platforms-per-port-orchestrator.md

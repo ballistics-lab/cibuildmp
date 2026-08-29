@@ -83,6 +83,27 @@ jobs:
     # red, which is exactly what `--keep-going`'s own report exists to
     # make unnecessary.
     continue-on-error: true
+    # Job-level, not set on the `uses: ./` step itself -- live-caught: a
+    # composite action's own inner steps do not reliably inherit `env:`
+    # declared on the *calling* step (only job/workflow-level `env:` is
+    # guaranteed to reach them), so `CIBMP_REPORT_PATH` set there never
+    # reached `report.write_report()` at all -- every bucket's own build
+    # still succeeded, just wrote its report to the CLI's own default
+    # location (`cache_root()/reports`, this job's cache, thrown away
+    # when the runner is), and "Upload report" below warned "No files
+    # were found" on every single job, every one silently swallowed by
+    # `if-no-files-found: warn` -- a whole run's worth of green checks
+    # and zero uploaded artifacts.
+    env:
+      CIBMP_VERSION: 0.0.0-ci
+      # Every bucket writes into the same job's own workspace-relative
+      # path -- fine, since each bucket is a separate job/runner/
+      # checkout; nothing shares this directory across buckets.
+      CIBMP_REPORT_PATH: ${{ github.workspace }}/.cibmp-report
+      # Disables cibuildmp's own native per-target GitHub step summary
+      # (stepsummary.py) -- every bucket writing its own table would
+      # bury aggregate-results's own single combined one.
+      CIBMP_DISABLE_GITHUB_STEP_SUMMARY: "1"
     steps:
       - uses: actions/checkout@v7
 
@@ -98,16 +119,6 @@ jobs:
 
       - name: Build this bucket
         uses: ./
-        env:
-          CIBMP_VERSION: 0.0.0-ci
-          # Every bucket writes into the same job's own workspace-relative
-          # path -- fine, since each bucket is a separate job/runner/
-          # checkout; nothing shares this directory across buckets.
-          CIBMP_REPORT_PATH: ${{ github.workspace }}/.cibmp-report
-          # Disables cibuildmp's own native per-target GitHub step summary
-          # (stepsummary.py) -- every bucket writing its own table would
-          # bury aggregate-results's own single combined one.
-          CIBMP_DISABLE_GITHUB_STEP_SUMMARY: "1"
         with:
           package-dir: examples/template
           build: ${{ inputs.build }}
@@ -121,4 +132,4 @@ jobs:
           name: report-${{ inputs.label }}
           path: .cibmp-report/*.json
           retention-days: 1
-          if-no-files-found: warn
+          if-no-files-found: error
