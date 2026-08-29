@@ -314,7 +314,9 @@ def build_windows(
     )
     dockerrun.run(
         command,
-        mounts=usermod_mounts(mpy_dir, Path(opts.user_c_modules), package_dir=package_dir),
+        mounts=usermod_mounts(
+            mpy_dir, Path(opts.user_c_modules), package_dir=package_dir
+        ),
         workdir=_windows_dir(mpy_dir),
         image=docker_image,
         timeout=dockerrun.timeout_for("windows", opts.arch),

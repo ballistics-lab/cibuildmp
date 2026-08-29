@@ -133,7 +133,9 @@ def build_qemu(
     command = qemu_make_command(opts, mpy_dir, cross)
     dockerrun.run(
         command,
-        mounts=usermod_mounts(mpy_dir, Path(opts.user_c_modules), package_dir=package_dir),
+        mounts=usermod_mounts(
+            mpy_dir, Path(opts.user_c_modules), package_dir=package_dir
+        ),
         workdir=mpy_dir / "ports" / "qemu",
         image=docker_image,
         timeout=dockerrun.timeout_for("qemu", opts.board),
