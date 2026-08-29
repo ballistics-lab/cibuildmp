@@ -278,18 +278,27 @@ is listed below for orientation, not just the ones this project covers.
 at all — the other 9 have verified facts a config can already *name*, but
 nothing yet to actually build them. Every ✅ row below is live-verified
 against a real MicroPython checkout, including a real custom
-`USER_C_MODULES` module — `unix`, `windows`, `webassembly` and `qemu` are
-additionally exercised end to end through the real `action.yml` on every
-push (`build-examples.yml`), producing genuine linked binaries with their
-executable bit intact, Docker-only (`unix`: one native image per
-arch/libc; `windows`/`webassembly`/`qemu`: one image each — `qemu`'s own
-`v1.29.0-qemu-MPS2_AN385` runs in its own matrix leg rather than sharing
-a job with already-proven cells, since it was the first build ever run
-through that path). `esp32` and `rp2` are the two ports not wired into
-this project's own `action.yml` yet; `esp32`'s own composite action
-remains the supported, verified production path for it, and `rp2`'s
-driver was only just live-verified directly against `examples/template`
-(record 0060) -- not yet exercised through `action.yml`.
+`USER_C_MODULES` module, Docker-only. `unix`, `windows`, `webassembly` and
+`qemu` are exercised through `build-examples.yml`'s own small integration
+smoke test on every push, producing genuine linked binaries with their
+executable bit intact (`unix`: one native image per arch/libc;
+`windows`/`webassembly`/`qemu`: one image each — `qemu`'s own
+`v1.29.0-qemu-MPS2_AN385` runs in its own matrix leg rather than sharing a
+job with already-proven cells, since it was the first build ever run
+through that path). `esp32` and `rp2` are not in that smoke test, but not
+because either is unproven -- both are exercised far more broadly, on
+every pull request, through `test-all-platforms.yml`'s own real matrix
+(`bin/plan_test_matrix.py`, record 0065): 83 real `esp32` identifiers and
+74 real `rp2` ones, every board/tag row `resources/build-platforms.toml`
+carries, not a spot check. **Both build through the exact same `cibuildmp`
+CLI/action every other ✅ row does** -- `esp32`'s own composite action
+(tracker item [0038]) was only ever needed while `build_esp32()` still
+provisioned onto the bare host; record 0028 moved it fully into
+`esp_idf_base` (Docker) on 2026-08-28, and nothing in this project still
+depends on that composite action's own toolchain-install path. `rp2`'s
+own driver landed the next day (record 0060), live-verified against
+`examples/template` first and now carrying its own share of every
+`test-all-platforms.yml` run since.
 
 <table>
 <thead>
