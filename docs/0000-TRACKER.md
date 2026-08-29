@@ -95,6 +95,20 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 - [ ] [0057] more than one module per build | **decided, both halves, and both are documentation rather than mechanism.** natmod: one config per module -- `examples/template` and `examples/wasm2mpy` already demonstrate it, and `collect_output()`'s two-`.mpy` refusal becomes the guard for a mis-scoped config. usermod: `user-c-modules` stays one path; N modules live in the consumer's own layout -- subdirectories on Make ports (`py/py.mk` globs `*/micropython.mk`), an aggregating `micropython.cmake` that `include()`s the others on CMake ports. No list, because the aggregator is the consumer's file rather than one cibuildmp generates ([0002]) and one key keeps one meaning ([0052]). The trap the docs must name: upstream's own `examples/usercmodule/micropython.cmake` lists only `cexample`/`cppexample`, so the same directory yields three modules on a Make port and two on a CMake one. [0054]'s fixture is what tests both forms -- neither has ever run here
 ### Implemented
 
+- [x] [0065] bucketed test-matrix planning | replaces [0062]'s per-port
+      `workflow_call` fan-out (which fixed a matrix-*size* ceiling that
+      was never the real bottleneck) with `bin/plan_test_matrix.py`:
+      resolves the real ordered identifier list and bin-packs it into
+      at most 20 buckets, balanced by a real-run-seeded time estimate,
+      split by runner class first (unix `aarch64`/`armv7l` on
+      `ubuntu-24.04-arm`, everything else `ubuntu-latest`). Each bucket
+      runs with `--keep-going` ([0063]) and uploads a JSON report;
+      `aggregate-results` renders the summary from those reports, in the
+      plan's own identifier order rather than upload order or a sort.
+      `test-platforms.yml` is now a thin single-job building block
+      (still directly dispatchable); `action.yml` grew a `keep-going`
+      input so it can reach `--keep-going` through the real composite
+      action rather than a bypass
 - [x] [0063] `--keep-going` and a JSON build report | added for
       `test-platforms.yml`-style coverage sweeps: off by default (every
       existing caller's fail-fast behaviour is unchanged), on it lets
@@ -271,3 +285,4 @@ record is added.
 [0061]: records/0061-usermod-build-drivers-split-per-port.md
 [0062]: records/0062-test-platforms-per-port-orchestrator.md
 [0063]: records/0063-keep-going-and-json-build-report.md
+[0065]: records/0065-bucketed-test-matrix-planning.md

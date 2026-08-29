@@ -39,6 +39,15 @@ inputs:
     description: "Comma-separated list of cibuildmp extras to install"
     required: false
     default: ""
+  keep-going:
+    description: >
+      Any non-empty value passes --keep-going: build every selected
+      target even if an earlier one fails, instead of stopping at the
+      first failure (record 0063). Every attempted target's own outcome,
+      including failures, still lands in the JSON build report either
+      way -- see CIBMP_REPORT_PATH.
+    required: false
+    default: ""
 
 # Composite, not Docker -- docs/BACKLOG.md's own D28/D30 (container-per-port
 # migration, step 1). The Docker action this used to be ran *inside* one
@@ -234,6 +243,9 @@ runs:
         if [ -n "$ACTION_SKIP" ]; then
           args+=(--skip "$ACTION_SKIP")
         fi
+        if [ -n "$ACTION_KEEP_GOING" ]; then
+          args+=(--keep-going)
+        fi
         cibuildmp "${args[@]}"
       env:
         ACTION_PACKAGE_DIR: ${{ inputs.package-dir }}
@@ -241,3 +253,4 @@ runs:
         ACTION_CONFIG_FILE: ${{ inputs.config-file }}
         ACTION_BUILD: ${{ inputs.build }}
         ACTION_SKIP: ${{ inputs.skip }}
+        ACTION_KEEP_GOING: ${{ inputs.keep-going }}
