@@ -10,6 +10,8 @@ Python" pattern) -- see docs/BACKLOG.md D16 and D17.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from ...resources import usermod_data
 
 _PORTS: dict[str, dict[str, str]] = usermod_data()["port"]
@@ -63,15 +65,42 @@ def resolve_user_c_modules(port: str, module_dir: str) -> str:
     """The USER_C_MODULES value to pass for `port`'s build, given the
     directory holding a consumer's own module (D16).
 
-    "make" ports take `module_dir` as-is -- py/py.mk globs
-    `<module_dir>/*/micropython.mk`. "cmake" ports take the module's own
-    `micropython.cmake` file directly: py/usermod.cmake would also accept
-    a bare directory there (it appends `/micropython.cmake` itself), but
-    every real cmake-port consumer (a7p's own mp-usermod.yml, for both
-    esp32 and rp2) always passes the file, so this mirrors that rather
-    than relying on the directory form nothing here has actually
-    exercised.
+    "cmake" ports take the module's own `micropython.cmake` file
+    directly: py/usermod.cmake would also accept a bare directory there
+    (it appends `/micropython.cmake` itself), but every real cmake-port
+    consumer (a7p's own mp-usermod.yml, for both esp32 and rp2) always
+    passes the file, so this mirrors that rather than relying on the
+    directory form nothing here has actually exercised.
+
+    "make" ports are the asymmetric half, and a real, live-caught trap
+    (o-murphy/micropython-wasm3's own migration, 2026-08-29): py/py.mk
+    globs `<module_dir>/*/micropython.mk` -- one directory level *above*
+    the module itself, not `module_dir` directly. A consumer whose module
+    sits flat (`usermod/micropython.mk`, `module_dir="usermod"` -- the
+    exact shape a single-module project reaches for first) gets a glob
+    that matches nothing, and nothing here or in upstream py.mk raises
+    for that: the port just builds and links with zero user modules,
+    silently. cibuildmp's own examples/template avoids this by
+    structuring around it (`usermod/micropython.mk` one level down,
+    `micropython.cmake` one level *up* at the project root, both reached
+    correctly from a single `user-c-modules = "."`) -- correct, but only
+    because whoever wrote it already knew this asymmetry existed; nothing
+    enforces or explains it to a new consumer, wasm3's own first attempt
+    included.
+
+    So: when `module_dir` itself already contains a `micropython.mk`
+    (points straight at the module, the flat/single-module shape), resolve
+    to its parent instead -- the glob then finds it at
+    `<parent>/<module_dir's own name>/micropython.mk`, exactly like the
+    multi-module shape (`module_dir` genuinely holding several `*/
+    micropython.mk` subdirectories, a7p's own `usermod/a7p/micropython.mk`
+    included) already works today. That existing shape is unaffected: a
+    `module_dir` with no `micropython.mk` directly inside it (a7p's own
+    `usermod/`, examples/template's own `.`) falls through unchanged, the
+    same value this function has always returned for it.
     """
     if build_system(port) == "cmake":
         return f"{module_dir}/micropython.cmake"
+    if (Path(module_dir) / "micropython.mk").is_file():
+        return str(Path(module_dir).parent)
     return module_dir
