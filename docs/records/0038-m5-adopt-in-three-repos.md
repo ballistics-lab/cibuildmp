@@ -1,0 +1,80 @@
+# 0038. M5 — adopt in the three repos
+
+- Status: In progress (two items still open)
+- Related: [0011]
+
+<!-- migrated verbatim from docs/BACKLOG.md lines 813-843 -->
+
+### M5 — adopt in the three repos
+
+- [x] The same three repos: replace the natmod matrix with `cibuildmp`.
+      a7p was the interesting one, exactly as anticipated — non-default
+      `module-dir` (`micropython/natmod`) and a `pre-build-command`
+      (`test -f nanopb/pb.h || make fetch-nanopb`, guarding against a
+      re-fetch on every arch since `cibuildmp`'s own D9 runs one job
+      sequentially through all of them). All three (`micropython-bclibc`,
+      `a7p`, `micropython-wasm3`) verified green on real CI, arch by arch —
+      not `--dry-run`. Surfaced two real, previously-unknown bugs along the
+      way, one per repo: a stale-facade-collision in `a7p`'s and
+      `micropython-wasm3`'s own `dist:` targets (same shape as the one
+      already fixed in `micropython-bclibc`'s own Makefile under M3), and
+      `micropython-wasm3`'s `dist:` never cleaning up
+      `$(BUILD)/$(MOD).native.mpy`, which made `cibuildmp`'s own
+      `collect_output()` correctly refuse an ambiguous two-`.mpy` result
+      instead of silently picking one. Neither is a `cibuildmp` bug; both
+      are now fixed in their own repos' Makefiles.
+- [x] `micropython-bclibc`, `a7p`, `micropython-wasm3`: repinned every
+      `uses:` path from the interim `cibuildmp@<commit-sha>` pin (used
+      while no tag existed past `v0.3.0a1`) to `cibuildmp@v0.3.0`
+      (**D11**), now that it's cut — mechanical, no behaviour change.
+      Not yet pushed/re-verified against the tag at the time of this
+      note; the SHA it points to is the same commit already confirmed
+      green in all three repos' CI.
+- [ ] Archive `ballistics-lab/micropython-native-ci` once all three have
+      repinned.
+- [ ] Reduce `build-natmod` to a wrapper over `cibuildmp --only <id>` so
+      there is one implementation of the toolchain logic, not two. Do not let
+      the two coexist for long.
+
+---
+
+## Addendum, 2026-08-28 — the archive item is closed; the wrapper item got worse
+
+Verified rather than assumed, since both open items above were written months of
+sessions ago and one of them had quietly become true.
+
+**`ballistics-lab/micropython-native-ci` is archived** — `archived: true` from the
+API, last touched 2026-08-24. Its precondition ("once all three have repinned") was
+met at the same time: every one of the three repos' `origin/main` carries only
+`ballistics-lab/cibuildmp@v0.3.0` references and not one `uses:` of
+`micropython-native-ci`. `micropython-bclibc` 13, `micropython-wasm3` 15, `a7p` its
+own set; a7p's single remaining textual mention is a comment explaining the move.
+(Worth recording that a stale local checkout of `micropython-bclibc` showed the
+opposite — `main` one commit behind `Ci/cibuildmp (#17)` — which is exactly the shape
+of a false "this was never done" conclusion.)
+
+**The `build-natmod` wrapper item is still open, and the reason to do it is stronger
+than when it was written.** The action moved into this repo with [0011] and is now
+`.github/actions/build-natmod/action.yml`: 133 lines that do not mention `cibuildmp`
+once, carrying their own per-`ARCH` apt package list, their own xtensa toolchain
+install, their own esp-idf install, and a bare `make ARCH=<arch> dist`.
+
+The original argument was "one implementation of the toolchain logic, not two". That
+argument has since inverted: [0050] deleted cibuildmp's bare-host toolchain path
+entirely and made natmod Docker-only, so this action is no longer the *second*
+implementation of something — it is the *only* remaining bare-host natmod toolchain
+implementation in the project, and nothing tests, pins or updates it. The four
+toolchain tarballs it would have shared with cibuildmp now live in
+`docker/natmod.Dockerfile` and are themselves unwatched ([0046]).
+
+Also still open, and unchanged: the repin itself. All three repos pin `v0.3.0`, and
+HEAD has since renamed every `unix` identifier ([0044]), deleted `--toolchain` and
+`--print-build-matrix` ([0049]/[0050]), and made natmod require Docker. With [0044]'s
+own row closed on 2026-08-28 there is nothing left to wait for, and every further
+commit on HEAD widens the single migration these repos should have to do once.
+
+[0011]: 0011-one-repo-absorbs-micropython-native-ci.md
+[0044]: 0044-unix-native-images-landed.md
+[0046]: 0046-pin-staleness-checker.md
+[0049]: 0049-no-matrix-generation-archs-vocabulary.md
+[0050]: 0050-natmod-is-docker-only.md

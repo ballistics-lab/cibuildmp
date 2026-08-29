@@ -1,4 +1,30 @@
-"""Command line interface."""
+"""Command line interface -- the parts genuinely shared across every
+platform, and nothing else.
+
+What lives here: the one argument parser (every platform is reached
+through the same `cibuildmp` command), and the coordinator (`_run()`) that
+resolves both families on every invocation, merges `--print-build-
+identifiers`, makes the one joint "nothing at all was selected" decision,
+and dispatches whichever families ended up with a nonzero target list.
+This module never names `natmod`/`usermod` anywhere below -- only
+`platforms.FAMILIES` -- which is the actual requirement a future third
+family (zephyr, [0022]; any of upstream's own ~20 real ports) needs this
+dispatch to satisfy, since none of it should have to change to add one.
+
+There is no more platform *activation* concept at all (record 0052's own
+live-caught retraction): every family is always in scope, on every
+invocation, and `build`/`skip` glob-matching each family's own real
+identifiers is the only thing that decides what actually gets built. An
+empty config selects nothing from either family -- the zero-config
+default used to mean "natmod, with build narrowed to the newest known
+ABI"; it means nothing at all now, the same retraction natmod's own
+default-build narrowing already got. `--platform`/`--only`/`--enable`/
+`--archs` are gone with it: everything any of them could reach, an
+ordinary `build`/`skip` glob (or an `--build`/`--skip` CLI override, or an
+`[override."<glob>"]` entry) already reaches directly against the real
+identifier -- see the README for the full identifier list and glob
+syntax.
+"""
 
 from __future__ import annotations
 
@@ -6,27 +32,15 @@ import argparse
 import json
 import os
 import shutil
+import stat
 import sys
 from pathlib import Path
+from typing import Any
 
 from . import __version__
-from .build import BuildError, BuildResult, build_target
-from .options import BuildOptions, ConfigError, Options
-from .sources import (
-    SourceError,
-    build_mpy_cross,
-    cache_root,
-    fetch_micropython,
-    read_mpy_abi,
-)
-from .targets import (
-    LATEST_KNOWN_ABI,
-    NATMOD_ARCHS,
-    Target,
-    UnknownArchError,
-    is_abi_known,
-)
-from .toolchains import ResolvedToolchain, ToolchainError, resolve
+from .platforms import FAMILIES, PlatformModule
+from .platforms.natmod.options import ConfigError, read_config
+from .sources import cache_root
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -35,7 +49,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Build MicroPython native C extensions across every target "
         "a module supports, from one declarative config.",
         epilog="Most options are supplied via cibuildmp.toml or CIBMP_* environment "
-        "variables. See docs/BACKLOG.md for the design and what is implemented.",
+        "variables. See docs/0000-TRACKER.md for the design and what is implemented.",
     )
     parser.add_argument(
         "package_dir",
@@ -59,36 +73,31 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-dir",
         type=Path,
         default=None,
-        help="Where to collect built .mpy files (overrides the config)",
+        help="Where to collect built .mpy files (overrides the config, natmod only "
+        "-- usermod's own output-dir is config/CIBMP_OUTPUT_DIR only)",
     )
     parser.add_argument(
-        "--only",
+        "--build",
         default=None,
-        metavar="IDENTIFIER",
-        help="Build exactly this one identifier, overriding the config's own "
-        "build/skip selectors. Opt into a job-per-target CI layout with this; "
-        "the default is one invocation building every selected target.",
+        metavar="GLOB[ GLOB...]",
+        help="Override the config's own build selector -- space-separated glob(s) "
+        "matched against the real identifier, the same syntax build/CIBMP_BUILD "
+        'accept (e.g. --build "*manylinux*" or --build "mpy6.3-*"). Replaces the '
+        "old --only/--platform: name exactly what you want with a glob specific "
+        "enough to match one identifier, or as broad as any other build value.",
     )
     parser.add_argument(
-        "--archs",
+        "--skip",
         default=None,
-        help="Comma-separated list of architectures to build, or 'all'. Overrides "
-        "the config's own archs. There is no 'auto': every natmod arch is a "
-        "cross-compile, so none of them depends on what this machine is.",
-    )
-    parser.add_argument(
-        "--toolchain",
-        default="auto",
-        choices=["auto", "host", "download"],
-        help="How to obtain each target's cross toolchain. auto (default) uses "
-        "one already on PATH and downloads a pinned tarball otherwise; host "
-        "refuses to download; download ignores what is on PATH.",
+        metavar="GLOB[ GLOB...]",
+        help="Override the config's own skip selector -- same glob syntax as "
+        "--build/skip/CIBMP_SKIP.",
     )
     parser.add_argument(
         "--clean-cache",
         action="store_true",
         help="Delete cibuildmp's cache (MicroPython checkouts, mpy-cross builds "
-        "and downloaded toolchains) and exit",
+        "and any downloaded sources) and exit",
     )
     parser.add_argument(
         "--dry-run",
@@ -101,13 +110,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print the identifiers this config selects, one per line, then exit",
     )
     parser.add_argument(
-        "--print-build-matrix",
-        action="store_true",
-        help="Print a JSON array of {only, os} objects, then exit. Feed it to a "
-        "GitHub Actions `strategy.matrix.include` via fromJSON() to get one job "
-        "per target. Only worth it when targets need different runners.",
-    )
-    parser.add_argument(
         "--json",
         action="store_true",
         help="With --print-build-identifiers, emit a JSON array instead of lines",
@@ -118,210 +120,126 @@ def build_parser() -> argparse.ArgumentParser:
         help="Do not report an error code if no target is selected",
     )
     parser.add_argument(
+        "--keep-going",
+        action="store_true",
+        help="Build every selected target even if an earlier one fails, instead "
+        "of stopping at the first failure (the default). Every attempted "
+        "target's own outcome, including failures, is written to a JSON "
+        "report either way -- see CIBMP_REPORT_PATH.",
+    )
+    parser.add_argument(
         "--debug-traceback",
         action="store_true",
         default=os.environ.get("CIBMP_DEBUG_TRACEBACK", "") not in {"", "0"},
         help="Print a full traceback for all errors",
     )
-    parser.add_argument(
-        "--platform",
-        default="natmod",
-        choices=["natmod"],
-        help="Build mode. Only natmod is implemented; usermod is planned "
-        "(see docs/BACKLOG.md).",
-    )
     return parser
 
 
-def _plan_line(
-    index: int,
-    total: int,
-    options: BuildOptions,
-    chain: ResolvedToolchain | None = None,
-) -> str:
-    make = ["make", "-C", options.module_dir, f"ARCH={options.target.arch}"]
-    make += options.extra_make_args
-    make.append(options.make_target)
-    # The prefix actually in play, which is not always the one dynruntime.mk
-    # hardcodes -- showing target.cross here would contradict the CROSS=
-    # override sitting in the same line's make command.
-    prefix = chain.prefix if chain is not None else options.target.cross
-    # Right-align the counter so the columns after it stay put once the
-    # index gains a digit ([10/10] is wider than [9/10]).
-    counter = f"[{index:>{len(str(total))}}/{total}]"
-    return (
-        f"{counter} {options.target.identifier:<28} "
-        f"CROSS={prefix or '(host)':<22} {' '.join(make)}"
-    )
+# The two top-level tables every platform used to gate activation with
+# (before that, carry a per-port axis) -- neither concept exists any more,
+# so a config still writing one of these six gets a specific error naming
+# the real replacement, the same courtesy every other retired config
+# surface in this project gets (record 0048's own "a misplaced/stale key
+# must never silently do nothing"). `[usermod]`/`[publish]`/`[override]`
+# are the only tables left with any meaning at all -- shared defaults for
+# every usermod port, natmod's own extra-files list, and the shared
+# per-target override list, respectively.
+_RETIRED_PLATFORM_TABLES: frozenset[str] = frozenset(
+    {"natmod", "unix", "windows", "qemu", "webassembly", "esp32"}
+)
+_KNOWN_TABLES: frozenset[str] = frozenset({"usermod", "publish", "override"})
 
 
-def build(options: Options, targets: list[Target], *, toolchain: str = "auto") -> int:
-    """Build every selected target in one invocation.
-
-    Sequential and in-process on purpose (D9), the same shape cibuildwheel
-    uses for the Python versions inside one runner. Fetching MicroPython and
-    building mpy-cross are identical for every natmod arch *sharing an ABI*,
-    so doing them once per ABI group here is strictly cheaper than paying
-    for them in each of ten matrix legs -- and unlike cibuildwheel, no
-    natmod target needs a runner any other target cannot use, so nothing
-    forces a fan-out. Callers who want one anyway (failure isolation,
-    wall-clock) opt in with --only.
-
-    Grouped by MicroPython tag (**D13**): almost always one group, since
-    that is the common case, but `tag_groups()` can hand back more than one
-    when `micropython` spans an ABI boundary, and each needs its own
-    checkout and its own mpy-cross.
-    """
-    resolved = [options.build_options(t) for t in targets]
-    total = len(resolved)
-
-    # Toolchains are resolved before the plan is printed, not after: where a
-    # toolchain's prefix is not the one dynruntime.mk hardcodes, resolution
-    # adds a CROSS= override, and a plan printed first would show a make
-    # command that is not the one about to run.
-    print(f"cibuildmp: resolving toolchains for {total} target(s)")
-    chains = []
-    for build_options in resolved:
-        chain = resolve(build_options.target.arch, strategy=toolchain)
-        chains.append(chain)
-        build_options.extra_make_args = [
-            *chain.make_overrides,
-            *build_options.extra_make_args,
-        ]
-
-    tags = ", ".join(tag for tag, _abi in options.tag_groups())
-    print(f"\ncibuildmp: {total} target(s) against MicroPython {tags}")
-    for index, (build_options, chain) in enumerate(
-        zip(resolved, chains, strict=True), 1
-    ):
-        print("  " + _plan_line(index, total, build_options, chain))
-        print(f"        {chain.describe()}")
-
-    # Resolved once, not per target: the same files and version apply to
-    # every identifier's own package.json (D14). Checked up front so a
-    # missing extra-files entry fails before any target builds, not after
-    # the first one succeeds.
-    extra_files = [options.package_dir / f for f in options.extra_files()]
-    for extra in extra_files:
-        if not extra.is_file():
-            raise BuildError(f"extra-files entry not found: {extra}")
-
-    results: list[BuildResult] = []
-    index = 0
-    # Preserves first-appearance order (options.targets() emits one ABI
-    # group at a time), not sorted -- a later tag never jumps ahead of an
-    # earlier one just because it sorts first.
-    build_tags = list(dict.fromkeys(bo.target.tag for bo in resolved))
-    for tag in build_tags:
-        group = [
-            (bo, chain)
-            for bo, chain in zip(resolved, chains, strict=True)
-            if bo.target.tag == tag
-        ]
-        abi = group[0][0].target.abi  # one ABI per tag group, by construction
-
-        # Shared setup, paid once per ABI group rather than once per target
-        # in it -- see build()'s own docstring and D9.
-        print(f"\ncibuildmp: preparing MicroPython {tag}")
-        mpy_dir = fetch_micropython(tag, submodules=options.micropython_submodules)
-        build_mpy_cross(mpy_dir)
-
-        # The checkout is authoritative about the ABI; targets.MPY_ABI's
-        # table is only a way to answer the question without one. A
-        # disagreement means the identifiers already printed are wrong, so
-        # it stops here rather than producing files labelled with an ABI
-        # they do not have.
-        actual_abi = read_mpy_abi(mpy_dir)
-        if actual_abi != abi:
-            raise SourceError(
-                f"MicroPython {tag} has .mpy ABI {actual_abi}, but the "
-                f"identifiers were built assuming {abi}. Set `mpy-abi = "
-                f'"{actual_abi}"` in the config, or report the stale entry in '
-                f"cibuildmp.targets.MPY_ABI."
-            )
-
-        print(f"\ncibuildmp: building {len(group)} target(s) for MicroPython {tag}")
-        for build_options, chain in group:
-            index += 1
-            print("\n  " + _plan_line(index, total, build_options, chain))
-            module_root = options.package_dir / build_options.module_dir
-            output_dir = options.package_dir / build_options.output_dir
-            result = build_target(
-                build_options,
-                chain,
-                mpy_dir,
-                module_root,
-                output_dir,
-                extra_files=extra_files,
-                version=options.version,
-            )
-            results.append(result)
-            print(f"        done in {result.duration:.1f}s -> {result.output}")
-
-    total_duration = sum(r.duration for r in results)
-    print(f"\ncibuildmp: {total} target(s) built in {total_duration:.1f}s")
-    for result in results:
-        print(f"  {result.identifier}: {result.output.name} ({result.size} bytes)")
-    return 0
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-
-    if args.clean_cache:
-        root = cache_root()
-        if not root.exists():
-            print(f"cibuildmp: nothing to clean ({root} does not exist)")
-            return 0
-        shutil.rmtree(root)
-        print(f"cibuildmp: removed {root}")
-        return 0
-
-    try:
-        options = Options.load(args.package_dir, args.config_file)
-        if args.output_dir is not None:
-            options.output_dir = args.output_dir
-        if args.archs is not None:
-            options.archs = (
-                list(NATMOD_ARCHS)
-                if args.archs.strip() == "all"
-                else [a.strip() for a in args.archs.split(",") if a.strip()]
-            )
-        targets = options.targets()
-    except (ConfigError, UnknownArchError, SourceError) as exc:
-        if args.debug_traceback:
-            raise
-        print(f"cibuildmp: error: {exc}", file=sys.stderr)
-        return 2
-
-    if args.only is not None:
-        # --only overrides build/skip, matching cibuildwheel's own semantics
-        # for the flag: the caller has already decided what this invocation
-        # is for, and a matrix leg that reached here was selected when the
-        # matrix was generated.
-        targets = [t for t in targets if t.identifier == args.only]
-        if not targets:
-            print(
-                f"cibuildmp: error: --only {args.only!r} matches no target this "
-                f"config can produce",
-                file=sys.stderr,
-            )
-            return 2
-
-    if args.print_build_matrix:
-        print(
-            json.dumps(
-                [
-                    {"only": bo.target.identifier, "os": bo.runs_on}
-                    for bo in (options.build_options(t) for t in targets)
-                ]
-            )
+def _validate_top_level_tables(raw: dict) -> None:
+    """A top-level table whose name is neither one of the three still-
+    meaningful ones nor one of the six retired platform names is almost
+    certainly a typo (`[stm32]` for a port this project has no build
+    driver for yet, `[usermdo]` for `[usermod]`)."""
+    retired = sorted(_RETIRED_PLATFORM_TABLES & raw.keys())
+    if retired:
+        raise ConfigError(
+            f"[{retired[0]}] no longer exists -- every platform is always in "
+            "scope now, selected purely by build/skip glob-matching its own "
+            "real identifiers (see the README for the full identifier list). "
+            "Move any module-dir/user-c-modules/manifest/extra-make-args/"
+            "extra-cmake-args/make-target/pre-build-command/arch-flags value "
+            "to the top level "
+            "(or [usermod] for a usermod-wide default), and narrow with "
+            'build/skip (e.g. build = "*-x64") or [override."<glob>"] '
+            "instead."
         )
-        return 0
+    unknown = sorted(
+        key
+        for key, value in raw.items()
+        if isinstance(value, dict) and key not in _KNOWN_TABLES
+    )
+    if unknown:
+        raise ConfigError(
+            f"unknown table(s) at the top level: "
+            f"{', '.join(f'[{k}]' for k in unknown)}."
+        )
+
+
+def _resolve_all(
+    args: argparse.Namespace,
+    package_dir: Path,
+    config_file: Path | None,
+    preread: tuple[Path | None, dict],
+) -> list[tuple[PlatformModule, Any, list]] | int:
+    """Every family's own config, resolved and narrowed to its own
+    selected targets -- every family, unconditionally, every invocation.
+    Returns the error's own exit code (already printed) instead of the
+    list on the first family that fails to load.
+
+    Two-phase, not one: `build`/`skip`/`[override]` are shared, top-level
+    config now, and each family's own reachability audit (inside
+    `.targets()`) needs to know every *other* active family's own real
+    identifiers to tell "meant for the other family" apart from "a typo"
+    (`Options.targets()`'s own `foreign_identifiers` docstring has the
+    full reasoning). That needs every family's own `all_targets()` before
+    any of them can safely call `.targets()`, so `resolve_options()` runs
+    for every family first, then `.targets()` for every family second --
+    still zero hardcoded family names, just two passes over the same
+    `FAMILIES` tuple instead of one.
+    """
+    loaded: list[tuple[PlatformModule, Any, list[str]]] = []
+    for family in FAMILIES:
+        try:
+            options = family.resolve_options(args, package_dir, config_file, preread)
+        except family.LOAD_ERRORS as exc:  # type: ignore[attr-defined]
+            if args.debug_traceback:
+                raise
+            print(f"cibuildmp: error: {exc}", file=sys.stderr)
+            return 2
+        loaded.append((family, options, [t.identifier for t in options.all_targets()]))
+
+    resolved: list[tuple[PlatformModule, Any, list]] = []
+    for index, (family, options, _own_identifiers) in enumerate(loaded):
+        foreign = [i for j, (_, _, ids) in enumerate(loaded) if j != index for i in ids]
+        try:
+            targets = options.targets(foreign_identifiers=foreign)
+        except family.LOAD_ERRORS as exc:  # type: ignore[attr-defined]
+            if args.debug_traceback:
+                raise
+            print(f"cibuildmp: error: {exc}", file=sys.stderr)
+            return 2
+        resolved.append((family, options, targets))
+    return resolved
+
+
+def _run(
+    args: argparse.Namespace,
+    package_dir: Path,
+    config_file: Path | None,
+    preread: tuple[Path | None, dict],
+) -> int:
+    resolved = _resolve_all(args, package_dir, config_file, preread)
+    if isinstance(resolved, int):
+        return resolved
 
     if args.print_build_identifiers:
-        identifiers = [t.identifier for t in targets]
+        identifiers = [t.identifier for _, _, targets in resolved for t in targets]
         if args.json:
             print(json.dumps(identifiers))
         else:
@@ -329,7 +247,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(identifier)
         return 0
 
-    if not targets:
+    total = sum(len(targets) for _, _, targets in resolved)
+    if total == 0:
         if args.allow_empty:
             print("cibuildmp: no targets selected")
             return 0
@@ -340,28 +259,116 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    unknown_tags = [tag for tag in options.micropython if not is_abi_known(tag)]
-    if unknown_tags:
-        print(
-            f"cibuildmp: warning: no recorded .mpy ABI for MicroPython "
-            f"{', '.join(unknown_tags)}; assuming {LATEST_KNOWN_ABI}. The ABI "
-            f"actually encoded in each built .mpy is verified against its "
-            f"identifier, so a wrong guess fails the build rather than shipping.",
-            file=sys.stderr,
-        )
+    rc = 0
+    for family, options, targets in resolved:
+        if not targets:
+            # This family's own build/skip simply matched nothing --
+            # the ordinary case for a config that only configures the
+            # other family, not a per-family error (the joint check
+            # above already ruled out "nothing at all was selected").
+            continue
+        frc = family.run_resolved(args, options, targets)
+        rc = frc if frc != 0 else rc
+    return rc
 
-    if args.dry_run:
-        total = len(targets)
-        tags = ", ".join(tag for tag, _abi in options.tag_groups())
-        print(f"cibuildmp: {total} target(s) against MicroPython {tags}")
-        for index, target in enumerate(targets, 1):
-            print("  " + _plan_line(index, total, options.build_options(target)))
+
+def _clear_readonly_and_retry(func: Any, path: str, _exc: Any) -> None:
+    """`shutil.rmtree()` error handler: a real, live failure --
+    `autom4te.cache` (autoconf, `ports/unix`'s own libffi build under
+    `MICROPY_STANDALONE=1`) creates entries some platforms leave without
+    the owner write bit, so a plain `os.unlink`/`os.rmdir` refuses with
+    `PermissionError` even though this process owns the cache tree
+    outright and can simply reclaim write access first.
+
+    An earlier version of this handler chmod'd only `path` itself and
+    still failed live in CI -- caught, not assumed fixed. Removing an
+    entry needs write+execute on the directory *containing* it, not on
+    the entry: `os.unlink(".../autom4te.cache/requests")` fails on
+    `autom4te.cache`'s own missing write bit, not on `requests`, which is
+    just a plain file. Chmodding both `path` and its parent, ignoring
+    whichever one does not apply (`os.chmod` on a file that already had
+    the right bits, or on a parent already writable, is a harmless no-op)
+    means this handler does not have to know which of shutil's own
+    internal calls (`unlink`, `rmdir`, `scandir`, ...) is retrying, only
+    that reclaiming access to both ends of the failing path is always
+    safe within a cache tree this process owns outright.
+    """
+    for target in (path, os.path.dirname(path)):
+        try:
+            os.chmod(target, stat.S_IWRITE | stat.S_IREAD | stat.S_IEXEC)
+        except OSError:
+            pass
+    func(path)
+
+
+def _rmtree_writable(root: Path) -> None:
+    """`shutil.rmtree(root)`, tolerating read-only entries under it --
+    see `_clear_readonly_and_retry()`. `onexc` (the exception instance)
+    replaced `onerror` (a `sys.exc_info()` triple) in Python 3.12 and the
+    old name is deprecated since; this project supports 3.11 onward
+    (`pyproject.toml`), so both are wired to the same handler -- its
+    third parameter is unused either way, so one function satisfies both
+    call shapes without actually branching on which fields it receives.
+    """
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(root, onexc=_clear_readonly_and_retry)
+    else:
+        shutil.rmtree(root, onerror=_clear_readonly_and_retry)
+
+
+def main(argv: list[str] | None = None) -> int:
+    # Every `print()` in this tool is progress output, and until this line
+    # existed none of it *was* progress output on CI. Python block-buffers
+    # stdout whenever it is not a tty, so a build's own narration
+    # ("downloaded micropython.tar.xz", "mpy-cross: building", the
+    # per-target result lines) sat in a 8KiB buffer until interpreter exit
+    # and then arrived all at once, at the very end -- while `make`, an
+    # ordinary subprocess inheriting the same fd, wrote straight through
+    # and got interleaved ahead of all of it.
+    #
+    # Read off a real run rather than reasoned about: in run 32958683512
+    # every one of cibuildmp's own lines carries the timestamp
+    # `10:34:25.606`, including "downloaded micropython.tar.xz (104 MiB)",
+    # which describes something that finished ninety seconds earlier and
+    # is printed *after* the final `LINK`. Anything this tool says about
+    # what it is currently doing is worthless under that ordering, which
+    # makes line buffering a precondition for the probe reporting in
+    # `usermod/dockerrun.py` rather than a cosmetic fix -- and part of
+    # what record 0047 is about.
+    #
+    # Line buffering, not `flush=True` per call site: the property wanted
+    # is of the stream, and scattering flushes leaves the next `print()`
+    # anyone adds silently wrong again. `reconfigure()` is guarded because
+    # stdout can be a plain object with no such method (pytest's own
+    # capture, an embedding host), and buffering is never worth an
+    # exception.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(line_buffering=True)  # type: ignore[union-attr]
+        except (AttributeError, ValueError, OSError):
+            pass
+
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    if args.clean_cache:
+        root = cache_root()
+        if not root.exists():
+            print(f"cibuildmp: nothing to clean ({root} does not exist)")
+            return 0
+        _rmtree_writable(root)
+        print(f"cibuildmp: removed {root}")
         return 0
 
     try:
-        return build(options, targets, toolchain=args.toolchain)
-    except (SourceError, ToolchainError, BuildError) as exc:
+        preread = read_config(args.package_dir, args.config_file)
+        _validate_top_level_tables(preread[1])
+        for family in FAMILIES:
+            family.validate_family_table(preread[1], error=ConfigError)
+    except ConfigError as exc:
         if args.debug_traceback:
             raise
         print(f"cibuildmp: error: {exc}", file=sys.stderr)
         return 2
+
+    return _run(args, args.package_dir, args.config_file, preread)

@@ -1,0 +1,135 @@
+name: Test platforms
+
+# Plan / build / aggregate, not one job per port (record 0062's own
+# shape) or one job per identifier (this file's own shape immediately
+# before this record). Both of those existed to solve a *matrix-size*
+# ceiling -- GitHub's own 256-configs-per-`strategy.matrix` cap -- which
+# was never actually the bottleneck this project was paying for. A real
+# run measured it directly: one-job-per-identifier finished 30 of 238
+# legs in the first eight minutes, then nothing progressed for 35+ more
+# ([0044]'s own 2026-08-29 addendum). That is an account-wide *concurrent*
+# job cap, not a matrix-size one, and no amount of per-port splitting
+# fixes it -- more, smaller matrices sharing one concurrency budget queue
+# exactly as badly as one big one.
+#
+# `plan` (`bin/plan_test_matrix.py`) resolves the real, ordered identifier
+# list `build`/`skip` selects and bin-packs it into at most `max-buckets`
+# (default 20) buckets, balanced by a real-run-seeded time estimate and
+# split so no bucket mixes identifiers that need different runners.
+# `build` fans out one call to `test-platforms.yml` per bucket, each
+# running its own share with `--keep-going` ([0063]) and uploading a JSON
+# report. `aggregate-results` renders one summary table from every
+# report, ordered exactly the way `plan` found the identifiers in the
+# first place -- not upload order, not sorted (docs/records/0065).
+
+on:
+  pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "LICENSE"
+  workflow_dispatch:
+    inputs:
+      build:
+        description: "--build override (default: the full real matrix)"
+        required: false
+        type: string
+      skip:
+        description: "--skip override (default: known-flaky/known-broken cells)"
+        required: false
+        type: string
+      max-buckets:
+        description: "Concurrent job cap for the build fan-out"
+        required: false
+        type: string
+        default: "20"
+
+concurrency:
+  group: test-platforms-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      identifiers: ${{ steps.plan.outputs.identifiers }}
+      buckets: ${{ steps.plan.outputs.buckets }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # No Docker, no `uv tool install` -- `bin/plan_test_matrix.py`'s own
+      # docstring confirms live that target resolution needs neither of
+      # cibuildmp's two runtime deps (pyelftools/ar), so `PYTHONPATH=src`
+      # against the checkout is enough; this job stays a plain,
+      # sub-minute Python run.
+      - name: Plan the bucketed matrix
+        id: plan
+        env:
+          CIBMP_BUILD_INPUT: ${{ inputs.build || 'v1.29.0-* v1.28.0-* mpy6.3-v1.29.0-* mpy6.3-v1.28.0-*' }}
+          # `v1.28.0-qemu-NETDUINO2`: this project's own long-standing
+          # default skip. `*musllinux_1_2_ppc64le`/
+          # `v1.28.0-manylinux_2_28_s390x`: real, confirmed-live breakage
+          # in unix's own emulated-everywhere cells, not the native/
+          # emulated axis alone -- see docs/records/0044's own 2026-08-29
+          # addendum.
+          CIBMP_SKIP_INPUT: ${{ inputs.skip || 'v1.28.0-qemu-NETDUINO2 *musllinux_1_2_ppc64le v1.28.0-manylinux_2_28_s390x' }}
+          CIBMP_MAX_BUCKETS: ${{ inputs.max-buckets || '20' }}
+        run: |
+          set -euo pipefail
+          PYTHONPATH=src python3 bin/plan_test_matrix.py examples/template \
+            --build "$CIBMP_BUILD_INPUT" \
+            --skip "$CIBMP_SKIP_INPUT" \
+            --max-buckets "$CIBMP_MAX_BUCKETS" \
+            > plan.json
+          echo "identifiers=$(jq -c .identifiers plan.json)" >> "$GITHUB_OUTPUT"
+          echo "buckets=$(jq -c .buckets plan.json)" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Test platforms -- plan"
+            echo
+            echo "$(jq '.identifiers | length' plan.json) identifiers, $(jq '.buckets | length' plan.json) buckets:"
+            echo
+            echo "| Bucket | Runner | Identifiers | Estimate |"
+            echo "| --- | --- | --- | --- |"
+            jq -r '.buckets[] | "| \(.label) | \(.runner) | \(.build | split(" ") | length) | \(.estimated_seconds)s |"' plan.json
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.plan.outputs.buckets) }}
+    uses: ./.github/workflows/test-platforms.yml
+    with:
+      label: ${{ matrix.label }}
+      build: ${{ matrix.build }}
+      runner: ${{ matrix.runner }}
+
+  # No single job can render this: a matrix job's own outputs only ever
+  # keep the *last* leg to finish, and `test-platforms.yml`'s own
+  # `continue-on-error: true` means a real failure never turns this check
+  # red either, so without this a failure is visible only by opening one
+  # bucket's own log. Artifacts uploaded by a called reusable workflow's
+  # own jobs are still part of this same top-level run, so
+  # `download-artifact` here sees every bucket's own report with nothing
+  # passed back through `build`'s own outputs.
+  aggregate-results:
+    needs: [plan, build]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: report-*
+          path: reports
+          merge-multiple: true
+
+      - name: Build summary
+        env:
+          IDENTIFIERS: ${{ needs.plan.outputs.identifiers }}
+        run: |
+          set -euo pipefail
+          echo "$IDENTIFIERS" > identifiers.json
+          python3 bin/render_test_summary.py reports identifiers.json >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,233 @@
+name: Publish Docker images
+
+# The "separate workflow" the user's own direction called for, checked
+# against cibuildwheel's real model before shaping it: cibuildwheel never
+# builds its own manylinux/musllinux images as part of a consumer's
+# build at all -- publishing one is a rare, out-of-band maintainer task
+# (its own bin/update_docker.py), and the pinned digest that results
+# (resources/pinned_docker_images.cfg) is the only thing a real build
+# ever touches (a plain `docker pull`, see cibuildwheel's own
+# oci_container.py). This workflow is cibuildmp's own equivalent of that
+# maintainer task -- it does not run on every push (build-examples.yml's
+# own verify-docker-images job already build-checks every Dockerfile on
+# every push/PR, catching breakage fast); it runs when docker/ actually
+# changes on main, or on demand, and its own job is publishing, not
+# verifying.
+#
+# docker/*.Dockerfile lives at the repo root, not inside
+# src/cibuildmp/resources/ -- pyproject.toml's own comment has the full
+# reasoning (mirrors pypa/manylinux's own top-level docker/, since
+# neither repo needs these files to ship inside an installed package any
+# more now that cibuildmp never builds one itself).
+#
+# **Record 0043 reshaped this matrix.** It used to be eight names with no
+# `platforms:` key at all, which meant every image was built as
+# `linux/amd64` by accident of the runner rather than by decision -- fine
+# while `unix` cross-compiled from amd64, and the direct cause of the
+# `exec format error` an `ubuntu-24.04-arm` consumer hit. Now each entry
+# carries the platform it is *for*, and for the `unix` cells that platform
+# is the build target itself: `manylinux_2_28_aarch64` is an arm64 image
+# holding a native aarch64 toolchain, not an amd64 image holding a cross
+# one. Nothing here is a manifest list, deliberately -- one image, one
+# platform, exactly as pypa publishes its own and for the same reason
+# (a list would put host-dependent resolution back in).
+#
+# Names are pypa's, with no `cibuildmp-` prefix:
+# `docker/<tag>.Dockerfile` -> `ghcr.io/<owner>/<tag>`, where `<tag>` is a
+# real PEP 600 / PEP 656 platform tag. The three cross-compiling ports keep
+# plain port names -- there is no upstream `manylinux`-shaped name to reuse
+# for a mingw-w64 or emsdk host.
+#
+# Digest-pinned, not `:latest` -- the user's own explicit call: GHCR
+# supports pinning by digest exactly the way quay.io does for
+# cibuildwheel's own pins, so there is no need to trade the immutability
+# a `:sha-<gitsha>` tag already gave build-examples.yml's own dev-branch
+# testing for a floating tag here. After this workflow runs, a
+# maintainer records the digest GitHub prints for each pushed image
+# (`docker/build-push-action`'s own `digest` output, printed to the job
+# summary below) into `resources/pinned_docker_images.toml`, in a real PR
+# -- the same manual-but-deliberate cadence cibuildwheel's own
+# `bin/update_docker.py` has for its own pins, not something this workflow
+# does to source on its own. cibuildmp now has that script too:
+# `bin/update_docker.py --images` re-reads every digest straight off GHCR
+# and fills the whole table in one pass, which beats copying ten of
+# them out of a job summary by hand.
+
+on:
+  push:
+    branches: [main] # temporary
+    paths:
+      - "docker/**"
+      - ".github/workflows/publish-docker-images.yml"
+  workflow_dispatch:
+    inputs:
+      only:
+        description: >
+          Republish just these images -- comma-separated with no spaces,
+          e.g. "natmod" or "windows,qemu". Empty rebuilds all ten,
+          which is hours: three of them (aarch64, ppc64le, s390x) are
+          emulated on this runner's amd64 host.
+        required: false
+        default: ""
+
+concurrency:
+  group: publish-docker-images-${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      # fail-fast off: three of these (aarch64, ppc64le, s390x) are
+      # emulated builds of unrelated architectures, and one arch's base
+      # going missing upstream should not cancel the other cells that are
+      # fine.
+      fail-fast: false
+      matrix:
+        include:
+          # Only the cells that actually add a cibuildmp layer on top of
+          # pypa's own base get built and published here. `armv7l`'s
+          # `manylinux_2_31`, `riscv64`'s `manylinux_2_39`, and every
+          # `musllinux_1_2` cell (all seven arches) were verified to be a
+          # bare `FROM` and nothing else -- their Dockerfiles are deleted,
+          # and `resources/pinned_docker_images.toml` points those nine
+          # cells straight at `pinned_pypa_images.toml`'s own digest
+          # instead of a `ghcr.io/ballistics-lab/...` copy of it.
+          - { image: manylinux_2_28_x86_64, platform: linux/amd64 }
+          - { image: manylinux_2_28_i686, platform: linux/386 }
+          - { image: manylinux_2_28_aarch64, platform: linux/arm64 }
+          - { image: manylinux_2_28_ppc64le, platform: linux/ppc64le }
+          - { image: manylinux_2_28_s390x, platform: linux/s390x }
+          # mipsel is the one `unix` cell that is still a cross-compile,
+          # so its platform is the amd64 *host*, not its build target --
+          # there is no 32-bit mipsel image to be native to (record 0043's
+          # own documented exception).
+          - { image: manylinux_2_39_mipsel, platform: linux/amd64 }
+          # Cross-compile hosts targeting Windows, bare metal and wasm.
+          - { image: windows, platform: linux/amd64 }
+          - { image: webassembly, platform: linux/amd64 }
+
+          # The six toolchain-group images record 0058 splits
+          # `natmod.Dockerfile`/`qemu.Dockerfile` into -- keyed by which
+          # compiler a build needs, not by which port or arch. All
+          # `linux/amd64`, the same reason `natmod`/`qemu` were: a `.mpy`
+          # or a bare-metal `.elf` is relocatable output with nothing to be
+          # native *to*, every toolchain in each of these is a
+          # cross-compiler, and the pinned tarballs each ship an x86_64
+          # build and no other.
+          - { image: arm_embedded, platform: linux/amd64 }
+          - { image: riscv_embedded, platform: linux/amd64 }
+          - { image: xtensa_lx106, platform: linux/amd64 }
+          - { image: xtensa_esp, platform: linux/amd64 }
+          - { image: natmod_host, platform: linux/amd64 }
+          - { image: ppc64le_linux, platform: linux/amd64 }
+          - { image: esp_idf_base, platform: linux/amd64 }
+    steps:
+      - uses: actions/checkout@v7
+
+      # Required, not optional: every non-amd64 entry above runs foreign
+      # binaries at image-build time (`dnf install` inside an arm64 or
+      # s390x base). cibuildmp itself never installs emulation -- parity
+      # with cibuildwheel, which pushes exactly this onto the caller --
+      # so the workflow that needs it sets it up for itself.
+      - uses: docker/setup-qemu-action@v4
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push docker/${{ matrix.image }}.Dockerfile
+        id: push
+        # The `only` input, on each step rather than on the job.
+        # A job-level `if` is evaluated *before* the matrix is expanded,
+        # so `matrix` is not in scope there -- putting it there made the
+        # whole file invalid ("Unrecognized named-value: 'matrix'"), which
+        # is a failure mode worth one line: a broken workflow file does
+        # not fail a run, it fails the *parse*, so nothing runs at all and
+        # nothing in the Actions tab explains why.
+        if: >-
+          github.event.inputs.only == ''
+          || contains(
+            format(',{0},', github.event.inputs.only),
+            format(',{0},', matrix.image)
+          )
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/${{ matrix.image }}.Dockerfile
+          platforms: ${{ matrix.platform }}
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:latest
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+      - name: Check the package is publicly pullable
+        if: >-
+          github.event.inputs.only == ''
+          || contains(
+            format(',{0},', github.event.inputs.only),
+            format(',{0},', matrix.image)
+          )
+        # Checks, deliberately -- it does not try to change anything.
+        #
+        # This step first tried `gh api -X PATCH
+        # .../packages/container/<name>/visibility`, on the theory
+        # (record 0033) that a freshly-published package lands private and
+        # an anonymous pull of a digest this repo just pinned would answer
+        # `401`. Both halves of that turned out wrong, and the run that
+        # published record 0044's eighteen images is the evidence:
+        #
+        #   * **The PATCH 404s**, in the workflow and from a local `gh`
+        #     login carrying `write:packages` + `delete:packages` alike.
+        #     There is no REST resource for changing a container
+        #     package's visibility; the package settings UI is the only
+        #     way. So the old step was aiming at a URL that does not
+        #     exist and then blaming the token.
+        #   * **The packages were already public** before it fired -- the
+        #     same job log shows `"visibility": "public"` above the PATCH.
+        #     A package published by Actions into a public repository
+        #     comes out public.
+        #
+        # What is left is worth keeping, because 0033's failure was real
+        # once: read the visibility back and say so if it is not public.
+        # That turns "the pins are unusable anonymously" into a warning at
+        # publish time instead of a `401` in some consumer's build, and it
+        # names the one action that actually fixes it.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.repository_owner_id }}" = "${{ github.actor_id }}" ]; then
+            ENDPOINT="user/packages/container/${{ matrix.image }}"
+          else
+            ENDPOINT="orgs/${{ github.repository_owner }}/packages/container/${{ matrix.image }}"
+          fi
+          VISIBILITY=$(gh api "$ENDPOINT" --jq .visibility 2>/dev/null || echo unknown)
+          echo "${{ matrix.image }}: $VISIBILITY"
+          if [ "$VISIBILITY" != "public" ]; then
+            echo "::warning::${{ matrix.image }} is '$VISIBILITY' -- an anonymous pull of the digest below will fail. Make it public in the package settings UI (there is no API for this)."
+          fi
+
+      - name: Record the pinned digest
+        if: >-
+          github.event.inputs.only == ''
+          || contains(
+            format(',{0},', github.event.inputs.only),
+            format(',{0},', matrix.image)
+          )
+        # The `:latest` tag above is only what makes this image easy to
+        # find by hand -- nothing in cibuildmp itself is ever pointed at a
+        # mutable tag (resources/pinned_docker_images.toml's own header
+        # has why). This is the value that ends up in that file, either
+        # copied from here or read back by `bin/update_docker.py --images`.
+        run: |
+          echo "### ${{ matrix.image }} (${{ matrix.platform }})" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}@${{ steps.push.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
