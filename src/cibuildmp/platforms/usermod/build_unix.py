@@ -42,6 +42,7 @@ rather than assuming the pinned settings alone were enough.
 
 from __future__ import annotations
 
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -357,7 +358,9 @@ def run_unix_deplibs(
 
     dockerrun.run(
         command,
-        mounts=usermod_mounts(mpy_dir, Path(opts.user_c_modules), package_dir=package_dir),
+        mounts=usermod_mounts(
+            mpy_dir, Path(opts.user_c_modules), package_dir=package_dir
+        ),
         workdir=_unix_dir(mpy_dir),
         image=docker_image,
         timeout=dockerrun.timeout_for("unix", opts.target),
@@ -445,6 +448,188 @@ def _split_target(target: str) -> tuple[str, str]:
     from ... import dockerrun
 
     return dockerrun.split_tag(target)
+
+
+# The one dynamic-linking guarantee `manylinux_2_28`/`manylinux_2_31` make
+# about the *host* (every dynamic `unix` target that is not `mipsel`
+# builds under one of these two) -- verified against `auditwheel`'s own
+# `policy/manylinux-policy.json` (2026-08-29, `auditwheel==6.8.1`), not
+# recalled: the two floors carry byte-identical `lib_whitelist`s, so one
+# table covers both. This is what `auditwheel repair` bundles a wheel's
+# own copy of anything *not* in it for -- `libffi.so.6` included, the
+# specific gap a real `unix` build hit (a `manylinux_2_28_x86_64` binary,
+# run on a plain `ubuntu-latest` runner: "error while loading shared
+# libraries: libffi.so.6: cannot open shared object file"). `unix`
+# produces a bare executable rather than a wheel, so there is nothing for
+# `auditwheel` itself to operate on; `repair_unix_binary()` below
+# reimplements the same vendor-and-patch-rpath idea directly, the same
+# "decoded by hand" choice `_required_glibc()` already makes for the
+# floor check.
+_MANYLINUX_BASELINE_LIBS = frozenset(
+    {
+        "libGL.so.1",
+        "libICE.so.6",
+        "libSM.so.6",
+        "libX11.so.6",
+        "libXext.so.6",
+        "libXrender.so.1",
+        "libanl.so.1",
+        "libatomic.so.1",
+        "libc.so.6",
+        "libdl.so.2",
+        "libexpat.so.1",
+        "libgcc_s.so.1",
+        "libglib-2.0.so.0",
+        "libgobject-2.0.so.0",
+        "libgthread-2.0.so.0",
+        "libm.so.6",
+        "libmvec.so.1",
+        "libnsl.so.1",
+        "libpthread.so.0",
+        "libresolv.so.2",
+        "librt.so.1",
+        "libstdc++.so.6",
+        "libutil.so.1",
+        "libz.so.1",
+    }
+)
+
+# musl's own guarantee is far narrower -- verified the same way, against
+# `musllinux-policy.json`: `musllinux_1_2` whitelists only `libc.so` and
+# `libz.so.1`. `libffi` is absent from both tables; nothing here special-
+# cases it by name, since the point is to catch whatever is missing, not
+# just the one gap that happened to be found first.
+_MUSLLINUX_BASELINE_LIBS = frozenset({"libc.so", "libz.so.1"})
+
+
+def _baseline_libs(floor: str) -> frozenset[str]:
+    return (
+        _MUSLLINUX_BASELINE_LIBS
+        if floor.startswith("musllinux")
+        else _MANYLINUX_BASELINE_LIBS
+    )
+
+
+def _dynamic_needed_libs(binary: Path) -> list[str]:
+    """The `DT_NEEDED` entries in `binary`'s own `.dynamic` section, in
+    file order -- the same table `auditwheel` reads off a wheel's `.so`
+    files to decide what needs vendoring, read here with `pyelftools`
+    (already a dependency, D12) instead of shelling out to a tool that
+    only accepts `.whl` files.
+
+    `[]` for a statically-linked binary (`mipsel`'s `-static` link, or any
+    future one): a static binary carries no `.dynamic` section at all,
+    which is a legitimate, fully-portable case rather than a read
+    failure -- nothing to repair. `ELFError` is swallowed for the same
+    reason `_required_glibc()` swallows it: this check runs after
+    `verify_unix_output()` has already read a valid ELF header, so a
+    parse failure here would only ever be this function's own bug, not a
+    build outcome worth surfacing as one.
+    """
+    from elftools.common.exceptions import ELFError
+    from elftools.elf.dynamic import DynamicSection
+    from elftools.elf.elffile import ELFFile
+
+    try:
+        with binary.open("rb") as handle:
+            elf = ELFFile(handle)
+            dynamic = elf.get_section_by_name(".dynamic")
+            if not isinstance(dynamic, DynamicSection):
+                return []
+            return [
+                tag.needed
+                for tag in dynamic.iter_tags()
+                if tag.entry.d_tag == "DT_NEEDED"
+            ]
+    except ELFError:
+        return []
+
+
+def _non_baseline_needed_libs(target: str, binary: Path) -> list[str]:
+    floor, _arch = _split_target(target)
+    baseline = _baseline_libs(floor)
+    return [name for name in _dynamic_needed_libs(binary) if name not in baseline]
+
+
+def repair_unix_binary(
+    target: str,
+    binary: Path,
+    *,
+    docker_image: str,
+    oci_platform: str | None,
+    linux32: bool,
+    timeout: float | None,
+    mounts: list[Path],
+) -> None:
+    """`cibuildmp`'s own `auditwheel repair`, for the one artifact type
+    `auditwheel` cannot touch at all: a bare executable rather than a
+    wheel.
+
+    A no-op whenever `_non_baseline_needed_libs()` finds nothing -- the
+    common case (every arch but the one this was written for links
+    nothing outside the floor's own baseline once `libffi` is handled),
+    and the only case for a statically-linked target (`mipsel`), which
+    never reaches a `docker run` here at all.
+
+    Otherwise runs `ldd`/`patchelf` **inside `docker_image`**, the same
+    image `binary` was just built in -- not on the host, which is the
+    reason this exists: only the container's own dynamic linker can
+    resolve where `libffi.so.6` (or whatever else shows up here in the
+    future) actually lives, and only that container is guaranteed to
+    carry `patchelf` at all. Both tools are already present in every
+    `pypa/manylinux*`/`pypa/musllinux*` base image without cibuildmp (or
+    cibuildwheel, whose own default `repair-wheel-command` is bare
+    `auditwheel repair -w {dest_dir} {wheel}`, installing neither tool
+    itself anywhere in its own source) ever installing either -- verified
+    by that absence, not assumed.
+
+    For each non-baseline `DT_NEEDED` name: resolve it with `ldd` (the
+    same resolution the dynamic linker itself would do at container run
+    time, so this cannot disagree with what the binary actually loads),
+    copy the real file it points at into a `lib/` directory next to
+    `binary`, then `patchelf --set-rpath '$ORIGIN/lib'` the binary once,
+    after every copy. `$ORIGIN` is `patchelf`'s/the ELF loader's own
+    runtime token (resolved relative to the *binary's* own location at
+    load time), not a shell variable -- single-quoted here so bash never
+    touches it.
+
+    `binary`'s own directory is always part of `mounts` already (it sits
+    under `opts.build_dir`, itself under the mounted `mpy_dir`), so the
+    `lib/` directory this writes lands on the host for free, the same way
+    the binary itself already does -- no separate copy-out step, no new
+    mount.
+    """
+    needed = _non_baseline_needed_libs(target, binary)
+    if not needed:
+        return
+
+    from ... import dockerrun
+
+    lib_dir = binary.parent / "lib"
+    bin_q = shlex.quote(binary.as_posix())
+    lib_dir_q = shlex.quote(lib_dir.as_posix())
+    libs_q = " ".join(shlex.quote(name) for name in needed)
+    script = f"""set -eux
+mkdir -p {lib_dir_q}
+for lib in {libs_q}; do
+    src=$(ldd {bin_q} | awk -v want="$lib" '$1 == want {{ print $3; exit }}')
+    if [ -z "$src" ] || [ ! -e "$src" ]; then
+        echo "repair: ldd could not resolve $lib for {bin_q}" >&2
+        exit 1
+    fi
+    cp -L "$src" {lib_dir_q}/"$lib"
+done
+patchelf --set-rpath '$ORIGIN/lib' {bin_q}
+"""
+    dockerrun.run(
+        ["bash", "-c", script],
+        mounts=mounts,
+        workdir=binary.parent,
+        image=docker_image,
+        timeout=timeout,
+        oci_platform=oci_platform,
+        linux32=linux32,
+    )
 
 
 def verify_unix_floor(target: str, binary: Path) -> None:
@@ -581,6 +766,17 @@ def build_unix(
     passes them uniformly); neither is used on this Docker-only path.
     `package_dir`, when given, is bind-mounted alongside `USER_C_MODULES`
     itself -- see `build_common.usermod_mounts()`'s own docstring for why.
+
+    One more step runs after both verifications pass:
+    `repair_unix_binary()` vendors any shared library the binary needs
+    that is not part of its own floor's baseline (`libffi` being the one
+    found so far) into a `lib/` directory beside it and points the binary
+    at that directory with `patchelf --set-rpath` -- this project's own
+    `auditwheel repair`, for the one artifact type `auditwheel` itself
+    cannot touch. See that function's own docstring for the full
+    reasoning; a no-op for every target that needs nothing repaired,
+    which today is every architecture except the dynamically-linked ones
+    that pull in `libffi`.
     """
     from ... import dockerrun
 
@@ -605,7 +801,9 @@ def build_unix(
     timeout = dockerrun.timeout_for("unix", opts.target)
 
     if unix_arch_settings(opts.target).standalone:
-        run_unix_deplibs(opts, mpy_dir, docker_image=docker_image, package_dir=package_dir)
+        run_unix_deplibs(
+            opts, mpy_dir, docker_image=docker_image, package_dir=package_dir
+        )
 
     mpy_cross = build_common.container_mpy_cross(
         mpy_dir,
@@ -618,7 +816,9 @@ def build_unix(
     command = unix_make_command(opts, mpy_dir, mpy_cross=mpy_cross)
     dockerrun.run(
         command,
-        mounts=usermod_mounts(mpy_dir, Path(opts.user_c_modules), package_dir=package_dir),
+        mounts=usermod_mounts(
+            mpy_dir, Path(opts.user_c_modules), package_dir=package_dir
+        ),
         workdir=_unix_dir(mpy_dir),
         image=docker_image,
         timeout=timeout,
@@ -633,4 +833,15 @@ def build_unix(
         )
     verify_unix_output(opts.target, binary)
     verify_unix_floor(opts.target, binary)
+    repair_unix_binary(
+        opts.target,
+        binary,
+        docker_image=docker_image,
+        oci_platform=oci_platform,
+        linux32=linux32,
+        timeout=timeout,
+        mounts=usermod_mounts(
+            mpy_dir, Path(opts.user_c_modules), package_dir=package_dir
+        ),
+    )
     return binary

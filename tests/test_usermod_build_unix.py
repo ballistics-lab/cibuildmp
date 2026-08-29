@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,9 @@ from cibuildmp.platforms.usermod.build_common import UsermodBuildError
 from cibuildmp.platforms.usermod.build_unix import (
     UNIX_ARCH_SETTINGS,
     UnixBuildOptions,
+    _dynamic_needed_libs,
+    _non_baseline_needed_libs,
+    repair_unix_binary,
     run_unix_deplibs,
     unix_make_command,
 )
@@ -409,3 +413,157 @@ def test_musl_aarch64_carries_both_rules_at_once():
 
 def test_a_cell_needing_nothing_gets_nothing():
     assert build_unix.unix_extra_cflags("manylinux_2_28_x86_64") == ()
+
+
+# ── the repair step (this project's own `auditwheel repair`) ───────────
+
+
+def test_dynamic_needed_libs_reads_a_real_elf(tmp_path):
+    # A real, plain-dynamic gcc output always needs at least libc -- no
+    # need to link anything exotic in to prove DT_NEEDED parses at all.
+    src = tmp_path / "t.c"
+    src.write_text("int main(void) { return 0; }\n")
+    binary = tmp_path / "t"
+    subprocess.run(["gcc", "-o", str(binary), str(src)], check=True)
+
+    assert "libc.so.6" in _dynamic_needed_libs(binary)
+
+
+def test_dynamic_needed_libs_empty_for_a_header_only_stub():
+    # fake_elf() is exactly what verify_unix_output()'s own tests build:
+    # a 20-byte header with no section table at all. A static real build
+    # (mipsel) reaches the same outcome for a different reason -- no
+    # `.dynamic` section either -- so both share this expectation.
+    assert _dynamic_needed_libs(Path("/dev/null")) == []
+
+
+def test_non_baseline_filters_manylinux_whitelist(monkeypatch):
+    monkeypatch.setattr(
+        "cibuildmp.platforms.usermod.build_unix._dynamic_needed_libs",
+        lambda binary: ["libc.so.6", "libz.so.1", "libffi.so.6", "libm.so.6"],
+    )
+    assert _non_baseline_needed_libs("manylinux_2_28_x86_64", Path("/x")) == [
+        "libffi.so.6"
+    ]
+
+
+def test_non_baseline_filters_musllinux_whitelist(monkeypatch):
+    # musl's own baseline is far narrower than glibc's -- libm is *not*
+    # in it, unlike manylinux's, so the same DT_NEEDED list produces a
+    # different (larger) non-baseline result here.
+    monkeypatch.setattr(
+        "cibuildmp.platforms.usermod.build_unix._dynamic_needed_libs",
+        lambda binary: ["libc.so", "libz.so.1", "libffi.so.6", "libm.so"],
+    )
+    assert _non_baseline_needed_libs("musllinux_1_2_x86_64", Path("/x")) == [
+        "libffi.so.6",
+        "libm.so",
+    ]
+
+
+def test_non_baseline_empty_when_nothing_needed(monkeypatch):
+    monkeypatch.setattr(
+        "cibuildmp.platforms.usermod.build_unix._dynamic_needed_libs",
+        lambda binary: ["libc.so.6"],
+    )
+    assert _non_baseline_needed_libs("manylinux_2_28_x86_64", Path("/x")) == []
+
+
+def test_repair_is_a_noop_when_nothing_non_baseline(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "cibuildmp.platforms.usermod.build_unix._non_baseline_needed_libs",
+        lambda target, binary: [],
+    )
+    calls = []
+    monkeypatch.setattr(
+        "cibuildmp.dockerrun.subprocess.run", lambda *a, **k: calls.append(a)
+    )
+
+    repair_unix_binary(
+        "manylinux_2_28_x86_64",
+        tmp_path / "micropython",
+        docker_image=_FAKE_UNIX_IMAGE,
+        oci_platform=None,
+        linux32=False,
+        timeout=None,
+        mounts=[tmp_path],
+    )
+
+    assert calls == []
+
+
+def test_repair_runs_ldd_and_patchelf_inside_the_container(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "cibuildmp.platforms.usermod.build_unix._non_baseline_needed_libs",
+        lambda target, binary: ["libffi.so.6"],
+    )
+    calls = []
+    monkeypatch.setattr(
+        "cibuildmp.dockerrun.subprocess.run",
+        lambda cmd, **k: calls.append(cmd),
+    )
+    binary = tmp_path / "build-manylinux_2_28_x86_64" / "micropython"
+
+    repair_unix_binary(
+        "manylinux_2_28_x86_64",
+        binary,
+        docker_image=_FAKE_UNIX_IMAGE,
+        oci_platform="linux/amd64",
+        linux32=False,
+        timeout=30,
+        mounts=[tmp_path],
+    )
+
+    assert len(calls) == 1
+    docker_command = calls[0]
+    assert docker_command[0] == "docker"
+    assert _FAKE_UNIX_IMAGE in docker_command
+    script = docker_command[-1]
+    assert "ldd" in script
+    assert "libffi.so.6" in script
+    # $ORIGIN is patchelf's/the loader's own runtime token, not a shell
+    # variable -- it must reach the container single-quoted, unexpanded.
+    assert "patchelf --set-rpath '$ORIGIN/lib'" in script
+    assert str(binary) in script
+
+
+def test_build_unix_calls_repair_when_libffi_is_needed(monkeypatch, tmp_path):
+    _mock_unix_image(monkeypatch)
+    monkeypatch.setattr(
+        "cibuildmp.platforms.usermod.build_unix._non_baseline_needed_libs",
+        lambda target, binary: ["libffi.so.6"],
+    )
+    calls = []
+    monkeypatch.setattr(
+        "cibuildmp.dockerrun.subprocess.run",
+        lambda cmd, **k: calls.append(cmd),
+    )
+    build_dir = tmp_path / "build-x86_64"
+    build_dir.mkdir()
+    (build_dir / "micropython").write_bytes(fake_elf())
+
+    build_unix_fn(opts(build_dir=build_dir), tmp_path / "mpy")
+
+    # One dockerrun.run() call for the main build, one for the repair --
+    # only the second one runs patchelf.
+    assert len(calls) == 2
+    assert "patchelf" in calls[1][-1]
+
+
+def test_build_unix_skips_repair_when_nothing_non_baseline(monkeypatch, tmp_path):
+    # The everyday path: fake_elf()'s header-only stub has no `.dynamic`
+    # section at all, so _non_baseline_needed_libs() (unmocked here) finds
+    # nothing and repair_unix_binary() never reaches a docker run.
+    _mock_unix_image(monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        "cibuildmp.dockerrun.subprocess.run",
+        lambda cmd, **k: calls.append(cmd),
+    )
+    build_dir = tmp_path / "build-x86_64"
+    build_dir.mkdir()
+    (build_dir / "micropython").write_bytes(fake_elf())
+
+    build_unix_fn(opts(build_dir=build_dir), tmp_path / "mpy")
+
+    assert len(calls) == 1
