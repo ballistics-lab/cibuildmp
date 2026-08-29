@@ -158,6 +158,39 @@ not), and `if-no-files-found` changed to `error` -- so the same class of bug
 would now fail the step loudly instead of a report silently going missing behind
 a green check.
 
+## Addendum, 2026-08-29 (second) — moving `env:` to job level was not the fix
+
+The very next real run (33246930962) still found zero reports -- this time loudly,
+`if-no-files-found: error` doing exactly what it was changed to do, cancelled by
+the user mid-run once enough buckets had gone red to look like a real regression.
+But this run's own logs settle the previous addendum's own theory for real,
+rather than leaving it argued from GitHub's general documented behaviour: the
+`Run cibuildmp` step's own resolved `env:` block, printed in the log, lists
+`CIBMP_REPORT_PATH: /home/runner/work/cibuildmp/cibuildmp/.cibmp-report` right
+there next to the job-level `CIBMP_VERSION`/`CIBMP_DISABLE_GITHUB_STEP_SUMMARY` --
+job-level `env:` does reach a composite action's own inner steps, confirmed
+directly rather than assumed. The previous addendum's fix was real (job-level
+`env:` is the correct, guaranteed-reliable place for these three vars regardless)
+but it was not addressing the actual cause of the missing reports, which survived
+it unchanged.
+
+The real cause was sitting in the very same "Upload report" step's own resolved
+inputs, printed in the exact same log: `include-hidden-files: false`, right next
+to `path: .cibmp-report/*.json`. `actions/upload-artifact@v7` excludes every file
+under a dot-prefixed path segment by default, *regardless of whether the `path:`
+glob names that segment explicitly* -- `.cibmp-report` is a hidden directory by
+that rule, so nothing under it was ever eligible for upload, on any of the twenty
+buckets, in either run. Every build really had succeeded (both runs' own logs
+show real "N target(s) built" lines with real byte sizes); the report file really
+was written, at exactly the path `CIBMP_REPORT_PATH` named -- it just could never
+leave the runner.
+
+Fixed by dropping the leading dot: `CIBMP_REPORT_PATH`/`path:` both renamed
+`cibmp-report` (no longer hidden), rather than reaching for
+`include-hidden-files: true` -- fewer surprises from anything else in this
+project's own tooling (`.gitignore`, an editor, a future `find`) that also treats
+a dot-prefixed path specially.
+
 [0044]: 0044-unix-native-images-landed.md
 [0058]: 0058-image-groups-are-toolchains-not-ports.md
 [0062]: 0062-test-platforms-per-port-orchestrator.md

@@ -83,23 +83,23 @@ jobs:
     # red, which is exactly what `--keep-going`'s own report exists to
     # make unnecessary.
     continue-on-error: true
-    # Job-level, not set on the `uses: ./` step itself -- live-caught: a
-    # composite action's own inner steps do not reliably inherit `env:`
-    # declared on the *calling* step (only job/workflow-level `env:` is
-    # guaranteed to reach them), so `CIBMP_REPORT_PATH` set there never
-    # reached `report.write_report()` at all -- every bucket's own build
-    # still succeeded, just wrote its report to the CLI's own default
-    # location (`cache_root()/reports`, this job's cache, thrown away
-    # when the runner is), and "Upload report" below warned "No files
-    # were found" on every single job, every one silently swallowed by
-    # `if-no-files-found: warn` -- a whole run's worth of green checks
-    # and zero uploaded artifacts.
+    # Job-level, not set on the `uses: ./` step itself -- a composite
+    # action's own inner steps are only guaranteed to see `env:` declared
+    # at job/workflow level, not on the specific step that calls `uses:`.
     env:
       CIBMP_VERSION: 0.0.0-ci
       # Every bucket writes into the same job's own workspace-relative
       # path -- fine, since each bucket is a separate job/runner/
-      # checkout; nothing shares this directory across buckets.
-      CIBMP_REPORT_PATH: ${{ github.workspace }}/.cibmp-report
+      # checkout; nothing shares this directory across buckets. No
+      # leading dot -- live-caught: `actions/upload-artifact@v7` defaults
+      # `include-hidden-files` to `false`, which excludes every file
+      # under a dot-prefixed directory regardless of the `path:` glob
+      # naming it explicitly (confirmed directly from a real run's own
+      # resolved step inputs: `include-hidden-files: false` printed right
+      # next to `path: .cibmp-report/*.json`) -- every bucket's own build
+      # was genuinely successful, and every "Upload report" step still
+      # found nothing to upload.
+      CIBMP_REPORT_PATH: ${{ github.workspace }}/cibmp-report
       # Disables cibuildmp's own native per-target GitHub step summary
       # (stepsummary.py) -- every bucket writing its own table would
       # bury aggregate-results's own single combined one.
@@ -130,6 +130,6 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: report-${{ inputs.label }}
-          path: .cibmp-report/*.json
+          path: cibmp-report/*.json
           retention-days: 1
           if-no-files-found: error
