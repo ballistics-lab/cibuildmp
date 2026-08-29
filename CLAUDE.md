@@ -53,16 +53,28 @@ questions in [docs/reference/open-questions.md](docs/reference/open-questions.md
 is a decision history, so keep them current with *what is true today* rather than appending
 to them.
 
-**What is currently being worked on is not listed here — read the tracker.** Its
-"In progress / Proposed" section is the only maintained answer: right now that's [0022]
-(zephyr, plus the unstarted `rp2` usermod build driver), [0028] (`esp32.Dockerfile` still
-not started — no Docker path for that port at all), [0031] (the musllinux half of the unix
-libc axis, now folded under [0043]), [0038] (two open M5 cleanup items), and [0040]
-(the usermod
-test-runner axis, not scheduled). "Implemented" below it is everything already landed —
-including [0008], whose only unfinished aside (reserving the PyPI name) was never
-committed follow-up work, just a "worth doing" note in the decision's own text. A summary
-duplicated into this file would go stale within a session or two — don't add one here.
+**What is currently being worked on is not listed here — read the tracker, every time,
+not this file's memory of it.** Its "In progress / Proposed" section is the only
+maintained answer. This exact sentence went stale once already: an earlier version of
+this file named [0028] ("`esp32.Dockerfile` still not started — no Docker path for that
+port at all") and [0022] ("unstarted `rp2` usermod build driver") as open, weeks after
+[0028] and [0060] had both actually closed — and an agent trusting that claim over the
+tracker is what caused real, user-visible confusion in a consuming repo's own migration
+work. A summary duplicated into this file would go stale within a session or two — don't
+add one here, and don't trust one you find here either if it ever creeps back in;
+`docs/0000-TRACKER.md`'s own "Implemented" vs "In progress / Proposed" split, not this
+file's prose, is the only claim about current status worth acting on.
+
+**The tracker is the only status source that self-corrects; narrative docs (`README.md`,
+docstrings, this file) do not.** Closing a record updates the tracker's own row and the
+record's own `Status:` line — nothing about that process touches `README.md`'s prose
+automatically. A closed record can leave a README paragraph describing the state it just
+superseded (e.g. [0028]/[0060] making an old "`esp32`/`rp2` not wired into `action.yml`
+yet" sentence false the moment they landed) sitting there, unrevised, for however long
+until someone reads it at face value and repeats the stale claim downstream. When closing
+a record, grep `README.md` (and any other narrative doc) for text describing the
+pre-record state and fix it in the same session — don't leave that for whoever reads that
+paragraph next to discover the hard way.
 
 From there, drill down rather than infer:
 
