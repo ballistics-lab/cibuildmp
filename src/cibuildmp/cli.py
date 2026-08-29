@@ -163,7 +163,8 @@ def _validate_top_level_tables(raw: dict) -> None:
             "scope now, selected purely by build/skip glob-matching its own "
             "real identifiers (see the README for the full identifier list). "
             "Move any module-dir/user-c-modules/manifest/extra-make-args/"
-            "make-target/pre-build-command/arch-flags value to the top level "
+            "extra-cmake-args/make-target/pre-build-command/arch-flags value "
+            "to the top level "
             "(or [usermod] for a usermod-wide default), and narrow with "
             'build/skip (e.g. build = "*-x64") or [override."<glob>"] '
             "instead."

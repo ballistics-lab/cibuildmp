@@ -50,6 +50,7 @@ class Rp2BuildOptions:
     frozen_manifest: str
     board: str = "PICO"
     extra_make_args: tuple[str, ...] = ()
+    extra_cmake_args: tuple[str, ...] = ()
 
 
 def rp2_make_command(
@@ -135,11 +136,14 @@ def build_rp2(
         # the bare `.cmake` file) -- see that function's own comment for
         # the sibling-manifest bug this avoids. `package_dir`, when given,
         # is appended on top -- see `build_common.usermod_mounts()`.
-        mounts=usermod_mounts(mpy_dir, Path(opts.user_c_modules).parent, package_dir=package_dir),
+        mounts=usermod_mounts(
+            mpy_dir, Path(opts.user_c_modules).parent, package_dir=package_dir
+        ),
         workdir=rp2_dir,
         image=docker_image,
         timeout=timeout,
         oci_platform=oci_platform,
+        env=build_common.cmake_extra_args_env(opts.extra_cmake_args, var="CMAKE_ARGS"),
     )
 
     firmware = rp2_dir / f"build-{opts.board}" / "firmware.uf2"

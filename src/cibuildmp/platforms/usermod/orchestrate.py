@@ -124,6 +124,7 @@ def _port_build_options(
         frozen_manifest = manifest_path.as_posix()
 
     extra_make_args = tuple(build_options.extra_make_args)
+    extra_cmake_args = tuple(build_options.extra_cmake_args)
 
     if port == "unix":
         return UnixBuildOptions(
@@ -183,6 +184,7 @@ def _port_build_options(
             frozen_manifest=frozen_manifest,
             board=target.arch,
             extra_make_args=extra_make_args,
+            extra_cmake_args=extra_cmake_args,
             **idf_kwargs,
         )
     if port == "rp2":
@@ -194,6 +196,7 @@ def _port_build_options(
             frozen_manifest=frozen_manifest,
             board=target.arch or "PICO",
             extra_make_args=extra_make_args,
+            extra_cmake_args=extra_cmake_args,
         )
     raise UsermodBuildError(f"no build_options builder wired for port {port!r}")
 

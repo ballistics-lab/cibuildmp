@@ -89,6 +89,46 @@ def usermod_mounts(
     return mounts
 
 
+def cmake_extra_args_env(
+    extra_cmake_args: tuple[str, ...], *, var: str
+) -> dict[str, str]:
+    """`extra-cmake-args` -> the one `dockerrun.run()` `env={...}` entry
+    that actually reaches a CMake-driven port's own build, for the two
+    usermod ports whose own Makefile wraps `cmake`/`idf.py` rather than
+    calling either directly: `rp2` (`var="CMAKE_ARGS"`) and `esp32`
+    (`var="IDFPY_FLAGS"`, ESP-IDF's own name for the same idea).
+
+    Not a plain `extra_make_args`-style command-line token, on purpose.
+    Both ports' own Makefiles build that variable with a plain `+=`
+    (`ports/rp2/Makefile`: `CMAKE_ARGS += -DMICROPY_BOARD=...`;
+    `ports/esp32/Makefile`: `IDFPY_FLAGS += -D MICROPY_BOARD=... $(CMAKE_ARGS)`),
+    never resetting it first -- and GNU Make's own precedence
+    (command-line > makefile assignment > environment) means a
+    command-line `make CMAKE_ARGS=-Dfoo=1` is not an *append*, whatever
+    operator the makefile itself later uses on it: verified live, twice
+    (`make CMAKE_ARGS=...` and even `make CMAKE_ARGS+=...` both replace
+    the makefile's own `-DMICROPY_BOARD=...`/`-DUSER_C_MODULES=...`
+    entirely, leaving only the command-line value). An **environment**
+    variable of the same name sits one precedence tier below a makefile's
+    own assignment, so the makefile's `+=` treats it as the *starting*
+    value and appends its own required flags on top -- confirmed the same
+    way, `CMAKE_ARGS=-Dfoo=1 make` keeps every flag the makefile itself
+    still adds. `dockerrun.run()`'s own `env=` becomes `-e KEY=VALUE` on
+    the `docker run` invocation, landing in the container's process
+    environment before the script or `make` call inside it ever runs --
+    exactly this tier.
+
+    `{}` (no entry at all) when `extra_cmake_args` is empty, rather than
+    an explicit `{var: ""}`: harmless either way (an empty environment
+    value behaves like unset for a `+=`-only variable), but an absent key
+    keeps a caller's own `dockerrun.run(..., env=...)` call sites free of
+    a no-op entry when nobody configured anything.
+    """
+    if not extra_cmake_args:
+        return {}
+    return {var: " ".join(extra_cmake_args)}
+
+
 def container_mpy_cross(
     mpy_dir: Path,
     *,

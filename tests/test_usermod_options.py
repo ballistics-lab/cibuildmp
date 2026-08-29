@@ -234,6 +234,52 @@ def test_extra_make_args_shared_across_targets(tmp_path):
     assert build_options.extra_make_args == ["DEBUG=1"]
 
 
+def test_extra_cmake_args_defaults_to_empty(tmp_path):
+    write_config(tmp_path, 'build = "v1.29.0-manylinux_2_28_x86_64"\n')
+    options = UsermodOptions.load(tmp_path)
+    build_options = options.build_options(options.targets()[0])
+
+    assert build_options.extra_cmake_args == []
+
+
+def test_extra_cmake_args_shared_across_targets(tmp_path):
+    # Meaningless to unix (a Make port with no CMake in the loop at all),
+    # but resolves the same way extra-make-args does regardless of which
+    # port ends up reading it -- only rp2/esp32's own build_<port>()
+    # functions actually consume it.
+    write_config(
+        tmp_path,
+        """
+        extra-cmake-args = ["-DMICROPY_C_HEAP_SIZE=131072"]
+        build = "v1.29.0-rp2-RPI_PICO"
+        """,
+    )
+    options = UsermodOptions.load(tmp_path)
+    build_options = options.build_options(options.targets()[0])
+
+    assert build_options.extra_cmake_args == ["-DMICROPY_C_HEAP_SIZE=131072"]
+
+
+def test_extra_cmake_args_via_override(tmp_path):
+    write_config(
+        tmp_path,
+        """
+        build = "v1.29.0-rp2-RPI_PICO v1.29.0-esp32-ESP32_GENERIC"
+
+        [override."*-rp2-*"]
+        extra-cmake-args = ["-DMICROPY_C_HEAP_SIZE=131072"]
+        """,
+    )
+    options = UsermodOptions.load(tmp_path)
+    by_identifier = {
+        t.identifier: options.build_options(t).extra_cmake_args
+        for t in options.targets()
+    }
+
+    assert by_identifier["v1.29.0-rp2-RPI_PICO"] == ["-DMICROPY_C_HEAP_SIZE=131072"]
+    assert by_identifier["v1.29.0-esp32-ESP32_GENERIC"] == []
+
+
 # ── record 0048: where build/skip live, and typos ────────────────────────
 
 

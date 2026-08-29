@@ -113,7 +113,7 @@ NATMOD_OVERRIDE_OPTION_KEYS: frozenset[str] = frozenset(
 # already makes between NATMOD_ARCH_NATIVE_CODE and NATIVE_ARCH_CODE, two
 # separately-named constants built from the same data for two call sites.
 _USERMOD_OVERRIDE_OPTION_KEYS_MIRROR: frozenset[str] = frozenset(
-    {"user-c-modules", "manifest", "extra-make-args"}
+    {"user-c-modules", "manifest", "extra-make-args", "extra-cmake-args"}
 )
 
 _OVERRIDE_META_KEYS: frozenset[str] = frozenset({"select", "inherit"})

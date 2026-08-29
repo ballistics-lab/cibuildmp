@@ -183,3 +183,49 @@ def test_esp32_custom_board_and_target():
     )
 
     assert "BOARD=ESP32S3_GENERIC" in command
+
+
+def test_esp32_extra_cmake_args_reach_the_container_as_idfpy_flags(
+    monkeypatch, tmp_path
+):
+    # Not a make command-line token (unlike extra_make_args): ported
+    # through the container's own environment instead, since
+    # ports/esp32/Makefile builds IDFPY_FLAGS with a plain `+=` that a
+    # command-line assignment would replace rather than add to -- see
+    # build_common.cmake_extra_args_env()'s own docstring.
+    _mock_esp32_image(monkeypatch)
+    build_dir = tmp_path / "mpy" / "ports" / "esp32" / "build-ESP32_GENERIC"
+    build_dir.mkdir(parents=True)
+    (build_dir / "micropython.bin").write_bytes(b"")
+
+    calls = []
+    monkeypatch.setattr(
+        "cibuildmp.dockerrun.subprocess.run",
+        lambda cmd, **k: calls.append(cmd) or None,
+    )
+
+    build_esp32(
+        esp32_opts(extra_cmake_args=("-DMICROPY_C_HEAP_SIZE=131072",)),
+        tmp_path / "mpy",
+        toolchain_root=tmp_path / "cache",
+    )
+
+    docker_command = calls[0]
+    assert "IDFPY_FLAGS=-DMICROPY_C_HEAP_SIZE=131072" in docker_command
+
+
+def test_esp32_no_extra_cmake_args_means_no_idfpy_flags_env(monkeypatch, tmp_path):
+    _mock_esp32_image(monkeypatch)
+    build_dir = tmp_path / "mpy" / "ports" / "esp32" / "build-ESP32_GENERIC"
+    build_dir.mkdir(parents=True)
+    (build_dir / "micropython.bin").write_bytes(b"")
+
+    calls = []
+    monkeypatch.setattr(
+        "cibuildmp.dockerrun.subprocess.run",
+        lambda cmd, **k: calls.append(cmd) or None,
+    )
+
+    build_esp32(esp32_opts(), tmp_path / "mpy", toolchain_root=tmp_path / "cache")
+
+    assert not any(arg.startswith("IDFPY_FLAGS=") for arg in calls[0])

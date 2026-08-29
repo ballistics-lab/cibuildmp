@@ -100,7 +100,7 @@ DEFAULT_USER_C_MODULES = "."
 # literal Makefile variable it feeds, the same principle `extra-make-args`
 # already follows.
 USERMOD_PORT_BASE: frozenset[str] = frozenset(
-    {"user-c-modules", "manifest", "extra-make-args"}
+    {"user-c-modules", "manifest", "extra-make-args", "extra-cmake-args"}
 )
 
 # `USERMOD_ONLY_GENERIC_KEYS`'s own counterpart to `user-c-modules`/
@@ -113,7 +113,9 @@ USERMOD_PORT_BASE: frozenset[str] = frozenset(
 # `skip` do not need an entry here -- they are already in the shared
 # `GENERIC_KEYS`, being real, identically-named, identically-meant keys on
 # both sides.
-USERMOD_ONLY_GENERIC_KEYS: frozenset[str] = frozenset({"user-c-modules", "manifest"})
+USERMOD_ONLY_GENERIC_KEYS: frozenset[str] = frozenset(
+    {"user-c-modules", "manifest", "extra-cmake-args"}
+)
 
 # `[usermod]` (the family table) carries `user-c-modules`/`manifest`/
 # `extra-make-args`/`build`/`skip` as shared defaults for every port at
@@ -176,8 +178,8 @@ def check_usermod_family_table(
             "is always in scope now -- there is no [unix]/[esp32]/etc. "
             "table to select one, and no port list to write here either. "
             "[usermod] itself only holds shared defaults (build/skip, "
-            "user-c-modules/manifest/extra-make-args) for every port at "
-            "once; narrow which targets actually build with a build/skip "
+            "user-c-modules/manifest/extra-make-args/extra-cmake-args) for "
+            "every port at once; narrow which targets actually build with a build/skip "
             'glob (e.g. build = "*manylinux*") or an '
             '[override."<glob>"] entry.'
         )
@@ -227,6 +229,13 @@ class UsermodBuildOptions:
     user_c_modules: str
     manifest: str
     extra_make_args: list[str] = field(default_factory=list)
+    # CMake-only, unlike extra_make_args above: no `[esp32]`/`[rp2]` table
+    # exists to scope it, so it resolves through the same generic/override
+    # cascade and is simply ignored by the four Make ports (unix, windows,
+    # webassembly, qemu) -- their own build_<port>() functions never read
+    # it. See build_common.cmake_extra_args_env() for why this can't just
+    # ride the make command line the way extra_make_args does.
+    extra_cmake_args: list[str] = field(default_factory=list)
 
     @property
     def identifier(self) -> str:
@@ -554,4 +563,7 @@ class UsermodOptions:
             user_c_modules=str(opt("user-c-modules", DEFAULT_USER_C_MODULES)),
             manifest=str(opt("manifest", "")),
             extra_make_args=_as_list_or_str(opt("extra-make-args"), "extra-make-args"),
+            extra_cmake_args=_as_list_or_str(
+                opt("extra-cmake-args"), "extra-cmake-args"
+            ),
         )

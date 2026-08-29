@@ -25,6 +25,7 @@ class Esp32BuildOptions:
     idf_target: str = "esp32"
     idf_version: str = "v5.5.1"
     extra_make_args: tuple[str, ...] = ()
+    extra_cmake_args: tuple[str, ...] = ()
 
 
 def esp32_make_command(
@@ -182,7 +183,9 @@ def build_esp32(
         # `package_dir`, when given, is appended on top -- see
         # `build_common.usermod_mounts()`.
         mounts=[
-            *usermod_mounts(mpy_dir, Path(opts.user_c_modules).parent, package_dir=package_dir),
+            *usermod_mounts(
+                mpy_dir, Path(opts.user_c_modules).parent, package_dir=package_dir
+            ),
             idf_dir,
             tools_dir,
         ],
@@ -190,6 +193,13 @@ def build_esp32(
         image=docker_image,
         timeout=timeout,
         oci_platform=oci_platform,
+        # ESP-IDF's own name for the same idea `rp2` calls CMAKE_ARGS --
+        # ports/esp32/Makefile: `IDFPY_FLAGS += -D MICROPY_BOARD=... $(CMAKE_ARGS)`,
+        # never reset first, so this reaches idf.py's own cmake invocation
+        # the same append-not-replace way. See
+        # `build_common.cmake_extra_args_env()`'s own docstring for why an
+        # environment variable, not a make command-line token.
+        env=build_common.cmake_extra_args_env(opts.extra_cmake_args, var="IDFPY_FLAGS"),
     )
 
     firmware = mpy_dir / "ports" / "esp32" / f"build-{opts.board}" / "micropython.bin"
