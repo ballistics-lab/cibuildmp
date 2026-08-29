@@ -537,7 +537,11 @@ def _dynamic_needed_libs(binary: Path) -> list[str]:
             if not isinstance(dynamic, DynamicSection):
                 return []
             return [
-                tag.needed
+                # DynamicTag.__init__ sets .needed via a runtime setattr()
+                # for DT_NEEDED specifically (pyelftools' own "_HANDLED_TAGS"
+                # convenience-attribute mechanism) -- real at runtime, just
+                # invisible to pyright's static analysis.
+                tag.needed  # pyright: ignore[reportAttributeAccessIssue]
                 for tag in dynamic.iter_tags()
                 if tag.entry.d_tag == "DT_NEEDED"
             ]
