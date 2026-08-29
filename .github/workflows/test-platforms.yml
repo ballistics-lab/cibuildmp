@@ -88,6 +88,22 @@ jobs:
     # at job/workflow level, not on the specific step that calls `uses:`.
     env:
       CIBMP_VERSION: 0.0.0-ci
+      # A real env var, not routed through the `skip:` input/`action.yml`'s
+      # own `[ -n "$ACTION_SKIP" ]` presence check -- that check can't tell
+      # "explicitly empty" from "not set", so an empty `inputs.skip` (this
+      # bucket needed no skip at all) makes `action.yml` omit `--skip` from
+      # the CLI entirely, letting `examples/template/cibuildmp.toml`'s own
+      # `skip = "*_ppc64le *_s390x *_riscv64"` silently re-apply and filter
+      # back out the exact identifiers this bucket was planned around --
+      # live-caught: three buckets made entirely of those suffixes (the
+      # surviving emulated unix cells) failed with "no targets selected"
+      # before `orchestrate.build()`/`build_all()` ever ran, so no report
+      # was written either (docs/records/0065, fourth addendum). Setting it
+      # here reaches `options.py`'s cascade directly as an explicit empty
+      # layer -- which does replace, per `resolve_cascade()`'s own
+      # None-means-unset docstring -- correctly overriding the config
+      # file's default regardless of what `inputs.skip` is.
+      CIBMP_SKIP: ""
       # Every bucket writes into the same job's own workspace-relative
       # path -- fine, since each bucket is a separate job/runner/
       # checkout; nothing shares this directory across buckets. No

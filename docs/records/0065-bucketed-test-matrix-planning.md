@@ -251,6 +251,60 @@ account's real limit ([0065]'s own "what is not decided here" already flags
 this). Whatever that real limit is, if it is below 20, some staggering on
 every run is a residual cost this change does not remove.
 
+## Addendum, 2026-08-29 (fourth) — the config's own default `skip` silently re-applies when `--skip` is omitted
+
+A later run (33249014504, same commit as the third addendum's re-plan)
+still came back with three buckets missing reports -- not all twenty, and
+not the same failure mode as either prior addendum: this time the "Build
+this bucket" step itself failed, in ~12-25 seconds, well before a real
+build could even start. All three (`amd64-14`, `amd64-15`, `amd64-16`) were
+buckets made entirely of pairs from the nine surviving emulated unix
+identifiers -- the exact class `_EMULATED_UNIX_WEIGHT` exists for. The job
+log gave the real cause directly:
+
+```
+ACTION_BUILD: v1.28.0-manylinux_2_28_ppc64le v1.29.0-musllinux_1_2_s390x
+ACTION_SKIP:
+ACTION_KEEP_GOING: 1
+##[endgroup]
+cibuildmp: error: no targets selected. Pass --allow-empty if that is expected.
+##[error]Process completed with exit code 2.
+```
+
+`examples/template/cibuildmp.toml` carries its own top-level `skip =
+"*_ppc64le *_s390x *_riscv64"` -- the exact suffixes these three buckets
+were built from. `action.yml`'s own script only appends `--skip
+"$ACTION_SKIP"` to the CLI when `[ -n "$ACTION_SKIP" ]`; for these three
+buckets `inputs.skip` was the empty-string default (`bin/plan_test_
+matrix.py` never emits a per-bucket `skip`, it pre-filters instead), so
+`--skip` was omitted from the CLI *entirely* -- not passed as `--skip ""`.
+That let the config file's own `skip` cascade layer apply unopposed
+(`options.py`'s `resolve_cascade()`: an *omitted* layer is `None` and is
+skipped, but this was never given the chance to be an omitted layer in the
+first place, since no `--skip` flag means the config layer is the only one
+present at all), filtering the exact identifiers `plan_test_matrix.py` had
+already selected right back out, down to zero. `cli.main()` raises before
+`orchestrate.build()`/`build_all()` is ever called, so `report.write_
+report()` never runs either -- zero report files, so "Upload report"
+failed too (loudly, `if-no-files-found: error`), which is why this looked
+like a missing-report bug and not a skip bug at first glance.
+
+The fix is not in `plan_test_matrix.py` or `action.yml` -- it is a real env
+var, `CIBMP_SKIP: ""`, added to `test-platforms.yml`'s own job-level
+`env:` block (alongside `CIBMP_VERSION`/`CIBMP_REPORT_PATH`/`CIBMP_
+DISABLE_GITHUB_STEP_SUMMARY`, for the same job-level-reaches-the-composite-
+action's-inner-steps reason the first addendum already established).
+Unlike `action.yml`'s own `[ -n ... ]` presence check, `options.py` reads
+`CIBMP_SKIP` via plain `os.environ.get()`, which does distinguish "unset"
+(`None`, cascade layer skipped) from "set to empty string" (a real,
+explicit value that replaces) -- confirmed directly from `resolve_
+cascade()`'s own docstring and `platforms/natmod/options.py`'s env-lookup
+line. Setting it unconditionally means every bucket's own explicit,
+already-filtered `build` selection is what actually decides what gets
+built, regardless of whether `inputs.skip` happens to be empty for that
+bucket -- the config file's own default skip no longer gets a chance to
+silently re-apply underneath it.
+
 [0044]: 0044-unix-native-images-landed.md
 [0058]: 0058-image-groups-are-toolchains-not-ports.md
 [0062]: 0062-test-platforms-per-port-orchestrator.md
