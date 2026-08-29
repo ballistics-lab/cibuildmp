@@ -118,7 +118,7 @@ def run_resolved(
 
     print(f"cibuildmp: {total} usermod target(s)")
     try:
-        results = orchestrate.build(options, targets)
+        results = orchestrate.build(options, targets, keep_going=args.keep_going)
     except BUILD_ERRORS as exc:
         if args.debug_traceback:
             raise
@@ -139,6 +139,17 @@ def run_resolved(
         overrides=options.overrides,
         override_error=UsermodConfigError,
     )
+    # Only reachable with fewer results than targets when args.keep_going
+    # let `orchestrate.build()` attempt every target instead of raising at
+    # the first failure (BUILD_ERRORS above would have caught that
+    # instead) -- see orchestrate.build()'s own keep_going docstring.
+    failed = total - len(results)
+    if failed:
+        print(
+            f"cibuildmp: {failed}/{total} target(s) failed -- see the report above",
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 

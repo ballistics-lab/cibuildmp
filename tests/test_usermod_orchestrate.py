@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -397,6 +398,100 @@ def test_build_groups_by_tag_and_fetches_once_per_group(tmp_path, monkeypatch):
     assert (
         len(output_dirs) == 2
     )  # two distinct directories, not one overwriting the other
+
+
+def test_build_keep_going_continues_past_a_failed_target(tmp_path, monkeypatch):
+    # qemu fails, unix still gets attempted and its result is still
+    # returned -- the default (fail-fast) would have stopped at whichever
+    # of the two `build_one()` calls ran first.
+    package_dir = tmp_path / "pkg"
+    make_module_dir(package_dir)
+    write_config(package_dir, "")
+    options = UsermodOptions.load(package_dir)
+    options.output_dir = tmp_path / "mpyhouse"
+
+    import cibuildmp.platforms.usermod.orchestrate as orchestrate_module
+
+    monkeypatch.setattr(
+        orchestrate_module.sources,
+        "fetch_micropython",
+        lambda tag, **k: tmp_path / "mpy",
+    )
+    monkeypatch.setattr(
+        orchestrate_module.sources, "build_mpy_cross", lambda d, **k: None
+    )
+
+    def fake_build_one(options, target, mpy_dir, **k):
+        if target.port == "qemu":
+            raise build_common.UsermodBuildError("simulated qemu failure")
+        identifier_dir = options.output_dir / target.identifier
+        identifier_dir.mkdir(parents=True, exist_ok=True)
+        produced = identifier_dir / "micropython"
+        produced.write_bytes(FAKE_X86_64_ELF)
+        return orchestrate_module.UsermodBuildResult(
+            identifier=target.identifier, output=produced, duration=0.1
+        )
+
+    monkeypatch.setattr(orchestrate_module, "build_one", fake_build_one)
+    monkeypatch.setenv("CIBMP_REPORT_PATH", str(tmp_path / "reports"))
+
+    targets = [
+        UsermodTarget(port="unix", arch="manylinux_2_28_x86_64", tag="v1.29.0"),
+        # No tag -- a hand-built UsermodTarget with a real tag must match a
+        # real (port, tag, arch) row (see .identifier's own docstring);
+        # "" is the plain, pre-0052 {port}-{arch} shape every build-
+        # mechanics test other than the real-row ones already uses.
+        UsermodTarget(port="qemu", arch=""),
+    ]
+
+    results = orchestrate_module.build(options, targets, keep_going=True)
+
+    assert [r.identifier for r in results] == ["v1.29.0-manylinux_2_28_x86_64"]
+
+    report_files = list((tmp_path / "reports").glob("*.json"))
+    assert len(report_files) == 1
+    payload = json.loads(report_files[0].read_text())
+    assert payload["built"] == 1
+    assert payload["failed"] == 1
+    failed = next(r for r in payload["results"] if r["error"])
+    assert "simulated qemu failure" in failed["error"]
+
+
+def test_build_without_keep_going_raises_but_still_writes_a_report(
+    tmp_path, monkeypatch
+):
+    package_dir = tmp_path / "pkg"
+    make_module_dir(package_dir)
+    write_config(package_dir, "")
+    options = UsermodOptions.load(package_dir)
+    options.output_dir = tmp_path / "mpyhouse"
+
+    import cibuildmp.platforms.usermod.orchestrate as orchestrate_module
+
+    monkeypatch.setattr(
+        orchestrate_module.sources,
+        "fetch_micropython",
+        lambda tag, **k: tmp_path / "mpy",
+    )
+
+    def fake_build_one(options, target, mpy_dir, **k):
+        raise build_common.UsermodBuildError("simulated failure")
+
+    monkeypatch.setattr(orchestrate_module, "build_one", fake_build_one)
+    monkeypatch.setenv("CIBMP_REPORT_PATH", str(tmp_path / "reports"))
+
+    targets = [UsermodTarget(port="unix", arch="manylinux_2_28_x86_64", tag="v1.29.0")]
+
+    with pytest.raises(build_common.UsermodBuildError):
+        orchestrate_module.build(options, targets)
+
+    # write_report() runs from the `finally` regardless of keep_going, so
+    # the one failure this raised on is still on record.
+    report_files = list((tmp_path / "reports").glob("*.json"))
+    assert len(report_files) == 1
+    payload = json.loads(report_files[0].read_text())
+    assert payload["failed"] == 1
+    assert payload["built"] == 0
 
 
 def test_build_one_resolves_relative_output_dir_against_package_dir(

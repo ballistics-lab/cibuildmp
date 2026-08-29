@@ -23,9 +23,11 @@ from __future__ import annotations
 import json
 import shutil
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
+from ... import report
 from ...sources import (
     SourceError,
     fetch_micropython,
@@ -56,7 +58,9 @@ def _plan_line(index: int, total: int, options: BuildOptions) -> str:
     return f"{counter} {options.target.identifier:<28} {' '.join(make)}"
 
 
-def build_all(options: Options, targets: list[Target]) -> int:
+def build_all(
+    options: Options, targets: list[Target], *, keep_going: bool = False
+) -> int:
     """Build every selected target in one invocation.
 
     Named `build_all` rather than the bare `build` this function had as
@@ -83,6 +87,20 @@ def build_all(options: Options, targets: list[Target]) -> int:
     ABI unless a config's own `build`/`skip` opens it up wider, but never
     fewer groups than the selection genuinely spans, and each needs its
     own checkout and its own mpy-cross.
+
+    `keep_going` ([0063]): False (the default) preserves this function's
+    original behaviour exactly -- a group's own SourceError (a bad fetch,
+    an ABI mismatch) or a target's own BuildError propagates straight out,
+    uncaught, to `run_resolved()`'s own catch, and nothing later is
+    attempted. True is a real, deliberate divergence from cibuildwheel
+    (checked live against a real 4.2.0 install, `platforms/linux.py`'s own
+    `build()`: it is unconditionally fail-fast too, with no keep-going
+    concept at all) -- added for a `--build` glob wide enough to span the
+    whole real matrix, where a coverage sweep needs every target's own
+    outcome, not just the first failure. Either way, every target actually
+    attempted -- success or failure -- lands in the JSON report this
+    function always writes (`report.write_report()`, in a `finally`)
+    before returning or letting the exception through.
     """
     resolved = [options.build_options(t) for t in targets]
     total = len(resolved)
@@ -131,58 +149,95 @@ def build_all(options: Options, targets: list[Target]) -> int:
             raise BuildError(f"extra-files entry not found: {extra}")
 
     results: list[BuildResult] = []
+    entries: list[report.ReportEntry] = []
     index = 0
     # Preserves first-appearance order (options.targets() emits one ABI
     # group at a time), not sorted -- a later tag never jumps ahead of an
     # earlier one just because it sorts first.
     build_tags = list(dict.fromkeys(bo.target.tag for bo in resolved))
-    for tag in build_tags:
-        group = [bo for bo in resolved if bo.target.tag == tag]
-        abi = group[0].target.abi  # one ABI per tag group, by construction
+    try:
+        for tag in build_tags:
+            group = [bo for bo in resolved if bo.target.tag == tag]
+            abi = group[0].target.abi  # one ABI per tag group, by construction
 
-        # Shared setup, paid once per ABI group rather than once per target
-        # in it -- see build()'s own docstring and D9.
-        print(f"\ncibuildmp: preparing MicroPython {tag}")
-        mpy_dir = fetch_micropython(tag, submodules=options.micropython_submodules)
-        # Any arch in this tag group's own image builds mpy-cross
-        # identically (see build_mpy_cross()'s own docstring -- it is a
-        # host tool, portable across every natmod toolchain-group image
-        # alike), so the first one picks which already-required image
-        # pays for it rather than pulling a fifth image just for this.
-        build_mpy_cross(mpy_dir, group[0].target.arch)
+            # Shared setup, paid once per ABI group rather than once per
+            # target in it -- see build()'s own docstring and D9.
+            print(f"\ncibuildmp: preparing MicroPython {tag}")
+            group_start = time.time()
+            try:
+                mpy_dir = fetch_micropython(
+                    tag, submodules=options.micropython_submodules
+                )
+                # Any arch in this tag group's own image builds mpy-cross
+                # identically (see build_mpy_cross()'s own docstring -- it
+                # is a host tool, portable across every natmod
+                # toolchain-group image alike), so the first one picks
+                # which already-required image pays for it rather than
+                # pulling a fifth image just for this.
+                build_mpy_cross(mpy_dir, group[0].target.arch)
 
-        # The checkout is authoritative about the ABI; targets.MPY_ABI's
-        # table (resources/build-platforms.toml, record 0052 Track C) is
-        # only a way to answer the question without one. A disagreement
-        # means the identifiers already printed are wrong, so it stops
-        # here rather than producing files labelled with an ABI they do
-        # not have.
-        actual_abi = read_mpy_abi(mpy_dir)
-        if actual_abi != abi:
-            raise SourceError(
-                f"MicroPython {tag} has .mpy ABI {actual_abi}, but the "
-                f"identifiers were built assuming {abi} -- refresh the stale "
-                f"entry with bin/refresh_natmod_archs.py {tag}."
-            )
+                # The checkout is authoritative about the ABI;
+                # targets.MPY_ABI's table (resources/build-platforms.toml,
+                # record 0052 Track C) is only a way to answer the
+                # question without one. A disagreement means the
+                # identifiers already printed are wrong, so it stops here
+                # rather than producing files labelled with an ABI they do
+                # not have.
+                actual_abi = read_mpy_abi(mpy_dir)
+                if actual_abi != abi:
+                    raise SourceError(
+                        f"MicroPython {tag} has .mpy ABI {actual_abi}, but the "
+                        f"identifiers were built assuming {abi} -- refresh the "
+                        f"stale entry with bin/refresh_natmod_archs.py {tag}."
+                    )
+            except BUILD_ERRORS as exc:
+                if not keep_going:
+                    raise
+                duration = time.time() - group_start
+                print(f"cibuildmp: error: {exc}", file=sys.stderr)
+                for build_options in group:
+                    index += 1
+                    entries.append(
+                        report.entry_for_error(build_options.identifier, duration, exc)
+                    )
+                continue
 
-        print(f"\ncibuildmp: building {len(group)} target(s) for MicroPython {tag}")
-        for build_options in group:
-            index += 1
-            print("\n  " + _plan_line(index, total, build_options))
-            module_root = options.package_dir / build_options.module_dir
-            output_dir = options.package_dir / build_options.output_dir
-            result = build_target(
-                build_options,
-                mpy_dir,
-                module_root,
-                output_dir,
-                package_dir=options.package_dir,
-                extra_files=extra_files,
-                name=options.name,
-                version=options.version,
-            )
-            results.append(result)
-            print(f"        done in {result.duration:.1f}s -> {result.output}")
+            print(f"\ncibuildmp: building {len(group)} target(s) for MicroPython {tag}")
+            for build_options in group:
+                index += 1
+                print("\n  " + _plan_line(index, total, build_options))
+                module_root = options.package_dir / build_options.module_dir
+                output_dir = options.package_dir / build_options.output_dir
+                start = time.time()
+                try:
+                    result = build_target(
+                        build_options,
+                        mpy_dir,
+                        module_root,
+                        output_dir,
+                        package_dir=options.package_dir,
+                        extra_files=extra_files,
+                        name=options.name,
+                        version=options.version,
+                    )
+                except BUILD_ERRORS as exc:
+                    duration = time.time() - start
+                    print(
+                        f"        FAILED after {duration:.1f}s: {exc}", file=sys.stderr
+                    )
+                    entries.append(
+                        report.entry_for_error(build_options.identifier, duration, exc)
+                    )
+                    if not keep_going:
+                        raise
+                    continue
+                results.append(result)
+                entries.append(report.entry_for_result(result))
+                print(f"        done in {result.duration:.1f}s -> {result.output}")
+    finally:
+        # Always, keep_going or not, fail-fast or not -- see the
+        # docstring's own keep_going paragraph.
+        report.write_report(entries, total_duration=sum(e.duration for e in entries))
 
     total_duration = sum(r.duration for r in results)
     print(f"\ncibuildmp: {total} target(s) built in {total_duration:.1f}s")
@@ -196,6 +251,14 @@ def build_all(options: Options, targets: list[Target]) -> int:
         overrides=options.overrides,
         override_error=ConfigError,
     )
+    failed = len(entries) - len(results)
+    if failed:
+        print(
+            f"cibuildmp: {failed}/{len(entries)} target(s) failed -- see the report "
+            "above",
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 
@@ -281,7 +344,7 @@ def run_resolved(args: Any, options: Options, targets: list[Target]) -> int:
         return 0
 
     try:
-        return build_all(options, targets)
+        return build_all(options, targets, keep_going=args.keep_going)
     except BUILD_ERRORS as exc:
         if args.debug_traceback:
             raise

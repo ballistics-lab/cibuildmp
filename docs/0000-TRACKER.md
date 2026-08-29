@@ -95,6 +95,20 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 - [ ] [0057] more than one module per build | **decided, both halves, and both are documentation rather than mechanism.** natmod: one config per module -- `examples/template` and `examples/wasm2mpy` already demonstrate it, and `collect_output()`'s two-`.mpy` refusal becomes the guard for a mis-scoped config. usermod: `user-c-modules` stays one path; N modules live in the consumer's own layout -- subdirectories on Make ports (`py/py.mk` globs `*/micropython.mk`), an aggregating `micropython.cmake` that `include()`s the others on CMake ports. No list, because the aggregator is the consumer's file rather than one cibuildmp generates ([0002]) and one key keeps one meaning ([0052]). The trap the docs must name: upstream's own `examples/usercmodule/micropython.cmake` lists only `cexample`/`cppexample`, so the same directory yields three modules on a Make port and two on a CMake one. [0054]'s fixture is what tests both forms -- neither has ever run here
 ### Implemented
 
+- [x] [0063] `--keep-going` and a JSON build report | added for
+      `test-platforms.yml`-style coverage sweeps: off by default (every
+      existing caller's fail-fast behaviour is unchanged), on it lets
+      `build_all()`/`orchestrate.build()` survive a target's own failure
+      (and a tag group's own fetch failure) and keep attempting the rest.
+      A JSON report -- one file per invocation, `{identifier, duration,
+      error, output_dir, size, files}` per target -- is written
+      unconditionally, `--keep-going` or not, under `cache_root() /
+      "reports"` (`CIBMP_REPORT_PATH` to redirect). Checked live against a
+      real cibuildwheel 4.2.0 install first: upstream's own `build()` is
+      fail-fast unconditionally too, with no keep-going concept at all --
+      this is a genuine cibuildmp-only divergence. `test-platforms.yml`
+      itself does not use any of this yet -- batching identifiers per
+      image group and wiring `--keep-going` in is separate follow-up work
 - [x] [0062] `test-platforms.yml` split into a per-port orchestrator | landed
       2026-08-29, closing the real (not hypothetical) 211/256 amd64-matrix
       headroom [0060]'s own 74 rp2 identifiers exposed, with nine more usermod
@@ -256,3 +270,4 @@ record is added.
 [0060]: records/0060-rp2-build-driver.md
 [0061]: records/0061-usermod-build-drivers-split-per-port.md
 [0062]: records/0062-test-platforms-per-port-orchestrator.md
+[0063]: records/0063-keep-going-and-json-build-report.md

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from cibuildmp.cli import main
 from cibuildmp.platforms import natmod as natmod_cli
-from cibuildmp.platforms.natmod.build import BuildResult
+from cibuildmp.platforms.natmod.build import BuildError, BuildResult
 from cibuildmp.platforms.natmod.targets import (
     newest_known_abi,
     newest_stable_tag_for_abi,
@@ -193,6 +193,85 @@ def test_real_build_writes_github_step_summary_when_set(monkeypatch, tmp_path):
     assert "1 target built in 0.5 seconds" in text
     assert "mpy6.3-x64" in text
     assert "42 Bytes" in text
+
+
+def test_keep_going_continues_past_a_failed_target_and_writes_json_report(
+    monkeypatch, tmp_path
+):
+    # x64 fails, armv6m still gets attempted and succeeds -- the default
+    # (fail-fast) would have stopped at whichever of the two builds first,
+    # never touching the other. CONFIG (module-level) is the same
+    # x64+armv6m glob test_print_build_identifiers already confirms
+    # resolves to exactly two identifiers.
+    package_dir = Path(write(tmp_path, CONFIG))
+
+    monkeypatch.setattr(
+        natmod_cli, "fetch_micropython", lambda tag, **k: tmp_path / "mpy"
+    )
+    monkeypatch.setattr(natmod_cli, "build_mpy_cross", lambda mpy_dir, arch, **k: None)
+    monkeypatch.setattr(natmod_cli, "read_mpy_abi", lambda mpy_dir: "6.3")
+
+    # Its own subdirectory, not tmp_path directly -- entry_for_result()
+    # lists every file in produced.parent, and tmp_path already holds
+    # cibuildmp.toml from write() above.
+    produced = tmp_path / "out" / "template-armv6m.mpy"
+    produced.parent.mkdir()
+    produced.write_bytes(b"\x00" * 7)
+
+    def fake_build_target(build_options, mpy_dir, module_root, output_dir, **k):
+        if "x64" in build_options.identifier:
+            raise BuildError("simulated link failure")
+        return BuildResult(
+            identifier=build_options.identifier, output=produced, duration=0.2
+        )
+
+    monkeypatch.setattr(natmod_cli, "build_target", fake_build_target)
+    monkeypatch.setenv("CIBMP_REPORT_PATH", str(tmp_path / "reports"))
+
+    assert main([str(package_dir), "--keep-going"]) == 1
+
+    report_files = list((tmp_path / "reports").glob("*.json"))
+    assert len(report_files) == 1
+    payload = json.loads(report_files[0].read_text())
+    assert payload["built"] == 1
+    assert payload["failed"] == 1
+    results_by_id = {r["identifier"]: r for r in payload["results"]}
+    assert len(results_by_id) == 2
+    failed = next(r for r in results_by_id.values() if r["error"])
+    assert "simulated link failure" in failed["error"]
+    assert failed["output_dir"] is None
+    ok = next(r for r in results_by_id.values() if r["error"] is None)
+    assert ok["output_dir"] == str(produced.parent)
+    assert ok["files"] == [produced.name]
+
+
+def test_without_keep_going_still_writes_a_report_before_stopping(
+    monkeypatch, tmp_path
+):
+    # Default behaviour (no --keep-going) is otherwise unchanged -- still
+    # stops at the first failure, still exits 2 -- but now also leaves a
+    # report behind describing that one failure.
+    package_dir = Path(write(tmp_path, CONFIG))
+
+    monkeypatch.setattr(
+        natmod_cli, "fetch_micropython", lambda tag, **k: tmp_path / "mpy"
+    )
+    monkeypatch.setattr(natmod_cli, "build_mpy_cross", lambda mpy_dir, arch, **k: None)
+    monkeypatch.setattr(natmod_cli, "read_mpy_abi", lambda mpy_dir: "6.3")
+
+    def fake_build_target(build_options, mpy_dir, module_root, output_dir, **k):
+        raise BuildError("simulated link failure")
+
+    monkeypatch.setattr(natmod_cli, "build_target", fake_build_target)
+    monkeypatch.setenv("CIBMP_REPORT_PATH", str(tmp_path / "reports"))
+
+    assert main([str(package_dir)]) == 2
+
+    report_files = list((tmp_path / "reports").glob("*.json"))
+    assert len(report_files) == 1
+    payload = json.loads(report_files[0].read_text())
+    assert payload["built"] == 0
+    assert payload["failed"] == 1
 
 
 def test_output_is_line_buffered_and_survives_a_stream_without_reconfigure(

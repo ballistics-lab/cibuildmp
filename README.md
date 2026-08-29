@@ -148,6 +148,49 @@ ABI — name one explicitly (`mpy6.3-v1.29.0-*`) to pin it yourself. Usermod
 has no equivalent narrowing: every real `(port, tag, arch/board)` row
 already carries its own explicit tag.
 
+### `--keep-going` and the JSON build report
+
+The default is fail-fast: the first target to fail stops the whole
+invocation, and nothing selected after it is even attempted — the same
+behaviour `cibuildwheel` itself has, unconditionally, with no keep-going
+concept of its own. `--keep-going` (record [0063]) is a deliberate cibuildmp
+divergence for the opposite case — a `--build` glob wide enough to span a
+real coverage sweep, where the point is to find out *every* target's own
+outcome rather than stop at the first one that fails.
+
+Every attempted target — success or failure, `--keep-going` or not — is
+written to a JSON report, one file per invocation, under
+`~/.cache/cibuildmp/reports/` by default (`CIBMP_REPORT_PATH` to redirect
+it). Each entry carries the identifier, how long it took, and either the
+built artifact's directory/size/file listing or the error that stopped it:
+
+```json
+{
+  "generated_at": "2026-08-29T12:00:00+00:00",
+  "total_duration": 12.4,
+  "built": 1,
+  "failed": 1,
+  "results": [
+    {
+      "identifier": "v1.29.0-manylinux_2_28_x86_64",
+      "duration": 9.1,
+      "error": null,
+      "output_dir": "mpyhouse/v1.29.0-manylinux_2_28_x86_64",
+      "size": 1048576,
+      "files": ["micropython-v1.29.0-manylinux_2_28_x86_64"]
+    },
+    {
+      "identifier": "v1.29.0-qemu-POWERNV9",
+      "duration": 3.3,
+      "error": "make: *** [firmware.elf] Error 1",
+      "output_dir": null,
+      "size": null,
+      "files": []
+    }
+  ]
+}
+```
+
 ## Target support
 
 ### Natmod, per arch

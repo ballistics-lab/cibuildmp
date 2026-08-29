@@ -120,6 +120,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Do not report an error code if no target is selected",
     )
     parser.add_argument(
+        "--keep-going",
+        action="store_true",
+        help="Build every selected target even if an earlier one fails, instead "
+        "of stopping at the first failure (the default). Every attempted "
+        "target's own outcome, including failures, is written to a JSON "
+        "report either way -- see CIBMP_REPORT_PATH.",
+    )
+    parser.add_argument(
         "--debug-traceback",
         action="store_true",
         default=os.environ.get("CIBMP_DEBUG_TRACEBACK", "") not in {"", "0"},

@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ... import sources
+from ... import report, sources
 from . import manifests, portinfo
 from .build_common import UsermodBuildError
 from .build_esp32 import Esp32BuildOptions, build_esp32
@@ -36,8 +36,19 @@ from .build_rp2 import RP2_SUBMODULES, Rp2BuildOptions, build_rp2
 from .build_unix import UnixBuildOptions, build_unix
 from .build_webassembly import WebassemblyBuildOptions, build_webassembly
 from .build_windows import WindowsBuildOptions, build_windows
-from .options import UsermodBuildOptions, UsermodOptions
+from .options import UsermodBuildOptions, UsermodConfigError, UsermodOptions
 from .targets import UsermodTarget, esp32_idf_info
+
+# Every exception a real build (or the tag-group setup ahead of it -- a
+# bad fetch, [0063]'s own keep_going path) can raise. Duplicates
+# `usermod/__init__.py`'s own module-level `BUILD_ERRORS` tuple rather
+# than importing it -- that module imports this one (`from . import
+# orchestrate`), so importing back would cycle.
+_BUILD_ERRORS: tuple[type[Exception], ...] = (
+    sources.SourceError,
+    UsermodBuildError,
+    UsermodConfigError,
+)
 
 # port -> the build_<port>() function, uniform signature across all six:
 # build_x(opts, mpy_dir, *, toolchain_root=None, quiet=False) -> Path.
@@ -310,6 +321,7 @@ def build(
     *,
     toolchain_root: Path | None = None,
     quiet: bool = False,
+    keep_going: bool = False,
 ) -> list[UsermodBuildResult]:
     """Build every selected target in one invocation.
 
@@ -322,29 +334,82 @@ def build(
     paying for it once per target. Almost always one group, since that is
     the common case, but `targets` can span more than one release since
     `micropython` stopped being silently truncated to its first entry.
+
+    `keep_going` ([0063]): False (the default) preserves this function's
+    original behaviour exactly -- a group's own fetch failure or a
+    target's own build failure propagates straight out, uncaught, and the
+    caller (`usermod/__init__.py`'s own `run_resolved()`) sees it as
+    today. True keeps attempting every remaining target (in this group and
+    every later one) after a failure instead of stopping -- the return
+    value stays *successes only*, same shape as always, so an existing
+    caller that just does `len(build(...))`/iterates the list is
+    unaffected; `run_resolved()` tells the two apart by comparing
+    `len(targets)` against `len(results)`. Every target actually attempted
+    -- success or failure -- lands in the JSON report this function always
+    writes (`report.write_report()`, in a `finally`) before returning or
+    letting the exception through, the same unconditional-write natmod's
+    own `build_all()` does.
     """
-    results = []
+    results: list[UsermodBuildResult] = []
+    entries: list[report.ReportEntry] = []
     # Preserves first-appearance order (usermod_targets() emits one tag
     # group at a time), not sorted -- matches natmod's own
     # dict.fromkeys(bo.target.tag for bo in resolved) idiom exactly.
     build_tags = list(dict.fromkeys(t.tag for t in targets))
-    for tag in build_tags:
-        group = [t for t in targets if t.tag == tag]
-        # `RP2_SUBMODULES` only ever matters on `fetch_micropython()`'s own
-        # clone path (a preview tag with no release tarball) -- the
-        # tarball path already vendors every lib/ submodule for every
-        # port, rp2 included. Threaded here, not hardcoded into
-        # `fetch_micropython()` itself, since no other port needs one yet.
-        rp2_submodules = (
-            list(RP2_SUBMODULES) if any(t.port == "rp2" for t in group) else None
-        )
-        mpy_dir = sources.fetch_micropython(tag, submodules=rp2_submodules)
-        if any(t.port in _HOST_MPY_CROSS_PORTS for t in group):
-            sources.build_mpy_cross(mpy_dir, quiet=quiet)
-        for target in group:
-            results.append(
-                build_one(
-                    options, target, mpy_dir, toolchain_root=toolchain_root, quiet=quiet
-                )
+    try:
+        for tag in build_tags:
+            group = [t for t in targets if t.tag == tag]
+            # `RP2_SUBMODULES` only ever matters on `fetch_micropython()`'s
+            # own clone path (a preview tag with no release tarball) -- the
+            # tarball path already vendors every lib/ submodule for every
+            # port, rp2 included. Threaded here, not hardcoded into
+            # `fetch_micropython()` itself, since no other port needs one
+            # yet.
+            rp2_submodules = (
+                list(RP2_SUBMODULES) if any(t.port == "rp2" for t in group) else None
             )
+            group_start = time.time()
+            try:
+                mpy_dir = sources.fetch_micropython(tag, submodules=rp2_submodules)
+                if any(t.port in _HOST_MPY_CROSS_PORTS for t in group):
+                    sources.build_mpy_cross(mpy_dir, quiet=quiet)
+            except _BUILD_ERRORS as exc:
+                if not keep_going:
+                    raise
+                duration = time.time() - group_start
+                print(f"cibuildmp: error: {exc}")
+                for target in group:
+                    entries.append(
+                        report.entry_for_error(target.identifier, duration, exc)
+                    )
+                continue
+
+            for target in group:
+                start = time.time()
+                try:
+                    result = build_one(
+                        options,
+                        target,
+                        mpy_dir,
+                        toolchain_root=toolchain_root,
+                        quiet=quiet,
+                    )
+                except _BUILD_ERRORS as exc:
+                    duration = time.time() - start
+                    print(
+                        f"cibuildmp: {target.identifier} FAILED after {duration:.1f}s: {exc}"
+                    )
+                    entries.append(
+                        report.entry_for_error(target.identifier, duration, exc)
+                    )
+                    if not keep_going:
+                        raise
+                    continue
+                results.append(result)
+                entries.append(report.entry_for_result(result))
+    finally:
+        # Always, keep_going or not, fail-fast or not -- see the
+        # docstring's own keep_going paragraph.
+        report.write_report(entries, total_duration=sum(e.duration for e in entries))
+
     return results
