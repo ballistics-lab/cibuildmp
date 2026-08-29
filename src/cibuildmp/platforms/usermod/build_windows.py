@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import build_common
-from .build_common import UsermodBuildError
+from .build_common import UsermodBuildError, usermod_mounts
 
 
 @dataclass(frozen=True)
@@ -222,6 +222,7 @@ def build_windows(
     *,
     toolchain_root: Path | None = None,
     quiet: bool = False,
+    package_dir: Path | None = None,
 ) -> Path:
     """Build ports/windows for `opts.arch`, returning the produced `.exe`.
 
@@ -275,7 +276,8 @@ def build_windows(
     every `build_<port>()` shares (`orchestrate.py`'s `build_one()`
     passes them uniformly); neither is used on this Docker-only path --
     the same vestigial-but-uniform pair build_unix()/build_webassembly()
-    already carry.
+    already carry. `package_dir`, when given, is bind-mounted alongside
+    `USER_C_MODULES` itself -- see `build_common.usermod_mounts()`.
 
     The output path is `opts.build_dir / "micropython.exe"` --
     ports/windows/Makefile's own `PROG ?= micropython` plus the `.exe`
@@ -312,7 +314,7 @@ def build_windows(
     )
     dockerrun.run(
         command,
-        mounts=[mpy_dir, Path(opts.user_c_modules)],
+        mounts=usermod_mounts(mpy_dir, Path(opts.user_c_modules), package_dir=package_dir),
         workdir=_windows_dir(mpy_dir),
         image=docker_image,
         timeout=dockerrun.timeout_for("windows", opts.arch),

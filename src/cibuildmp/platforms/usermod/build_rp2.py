@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import build_common
-from .build_common import UsermodBuildError
+from .build_common import UsermodBuildError, usermod_mounts
 
 # `sources.fetch_micropython()`'s own `submodules=` -- only ever consulted
 # on its clone path (a preview tag with no published release tarball); the
@@ -78,6 +78,7 @@ def build_rp2(
     *,
     toolchain_root: Path | None = None,
     quiet: bool = False,
+    package_dir: Path | None = None,
 ) -> Path:
     """Build ports/rp2 for `opts.board`, returning the produced
     `firmware.uf2`.
@@ -103,6 +104,8 @@ def build_rp2(
     `toolchain_root`/`quiet` are accepted only for the same call shape
     every `build_<port>()` shares (`orchestrate.py`'s `build_one()`
     passes them uniformly); neither is used on this Docker-only path.
+    `package_dir`, when given, is bind-mounted alongside `USER_C_MODULES`
+    itself -- see `build_common.usermod_mounts()`.
     """
     from ... import dockerrun
 
@@ -130,8 +133,9 @@ def build_rp2(
         command,
         # Same directory-level mount `build_esp32()` uses (`.parent`, not
         # the bare `.cmake` file) -- see that function's own comment for
-        # the sibling-manifest bug this avoids.
-        mounts=[mpy_dir, Path(opts.user_c_modules).parent],
+        # the sibling-manifest bug this avoids. `package_dir`, when given,
+        # is appended on top -- see `build_common.usermod_mounts()`.
+        mounts=usermod_mounts(mpy_dir, Path(opts.user_c_modules).parent, package_dir=package_dir),
         workdir=rp2_dir,
         image=docker_image,
         timeout=timeout,

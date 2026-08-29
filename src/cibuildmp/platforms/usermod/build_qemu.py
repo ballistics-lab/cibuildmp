@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .build_common import UsermodBuildError
+from .build_common import UsermodBuildError, usermod_mounts
 
 # board -> `ports/qemu/Makefile`'s own `CROSS_COMPILE ?=` for it, keyed by
 # `QEMU_ARCH`, not by board directly. Every value here is copied straight
@@ -88,6 +88,7 @@ def build_qemu(
     *,
     toolchain_root: Path | None = None,
     quiet: bool = False,
+    package_dir: Path | None = None,
 ) -> Path:
     """Build ports/qemu for `opts.board`, returning the produced firmware.
 
@@ -101,7 +102,9 @@ def build_qemu(
 
     The output path is `opts.build_dir / "firmware.elf"` --
     ports/qemu/Makefile's own `all: $(BUILD)/firmware.elf` target, again
-    no globbing needed.
+    no globbing needed. `package_dir`, when given, is bind-mounted
+    alongside `USER_C_MODULES` itself -- see
+    `build_common.usermod_mounts()`.
     """
     from ... import dockerrun
 
@@ -130,7 +133,7 @@ def build_qemu(
     command = qemu_make_command(opts, mpy_dir, cross)
     dockerrun.run(
         command,
-        mounts=[mpy_dir, Path(opts.user_c_modules)],
+        mounts=usermod_mounts(mpy_dir, Path(opts.user_c_modules), package_dir=package_dir),
         workdir=mpy_dir / "ports" / "qemu",
         image=docker_image,
         timeout=dockerrun.timeout_for("qemu", opts.board),

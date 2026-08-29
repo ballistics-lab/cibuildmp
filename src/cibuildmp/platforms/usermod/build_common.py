@@ -26,6 +26,69 @@ class UsermodBuildError(Exception):
     pass
 
 
+def usermod_mounts(
+    mpy_dir: Path, user_c_modules_mount: Path, *, package_dir: Path | None
+) -> list[Path]:
+    """The bind mounts every `build_<port>()` gives its own `dockerrun.run()`
+    call: `mpy_dir`, `user_c_modules_mount`, and -- when the caller has one
+    to give -- the whole `package_dir` too.
+
+    `user_c_modules_mount` is a `Path`, not a bare `USER_C_MODULES` string,
+    because what actually needs mounting differs by build system: Make
+    ports mount `USER_C_MODULES` itself (`opts.user_c_modules`, a real
+    directory `py/py.mk`'s own glob reads); CMake ports (`esp32`/`rp2`)
+    resolve `USER_C_MODULES` to a *file* (`portinfo.resolve_user_c_modules()`
+    appends `/micropython.cmake`), so their own callers pass that file's
+    `.parent` instead -- both already did before `package_dir` existed
+    here, unchanged by this helper.
+
+    `dockerrun.run()` bind-mounts each of these at its own identical host
+    path (its own docstring), so a module whose sources reach *outside*
+    `USER_C_MODULES` via a relative path (`../src`, `../../natmod/nanopb`,
+    a sibling directory two levels up, whatever the consumer's own layout
+    actually is) previously saw nothing there at all -- confirmed live
+    against a real consumer (`o-murphy/a7p`'s own `usermod/a7p/
+    micropython.mk`, `../../src`/`../../natmod/nanopb` both invisible
+    in-container, "No such file or directory" on a path that existed on the
+    host the whole time), and independently already known: `examples/
+    template`'s own `usermod/micropython.mk` carries the identical warning
+    for the identical reason, worked around there by setting
+    `user-c-modules = "."` so `USER_C_MODULES` itself resolves to
+    `package_dir` -- a real fix, but one that requires restructuring the
+    consumer's own module to sit exactly one level under its own project
+    root, which cibuildwheel does not ask of a `setup.py`/`pyproject.toml`
+    and this project should not ask of a module either.
+
+    `package_dir` is mounted instead, unconditionally, the same way
+    `natmod/build.py` already mounts it for every natmod target
+    (`mounts=[mpy_dir, package_dir.resolve()]` there, unchanged) --
+    consistent with cibuildwheel's own principle that nothing about the
+    project being built should be invisible to the container it builds in,
+    even though the mechanism here (an extra bind mount at the project's
+    own identical host path) is simpler than cibuildwheel's own `docker cp`/
+    tar-pipe copy-in (`OCIContainer.copy_into()`) -- this project already
+    bind-mounts everything else at identical host paths, and one more
+    mount at the same convention costs nothing where a wholesale change of
+    mechanism would.
+
+    `USER_C_MODULES` itself stays in the list even though `package_dir`
+    (when given) already contains it -- a strict subdirectory of an
+    already-mounted tree bind-mounts for free either way, and dropping it
+    would make this helper's own list depend on `package_dir` always being
+    given, which it is not (see the `None` default: called directly, in a
+    handful of tests, with no `package_dir` in scope at all).
+
+    `package_dir=None` (its own tests, or a direct API caller with no
+    project directory in scope) keeps today's narrower behaviour exactly,
+    rather than raising or guessing one -- there is no sane default to
+    invent for "no project directory was given."
+    """
+    mounts = [mpy_dir, user_c_modules_mount]
+    if package_dir is not None:
+        mounts.append(package_dir.resolve())
+    return mounts
+
+
 def container_mpy_cross(
     mpy_dir: Path,
     *,

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import build_common
-from .build_common import UsermodBuildError
+from .build_common import UsermodBuildError, usermod_mounts
 
 
 @dataclass(frozen=True)
@@ -55,6 +55,7 @@ def build_webassembly(
     *,
     toolchain_root: Path | None = None,
     quiet: bool = False,
+    package_dir: Path | None = None,
 ) -> Path:
     """Build ports/webassembly for `opts.variant`, returning the produced
     `micropython.mjs`.
@@ -70,7 +71,9 @@ def build_webassembly(
     the image's own `ENV PATH` already covers it. `toolchain_root`/`quiet`
     are accepted only for the same call shape every `build_<port>()`
     shares (`orchestrate.py`'s `build_one()` passes them uniformly);
-    neither is used on this Docker-only path.
+    neither is used on this Docker-only path. `package_dir`, when given,
+    is bind-mounted alongside `USER_C_MODULES` itself -- see
+    `build_common.usermod_mounts()`.
 
     The output path is `opts.build_dir / "micropython.mjs"` --
     `ports/webassembly/Makefile`'s own `all:` target.
@@ -100,7 +103,7 @@ def build_webassembly(
     )
     dockerrun.run(
         command,
-        mounts=[mpy_dir, Path(opts.user_c_modules)],
+        mounts=usermod_mounts(mpy_dir, Path(opts.user_c_modules), package_dir=package_dir),
         workdir=mpy_dir / "ports" / "webassembly",
         image=docker_image,
         timeout=dockerrun.timeout_for("webassembly"),

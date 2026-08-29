@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import build_common, espidf
-from .build_common import UsermodBuildError
+from .build_common import UsermodBuildError, usermod_mounts
 
 
 @dataclass(frozen=True)
@@ -115,6 +115,7 @@ def build_esp32(
     *,
     toolchain_root: Path | None = None,
     quiet: bool = False,
+    package_dir: Path | None = None,
 ) -> Path:
     """Build ports/esp32 for `opts.board`, returning the produced
     `micropython.bin`.
@@ -178,7 +179,13 @@ def build_esp32(
         # ... [Errno 2] No such file or directory`. `.parent` brings this
         # port's own mount up to the same directory-level coverage every
         # Make port already has, not a new guarantee beyond that.
-        mounts=[mpy_dir, Path(opts.user_c_modules).parent, idf_dir, tools_dir],
+        # `package_dir`, when given, is appended on top -- see
+        # `build_common.usermod_mounts()`.
+        mounts=[
+            *usermod_mounts(mpy_dir, Path(opts.user_c_modules).parent, package_dir=package_dir),
+            idf_dir,
+            tools_dir,
+        ],
         workdir=mpy_dir / "ports" / "esp32",
         image=docker_image,
         timeout=timeout,

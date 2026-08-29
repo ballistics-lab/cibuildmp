@@ -47,7 +47,7 @@ from pathlib import Path
 from typing import Literal
 
 from . import build_common
-from .build_common import UsermodBuildError
+from .build_common import UsermodBuildError, usermod_mounts
 
 
 @dataclass(frozen=True)
@@ -317,7 +317,11 @@ def unix_make_command(
 
 
 def run_unix_deplibs(
-    opts: UnixBuildOptions, mpy_dir: Path, *, docker_image: str
+    opts: UnixBuildOptions,
+    mpy_dir: Path,
+    *,
+    docker_image: str,
+    package_dir: Path | None = None,
 ) -> None:
     """MICROPY_STANDALONE=1 only makes libffi a DEPLIBS entry, not a
     prerequisite of the default build target -- must run as its own step
@@ -353,7 +357,7 @@ def run_unix_deplibs(
 
     dockerrun.run(
         command,
-        mounts=[mpy_dir, Path(opts.user_c_modules)],
+        mounts=usermod_mounts(mpy_dir, Path(opts.user_c_modules), package_dir=package_dir),
         workdir=_unix_dir(mpy_dir),
         image=docker_image,
         timeout=dockerrun.timeout_for("unix", opts.target),
@@ -530,6 +534,7 @@ def build_unix(
     *,
     toolchain_root: Path | None = None,
     quiet: bool = False,
+    package_dir: Path | None = None,
 ) -> Path:
     """Build ports/unix for `opts.target`, returning the produced binary.
 
@@ -574,6 +579,8 @@ def build_unix(
     `toolchain_root`/`quiet` are accepted only for the same call shape
     every `build_<port>()` shares (`orchestrate.py`'s `build_one()`
     passes them uniformly); neither is used on this Docker-only path.
+    `package_dir`, when given, is bind-mounted alongside `USER_C_MODULES`
+    itself -- see `build_common.usermod_mounts()`'s own docstring for why.
     """
     from ... import dockerrun
 
@@ -598,7 +605,7 @@ def build_unix(
     timeout = dockerrun.timeout_for("unix", opts.target)
 
     if unix_arch_settings(opts.target).standalone:
-        run_unix_deplibs(opts, mpy_dir, docker_image=docker_image)
+        run_unix_deplibs(opts, mpy_dir, docker_image=docker_image, package_dir=package_dir)
 
     mpy_cross = build_common.container_mpy_cross(
         mpy_dir,
@@ -611,7 +618,7 @@ def build_unix(
     command = unix_make_command(opts, mpy_dir, mpy_cross=mpy_cross)
     dockerrun.run(
         command,
-        mounts=[mpy_dir, Path(opts.user_c_modules)],
+        mounts=usermod_mounts(mpy_dir, Path(opts.user_c_modules), package_dir=package_dir),
         workdir=_unix_dir(mpy_dir),
         image=docker_image,
         timeout=timeout,

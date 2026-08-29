@@ -284,7 +284,13 @@ def build_one(
         shutil.rmtree(build_dir, ignore_errors=True)
 
     build_fn = _BUILD_FN[target.port]
-    produced = build_fn(port_opts, mpy_dir, toolchain_root=toolchain_root, quiet=quiet)
+    produced = build_fn(
+        port_opts,
+        mpy_dir,
+        toolchain_root=toolchain_root,
+        quiet=quiet,
+        package_dir=options.package_dir,
+    )
 
     # options.output_dir is deliberately relative ("mpyhouse" by default,
     # D-shared with natmod's own DEFAULT_OUTPUT_DIR) -- resolved against
