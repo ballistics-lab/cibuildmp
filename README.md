@@ -77,7 +77,7 @@ On CI, use the action instead of installing the CLI yourself — it already
 runs on a bare runner with the runner's own Docker daemon reachable:
 
 ```yaml
-- uses: ballistics-lab/cibuildmp@v0.3.0
+- uses: ballistics-lab/cibuildmp@v0.4.0
   with:
     build: "mpy6.3-* v1.29.0-manylinux_2_28_x86_64"
 ```
@@ -441,9 +441,9 @@ own driver landed the next day (record 0060), live-verified against
     <code>arm64</code>
   </td>
   <td>
-    <code>apt install gcc-mingw-w64-x86-64</code><br>
-    <code>apt install gcc-mingw-w64-i686</code><br>
-    <code>llvm-mingw</code> (Linux x64 host only)
+
+  `windows` image (Docker)[^windowsimg]
+
   </td>
   <td>✅</td>
 </tr>
@@ -513,6 +513,8 @@ own driver landed the next day (record 0060), live-verified against
 
 [^esp32ci]: `build_esp32()` went Docker 2026-08-28 (`esp_idf_base`, [0058]), closing the venv conflict that made every real esp32 build fail on the bare host; `idf_version`/`idf_target` are threaded from each board's own real row rather than a fixed default, and `HOME` is exported explicitly for the same reason `esp32`'s own `ports/esp32` needs a real per-user cache dir that `dockerrun.run()`'s `--user <uid>:<gid>` doesn't otherwise give it (unmapped on GitHub's own runners specifically, live-caught on real CI). `test-platforms.yml`'s own broad sweep is what actually proves this across the whole board matrix, not a spot check — Xtensa and RISC-V both, both MicroPython tags this project currently tracks.
 
+[^windowsimg]: One combined `docker/windows.Dockerfile` image (`ghcr.io/ballistics-lab/windows`) for all three arches, not split per arch like `unix`'s own five images — there is no second Windows libc a binary could be built against, so the isolation argument that drives `unix`'s split doesn't apply here. `x64`/`x86` are plain apt-installed `gcc-mingw-w64-x86-64`/`gcc-mingw-w64-i686` inside the image; `arm64` is a pinned `llvm-mingw` tarball baked into the same image (no Debian/Ubuntu package targets `aarch64-w64-mingw32` at all). None of this runs on the CI runner itself any more — `apt install gcc-mingw-w64-*` on the bare host was removed as part of Record 0042's own container migration.
+
 No Windows or macOS host is needed for any of the ✅/⚠️ usermod targets
 above, `windows`'s own three arches included — every toolchain there is
 either already on a Linux host or downloads/apt-installs onto one.
@@ -571,14 +573,23 @@ provisioning, and the build itself, all ten arches now running inside one
 pulled `docker/natmod.Dockerfile` image rather than a host-side
 toolchain resolver (that resolver, and its own `--toolchain` flag, are
 deleted) — verified on real CI in all three consuming repos, not just
-`--dry-run`. Usermod's
-own build drivers are wired into the CLI too (see
-[Target support](#target-support) above): `unix`/`windows`/`webassembly`
-run live through the real `action.yml`, all three in one invocation. What's
-still open is the third consuming-repo step: none of
-`micropython-bclibc`/`a7p`/`micropython-wasm3` has repinned its own usermod
-workflow to the `cibuildmp` CLI yet. Until one does, the composite actions
-stay the supported path for it.
+`--dry-run`. Usermod's own build drivers are wired into the CLI too (see
+[Target support](#target-support) above), covering every port with a
+real driver, not just three. Two of the three consuming repos have
+already repinned: `a7p` and `micropython-wasm3` are fully migrated off
+every `build-usermod-*`/`fetch-micropython` composite action onto the
+unified CLI/action (each keeps its own genuine
+cross-compile-with-no-native-host cell, `unix-mipsel`, on the old
+composite action deliberately). `micropython-bclibc` is mid-migration —
+pushed, awaiting its own first CI run on the new path. See the tracker's
+own [0038] row for current status rather than trusting this paragraph,
+which this project's own `CLAUDE.md` warns goes stale exactly this way.
+
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the dev loop, and
+[`CLAUDE.md`](CLAUDE.md) before touching anything with a `cibuildwheel`
+counterpart — selectors, identifiers, options, container invocation.
 
 ## Composite actions
 
@@ -595,12 +606,15 @@ Pin consumers to a tag, not `@main` and not a commit SHA — bumping the tag
 a consumer references is a deliberate, visible edit in that repo, same as
 bumping any other CI dependency.
 
-The `cibuildmp` package and the actions share one version. `v0.3.0` is the
-first tag where the CLI actually builds a module, not just plans it; it
-continues `micropython-native-ci`'s version line rather than restarting
-it, since this repo absorbed that one (its consumers have since repinned;
-the old repo is now archived). See [`CHANGELOG.md`](CHANGELOG.md) for the
-full history.
+The `cibuildmp` package and the actions share one version. `v0.4.0` is the
+current tag, and the one every example in this README targets — it's a
+breaking release (config surface rewritten, `unix` identifiers renamed;
+see `CHANGELOG.md`'s own `[0.4.0]` entry). `v0.3.0` was the first tag
+where the CLI actually built a module at all, not just planned it, and
+the line continues `micropython-native-ci`'s own version numbering rather
+than restarting it, since this repo absorbed that one (its consumers have
+since repinned; the old repo is now archived). See
+[`CHANGELOG.md`](CHANGELOG.md) for the full history.
 
 The root `action.yml` installs `cibuildmp` from its own checkout rather
 than from PyPI (`uv tool install "$GITHUB_ACTION_PATH"`, already the

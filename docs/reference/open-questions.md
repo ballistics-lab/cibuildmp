@@ -131,11 +131,11 @@ the same way [docs/0000-TRACKER.md](../0000-TRACKER.md) folds resolved
   base rather than from inspection.
 
 [0018]: ../records/0018-windows-provisioning-fourth-story.md
-[0042]: ../records/0042-windows-docker-wiring-and-resolver-removal.md
-[0043]: ../records/0043-unix-adopts-cibuildwheel-native-image-model.md
 [0019]: ../records/0019-esp-idf-provisioning-heaviest.md
+[0043]: ../records/0043-unix-adopts-cibuildwheel-native-image-model.md
 [0031]: ../records/0031-unix-musllinux-libc-axis.md
 [0033]: ../records/0033-cibuildmp-never-builds-docker-image-itself.md
 [0042]: ../records/0042-windows-docker-wiring-and-resolver-removal.md
 [0044]: ../records/0044-unix-native-images-landed.md
 [0045]: ../records/0045-only-is-a-filter-not-a-forced-identifier.md
+[0046]: ../records/0046-pin-staleness-checker.md

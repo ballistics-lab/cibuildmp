@@ -50,6 +50,15 @@ concurrency:
 
 jobs:
   plan:
+    # A Dependabot PR only ever touches `.github/dependabot.yml` itself or
+    # a `docker/*.Dockerfile` -- a base-image bump, which
+    # `verify-docker-images.yml` already build-checks directly. Running
+    # this file's own 200+-identifier functional matrix on every one of
+    # those (paths-ignore below only excludes **.md/docs/**/LICENSE, not
+    # docker/**) burns the same concurrent-job budget this file's own
+    # header comment already flags as the real ceiling, for a change this
+    # matrix has nothing useful to say about. See docs/records/0068.
+    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     outputs:
       identifiers: ${{ steps.plan.outputs.identifiers }}
@@ -115,7 +124,10 @@ jobs:
   # passed back through `build`'s own outputs.
   aggregate-results:
     needs: [plan, build]
-    if: always()
+    # `always()` alone would still run this after `plan`'s own actor guard
+    # skips it, with nothing to aggregate -- same guard, so a skipped plan
+    # means a skipped aggregate too, not a report over zero buckets.
+    if: always() && github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
