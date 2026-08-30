@@ -319,6 +319,28 @@ def build_one(
     # attempt to run it.
     shutil.copy(produced, dest)
 
+    # `unix`'s own `repair_unix_binary()` (build_unix.py) is this project's
+    # `auditwheel repair`: for a target whose floor lacks `libffi` as a
+    # baseline shared object (the dynamically-linked glibc cells), it
+    # vendors `libffi.so.<N>` into a `lib/` directory beside `produced` and
+    # points the binary at it with `patchelf --set-rpath '$ORIGIN/lib'` --
+    # `$ORIGIN` meaning "whatever directory the running executable actually
+    # lives in", not `produced`'s own original build directory specifically.
+    # Copying only `produced` above silently broke that portability
+    # contract for every target it applies to: the file collected into
+    # `identifier_dir` ran fine from inside `mpy_dir` (its own `lib/`
+    # sibling right there) and failed the moment it was actually executed
+    # from where cibuildmp says it lives -- "error while loading shared
+    # libraries: libffi.so.6: cannot open shared object file", live-caught
+    # by `examples/usercmodule/smoke_test.py` actually running a collected
+    # `manylinux_2_28_x86_64` binary for the first time anywhere in this
+    # project (`build-examples.yml` has only ever `ls`ed the output, never
+    # executed it). A no-op for every other target and every other port --
+    # only `repair_unix_binary()` ever creates this directory at all.
+    lib_dir = produced.parent / "lib"
+    if lib_dir.is_dir():
+        shutil.copytree(lib_dir, dest.parent / "lib", dirs_exist_ok=True)
+
     return UsermodBuildResult(
         identifier=target.identifier, output=dest, duration=time.time() - start
     )

@@ -1,8 +1,8 @@
 # 0054 — an `examples/` usermod fixture built on upstream's own `examples/usercmodule`
 
-- Status: Proposed (nothing built; this record scopes the work and names what is
-  already known to be in the way)
-- Related: [0016], [0021], [0023], [0033], [0046], [0053]
+- Status: In progress (a narrow real slice landed via [0069] — `unix`/`rp2` only; the
+  scoping and open questions below are otherwise unchanged)
+- Related: [0016], [0021], [0023], [0033], [0046], [0053], [0069]
 
 ## Why a second usermod example at all
 
@@ -106,6 +106,23 @@ examples/usercmodule/
   available, or whether that unavailability is itself a finding worth recording per
   port in `resources/build-platforms.toml`.
 
+## Addendum, 2026-08-30 — a narrow real slice landed ([0069]), and one factual correction
+
+[0069] built the mechanism this record scoped but did not build: `unix` (Make) and `rp2`
+(CMake) now actually build upstream's `examples/usercmodule/` in CI, resolved straight
+from `sources.fetch_micropython()`'s own checkout per this record's own "no vendoring"
+call above — see that record for the mechanism, the two live CI failures hit landing it,
+and what is still left for `esp32`/`windows`/`webassembly`/`qemu`.
+
+Also worth recording precisely because it was checked directly against a real checkout
+rather than trusted from memory (this file's own opening section names exactly that
+discipline): "Why a second usermod example at all" above, in its `cppexample` bullet,
+reads `LDFLAGS_USERMOD += -lstdc++`. A real `v1.29.0` checkout's own
+`cppexample/micropython.mk` says `LIBS_USERMOD += -lstdc++`, not `LDFLAGS_USERMOD`. Left
+as the original, unedited text above per this project's own append-only convention for
+records — this addendum is the correction, not a silent fix — but anyone citing that line
+for the Makefile variable name itself should use `LIBS_USERMOD`.
+
 [0016]: 0016-usermod-user-c-modules-dir-vs-cmake.md
 [0021]: 0021-usermod-execution-central-value.md
 [0023]: 0023-usermod-identifier-scheme-config-output.md
@@ -113,3 +130,4 @@ examples/usercmodule/
 [0046]: 0046-pin-staleness-checker.md
 [0053]: 0053-usermod-ports-without-a-build-driver.md
 [0057]: 0057-multiple-modules-per-build.md
+[0069]: 0069-upstream-usercmodule-narrow-ci-slice.md

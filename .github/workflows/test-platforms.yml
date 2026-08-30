@@ -86,6 +86,18 @@ jobs:
     # Job-level, not set on the `uses: ./` step itself -- a composite
     # action's own inner steps are only guaranteed to see `env:` declared
     # at job/workflow level, not on the specific step that calls `uses:`.
+    #
+    # Every value below is a plain literal or references only `inputs.*`/
+    # `env.*` -- deliberately. `.github/workflows/test-upstream-usermodule.yml`
+    # (docs/records/0069) tried putting a `${{ runner.temp }}`- and then a
+    # `${{ github.workspace }}`-based expression in a job-level `env:` value
+    # here and got a genuine "invalid workflow file" both times (zero jobs
+    # ever created) -- confirmed live, twice, but *which* part of that shape
+    # GitHub's schema actually rejects was not pinned down with real
+    # confidence (0069's own addendum has the detail and the open question).
+    # Until that is resolved elsewhere, treat a runner-scoped context
+    # (`runner.*`, and possibly `github.workspace`) in a job-level `env:`
+    # value as unproven here, not safe to copy.
     env:
       CIBMP_VERSION: 0.0.0-ci
       # A real env var, not routed through the `skip:` input/`action.yml`'s

@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A real, narrow CI slice testing upstream's own `examples/usercmodule/`**, not just a
+  module cibuildmp wrote for itself the way `examples/template` is.
+  `.github/workflows/test-upstream-usermodule.yml` resolves the pinned MicroPython
+  checkout via `sources.fetch_micropython()` and builds `cexample`/`cppexample`/
+  `subpackage` on one Make port (`unix`) and one CMake port (`rp2`) — no vendoring, no new
+  config surface. `examples/usercmodule/micropython.cmake` is this repo's own three-line
+  shim adding the `subpackage` `include()` upstream's own CMake aggregator omits (a real
+  gap, confirmed against a v1.29.0 checkout, not assumed). `unix` also gets a real smoke
+  test (`examples/usercmodule/smoke_test.py`), run under the built binary, not just a
+  build-succeeded check. Confirmed green (run 33330364394), `cppexample`'s `-lstdc++`
+  linking on `rp2`'s own bare-metal toolchain included. Records 0054/0069.
+
+### Fixed
+
+- **A collected `unix` usermod binary that needed `libffi` shipped without the `lib/`
+  directory its own rpath depends on, and could not actually run from where cibuildmp
+  says its output lives.** `repair_unix_binary()` vendors `libffi.so.<N>` beside the
+  built binary and points it there with `patchelf --set-rpath '$ORIGIN/lib'` for exactly
+  this reason; `orchestrate.py`'s `build_one()` only ever copied the binary itself into
+  `mpyhouse/<identifier>/`, silently defeating that portability contract for every
+  dynamically-linked glibc cell. Invisible until now: nothing in this project's own CI
+  had ever executed a collected `unix` artifact, only listed it — `examples/usercmodule/
+  smoke_test.py` (above) is the first thing that did, and failed with "error while
+  loading shared libraries: libffi.so.6: cannot open shared object file" on its very
+  first real run. `build_one()` now copies the `lib/` sidecar alongside the binary too,
+  whenever `repair_unix_binary()` created one; a no-op for every other target and port.
+  Record 0070.
+
 ## [0.4.0] - 2026-08-29
 
 Extensive, still-unreleased rework of the config surface and natmod's own

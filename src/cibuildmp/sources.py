@@ -129,6 +129,18 @@ def fetch_micropython(
     `submodules` only ever matters on the clone path: the release tarball
     already vendors every one of them, which is the whole reason it is
     preferred. See _clone().
+
+    `quiet=False` (the default) prints progress -- download percentage,
+    "extracting", "cached at <dest>" -- to stdout, not stderr. A caller that
+    captures this function's own return value through a shell `$(...)`
+    command substitution (a CI step resolving the checkout path ahead of
+    the real build, e.g.) captures every one of those lines too, not just
+    the final `print(path)` -- live-caught in
+    .github/workflows/test-upstream-usermodule.yml (docs/records/0069): the
+    resulting multi-line value corrupted `$GITHUB_OUTPUT`, which GitHub's
+    own file-command parser then rejected outright, before either build
+    step in that workflow ever ran. Pass `quiet=True` whenever the return
+    value is being captured this way.
     """
     dest, was_cached = cached_dir(
         micropython_dir(tag, root),
