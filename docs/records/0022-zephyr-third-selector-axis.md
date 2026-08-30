@@ -1,7 +1,8 @@
 # 0022. zephyr is a third selector axis, not a board-based port that just needs its boards added
 
-- Status: Accepted (zephyr itself not scheduled); phase outline M6-M9b substantially implemented
-- Related: [0007], [0016], [0017]
+- Status: Accepted (zephyr itself not scheduled); phase outline M6-M9b substantially
+  implemented, M8's own `rp2` gap closed by [0060]
+- Related: [0007], [0016], [0017], [0060]
 
 <!-- migrated verbatim from docs/BACKLOG.md lines 1164-1493 -->
 
@@ -223,7 +224,13 @@ style, now that a slice of it is actually implemented:
         `arm64` itself moved off MSYS2 once `llvm-mingw` was confirmed
         live to build it from Linux too, with the exact Clang-vs-GCC
         `CFLAGS_EXTRA` fixes that took.
-  - [ ] `rp2` — **not started**, a real gap flagged directly rather than
+  - [x] `rp2` — was **not started** as of this bullet's original text
+        below (kept verbatim as the historical record of the gap); closed
+        2026-08-29 by [0060]'s own `build_rp2()`, live-verified against a
+        real `examples/template` build producing a genuine `firmware.uf2`
+        — see that record for the resolver and the submodules-provisioning
+        finding it took. Original gap description, for the record:
+        a real gap flagged directly rather than
         left implicit: **M6**'s own `resources/usermod.toml`/
         `usermod/portinfo.py` slice already scoped `rp2` in (its
         `build-system = "cmake"`/`default-manifest = "boards/manifest.py"`

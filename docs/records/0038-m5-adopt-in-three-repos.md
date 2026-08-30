@@ -1,6 +1,6 @@
 # 0038. M5 — adopt in the three repos
 
-- Status: In progress (two items still open)
+- Status: Implemented
 - Related: [0011]
 
 <!-- migrated verbatim from docs/BACKLOG.md lines 813-843 -->
@@ -30,11 +30,11 @@
       Not yet pushed/re-verified against the tag at the time of this
       note; the SHA it points to is the same commit already confirmed
       green in all three repos' CI.
-- [ ] Archive `ballistics-lab/micropython-native-ci` once all three have
+- [x] Archive `ballistics-lab/micropython-native-ci` once all three have
       repinned.
-- [ ] Reduce `build-natmod` to a wrapper over `cibuildmp --only <id>` so
-      there is one implementation of the toolchain logic, not two. Do not let
-      the two coexist for long.
+- [ ] ~~Reduce `build-natmod` to a wrapper over `cibuildmp --only <id>` so
+      there is one implementation of the toolchain logic, not two.~~
+      Rejected 2026-08-30 — see addendum below.
 
 ---
 
@@ -78,3 +78,30 @@ commit on HEAD widens the single migration these repos should have to do once.
 [0046]: 0046-pin-staleness-checker.md
 [0049]: 0049-no-matrix-generation-archs-vocabulary.md
 [0050]: 0050-natmod-is-docker-only.md
+
+---
+
+## Addendum, 2026-08-30 — the repin is done, and `micropython-bclibc` is green
+
+Verified live rather than assumed, prompted by a tracker row (below) that still read
+"`micropython-bclibc` pushed, awaiting its first CI run" — stale by the time it was
+checked. All three repos' current `origin/main` HEAD:
+
+- `ballistics-lab/micropython-bclibc` @ `a865480` (`ci/cibuildmp (#18)`) — 31/31 check
+  runs green, natmod and usermod both, `unix-mipsel, static` included.
+- `o-murphy/micropython-wasm3` @ `beecf67` (`ci/cibuildmp (#6)`) — 32/32 green.
+- `o-murphy/a7p` @ `110d571` (`use cibuildmp for ci cross build (#86)`) — 29/29 green.
+
+All three also carry `uses: ballistics-lab/cibuildmp@v0.4.0` throughout (grepped their
+workflow files directly), not the `v0.3.0` the 2026-08-28 addendum flagged as stale —
+the repin item above is done too, not just the archive.
+
+Only real open item left: the `build-natmod` wrapper, unchanged from the 2026-08-28
+addendum.
+
+## Addendum, 2026-08-30 — the `build-natmod` wrapper item is rejected
+
+Rejected by explicit user call: the action stays as its own bare-host natmod
+toolchain implementation, not folded into a `cibuildmp --build "<glob>"` wrapper.
+With that, this record has no open items left; status above moves to
+`Implemented`.

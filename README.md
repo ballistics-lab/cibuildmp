@@ -575,15 +575,14 @@ toolchain resolver (that resolver, and its own `--toolchain` flag, are
 deleted) — verified on real CI in all three consuming repos, not just
 `--dry-run`. Usermod's own build drivers are wired into the CLI too (see
 [Target support](#target-support) above), covering every port with a
-real driver, not just three. Two of the three consuming repos have
-already repinned: `a7p` and `micropython-wasm3` are fully migrated off
-every `build-usermod-*`/`fetch-micropython` composite action onto the
-unified CLI/action (each keeps its own genuine
-cross-compile-with-no-native-host cell, `unix-mipsel`, on the old
-composite action deliberately). `micropython-bclibc` is mid-migration —
-pushed, awaiting its own first CI run on the new path. See the tracker's
-own [0038] row for current status rather than trusting this paragraph,
-which this project's own `CLAUDE.md` warns goes stale exactly this way.
+real driver, not just three. All three consuming repos have repinned and
+are fully migrated off every `build-usermod-*`/`fetch-micropython`
+composite action onto the unified CLI/action, `cibuildmp@v0.4.0`, CI green
+on each repo's current `main` (`a7p` and `micropython-wasm3` each keep
+their own genuine cross-compile-with-no-native-host cell, `unix-mipsel`,
+on the old composite action deliberately). See the tracker's own [0038]
+row for current status rather than trusting this paragraph, which this
+project's own `CLAUDE.md` warns goes stale exactly this way.
 
 ## Contributing
 

@@ -84,7 +84,11 @@ something a different toolchain vendor is guaranteed to match.
 - Whether to actually move `manylinux_2_39_mipsel` onto a pinned tarball toolchain, and if so
   which release and what floor it claims. A real design decision (new toolchain, likely a new
   or renamed identifier), not a docs fix.
-- PR #16 itself — still open as of this record, not merged, not closed.
+- ~~PR #16 itself — still open as of this record, not merged, not closed.~~ Resolved by the
+  group-split addendum below: Dependabot auto-closed #16 once the group definition changed and
+  recreated it as #18 (14 updates, `ubuntu` no longer among them), which merged. `ubuntu` itself
+  was never re-proposed on its own in this pass -- `main` still carries `ubuntu:24.04` until
+  Dependabot next opens a standalone `ubuntu` PR under the new split.
 
 **Addendum, 2026-08-30.** The group split is implemented: `docker-images`' own `patterns: ["*"]`
 gained `exclude-patterns: ["ubuntu"]`, so `ubuntu` gets its own PR (still one, since every
