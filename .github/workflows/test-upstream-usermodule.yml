@@ -14,35 +14,28 @@ name: Test upstream usercmodule
 # examples/template matrix: one representative identifier per port, not
 # each port's own full arch/board matrix.
 #
-# No job here resolves the pinned checkout itself any more. It used to:
-# every job called `sources.fetch_micropython()` directly, in its own
-# pre-fetch step, so the real checkout path could be threaded into
-# `CIBMP_USER_C_MODULES`/`CIBMP_EXTRA_CMAKE_ARGS` by hand -- necessary back
-# when this project had no way to name "a path inside whatever checkout
-# cibuildmp itself is about to fetch" from outside cibuildmp. Two
-# mechanisms replaced that, both landing after the original narrow
-# unix+rp2 slice came back green (per [0054]'s own "widen only if it finds
-# something"):
+# No job here sets `CIBMP_USER_C_MODULES`/`CIBMP_EXTRA_MAKE_ARGS`/
+# `CIBMP_EXTRA_CMAKE_ARGS`, and none of them ever resolves the pinned
+# checkout itself. Both used to be true: every job called
+# `sources.fetch_micropython()` directly, in its own pre-fetch step, then
+# exported the real checkout path by hand -- necessary back when this
+# project had no way to name "a path inside whatever checkout cibuildmp
+# itself is about to fetch" from outside cibuildmp, and no way to say "this
+# one identifier needs this one extra flag" from inside a config file
+# meant to be shared by all six. `examples/usercmodule/cibuildmp.toml` now
+# carries all of it -- no `user-c-modules =` at all any more, for any
+# port: the built-in "." default is already right on both sides once
+# each side has its own real entry point (`micropython.cmake` for the two
+# CMake ports, `{cexample,cppexample,subpackage}/micropython.mk` for the
+# four Make ports -- see that toml's own header comment), plus
+# `[override."*-wasm32"]`'s own `extra-make-args` -- so a bare
+# `cibuildmp examples/usercmodule --build <identifier>` run, CI or local,
+# resolves identically to what a job here does. `build` stays out of that
+# file on purpose (see its own header comment): each job below still wants
+# exactly one identifier per push, not this fixture's full six-port sweep,
+# and that is the one thing a shared config file cannot express per-job.
 #
-#   - The two CMake ports (build-rp2/build-esp32) read `MICROPY_DIR`
-#     directly inside `examples/usercmodule/micropython.cmake` -- every
-#     CMake port already sets that variable before it `include()`s a user
-#     module at all, so no external input is needed.
-#   - The four Make ports (build-unix/build-windows/build-webassembly/
-#     build-qemu) set `CIBMP_USER_C_MODULES="{micropython}/examples/
-#     usercmodule"` literally; cibuildmp's own `orchestrate.py`
-#     (`_port_build_options()`) substitutes `{micropython}` with the real,
-#     already-fetched checkout itself, before anything reaches Docker or a
-#     bind mount -- see that function's own comment and docs/records/0069's
-#     own addendum for why this had to be cibuildmp's own job rather than
-#     something the CMake-side `$(TOP)`/`MICROPY_DIR` trick could cover:
-#     a Make port's `USER_C_MODULES` is also bind-mounted as a real host
-#     `Path` (`usermod_mounts()`), not just forwarded as a `make` variable,
-#     so it has to already be a real path by the time cibuildmp gets there
-#     -- which `{micropython}` now guarantees, uniformly, before either
-#     port family's own build machinery ever runs.
-#
-# An even leaner shape was tried before either of these and reverted: pin
+# An even leaner shape was tried before any of this and reverted: pin
 # `CIBMP_CACHE_PATH` to a fixed, known directory so the checkout's
 # eventual path becomes computable without fetching it at all. That broke
 # the workflow file outright, twice, for a GitHub Actions job-level-`env:`
@@ -67,30 +60,24 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Single source of truth for both jobs below -- bump here, not in two
-  # places, when this fixture moves to a newer tag.
+  # Single source of truth for every job below -- bump here, not six
+  # times, when this fixture moves to a newer tag.
   CIBMP_UPSTREAM_TAG: v1.29.0
 
 jobs:
   # ── unix: the Make side ─────────────────────────────────────────────
   #
-  # py/py.mk's own `<USER_C_MODULES>/*/micropython.mk` glob finds all three
-  # of upstream's own subdirectories with nothing extra to arrange -- no
-  # wrapper file needed on this side (see examples/usercmodule/
-  # micropython.cmake's own header comment for why the CMake side below
-  # needs one). USER_C_MODULES points straight at the pinned checkout's own
-  # examples/usercmodule/, never copied into this repo (0054: no vendoring).
+  # py/py.mk's own `<USER_C_MODULES>/*/micropython.mk` glob finds
+  # `examples/usercmodule/{cexample,cppexample,subpackage}/micropython.mk`
+  # -- this fixture's own thin wrappers, each `include`ing upstream's real
+  # file via `$(TOP)` (see `cexample/micropython.mk`'s own header comment)
+  # -- with `user-c-modules` at its built-in "." default, no override
+  # needed. Never vendored (0054): the real content still comes from the
+  # pinned checkout, only three one-line `include` shims live in this repo.
   build-unix:
     runs-on: ubuntu-latest
     env:
       CIBMP_VERSION: 0.0.0-ci
-      # {micropython} -- cibuildmp's own placeholder (orchestrate.py's
-      # _port_build_options(), record 0069's own addendum), substituted
-      # internally with the pinned checkout it already fetches before
-      # ever reaching Docker/mount. No pre-fetch step needed here any
-      # more: cibuildmp resolves this itself, the same way build-rp2/
-      # build-esp32 resolve MICROPY_DIR on the CMake side.
-      CIBMP_USER_C_MODULES: "{micropython}/examples/usercmodule"
     steps:
       - uses: actions/checkout@v7
 
@@ -130,35 +117,18 @@ jobs:
   # satisfiable on a bare-metal cross target. Deliberately not skipped --
   # a red leg here is a real finding to record, not a bug in this workflow.
   #
-  # No pre-fetch step, unlike build-unix above: examples/usercmodule/
-  # micropython.cmake resolves the pinned checkout itself, via MICROPY_DIR
-  # -- a CMake variable every CMake port already sets before it ever
-  # include()s a user module (rp2/CMakeLists.txt's own
+  # examples/usercmodule/micropython.cmake resolves the pinned checkout
+  # itself, via MICROPY_DIR -- a CMake variable every CMake port already
+  # sets before it ever include()s a user module (rp2/CMakeLists.txt's own
   # `get_filename_component(MICROPY_DIR "../.." ABSOLUTE)`, well before its
-  # own `include(${MICROPY_DIR}/py/usermod.cmake)`). No CIBMP_EXTRA_CMAKE_ARGS
-  # needed either -- record 0069's original mechanism, replaced now that
-  # this fixture's own micropython.cmake reads MICROPY_DIR directly. This
-  # does NOT extend to the Make ports below: `usermod_mounts()`
-  # (build_common.py) bind-mounts a Make port's own USER_C_MODULES as a
-  # real host `Path` in addition to passing it as a `make` variable, so it
-  # cannot be a `$(TOP)`-style Makefile expression the way a CMake
-  # variable reference can -- CMake ports keep USER_C_MODULES="." (this
-  # fixture's own small, real, mountable directory) and defer the actual
-  # upstream reference to MICROPY_DIR entirely inside the already-mounted
-  # checkout, which is the asymmetry that makes this simplification
-  # CMake-only.
+  # own `include(${MICROPY_DIR}/py/usermod.cmake)`) -- with `user-c-modules`
+  # at its built-in "." default, same as every other port here now.
   build-rp2:
     runs-on: ubuntu-latest
     permissions:
       contents: read
     env:
       CIBMP_VERSION: 0.0.0-ci
-      # "." -- examples/usercmodule/ itself, which holds this fixture's own
-      # micropython.cmake (not upstream's), same job-level-env reasoning
-      # test-platforms.yml's own header comment already gives: a composite
-      # action's inner steps only reliably see env set at job/workflow
-      # level, not on the specific step that calls `uses: ./`.
-      CIBMP_USER_C_MODULES: "."
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-qemu-action@v4
@@ -180,19 +150,17 @@ jobs:
   # SDK). Fully containerized since [0028] (no host-side ESP-IDF resolver
   # left).
   #
-  # No pre-fetch step, same reasoning as build-rp2 above: MICROPY_DIR is
-  # set at the very top of ports/esp32/main/CMakeLists.txt
-  # (`if(NOT MICROPY_DIR) get_filename_component(...)`), well before it
-  # -- via ports/esp32/CMakeLists.txt -- reaches `include(${MICROPY_DIR}/
-  # py/usermod.cmake)`, so examples/usercmodule/micropython.cmake resolves
-  # the checkout itself; no CIBMP_EXTRA_CMAKE_ARGS needed here either.
+  # Same MICROPY_DIR mechanism as build-rp2 above: MICROPY_DIR is set at
+  # the very top of ports/esp32/main/CMakeLists.txt
+  # (`if(NOT MICROPY_DIR) get_filename_component(...)`), well before it --
+  # via ports/esp32/CMakeLists.txt -- reaches `include(${MICROPY_DIR}/py/
+  # usermod.cmake)`.
   build-esp32:
     runs-on: ubuntu-latest
     permissions:
       contents: read
     env:
       CIBMP_VERSION: 0.0.0-ci
-      CIBMP_USER_C_MODULES: "."
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-qemu-action@v4
@@ -208,19 +176,18 @@ jobs:
 
   # ── windows, webassembly, qemu: the remaining three Make ports ──────────
   #
-  # Same mechanism as build-unix above (USER_C_MODULES points straight at
-  # the pinned checkout's own examples/usercmodule/, no wrapper file), one
-  # representative identifier per port rather than each port's own full
-  # arch matrix -- [0054]'s own "widen only if it finds something", not a
-  # cost-blind repeat of build-examples.yml's broader coverage. No smoke
-  # test for any of the three: none of their outputs (a .exe, a .wasm, a
-  # qemu ELF) runs directly on this runner the way unix's manylinux binary
-  # does (record 0069's own reasoning for why rp2 has none either).
+  # Same mechanism as build-unix above (the same three wrapper files,
+  # already discovered by py.mk's own glob), one representative identifier
+  # per port rather than each port's own full arch matrix -- [0054]'s own
+  # "widen only if it finds something", not a cost-blind repeat of
+  # build-examples.yml's broader coverage. No smoke test for any of the
+  # three: none of their outputs (a .exe, a .wasm, a qemu ELF) runs
+  # directly on this runner the way unix's manylinux binary does (record
+  # 0069's own reasoning for why rp2 has none either).
   build-windows:
     runs-on: ubuntu-latest
     env:
       CIBMP_VERSION: 0.0.0-ci
-      CIBMP_USER_C_MODULES: "{micropython}/examples/usercmodule"
     steps:
       - uses: actions/checkout@v7
 
@@ -233,43 +200,15 @@ jobs:
       - name: List built artifacts
         run: ls -laR examples/usercmodule/mpyhouse
 
+  # `examples/usercmodule/cibuildmp.toml`'s own `[override."*-wasm32"]`
+  # carries this identifier's own `extra-make-args` (CXX=em++ plus the
+  # CXXFLAGS_MOD fix for two real, separate upstream ports/webassembly/
+  # Makefile bugs -- see that file's own comment for both). Nothing
+  # webassembly-specific is set here any more.
   build-webassembly:
     runs-on: ubuntu-latest
     env:
       CIBMP_VERSION: 0.0.0-ci
-      CIBMP_USER_C_MODULES: "{micropython}/examples/usercmodule"
-      # Two real, separate upstream bugs in ports/webassembly/Makefile,
-      # both live-caught, both fixed the same way (a real command-line
-      # variable, through extra-make-args, no new cibuildmp option
-      # needed):
-      #
-      # 1. It sets CC/LD to `emcc` but never CXX -- py/mkenv.mk's own
-      #    default (`CXX = $(CROSS_COMPILE)g++`) then applies unmodified,
-      #    so a C++ user module's real .cpp compile silently runs through
-      #    the *host's* system g++ (confirmed live: the failure's own
-      #    `cc1plus` and "unrecognized command-line option" -- clang-only
-      #    flag names GCC doesn't know -- are exactly what a host g++
-      #    invocation looks like, not emcc's). `em++` is emsdk's own
-      #    (already-baked-in) C++ driver, the same binary emcc itself is
-      #    a sibling of.
-      # 2. cppexample.cpp fails to build even under the right compiler:
-      #    upstream's own ports/webassembly/mpconfigport.h unconditionally
-      #    `#define _GNU_SOURCE`, which emcc/clang already predefines by
-      #    itself in C++ mode (-std=c++11), tripping -Werror
-      #    -Wmacro-redefined. Not an upstream bug this project can fix
-      #    without vendoring that header (0054's own "no vendoring" call)
-      #    -- but py/mkrules.mk's own CXXFLAGS composition already reaches
-      #    into a `CXXFLAGS_MOD` variable nothing in the tree ever assigns
-      #    ("Add default C++ compiler flags based on CFLAGS. For use with
-      #    C++ user modules" -- that comment's own words), a real,
-      #    upstream-sanctioned hook for exactly this.
-      #
-      # Both reached through extra-make-args with no
-      # existing-accumulation-clobbering risk ([0066]'s own
-      # CMAKE_ARGS/IDFPY_FLAGS trap): CXX is a plain `=` assignment a
-      # command-line origin always wins outright, and nothing ever
-      # assigns CXXFLAGS_MOD at all, so neither has anything to replace.
-      CIBMP_EXTRA_MAKE_ARGS: "CXX=em++ CXXFLAGS_MOD=-Wno-macro-redefined"
     steps:
       - uses: actions/checkout@v7
 
@@ -288,7 +227,6 @@ jobs:
       contents: read
     env:
       CIBMP_VERSION: 0.0.0-ci
-      CIBMP_USER_C_MODULES: "{micropython}/examples/usercmodule"
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-qemu-action@v4

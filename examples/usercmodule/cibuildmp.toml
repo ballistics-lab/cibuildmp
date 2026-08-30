@@ -1,16 +1,44 @@
 # cibuildmp's own [0054]/[0069] fixture: MicroPython's own `examples/usercmodule/`
 # (cexample, cppexample, subpackage), not a module this project wrote for itself the way
-# `examples/template` is. Deliberately near-empty -- see the record for why this
-# directory holds nothing but this file and `micropython.cmake`.
+# `examples/template` is.
 #
-# No `build =`/`user-c-modules =` here, on purpose: both are set per-invocation by
-# `.github/workflows/test-upstream-usermodule.yml`, which is the only thing that knows
-# where `sources.fetch_micropython()` resolved the pinned checkout to
-# (`CIBMP_USER_C_MODULES=<checkout>/examples/usercmodule` for the Make port,
-# `CIBMP_USER_C_MODULES=.` + `CIBMP_EXTRA_CMAKE_ARGS=-DCIBMP_UPSTREAM_USERCMODULE_DIR=...`
-# for the CMake port -- see that workflow and docs/records/0069). A `build =`/
-# `user-c-modules =` default here would either duplicate the workflow's own value and
-# drift from it, or -- worse -- resolve to something real but wrong for a caller who
-# runs `cibuildmp examples/usercmodule` directly with no env set at all. No `manifest =`
-# either: none of the three upstream modules freezes any Python, so the per-port default
-# manifest `manifests.combined_manifest()` already includes is enough on its own.
+# No `build =` here, on purpose: `.github/workflows/test-upstream-usermodule.yml` still
+# passes `--build` per invocation (each job wants exactly one identifier, not this
+# fixture's full six-port sweep every push), and a default here would either duplicate
+# the workflow's own value and drift from it, or -- worse -- resolve to something real
+# but wrong for a caller who runs `cibuildmp examples/usercmodule` directly with no
+# `--build` given at all.
+#
+# No `user-c-modules =` either, for every port, CMake and Make alike: the built-in
+# default is already `"."` ([0051]'s ninth addendum), which is exactly right on both
+# sides once each side has its own real entry point pointed at the pinned checkout --
+# `micropython.cmake` (CMake ports, via MICROPY_DIR, see that file's own header comment)
+# and `{cexample,cppexample,subpackage}/micropython.mk` (Make ports, via $(TOP), see
+# `cexample/micropython.mk`'s own header comment) -- rather than through user-c-modules
+# itself. py.mk's own `$(USER_C_MODULES)/*/micropython.mk` glob finds these three
+# directories the same way it would any real multi-module project (a7p's own nested
+# `usermod/a7p/` shape); no vendoring (0054): every one of the six files here only
+# `include`s upstream's own real file, none of them copies its content.
+#
+# Two real, separate upstream bugs in ports/webassembly/Makefile, both live-caught: it
+# sets CC/LD to `emcc` but never CXX, so py/mkenv.mk's own default
+# (CXX = $(CROSS_COMPILE)g++) applies unmodified and a C++ user module's real .cpp
+# compile silently runs through the *host's* system g++ instead of emsdk's own `em++`
+# (confirmed live: the failure's own `cc1plus` and "unrecognized command-line option"
+# for a clang-only flag name are exactly what a host g++ invocation looks like, not
+# emcc's); and cppexample.cpp fails even under the right compiler, because upstream's
+# own ports/webassembly/mpconfigport.h unconditionally `#define _GNU_SOURCE`, which
+# emcc/clang already predefines by itself in C++ mode (-std=c++11), tripping -Werror
+# -Wmacro-redefined. Neither is fixable without vendoring upstream's own file (0054's
+# own "no vendoring" call); both are reached instead through py/mkrules.mk's own
+# CXXFLAGS_MOD hook ("Add default C++ compiler flags based on CFLAGS. For use with
+# C++ user modules" -- that comment's own words) plus a real CXX= override, neither
+# with any existing-accumulation-clobbering risk ([0066]'s own CMAKE_ARGS/IDFPY_FLAGS
+# trap): CXX is a plain `=` assignment a command-line origin always wins outright, and
+# nothing ever assigns CXXFLAGS_MOD at all, so neither has anything to replace.
+[override."*-wasm32"]
+extra-make-args = "CXX=em++ CXXFLAGS_MOD=-Wno-macro-redefined"
+
+# No `manifest =`: none of the three upstream modules freezes any Python, so the
+# per-port default manifest `manifests.combined_manifest()` already includes is enough
+# on its own.
