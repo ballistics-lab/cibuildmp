@@ -167,7 +167,7 @@ manylinux_2_39_mipsel = "ghcr.io/ballistics-lab/manylinux_2_39_mipsel@sha256:aec
 # `dockerrun.py`, since it is a property of the image rather than of any
 # build target) is what lets them run on an arm64 host at all -- emulated,
 # instead of failing with `exec format error`.
-windows = "ghcr.io/ballistics-lab/windows@sha256:dfdbf1b0c0334d4da68cd74ff516d9d8a6b7f0a88003b449e3be859625667f8f"
+windows = "ghcr.io/ballistics-lab/windows@sha256:9e69aaecd280dd8cb4d9247f320c98bf0af8f07a97dd370c454f3da76a172a5f"
 webassembly = "ghcr.io/ballistics-lab/webassembly@sha256:d35728567074c9af1b71f22e6f674946fff46ca69d159ea48672a80653544202"
 
 # ── the six toolchain-group images (record 0058) ───────────────────────
