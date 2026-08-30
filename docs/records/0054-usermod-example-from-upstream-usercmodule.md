@@ -2,7 +2,7 @@
 
 - Status: Proposed (nothing built; this record scopes the work and names what is
   already known to be in the way)
-- Related: [0016], [0021], [0023], [0053]
+- Related: [0016], [0021], [0023], [0033], [0046], [0053]
 
 ## Why a second usermod example at all
 
@@ -69,14 +69,27 @@ examples/usercmodule/
   CMake port builds two. Building the same three everywhere means adding one
   `include()` line to the vendored aggregator, which is a further argument for
   vendoring below.
-- **Vendoring policy.** This is MicroPython's own code, MIT-licensed, and the project
-  already has a precedent for carrying third-party source into `examples/`:
-  `examples/wasm2mpy` vendors from `vshymanskyy/wasm2mpy` with a `NOTICE` file next to
-  it. The alternative — reaching into the MicroPython checkout cibuildmp already
-  resolves per tag — is tempting and is worse: it would make the fixture's own content
-  change with the tag under test, so a failure could be upstream drift or a cibuildmp
-  regression with nothing to tell them apart. Vendor, with a `NOTICE`, and bump by
-  hand.
+- **Vendoring policy — reconsidered, flipped.** Original call: vendor, the way
+  `examples/wasm2mpy` vendors from `vshymanskyy/wasm2mpy` with its own `NOTICE` file,
+  because reaching into the MicroPython checkout cibuildmp already resolves per tag
+  would make the fixture's content "float" with whatever tag is under test, confusing
+  upstream drift with a real cibuildmp regression.
+
+  That reasoning doesn't hold: the tag is not floating, it's pinned — the same
+  `micropython = "v1.28.0"` shape `examples/template`'s own `cibuildmp.toml` already
+  uses, bumped only in a real, reviewed PR, the exact "a pin moves in a reviewed PR,
+  because the diff is the review" cadence [0033]/[0046] already established for every
+  other pin in this project. Reaching straight into `sources.fetch_micropython()`'s
+  own resolved checkout for `examples/usercmodule/` means the fixture's content is
+  exactly as pinned as anything else here — it changes only when a maintainer
+  deliberately bumps the tag, and CI running against that bump's own new
+  `usercmodule/` content *is* the review, not a source of confusion.
+
+  Vendoring is the worse choice on the project's own terms: a hand-copied tree is a
+  **second, independent pin** with its own bump schedule nothing watches — precisely
+  the un-noticed-staleness shape [0046] exists to name. No vendoring, no `NOTICE`
+  file, no separate bump step: read `examples/usercmodule/` straight out of the
+  checkout `fetch_micropython()` already resolves for whatever tag is under test.
 - **`build-examples.yml` runs `examples/template` on every leg.** A second usermod
   fixture is a second matrix's worth of CI minutes if it is added the same way. It is
   cheaper and more honest to run this one on a narrow port set at first — one Make port
@@ -96,5 +109,7 @@ examples/usercmodule/
 [0016]: 0016-usermod-user-c-modules-dir-vs-cmake.md
 [0021]: 0021-usermod-execution-central-value.md
 [0023]: 0023-usermod-identifier-scheme-config-output.md
+[0033]: 0033-cibuildmp-never-builds-docker-image-itself.md
+[0046]: 0046-pin-staleness-checker.md
 [0053]: 0053-usermod-ports-without-a-build-driver.md
 [0057]: 0057-multiple-modules-per-build.md
