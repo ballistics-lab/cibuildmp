@@ -556,3 +556,73 @@ def test_build_one_preserves_executable_bit(tmp_path, monkeypatch):
     result = build_one(options, target, mpy_dir)
 
     assert result.output.stat().st_mode & 0o111 != 0
+
+
+def test_build_one_copies_repaired_unix_lib_sidecar_alongside_the_binary(
+    tmp_path, monkeypatch
+):
+    # Regression check, record 0069/0070: `repair_unix_binary()` vendors
+    # libffi.so.6 into a `lib/` dir beside the built binary and points it
+    # there with `patchelf --set-rpath '$ORIGIN/lib'` -- a real collected
+    # artifact silently shipped without that sidecar, "$ORIGIN" resolving
+    # to wherever the binary actually runs from, not its original build
+    # directory, and failed "error while loading shared libraries:
+    # libffi.so.6: cannot open shared object file" the first time anything
+    # in this project actually executed a collected unix binary
+    # (examples/usercmodule/smoke_test.py, not just `ls`ed its output).
+    package_dir = tmp_path / "pkg"
+    make_module_dir(package_dir)
+    write_config(package_dir, "")
+    options = UsermodOptions.load(package_dir)
+    options.output_dir = tmp_path / "mpyhouse"
+
+    mpy_dir = tmp_path / "mpy"
+    target = UsermodTarget(port="unix", arch="manylinux_2_28_x86_64")
+
+    def fake_run(cmd, **kwargs):
+        build_dir = mpy_dir / "ports" / "unix" / "build-unix-manylinux_2_28_x86_64"
+        build_dir.mkdir(parents=True, exist_ok=True)
+        (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
+        # What a real repair_unix_binary() run leaves behind -- this test
+        # stubs dockerrun.subprocess.run entirely, so the real ldd/patchelf
+        # invocation never runs; simulating its own output directly is what
+        # lets this test exercise build_one()'s own collection step without
+        # a real container.
+        lib_dir = build_dir / "lib"
+        lib_dir.mkdir()
+        (lib_dir / "libffi.so.6").write_bytes(b"\x7fELF-stub-shared-object")
+
+    monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
+    (mpy_dir / "ports" / "unix").mkdir(parents=True)
+
+    result = build_one(options, target, mpy_dir)
+
+    sidecar = result.output.parent / "lib" / "libffi.so.6"
+    assert sidecar.is_file()
+    assert sidecar.read_bytes() == b"\x7fELF-stub-shared-object"
+
+
+def test_build_one_skips_lib_copy_when_no_sidecar_exists(tmp_path, monkeypatch):
+    # The common case (a statically-linked or already-in-floor target) --
+    # repair_unix_binary() creates no `lib/` dir at all, and this must stay
+    # a plain no-op rather than raising on a directory that never existed.
+    package_dir = tmp_path / "pkg"
+    make_module_dir(package_dir)
+    write_config(package_dir, "")
+    options = UsermodOptions.load(package_dir)
+    options.output_dir = tmp_path / "mpyhouse"
+
+    mpy_dir = tmp_path / "mpy"
+    target = UsermodTarget(port="unix", arch="manylinux_2_28_x86_64")
+
+    def fake_run(cmd, **kwargs):
+        build_dir = mpy_dir / "ports" / "unix" / "build-unix-manylinux_2_28_x86_64"
+        build_dir.mkdir(parents=True, exist_ok=True)
+        (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
+
+    monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
+    (mpy_dir / "ports" / "unix").mkdir(parents=True)
+
+    result = build_one(options, target, mpy_dir)
+
+    assert not (result.output.parent / "lib").exists()

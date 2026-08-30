@@ -154,6 +154,12 @@ fixture nor cibuildmp provides, where `unix`'s own output is a binary this runne
 simply execute (a `manylinux_2_28`-built binary runs unmodified on the runner's newer
 glibc, the whole point of the manylinux floor).
 
+This smoke test found a real bug on its very first run, immediately: the collected
+binary could not load `libffi.so.6` at all, because `orchestrate.py`'s own collection
+step never carried `repair_unix_binary()`'s own `lib/` sidecar along with it — nothing
+in this project had ever actually executed a collected `unix` artifact before. See
+[0070] for the full account and the fix.
+
 ## Why two jobs, not one job with four steps
 
 `$GITHUB_ENV` exports are overwritable step-to-step within one job, so a single job could
@@ -192,3 +198,4 @@ coordination needed between them.
 [0057]: 0057-multiple-modules-per-build.md
 [0065]: 0065-bucketed-test-matrix-planning.md
 [0066]: 0066-extra-cmake-args.md
+[0070]: 0070-unix-collected-binary-missing-repaired-lib-sidecar.md
