@@ -1,0 +1,16 @@
+# cibuildmp's own [0054]/[0069] fixture: MicroPython's own `examples/usercmodule/`
+# (cexample, cppexample, subpackage), not a module this project wrote for itself the way
+# `examples/template` is. Deliberately near-empty -- see the record for why this
+# directory holds nothing but this file and `micropython.cmake`.
+#
+# No `build =`/`user-c-modules =` here, on purpose: both are set per-invocation by
+# `.github/workflows/test-upstream-usermodule.yml`, which is the only thing that knows
+# where `sources.fetch_micropython()` resolved the pinned checkout to
+# (`CIBMP_USER_C_MODULES=<checkout>/examples/usercmodule` for the Make port,
+# `CIBMP_USER_C_MODULES=.` + `CIBMP_EXTRA_CMAKE_ARGS=-DCIBMP_UPSTREAM_USERCMODULE_DIR=...`
+# for the CMake port -- see that workflow and docs/records/0069). A `build =`/
+# `user-c-modules =` default here would either duplicate the workflow's own value and
+# drift from it, or -- worse -- resolve to something real but wrong for a caller who
+# runs `cibuildmp examples/usercmodule` directly with no env set at all. No `manifest =`
+# either: none of the three upstream modules freezes any Python, so the per-port default
+# manifest `manifests.combined_manifest()` already includes is enough on its own.
