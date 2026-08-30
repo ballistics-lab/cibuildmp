@@ -434,6 +434,17 @@ workflows green on every arch, including the RISC-V toolchain fix below.
   `__init__`, for `DT_NEEDED` specifically), just never as a declared
   attribute pyright's static analysis can see.
 
+## [0.3.0] - 2026-08-24
+
+First release where `cibuildmp` actually builds a module — `v0.3.0a1` could
+only plan the target matrix. Validated against three real consuming repos
+(`micropython-bclibc`, `a7p`, `micropython-wasm3`), all natmod and usermod
+workflows green on every arch, including a RISC-V toolchain fix. Its own
+detailed entry was lost in the `#9` squash-merge that later folded into the
+[0.4.0] rewrite; restored here as this short summary rather than the full
+original list, since most of what it described was itself superseded before
+[0.4.0] shipped — see `docs/records/` for that history.
+
 ## [0.3.0a1] - 2026-08-24
 
 First alpha. Ships the composite actions unchanged and the first working

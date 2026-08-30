@@ -66,8 +66,11 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
       own failure mode). Also fixed alongside: `publish.yml`'s `deploy` job no
       longer runs on `pull_request` (did nothing there, could still flake red),
       `test-all-platforms.yml` skips its full matrix for a `dependabot[bot]`
-      actor. Still open: whether to move `manylinux_2_39_mipsel` onto a pinned
-      tarball toolchain like the embedded images already use; PR #16 itself
+      actor. PR #16 resolved: auto-closed once the group split landed,
+      recreated as #18 (14 pypa-only updates) which merged; `ubuntu` itself
+      not yet re-proposed standalone, `main` still on `24.04`. Still open:
+      whether to move `manylinux_2_39_mipsel` onto a pinned tarball
+      toolchain like the embedded images already use
 - [ ] [0022] zephyr as a third usermod selector axis (epic) | phase outline
       M6-M9b mostly landed; `rp2`'s own build driver closed 2026-08-29 by
       [0060], live-verified. Zephyr itself still not started
