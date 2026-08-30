@@ -12,14 +12,19 @@ name: Test upstream usercmodule
 # slice came back green, per [0054]'s own "widen only if it finds
 # something." Still nowhere near build-examples.yml's much broader
 # examples/template matrix: one representative identifier per port, not
-# each port's own full arch/board matrix. Each job resolves the pinned
-# MicroPython checkout itself
-# (sources.fetch_micropython(), the same call cibuildmp makes internally)
-# *before* running cibuildmp, so the real checkout path can be threaded into
-# CIBMP_USER_C_MODULES/CIBMP_EXTRA_CMAKE_ARGS -- see 0069 for why this can't
-# just be a `user-c-modules` value in examples/usercmodule/cibuildmp.toml
-# (that path isn't known until the checkout exists, and this project has no
-# `{checkout}`-style template for it yet).
+# each port's own full arch/board matrix.
+#
+# The four Make-port jobs (unix/windows/webassembly/qemu) each resolve the
+# pinned MicroPython checkout themselves (sources.fetch_micropython(), the
+# same call cibuildmp makes internally) *before* running cibuildmp, so the
+# real checkout path can be threaded into CIBMP_USER_C_MODULES -- see 0069
+# for why this can't just be a `user-c-modules` value in
+# examples/usercmodule/cibuildmp.toml (that path isn't known until the
+# checkout exists, and this project has no `{checkout}`-style template for
+# it), and build-rp2's own header comment for why the CMake-port jobs
+# below need no such step at all: examples/usercmodule/micropython.cmake
+# resolves the checkout itself, via the MICROPY_DIR every CMake port
+# already sets before it include()s a user module.
 #
 # A leaner version of this (pin CIBMP_CACHE_PATH to a fixed, known
 # directory and skip the pre-fetch step entirely) was tried and reverted --
@@ -127,6 +132,24 @@ jobs:
   # question for one real toolchain: whether cppexample's `-lstdc++` is
   # satisfiable on a bare-metal cross target. Deliberately not skipped --
   # a red leg here is a real finding to record, not a bug in this workflow.
+  #
+  # No pre-fetch step, unlike build-unix above: examples/usercmodule/
+  # micropython.cmake resolves the pinned checkout itself, via MICROPY_DIR
+  # -- a CMake variable every CMake port already sets before it ever
+  # include()s a user module (rp2/CMakeLists.txt's own
+  # `get_filename_component(MICROPY_DIR "../.." ABSOLUTE)`, well before its
+  # own `include(${MICROPY_DIR}/py/usermod.cmake)`). No CIBMP_EXTRA_CMAKE_ARGS
+  # needed either -- record 0069's original mechanism, replaced now that
+  # this fixture's own micropython.cmake reads MICROPY_DIR directly. This
+  # does NOT extend to the Make ports below: `usermod_mounts()`
+  # (build_common.py) bind-mounts a Make port's own USER_C_MODULES as a
+  # real host `Path` in addition to passing it as a `make` variable, so it
+  # cannot be a `$(TOP)`-style Makefile expression the way a CMake
+  # variable reference can -- CMake ports keep USER_C_MODULES="." (this
+  # fixture's own small, real, mountable directory) and defer the actual
+  # upstream reference to MICROPY_DIR entirely inside the already-mounted
+  # checkout, which is the asymmetry that makes this simplification
+  # CMake-only.
   build-rp2:
     runs-on: ubuntu-latest
     permissions:
@@ -142,25 +165,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-qemu-action@v4
-
-      - name: Resolve the pinned MicroPython checkout (record 0069)
-        id: mpy
-        run: |
-          set -euo pipefail
-          dir=$(PYTHONPATH=src python3 -c "from cibuildmp.sources import fetch_micropython; print(fetch_micropython('${CIBMP_UPSTREAM_TAG}', quiet=True))")
-          echo "dir=$dir" >> "$GITHUB_OUTPUT"
-
-      # Exported via $GITHUB_ENV, not this step's own `env:` block, and not
-      # a static job-level `env:` either -- the value depends on the
-      # previous step's own output, only known at runtime, and (same
-      # reasoning as build-unix's own step above) a composite action's
-      # inner steps only reliably see env set at job/workflow level, not on
-      # the specific step that calls `uses: ./`. Reaches this fixture's own
-      # micropython.cmake as the plain CMake cache variable
-      # CIBMP_UPSTREAM_USERCMODULE_DIR (build_common.cmake_extra_args_env()
-      # -> CMAKE_ARGS, record 0066's own mechanism, unextended here).
-      - name: Export CIBMP_EXTRA_CMAKE_ARGS for the rest of this job
-        run: echo "CIBMP_EXTRA_CMAKE_ARGS=-DCIBMP_UPSTREAM_USERCMODULE_DIR=${{ steps.mpy.outputs.dir }}/examples/usercmodule" >> "$GITHUB_ENV"
 
       - name: Build upstream examples/usercmodule (rp2)
         uses: ./
