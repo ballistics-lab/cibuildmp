@@ -1,6 +1,7 @@
 # 0046 — nothing notices when a pin goes stale, except container images
 
-Status: Accepted (design; one source covered, the rest not built)
+Status: Accepted (design; container images covered, the docker base-OS tag partially
+covered by [0068], the rest not built)
 
 Lifted out of [reference/open-questions.md](../reference/open-questions.md),
 where it had grown into a real work item sitting in a living document. It
@@ -118,9 +119,33 @@ failing loudly is the right cadence, and it costs nothing on a normal push.
 - Where the results go: a failing scheduled job, an issue, or a job summary
   ([0029] already has real `stepsummary.py` machinery to reuse).
 
+---
+
+## Addendum, 2026-08-30 — partially resolved by [0068], for one pin the table above misses
+
+The table above inventories `resources/pinned_docker_images.toml`/`pinned_pypa_images.toml`
+as "container images" and "pypa base images", but not the plain `FROM ubuntu:24.04`-style base
+OS tag each `docker/*.Dockerfile` also carries independently of those two tables — a pin this
+record's own inventory missed entirely.
+
+[0068] found that gap the hard way (a real `ubuntu:24.04` → `26.04` bump breaking
+`manylinux_2_39_mipsel`) and closed it for that one pin category, not by building a checker
+script but by making Dependabot itself the notifier: `docker-images`' group now excludes
+`ubuntu`, so a base-OS tag bump always lands as its own isolated PR — never silently bundled
+with a routine pypa digest bump — and still requires the human review [0033]'s own cadence
+already demands before any pin moves. That is exactly the "make staleness visible on a
+schedule, report don't decide" shape this record asked for, just riding Dependabot's own
+schedule instead of a new script.
+
+Everything else this record names is still unbuilt: `bin/update_toolchains.py` for
+`resources/natmod.toml`, an emsdk checker, a decision on xtensa-lx106, and `update_docker.py`'s
+own `--check` still runs on no schedule at all ([0068] confirmed this directly: no `cron:`
+anywhere relevant in `.github/workflows/*.yml`).
+
 [0002]: 0002-delegate-compile-own-environment.md
 [0010]: 0010-pinned-data-in-resources.md
 [0013]: 0013-micropython-list-dedup-by-abi.md
 [0029]: 0029-github-actions-job-summary.md
 [0033]: 0033-cibuildmp-never-builds-docker-image-itself.md
 [0044]: 0044-unix-native-images-landed.md
+[0068]: 0068-docker-dependabot-grouping-and-mipsel-ubuntu-26-04.md
