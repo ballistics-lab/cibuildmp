@@ -81,12 +81,30 @@ something a different toolchain vendor is guaranteed to match.
 
 ## Not decided here
 
-- Which of the two group-split mechanisms above to use (Dependabot `ignore`, a second
-  `dependabot.yml` entry, or a group split) — flagged, not implemented.
 - Whether to actually move `manylinux_2_39_mipsel` onto a pinned tarball toolchain, and if so
   which release and what floor it claims. A real design decision (new toolchain, likely a new
   or renamed identifier), not a docs fix.
 - PR #16 itself — still open as of this record, not merged, not closed.
+
+**Addendum, 2026-08-30.** The group split is implemented: `docker-images`' own `patterns: ["*"]`
+gained `exclude-patterns: ["ubuntu"]`, so `ubuntu` gets its own PR (still one, since every
+Dockerfile referencing it collapses onto that one dependency name already) and never shares a
+PR with a pypa digest bump again. Chosen over a second `dependabot.yml` entry or an `ignore`
+directive: `exclude-patterns` keeps the fix inside the one group block that already explains
+itself, and — unlike `ignore` — still lets Dependabot open the (now-isolated) `ubuntu` PR for a
+human to look at, rather than silently never proposing the bump at all.
+
+Two more things this incident's own CI runs surfaced, fixed alongside since they're the same
+"a Dependabot PR pays for CI it gets nothing from" shape: `publish.yml`'s `deploy` job ran its
+own `checkout` on every `pull_request` even though every real step behind it was already gated
+to `push`/`workflow_dispatch` — confirmed live doing nothing useful and once flaking red on this
+repo's own PR #17 for exactly that reason; now `if: github.event_name != 'pull_request'`, so it
+doesn't run there at all. `test-all-platforms.yml`'s `paths-ignore` excludes `**.md`/`docs/**`/
+`LICENSE` but not `docker/**` or `.github/dependabot.yml`, so any Dependabot docker PR (or a
+docs PR that happens to also touch `dependabot.yml`, as this record's own PR did) fired the full
+200+-identifier matrix for a change `verify-docker-images.yml` already covers; `plan` and
+`aggregate-results` both gained `if: github.actor != 'dependabot[bot]'` (the latter alongside its
+existing `always()`, so a skipped `plan` doesn't leave it aggregating zero buckets).
 
 ## Why this belongs next to [0046]
 

@@ -23,11 +23,14 @@ on:
         type: string
         default: ""
 
-# pull_request here is deliberately build-only: none of the deploy job's environment/if:
-# conditions match a pull_request event, so no publish permissions are ever granted or used.
-# It exists so a packaging change (a missing resources/*.toml in the wheel, a metadata error
-# twine rejects) surfaces on the PR instead of at release time, when the version number is
-# already spent — PyPI will not let the same version be uploaded twice, even after a delete.
+# pull_request here is deliberately build-only: the `build` job (lint, type check, test,
+# `uv build`, `twine check`) still runs, so a packaging change (a missing resources/*.toml in
+# the wheel, a metadata error twine rejects) surfaces on the PR instead of at release time, when
+# the version number is already spent — PyPI will not let the same version be uploaded twice,
+# even after a delete. `deploy` itself does not run at all on pull_request (see its own `if:`) --
+# every one of its steps was already gated behind `push`/`workflow_dispatch`, so it never granted
+# or used publish permissions here, only paid for a checkout that could flake and had nothing to
+# show for succeeding either way.
 run-name: >
   Build & Publish → ${{ github.event_name == 'push' && 'PyPI' ||
       github.event_name == 'workflow_dispatch' && inputs.testpypi && 'TestPyPI' ||
@@ -119,6 +122,15 @@ jobs:
 
   deploy:
     needs: [build]
+    # Every real step below is already gated to `push` (real PyPI) or an
+    # opt-in `workflow_dispatch` (TestPyPI) -- on a `pull_request` event
+    # every one of them was already a no-op (see the comment on the
+    # workflow's own `pull_request` trigger above), so the job itself
+    # skipped doing anything real while still paying for a checkout that
+    # could flake and turn an unrelated PR red for a job that accomplished
+    # nothing on it either way. Confirmed live: exactly that happened on
+    # this repo's own PR #17.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.meta.outputs.tag }}

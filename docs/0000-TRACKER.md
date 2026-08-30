@@ -73,14 +73,14 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
       toolchain tarballs `docker/natmod.Dockerfile` ([0050]) moved in are a
       fifth thing nothing watches
 - [ ] [0068] docker Dependabot grouping fixed, and what the first grouped bump
-      exposed | the `docker` group now matches `github-actions`'s one-PR shape
-      (fixed, pushed). Its first real bump (PR #16) paired safe pypa digest
-      bumps with `ubuntu:24.04` -> `26.04` in one PR; CI confirmed
-      `manylinux_2_39_mipsel` breaks outright on the new base -- Ubuntu 26.04's
-      archive dropped the mipsel cross-toolchain package entirely (Debian
-      Trixie). Not done: splitting the group so a base-OS major bump can't hide
-      behind routine digest bumps again, and whether to move `mipsel` onto a
-      pinned tarball toolchain the way the embedded images already do
+      exposed | the `docker` group matches `github-actions`'s one-PR shape, and
+      `ubuntu` is now excluded from it so a base-OS major bump can never again
+      share a PR with routine pypa digest bumps (2026-08-30, closing PR #16's
+      own failure mode). Also fixed alongside: `publish.yml`'s `deploy` job no
+      longer runs on `pull_request` (did nothing there, could still flake red),
+      `test-all-platforms.yml` skips its full matrix for a `dependabot[bot]`
+      actor. Still open: whether to move `manylinux_2_39_mipsel` onto a pinned
+      tarball toolchain like the embedded images already use; PR #16 itself
 - [ ] [0022] zephyr as a third usermod selector axis (epic) | phase outline
       M6-M9b mostly landed; `rp2`'s own build driver closed 2026-08-29 by
       [0060], live-verified. Zephyr itself still not started
