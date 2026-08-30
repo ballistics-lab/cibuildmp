@@ -370,38 +370,40 @@ worked example) — the README's own identifier reference plus a config's
 own comments are meant to carry that teaching burden now, not a keyword
 vocabulary the tool computes for you.
 
-<!-- migrated verbatim from docs/BACKLOG.md lines 519-546 (Toolchain map) -->
+<!-- migrated verbatim from docs/BACKLOG.md lines 519-546 (Toolchain map); rewritten for the container era, [0050]/[0058] -->
 
-## Toolchain map (authoritative, from `py/dynruntime.mk`)
+## Toolchain map (arch → cross-compiler prefix, from `py/dynruntime.mk`)
 
-Ten arches, five distinct toolchains:
+Ten arches, five distinct cross-compiler prefixes:
 
-| ARCH | `CROSS` | Provisioning |
-| --- | --- | --- |
-| `x64` | *(none)* | host gcc |
-| `x86` | *(none)*, `-m32` | host gcc + multilib |
-| `armv6m` `armv7m` `armv7emsp` `armv7emdp` | `arm-none-eabi-` | downloadable tarball |
-| `xtensa` | `xtensa-lx106-elf-` | downloadable tarball (already done in `build-natmod`) |
-| `xtensawin` | `xtensa-esp32-elf-` | see below |
-| `rv32imc` `rv64imc` | `riscv64-unknown-elf-` | downloadable tarball, must ship picolibc |
+| ARCH | `CROSS` |
+| --- | --- |
+| `x64` | *(none)* |
+| `x86` | *(none)*, `-m32` |
+| `armv6m` `armv7m` `armv7emsp` `armv7emdp` | `arm-none-eabi-` |
+| `xtensa` | `xtensa-lx106-elf-` |
+| `xtensawin` | `xtensa-esp32-elf-` |
+| `rv32imc` `rv64imc` | `riscv64-unknown-elf-` |
 
-Two findings worth acting on:
+This table only answers "which compiler does this arch need" — it says
+nothing about how that compiler actually reaches a build, and that half
+moved to containers entirely ([0050]): there is no host toolchain resolver
+left at all (`natmod/toolchains.py`, its `--toolchain` flag, and
+`resources/natmod.toml`'s own `[[toolchain]]` table were all deleted), and
+no bare-host natmod build path survives it. Every arch above now runs inside
+a pulled image — one of six toolchain-group images keyed by what they hold,
+not by port ([0058]), several shared across natmod arches and usermod ports
+alike. See [docs/reference/vendored-images.md](vendored-images.md) for the
+full group model: which arch/port/board resolves to which image, how a build
+actually picks one at runtime, and how those images get published.
 
-- **`xtensawin` does not need ESP-IDF.** `dynruntime.mk` only ever asks for
-  `xtensa-esp32-elf-` on `PATH`. The current `build-natmod` action installs
-  the entire IDF (`--recursive` clone, the heaviest single step in this repo)
-  to obtain one cross-gcc. Espressif publishes standalone crosstool-NG
-  toolchain builds — **verify and switch to those**; it should cut minutes
-  off every run.
-- **RISC-V needs picolibc.** `dynruntime.mk` probes
-  `$(CROSS)gcc --print-file-name=picolibc.specs` and only sets
-  `-specs=`/`USE_PICOLIBC` if the toolchain ships it; Ubuntu 24.04's own
-  bare-metal RISC-V toolchain does, and the default is otherwise `nosys`.
-  Whichever tarball the resolver picks must ship picolibc, or `rv32imc` /
-  `rv64imc` silently build against a different libc than CI does today.
-
-(Resolved and shipped as of [0036] — see that record for what actually
-landed, including the prefix-reconciliation and picolibc details.)
+`xtensawin` needing no full ESP-IDF (only `xtensa-esp32-elf-` on `PATH`) and
+RISC-V needing a picolibc-shipping toolchain (`dynruntime.mk` probes
+`$(CROSS)gcc --print-file-name=picolibc.specs` and falls back to `nosys`
+otherwise, silently, if the toolchain lacks it) were both open questions
+here once; [0036] resolved and verified both, and [0050]'s own image build
+later baked the same prefix reconciliation in permanently, via symlinks
+rather than a `CROSS=` override on every make invocation.
 
 <!-- migrated verbatim from docs/BACKLOG.md lines 547-570 (Local use) -->
 
@@ -409,32 +411,29 @@ landed, including the prefix-reconciliation and picolibc details.)
 
 Running the same build on a laptop that CI runs is a goal, not a
 side effect — it is most of why the tool exists rather than more composite
-actions (**D3**). From M2 on, `cibuildmp --dry-run` and `cibuildmp` behave
-the same locally as on a runner, with the same config.
+actions (**D3**). `cibuildmp --dry-run` and `cibuildmp` behave the same
+locally as on a runner, with the same config.
 
-What that means per arch, on a Linux host:
+**Superseded from what this section originally described, as of
+[0030]/[0033]/[0050]:** every build — natmod and every usermod port alike —
+is Docker-only now, with no bare-host path left for either family. This
+section used to carry a per-arch table ("`x64` works with the host gcc,
+nothing to install", tarballs downloaded into `~/.cache/cibuildmp/` for the
+rest) describing natmod's own host toolchain resolver; [0050] deleted that
+resolver outright, along with the last arch (`x64`/`x86`, `natmod_host`
+below) that used to run directly on the invoking machine. There is nothing
+left that self-provisions onto the host — `x86`'s 32-bit multilib included,
+which is exactly what makes it buildable on an arm64 runner now, inside an
+amd64 container.
 
-| Target | Local story |
-| --- | --- |
-| `x64` | works with the host gcc, nothing to install |
-| `armv6m` `armv7m` `armv7emsp` `armv7emdp` | toolchain downloaded into `~/.cache/cibuildmp/` on first use |
-| `xtensa` `xtensawin` `rv32imc` `rv64imc` | same, once each tarball source is pinned |
-| `x86` | needs `gcc-multilib` on the host; cannot be fixed by a download |
-
-`x86` is the one that will not be self-provisioning, so it must fail with a
-message naming the package rather than a compiler error. Non-Linux hosts are
-an open question — see [docs/reference/open-questions.md](open-questions.md).
-
-Nothing about this is CI-specific: the cache directory, the toolchain
-resolver and the build loop are the same code path in both places. The only
-thing a runner adds is that its cache starts empty.
-
-**Note (as of [0030]/[0033]):** for usermod, this "no Docker, no host
-mutation" story was later superseded — usermod builds are Docker-only, and
-`cibuildmp` itself never builds an image, only pulls a published one. natmod
-keeps the host/download story above as its preferred path, with Docker as an
-additional, not required, option. See [0030] and [0033] for the full
-reasoning.
+Nothing about this is CI-specific: the resolved image, the container
+invocation and the build loop are the same code path in both places — a
+runner only starts with an empty local image cache. `docker` (a reachable
+daemon) is now a hard local-use prerequisite for every target, natmod
+included; see [docs/reference/vendored-images.md](vendored-images.md) for
+exactly what each target pulls. Non-Linux hosts (reaching a docker daemon,
+not a toolchain) are an open question — see
+[docs/reference/open-questions.md](open-questions.md).
 
 <!-- migrated verbatim from docs/BACKLOG.md lines 3649-3666 (Non-goals) -->
 
@@ -467,3 +466,5 @@ reasoning.
 [0030]: ../records/0030-container-approach-natmod-and-docker-vs-qemu.md
 [0033]: ../records/0033-cibuildmp-never-builds-docker-image-itself.md
 [0036]: ../records/0036-m2-toolchain-resolver.md
+[0050]: ../records/0050-natmod-is-docker-only.md
+[0058]: ../records/0058-image-groups-are-toolchains-not-ports.md

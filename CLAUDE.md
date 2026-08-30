@@ -76,6 +76,33 @@ a record, grep `README.md` (and any other narrative doc) for text describing the
 pre-record state and fix it in the same session — don't leave that for whoever reads that
 paragraph next to discover the hard way.
 
+**The specific floating files, so "any other narrative doc" isn't a search you have to
+invent each time.** Every one of these has actually drifted from real project state at
+least once, not hypothetically:
+
+- **`README.md`** — natmod/usermod's container story (image names, "one Dockerfile"
+  claims), per-port provisioning rows, migration/adoption status paragraphs, the
+  `@vX.Y.Z` pin in every example. Stale three separate times on record: [0028]/[0060]'s
+  esp32/rp2 claim named in this file's own earlier text (see above), a version pin stuck
+  on `@v0.3.0` weeks after `v0.4.0` shipped plus a `windows` row still describing deleted
+  bare-host `apt` provisioning (both fixed same session as [0068]'s own docs pass), and
+  this file's own "one `docker/natmod.Dockerfile` image" claim surviving [0058]'s
+  six-way toolchain-image split for two weeks after it landed.
+- **`docs/reference/design.md`** — explicitly a *living* reference, which does not make
+  it immune: its own "Toolchain map"/"Local use" sections kept describing natmod's
+  host-side toolchain resolver as current for weeks after [0050] deleted it and made
+  every build Docker-only.
+- **`docs/reference/vendored-images.md`** — the image-group model itself (which
+  arch/port/board resolves to which published image). A Dockerfile split/merge, a group
+  rename, or a `publish-docker-images.yml` change invalidates this file's own mapping
+  table directly, not just its prose.
+- **`docs/ACTIONS.md`** — the composite-action reference, carrying its own separate
+  `@vX.Y.Z` pin from README's; both drifted from the real published version at the same
+  time, caught in the same pass.
+- **`CHANGELOG.md`** — append-only in principle, but a squash-merge has silently
+  dropped an entire released-version section before, leaving a dangling link reference
+  at the bottom with nothing in the body to anchor to.
+
 From there, drill down rather than infer:
 
 - Each record's own header carries its `Status:` line. A record marked `Implemented` can
