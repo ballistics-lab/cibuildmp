@@ -83,6 +83,42 @@ def test_build_one_unix_writes_into_output_dir_identifier(tmp_path, monkeypatch)
     assert result.output.read_bytes() == FAKE_X86_64_ELF
 
 
+def test_build_one_substitutes_micropython_placeholder_in_user_c_modules(
+    tmp_path, monkeypatch
+):
+    # `{micropython}` (docs/records/0069's own addendum) lets `user-c-modules`
+    # name a path *inside the pinned checkout* without a caller resolving it
+    # first -- `mpy_dir` is already real and resolved by the time `build_one()`
+    # runs, for every port uniformly. No module directory needs to actually
+    # exist under `package_dir` here: the substituted value is already
+    # absolute, so `package_dir / user_c_modules` discards `package_dir`
+    # entirely (the same `Path("x") / "/abs" == "/abs"` behaviour the
+    # relative-output_dir test above already relies on).
+    package_dir = tmp_path / "pkg"
+    package_dir.mkdir()
+    write_config(package_dir, 'user-c-modules = "{micropython}/vendor/mymod"\n')
+    options = UsermodOptions.load(package_dir)
+    options.output_dir = tmp_path / "mpyhouse"
+
+    mpy_dir = tmp_path / "mpy"
+    target = UsermodTarget(port="unix", arch="manylinux_2_28_x86_64")
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        build_dir = mpy_dir / "ports" / "unix" / "build-unix-manylinux_2_28_x86_64"
+        build_dir.mkdir(parents=True, exist_ok=True)
+        (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
+
+    monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
+    (mpy_dir / "ports" / "unix").mkdir(parents=True)
+
+    build_one(options, target, mpy_dir)
+
+    expected = f"USER_C_MODULES={(mpy_dir / 'vendor' / 'mymod').as_posix()}"
+    assert expected in " ".join(captured["cmd"])
+
+
 def test_dest_name_unset_keeps_todays_filename():
     # record 0052, A3: gated on `name` alone -- a project that has not set
     # it yet keeps exactly today's filename, "micropython" stem included.
