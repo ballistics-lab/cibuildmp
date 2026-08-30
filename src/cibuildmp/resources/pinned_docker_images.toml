@@ -108,19 +108,19 @@
 [image_group]
 
 # ── unix -- one native image per (arch, libc floor), identity-keyed ────
-manylinux_2_28_x86_64 = "ghcr.io/ballistics-lab/manylinux_2_28_x86_64@sha256:849c8669a3e13c1402d43e1361dc750cc0560197b84574ddd5a595308beb2365"
+manylinux_2_28_x86_64 = "ghcr.io/ballistics-lab/manylinux_2_28_x86_64@sha256:6afa4abdc2938e4b6efb0b4046f2fd7391e12fb8fc9ce83f0994cf21cafdeb0b"
 musllinux_1_2_x86_64 = "quay.io/pypa/musllinux_1_2_x86_64@sha256:75327606c7666fc971bd9239c6b220fd205b4bb9563b588075164622609219ca"
 
-manylinux_2_28_i686 = "ghcr.io/ballistics-lab/manylinux_2_28_i686@sha256:ca75c3ab34ab78e3324181142b72d375c6f174cc766078ed138fc6be3fd2791c"
+manylinux_2_28_i686 = "ghcr.io/ballistics-lab/manylinux_2_28_i686@sha256:dea33eaea05c895c5562bfc0a862409d04b882bf4aee23718254d72e64a9d288"
 musllinux_1_2_i686 = "quay.io/pypa/musllinux_1_2_i686@sha256:8ca1be90979cb290909c1c945573ccdc7114505d66c563567ee6c78927fb215f"
 
-manylinux_2_28_aarch64 = "ghcr.io/ballistics-lab/manylinux_2_28_aarch64@sha256:166c369630ab42573898ed737cf920ac77a72bc80a85ecf7c899e2dec242abb3"
+manylinux_2_28_aarch64 = "ghcr.io/ballistics-lab/manylinux_2_28_aarch64@sha256:18e5e5f073652ab81ceeedef811fa8941abe86a355ab08b617e61ffad9904a43"
 musllinux_1_2_aarch64 = "quay.io/pypa/musllinux_1_2_aarch64@sha256:cea133e28484a93e9c40fc661256e8f1ec69b2887d0b64acbfaf48f26bbab103"
 
-manylinux_2_28_ppc64le = "ghcr.io/ballistics-lab/manylinux_2_28_ppc64le@sha256:0a40f9bda0c824c47c0f1629a078cf578fee991dc3f7b540bdd19a0b9a9a3532"
+manylinux_2_28_ppc64le = "ghcr.io/ballistics-lab/manylinux_2_28_ppc64le@sha256:ccba99196585efebf016fa0bc505df296138c502f02855fe04ed92aa8dbde515"
 musllinux_1_2_ppc64le = "quay.io/pypa/musllinux_1_2_ppc64le@sha256:d70f4708a377ba4a21eee38be20e35c757e911b5ca90df0fce002fd71a6df3a8"
 
-manylinux_2_28_s390x = "ghcr.io/ballistics-lab/manylinux_2_28_s390x@sha256:575a7d5cc8735ad07d519d7bdcf024263db4ca0227cf1d4e81327bb40b6a793c"
+manylinux_2_28_s390x = "ghcr.io/ballistics-lab/manylinux_2_28_s390x@sha256:68ffd717e2484bcca5fc9b8ef03a7bca717d0e9fb9105f2c37573b1ffc05757a"
 musllinux_1_2_s390x = "quay.io/pypa/musllinux_1_2_s390x@sha256:97af923ea31a097445fcaad1af154e1f0fd997a6d722141d55607dc3767f8782"
 
 # armv7l's manylinux line starts at `_2_31` upstream (Ubuntu 20.04/apt,
@@ -156,7 +156,7 @@ musllinux_1_2_riscv64 = "quay.io/pypa/musllinux_1_2_riscv64@sha256:c81bcd3275ce4
 # image). Recording it beats claiming nothing -- record 0031 found that
 # even this arch's static build still reaches glibc's own `dlopen`-based
 # NSS at runtime, so "no floor" would be the less honest of the two.
-manylinux_2_39_mipsel = "ghcr.io/ballistics-lab/manylinux_2_39_mipsel@sha256:25e3706769e14dc6e453daf118a46a32f9106ba6421b9cc0d39d8e6a3c266b6a"
+manylinux_2_39_mipsel = "ghcr.io/ballistics-lab/manylinux_2_39_mipsel@sha256:aec4468c39bdcd167cbb4c45e09a9bb03968475174df2de175529471c19f7e83"
 
 # ── cross-compiling ports with no image axis of their own ─────────────
 #
@@ -167,8 +167,8 @@ manylinux_2_39_mipsel = "ghcr.io/ballistics-lab/manylinux_2_39_mipsel@sha256:25e
 # `dockerrun.py`, since it is a property of the image rather than of any
 # build target) is what lets them run on an arm64 host at all -- emulated,
 # instead of failing with `exec format error`.
-windows = "ghcr.io/ballistics-lab/windows@sha256:13a60ccb2bac7a19450d3e4fe41fbddaa42776d3be2c1c4f55e70a1255859f18"
-webassembly = "ghcr.io/ballistics-lab/webassembly@sha256:a0b08d84a27ee720e9ee56299aae1f7107da1400845cfc0be5f06b1d029a3734"
+windows = "ghcr.io/ballistics-lab/windows@sha256:dfdbf1b0c0334d4da68cd74ff516d9d8a6b7f0a88003b449e3be859625667f8f"
+webassembly = "ghcr.io/ballistics-lab/webassembly@sha256:d35728567074c9af1b71f22e6f674946fff46ca69d159ea48672a80653544202"
 
 # ── the six toolchain-group images (record 0058) ───────────────────────
 #
@@ -180,15 +180,15 @@ webassembly = "ghcr.io/ballistics-lab/webassembly@sha256:a0b08d84a27ee720e9ee562
 # `publish-docker-images.yml` run 33175380705 (2026-08-28), each one
 # verified live before that run -- see record 0058's own "built and
 # verified" table for what each was tested against.
-arm_embedded = "ghcr.io/ballistics-lab/arm_embedded@sha256:71942f597e20ec7056b417fd11fc51dd94f86e1de1f6c6401fe546ae4ad1ffd8"
-riscv_embedded = "ghcr.io/ballistics-lab/riscv_embedded@sha256:7dc9b92ef8d4cd457bd14681feaa7f07493fb426712601e19d9219f38d28dc07"
-xtensa_lx106 = "ghcr.io/ballistics-lab/xtensa_lx106@sha256:ed50e6da5732eeb6aed3e7f99152f9d5d75c2c4cc163b8dee6d3da1d5fe3689b"
-xtensa_esp = "ghcr.io/ballistics-lab/xtensa_esp@sha256:a359ff0474cd10aaf1514bef20a57e4c8a7a5dbd830d6c5a0d9eab72f0ea3a60"
-natmod_host = "ghcr.io/ballistics-lab/natmod_host@sha256:85a790d948cd9ae690241e7b7234a9f411f82d9490aba5b249f24979a02bde47"
-ppc64le_linux = "ghcr.io/ballistics-lab/ppc64le_linux@sha256:dff49fd91ab8a2b209769c03da12307e1ab655d8c420248671ba893f17544835"
+arm_embedded = "ghcr.io/ballistics-lab/arm_embedded@sha256:9cc51bdf7d1189dd6e7126c32b876e0e178db2206e119498d31c00dfbf9563d8"
+riscv_embedded = "ghcr.io/ballistics-lab/riscv_embedded@sha256:17e6e4fe15787e97b635b22043fc8050bd153ac7dfc4ec0bdcbc9a523d66ef9f"
+xtensa_lx106 = "ghcr.io/ballistics-lab/xtensa_lx106@sha256:fb11daaf73ba8d1742a4d6adbc6703d756671e3cf2002af2700e6b1feb0c546b"
+xtensa_esp = "ghcr.io/ballistics-lab/xtensa_esp@sha256:f6c25dad7c7b8fb209635a5cc1addbab6e7f9f85ee5065f8db8a6b9eb5f2adf3"
+natmod_host = "ghcr.io/ballistics-lab/natmod_host@sha256:ec45bd4cf3b188ea14fbb2124db8093e0b514c0a25a685c6f966d7defe995ebc"
+ppc64le_linux = "ghcr.io/ballistics-lab/ppc64le_linux@sha256:7a5517e3733d9f705c8101bc7261f8013f407c82e40043fea5a18f81555a03e0"
 
 # Not a toolchain image (record 0058's own "esp_idf_base is not a
 # toolchain image"): ESP-IDF is installed into it at build time by
 # `usermod/espidf.py`, not baked in, since this table carries eight
 # distinct `idf_version`s. `esp32` names it directly.
-esp_idf_base = "ghcr.io/ballistics-lab/esp_idf_base@sha256:b9d213c834c3fb066c5407e9b6bf9e380c3813baf1b116b19ebadbadd4b57893"
+esp_idf_base = "ghcr.io/ballistics-lab/esp_idf_base@sha256:a7eb9007773fcc5bb3b200b1a635e52c57fcbd46f9fd945a70fef6f86628a002"
