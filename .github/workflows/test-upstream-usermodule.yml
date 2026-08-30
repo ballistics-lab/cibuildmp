@@ -6,10 +6,14 @@ name: Test upstream usercmodule
 # not one this project wrote for itself); docs/records/0069 is the mechanism
 # actually landed here and explains every choice below in full.
 #
-# Two jobs, one Make port and one CMake port -- [0054]'s own "one Make port
-# and one CMake port is enough to answer the three questions above", not
-# build-examples.yml's much broader examples/template matrix. Each job
-# resolves the pinned MicroPython checkout itself
+# Six jobs, one per port cibuildmp drives a usermod build for -- widened
+# from the original narrow unix+rp2 slice ([0054]'s own "one Make port and
+# one CMake port is enough to answer the three questions above") once that
+# slice came back green, per [0054]'s own "widen only if it finds
+# something." Still nowhere near build-examples.yml's much broader
+# examples/template matrix: one representative identifier per port, not
+# each port's own full arch/board matrix. Each job resolves the pinned
+# MicroPython checkout itself
 # (sources.fetch_micropython(), the same call cibuildmp makes internally)
 # *before* running cibuildmp, so the real checkout path can be threaded into
 # CIBMP_USER_C_MODULES/CIBMP_EXTRA_CMAKE_ARGS -- see 0069 for why this can't
@@ -163,6 +167,139 @@ jobs:
         with:
           package-dir: examples/usercmodule
           build: ${{ env.CIBMP_UPSTREAM_TAG }}-rp2-RPI_PICO
+
+      - name: List built artifacts
+        run: ls -laR examples/usercmodule/mpyhouse
+
+  # ── esp32: the second CMake port, and the second bare-metal toolchain ──
+  #
+  # [0054]'s own list of unanswered families after [0069]: esp32 is the
+  # ESP-IDF one -- a cmake-driven port like rp2, but a materially different
+  # toolchain (Xtensa/RISC-V via idf.py, not arm-none-eabi via the Pico
+  # SDK). `CIBMP_EXTRA_CMAKE_ARGS` is the exact same config surface rp2
+  # uses below; build_esp32.py's own build_common.cmake_extra_args_env()
+  # is what turns it into IDFPY_FLAGS instead of CMAKE_ARGS internally
+  # ([0066]) -- nothing in this workflow needs to know that distinction.
+  # Fully containerized since [0028] (no host-side ESP-IDF resolver left),
+  # so this needs no extra provisioning step beyond the checkout resolve
+  # every job here already does.
+  build-esp32:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      CIBMP_VERSION: 0.0.0-ci
+      CIBMP_USER_C_MODULES: "."
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v4
+
+      - name: Resolve the pinned MicroPython checkout (record 0069)
+        id: mpy
+        run: |
+          set -euo pipefail
+          dir=$(PYTHONPATH=src python3 -c "from cibuildmp.sources import fetch_micropython; print(fetch_micropython('${CIBMP_UPSTREAM_TAG}', quiet=True))")
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+
+      - name: Export CIBMP_EXTRA_CMAKE_ARGS for the rest of this job
+        run: echo "CIBMP_EXTRA_CMAKE_ARGS=-DCIBMP_UPSTREAM_USERCMODULE_DIR=${{ steps.mpy.outputs.dir }}/examples/usercmodule" >> "$GITHUB_ENV"
+
+      - name: Build upstream examples/usercmodule (esp32)
+        uses: ./
+        with:
+          package-dir: examples/usercmodule
+          build: ${{ env.CIBMP_UPSTREAM_TAG }}-esp32-ESP32_GENERIC
+
+      - name: List built artifacts
+        run: ls -laR examples/usercmodule/mpyhouse
+
+  # ── windows, webassembly, qemu: the remaining three Make ports ──────────
+  #
+  # Same mechanism as build-unix above (USER_C_MODULES points straight at
+  # the pinned checkout's own examples/usercmodule/, no wrapper file), one
+  # representative identifier per port rather than each port's own full
+  # arch matrix -- [0054]'s own "widen only if it finds something", not a
+  # cost-blind repeat of build-examples.yml's broader coverage. No smoke
+  # test for any of the three: none of their outputs (a .exe, a .wasm, a
+  # qemu ELF) runs directly on this runner the way unix's manylinux binary
+  # does (record 0069's own reasoning for why rp2 has none either).
+  build-windows:
+    runs-on: ubuntu-latest
+    env:
+      CIBMP_VERSION: 0.0.0-ci
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve the pinned MicroPython checkout (record 0069)
+        id: mpy
+        run: |
+          set -euo pipefail
+          dir=$(PYTHONPATH=src python3 -c "from cibuildmp.sources import fetch_micropython; print(fetch_micropython('${CIBMP_UPSTREAM_TAG}', quiet=True))")
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+
+      - name: Export CIBMP_USER_C_MODULES for the rest of this job
+        run: echo "CIBMP_USER_C_MODULES=${{ steps.mpy.outputs.dir }}/examples/usercmodule" >> "$GITHUB_ENV"
+
+      - name: Build upstream examples/usercmodule (windows)
+        uses: ./
+        with:
+          package-dir: examples/usercmodule
+          build: ${{ env.CIBMP_UPSTREAM_TAG }}-win_amd64
+
+      - name: List built artifacts
+        run: ls -laR examples/usercmodule/mpyhouse
+
+  build-webassembly:
+    runs-on: ubuntu-latest
+    env:
+      CIBMP_VERSION: 0.0.0-ci
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve the pinned MicroPython checkout (record 0069)
+        id: mpy
+        run: |
+          set -euo pipefail
+          dir=$(PYTHONPATH=src python3 -c "from cibuildmp.sources import fetch_micropython; print(fetch_micropython('${CIBMP_UPSTREAM_TAG}', quiet=True))")
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+
+      - name: Export CIBMP_USER_C_MODULES for the rest of this job
+        run: echo "CIBMP_USER_C_MODULES=${{ steps.mpy.outputs.dir }}/examples/usercmodule" >> "$GITHUB_ENV"
+
+      - name: Build upstream examples/usercmodule (webassembly)
+        uses: ./
+        with:
+          package-dir: examples/usercmodule
+          build: ${{ env.CIBMP_UPSTREAM_TAG }}-wasm32
+
+      - name: List built artifacts
+        run: ls -laR examples/usercmodule/mpyhouse
+
+  build-qemu:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      CIBMP_VERSION: 0.0.0-ci
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v4
+
+      - name: Resolve the pinned MicroPython checkout (record 0069)
+        id: mpy
+        run: |
+          set -euo pipefail
+          dir=$(PYTHONPATH=src python3 -c "from cibuildmp.sources import fetch_micropython; print(fetch_micropython('${CIBMP_UPSTREAM_TAG}', quiet=True))")
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+
+      - name: Export CIBMP_USER_C_MODULES for the rest of this job
+        run: echo "CIBMP_USER_C_MODULES=${{ steps.mpy.outputs.dir }}/examples/usercmodule" >> "$GITHUB_ENV"
+
+      - name: Build upstream examples/usercmodule (qemu)
+        uses: ./
+        with:
+          package-dir: examples/usercmodule
+          build: ${{ env.CIBMP_UPSTREAM_TAG }}-qemu-MPS2_AN385
 
       - name: List built artifacts
         run: ls -laR examples/usercmodule/mpyhouse
