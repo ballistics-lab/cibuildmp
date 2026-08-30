@@ -44,19 +44,6 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### In progress / Proposed
 
-- [ ] [0038] M5 -- adopt cibuildmp in the three consuming repos | `a7p`/
-      `micropython-wasm3` fully migrated onto the unified CLI/action (own
-      `unix-mipsel` cell stays on the old composite action deliberately,
-      [0067]); `micropython-bclibc` pushed, awaiting its first CI run.
-      Surfaced and closed two real bugs along the way, [0066]/[0067]. Left:
-      `micropython-bclibc` green, then close alongside the `build-natmod`
-      wrapper item below
-- [ ] [0038] reduce `.github/actions/build-natmod` to a wrapper over
-      `cibuildmp --build "<glob>"` | 133 lines, never mentions cibuildmp, own
-      per-`ARCH` apt/xtensa/esp-idf installs -- since [0050] deleted
-      cibuildmp's bare-host natmod path, this is the only bare-host natmod
-      toolchain implementation left, with no first implementation left to
-      agree with. Confirmed unchanged as of the 2026-08-29 docs audit
 - [ ] [0047] run output should look exactly like cibuildwheel's |
       `stepsummary.py` half shipped (HTML job-summary table, right-aligned
       footer). Terminal log folding, colour/symbols, and
@@ -94,6 +81,14 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 - [ ] [0057] more than one module per build | **decided, documentation not mechanism**: natmod is one config per module (already demonstrated); usermod stays one `user-c-modules` path, N modules live in the consumer's own layout (subdirectories on Make ports, an aggregating `.cmake` on CMake ports) -- no list, since the aggregator is the consumer's own file. Left: writing this down where a user finds it, and [0054]'s fixture to actually test both forms, neither run here yet
 ### Implemented
 
+- [x] [0038] M5 -- adopt cibuildmp in the three consuming repos | all three
+      (`micropython-bclibc` #18, `micropython-wasm3` #6, `a7p` #86) merged to
+      `main`, CI fully green on the current head (31/32/29 checks), all
+      pinned to `cibuildmp@v0.4.0`. `a7p`'s own `unix-mipsel` cell stays on
+      the old composite action deliberately ([0067]). Two real bugs surfaced
+      and closed along the way, [0066]/[0067]. Confirmed live 2026-08-30 --
+      the `build-natmod` wrapper item once tracked alongside this is now its
+      own row under Rejected, not a blocker on this one
 - [x] [0067] `resolve_user_c_modules()` auto-detects the flat make-module
       shape | live-caught migrating `micropython-wasm3` (M5, [0038]): `py/
       py.mk` globs `<USER_C_MODULES>/*/micropython.mk` for make ports, one
@@ -227,6 +222,10 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### Rejected
 
+- [x] [0038] reduce `.github/actions/build-natmod` to a wrapper over
+      `cibuildmp --build "<glob>"` | rejected by explicit user call, 2026-08-30
+      -- the action stays as its own bare-host natmod toolchain
+      implementation, not folded into cibuildmp
 - [x] [0052] Track B: a tree-addressed config mechanism | designed in detail, then reverted the same record for the build/skip-glob-only model that shipped instead -- [0051]'s own row above
 - [x] [0052] defaults folded into `[override."*"]` as a built-in entry | rejected by explicit user call -- "defaults як `[override."*"]` - зайве"; `default=` stays its own `Options.get()` parameter
 
