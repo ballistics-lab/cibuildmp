@@ -101,5 +101,20 @@ schedule or workflow — confirmed via `grep -rn "cron:" .github/workflows/*.yml
 whole repo, unrelated. The first "not decided" bullet above (an automated, scheduled
 verify-sweep) is therefore still genuinely undecided; only the manual audit half exists.
 
+**Addendum, 2026-08-30.** The first "not decided" bullet's own premise -- "the operating rule
+above makes automation moot" -- turned out not to hold in practice even within this project:
+the rule is a convention a person has to remember to honor, and this repo hit the exact failure
+it describes anyway. `publish-docker-images.yml` now closes the actual window instead of only
+naming it: before the `Build and push` step retags `:latest`, a new `Preserve the digest
+:latest is about to leave behind` step reads the digest `resources/pinned_docker_images.toml`
+still names for that image group and applies `docker buildx imagetools create --tag
+ghcr.io/<owner>/<image>:pre-<first 12 hex of the digest> <that digest>` to it -- deterministic
+(same digest always produces the same preservation tag, so a no-op re-run is safe) and read
+straight from the pin table rather than guessed from `git describe` or a release tag, since
+those describe the *package's* release lineage, not which image content is actually still
+pinned. A `:latest` move can no longer orphan the one digest a real build still depends on;
+whatever GHCR's own cleanup does to genuinely untagged manifests, this one keeps its own name
+until a maintainer's own PR moves the pin and the preservation tag stops mattering.
+
 [0046]: 0046-pin-staleness-checker.md
 [0058]: 0058-image-groups-are-toolchains-not-ports.md
