@@ -238,6 +238,22 @@ jobs:
     env:
       CIBMP_VERSION: 0.0.0-ci
       CIBMP_USER_C_MODULES: "{micropython}/examples/usercmodule"
+      # cppexample.cpp fails here otherwise: upstream's own
+      # ports/webassembly/mpconfigport.h unconditionally `#define
+      # _GNU_SOURCE`, which emcc/clang already predefines by itself in
+      # C++ mode (-std=c++11), tripping -Werror -Wmacro-redefined. Not an
+      # upstream bug this project can fix without vendoring that header
+      # (0054's own "no vendoring" call) -- but py/mkrules.mk's own
+      # CXXFLAGS composition already reaches into a `CXXFLAGS_MOD`
+      # variable nothing in the tree ever assigns ("Add default C++
+      # compiler flags based on CFLAGS. For use with C++ user modules" --
+      # that comment's own words), a real, upstream-sanctioned hook for
+      # exactly this. Reached through extra-make-args, already supported
+      # by every Make port -- no new cibuildmp option needed, and no
+      # existing-accumulation-clobbering risk either ([0066]'s own
+      # CMAKE_ARGS/IDFPY_FLAGS trap): nothing ever assigns CXXFLAGS_MOD
+      # first, so this command-line assignment has nothing to replace.
+      CIBMP_EXTRA_MAKE_ARGS: "CXXFLAGS_MOD=-Wno-macro-redefined"
     steps:
       - uses: actions/checkout@v7
 
