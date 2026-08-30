@@ -19,42 +19,63 @@ existing option surface first, per this project's own discipline (**M-phase reco
 throughout this tracker exist because plans that skip that step drift**), settles whether
 that surface is even the right thing to extend before extending it.
 
-## The mechanism: pin the cache root, and the checkout's future path is already known
+## The mechanism: resolve the checkout before `cibuildmp` runs, in the workflow itself
 
-The first version of this workflow called `sources.fetch_micropython()` directly, in a
-plain Python step, before either build step ran — the same function `cibuildmp` itself
-already calls internally (`orchestrate.build()`) — purely to read back its own return
-value. That duplicated the one real fetch for no reason: `sources.cache_root()` reads
-`CIBMP_CACHE_PATH` straight from the environment, unconditionally, so pinning it to a
-job-scoped literal (`${{ github.workspace }}/.cibmp-cache` — first tried as
-`${{ runner.temp }}`, reverted live: the `runner` context is only available in
-`jobs.<job_id>.steps`, not in job-level `env:` at all, and using it there is a genuine
-"invalid workflow file" — zero jobs ever created, the run's own display title falling
-back to the file's path, the tell that GitHub rejected the file before running anything)
-makes the checkout's own eventual
-path (`<CIBMP_CACHE_PATH>/micropython/<tag>`, `sources.micropython_dir()`) computable
-*before it exists* — nothing here needs to call `fetch_micropython()` itself at all.
-`cibuildmp`'s own real call, made once when the actual `uses: ./` build step runs, is
-what populates it; every env value this workflow sets is just that same predictable path,
-spelled out.
+`.github/workflows/test-upstream-usermodule.yml` calls `sources.fetch_micropython()`
+directly, in a plain Python step, before either build step runs — the same function
+`cibuildmp` itself already calls internally (`orchestrate.build()`) — so the real,
+populated checkout path can be threaded into `CIBMP_USER_C_MODULES`/
+`CIBMP_EXTRA_CMAKE_ARGS` for the actual build step. `quiet=True` is load-bearing, not
+decorative: `fetch_micropython()`'s own progress prints ("MicroPython v1.29.0:
+extracting") go to stdout by default, and the step's own `$(...)` command substitution
+captures all of it, not just the final `print(path)` — live-caught the hard way, a
+corrupted multi-line `GITHUB_OUTPUT` value GitHub's own file-command parser rejected
+outright before either build step ever ran on the very first version of this workflow.
 
 No new option, no CLI change, no template syntax: `CIBMP_USER_C_MODULES` and
 `CIBMP_EXTRA_CMAKE_ARGS` already exist and already beat the config file (`options.py`'s
 own `opt()` — env checked before the cascade, unconditionally). Not set in
-`examples/usercmodule/cibuildmp.toml` either, even though the path is now deterministic
-*for this one workflow's own choice of `CIBMP_CACHE_PATH`*: baking that literal into the
-checked-in config file would make it wrong the moment anything invokes this fixture with
-a different cache root — a maintainer testing locally, a future CI change — which is
-exactly the "resolves to something real but wrong" failure that file's own header comment
-already warns against for the same reason. `CIBMP_CACHE_PATH` is env-only by construction
-(`cache_root()` never reads it through the TOML cascade at all, the same way it never
-reads `XDG_CACHE_HOME` through one either), so there is no config-file-shaped version of
-this to write even if that were otherwise desirable.
+`examples/usercmodule/cibuildmp.toml`, on purpose (see that file's own header comment):
+the checkout's path is a fact about *this run's own environment*, not the project, and
+there is no `{checkout}`-style template for `user-c-modules` to spell it into a config
+value even if that were otherwise desirable.
 
 A vendored git submodule was considered and rejected for the same reason [0054] already
 rejected hand-vendoring: a submodule is a second pin with its own bump step, decoupled
 from the `v1.29.0` tag string `build =` already carries — exactly the un-noticed-staleness
 shape [0046] exists to name, just wearing git's clothing instead of a `NOTICE` file's.
+
+### A leaner version was tried, and reverted — the workflow file broke, twice, for a rule this session never conclusively pinned down
+
+The obvious next step looked free: `sources.cache_root()` reads `CIBMP_CACHE_PATH`
+straight from the environment, unconditionally, so pinning it to a fixed, job-scoped
+literal makes the checkout's own eventual path (`<CIBMP_CACHE_PATH>/micropython/<tag>`)
+computable *before it exists* — no pre-fetch step needed at all, since `cibuildmp`'s own
+real `fetch_micropython()` call (inside the actual build step) would populate exactly
+that path on its own. Two attempts at this shape were pushed to real CI, and both came
+back as a genuine **"invalid workflow file"** — zero jobs ever created, the run's own
+display title falling back to the file's own path rather than its `name:`, which is
+GitHub's own tell for rejecting the file before running anything at all, not a step
+failing inside a job:
+
+1. `CIBMP_CACHE_PATH: ${{ runner.temp }}/cibmp-cache` in job-level `env:` — rejected.
+2. `CIBMP_CACHE_PATH: ${{ github.workspace }}/.cibmp-cache` in job-level `env:` (the
+   `runner` context is documented as available only in `jobs.<job_id>.steps`, not
+   `jobs.<job_id>.env`, so this looked like the fix) — rejected identically.
+
+Both used a job-level `env:` value combining a runner-scoped expression
+(`runner.temp`/`github.workspace`) with a second, separate `${{ env.CIBMP_UPSTREAM_TAG }}`
+expression in the same scalar. Which part of that shape GitHub's own schema actually
+rejects — `github.workspace` genuinely unavailable at job-level `env:` resolution time
+(before a runner is dispatched), the two-expressions-in-one-scalar combination, or
+something else entirely — was **not** established with any real confidence within this
+session: two live pushes is not enough signal to isolate the cause with two candidate
+mechanisms both changing at once, and a third speculative push against production CI
+was the wrong way to find out. Reverted to the pre-fetch mechanism above, which is
+confirmed green (a real, complete, successful run — id `33330364394`, both jobs passing,
+`cppexample` linking on `rp2` included). Whoever revisits the leaner version should
+change exactly one variable at a time (context, or expression shape, not both) and
+verify each step, ideally against a disposable branch/workflow rather than this one.
 
 ## Why two ports, and why these two
 
