@@ -180,13 +180,15 @@ jobs:
   # [0054]'s own list of unanswered families after [0069]: esp32 is the
   # ESP-IDF one -- a cmake-driven port like rp2, but a materially different
   # toolchain (Xtensa/RISC-V via idf.py, not arm-none-eabi via the Pico
-  # SDK). `CIBMP_EXTRA_CMAKE_ARGS` is the exact same config surface rp2
-  # uses below; build_esp32.py's own build_common.cmake_extra_args_env()
-  # is what turns it into IDFPY_FLAGS instead of CMAKE_ARGS internally
-  # ([0066]) -- nothing in this workflow needs to know that distinction.
-  # Fully containerized since [0028] (no host-side ESP-IDF resolver left),
-  # so this needs no extra provisioning step beyond the checkout resolve
-  # every job here already does.
+  # SDK). Fully containerized since [0028] (no host-side ESP-IDF resolver
+  # left).
+  #
+  # No pre-fetch step, same reasoning as build-rp2 above: MICROPY_DIR is
+  # set at the very top of ports/esp32/main/CMakeLists.txt
+  # (`if(NOT MICROPY_DIR) get_filename_component(...)`), well before it
+  # -- via ports/esp32/CMakeLists.txt -- reaches `include(${MICROPY_DIR}/
+  # py/usermod.cmake)`, so examples/usercmodule/micropython.cmake resolves
+  # the checkout itself; no CIBMP_EXTRA_CMAKE_ARGS needed here either.
   build-esp32:
     runs-on: ubuntu-latest
     permissions:
@@ -197,16 +199,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-qemu-action@v4
-
-      - name: Resolve the pinned MicroPython checkout (record 0069)
-        id: mpy
-        run: |
-          set -euo pipefail
-          dir=$(PYTHONPATH=src python3 -c "from cibuildmp.sources import fetch_micropython; print(fetch_micropython('${CIBMP_UPSTREAM_TAG}', quiet=True))")
-          echo "dir=$dir" >> "$GITHUB_OUTPUT"
-
-      - name: Export CIBMP_EXTRA_CMAKE_ARGS for the rest of this job
-        run: echo "CIBMP_EXTRA_CMAKE_ARGS=-DCIBMP_UPSTREAM_USERCMODULE_DIR=${{ steps.mpy.outputs.dir }}/examples/usercmodule" >> "$GITHUB_ENV"
 
       - name: Build upstream examples/usercmodule (esp32)
         uses: ./
