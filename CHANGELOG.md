@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A real, narrow CI slice testing upstream's own `examples/usercmodule/`**, not just a
+  module cibuildmp wrote for itself the way `examples/template` is.
+  `.github/workflows/test-upstream-usermodule.yml` resolves the pinned MicroPython
+  checkout via `sources.fetch_micropython()` and builds `cexample`/`cppexample`/
+  `subpackage` on one Make port (`unix`) and one CMake port (`rp2`) — no vendoring, no new
+  config surface. `examples/usercmodule/micropython.cmake` is this repo's own three-line
+  shim adding the `subpackage` `include()` upstream's own CMake aggregator omits (a real
+  gap, confirmed against a v1.29.0 checkout, not assumed). `unix` also gets a real smoke
+  test (`examples/usercmodule/smoke_test.py`), run under the built binary, not just a
+  build-succeeded check. Confirmed green (run 33330364394), `cppexample`'s `-lstdc++`
+  linking on `rp2`'s own bare-metal toolchain included. Records 0054/0069.
+
 ## [0.4.0] - 2026-08-29
 
 Extensive, still-unreleased rework of the config surface and natmod's own
