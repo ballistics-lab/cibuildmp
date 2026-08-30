@@ -44,48 +44,43 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### In progress / Proposed
 
-- [ ] [0038] M5 -- adopt cibuildmp in the three consuming repos | this went well
-      past a mechanical repin 2026-08-29: `a7p` and `micropython-wasm3` are both
-      **fully migrated off every `build-usermod-*`/`fetch-micropython` composite
-      action onto the unified CLI/action** (only each repo's own genuine
-      cross-compile-with-no-native-host cell, `unix-mipsel`, stays on the old
-      composite action deliberately -- see [0067]'s own addendum) and green on
-      real CI, natmod and usermod both. `micropython-bclibc` is mid-migration,
-      pushed and awaiting its first CI run. Surfaced two real cibuildmp bugs
-      along the way, both fixed and both closed below: [0066] (no way to hand a
-      CMake-only flag to `rp2`/`esp32`) and [0067] (`resolve_user_c_modules()`
-      silently building zero user modules for a flat single-module `usermod/`
-      layout -- the shape `micropython-wasm3` and `micropython-bclibc` both
-      reach for, unlike `a7p`'s own nested `usermod/a7p/`). What is left: land
-      `micropython-bclibc`'s own CI (green or fixed to green), then this closes
-      alongside archiving `micropython-native-ci` (already done, verified
-      2026-08-28) and the `build-natmod` wrapper item below
+- [ ] [0038] M5 -- adopt cibuildmp in the three consuming repos | `a7p`/
+      `micropython-wasm3` fully migrated onto the unified CLI/action (own
+      `unix-mipsel` cell stays on the old composite action deliberately,
+      [0067]); `micropython-bclibc` pushed, awaiting its first CI run.
+      Surfaced and closed two real bugs along the way, [0066]/[0067]. Left:
+      `micropython-bclibc` green, then close alongside the `build-natmod`
+      wrapper item below
 - [ ] [0038] reduce `.github/actions/build-natmod` to a wrapper over
-      `cibuildmp --only <id>` | split out of the row above 2026-08-28 because
-      it is this repo's own work, not the consuming repos'. It grew teeth
-      since it was written: the action is 133 lines that never mention
-      cibuildmp, carrying per-`ARCH` apt packages, an xtensa install and an
-      esp-idf install of its own -- and [0050] deleted cibuildmp's bare-host
-      toolchain path outright, so this is now the *only* bare-host natmod
-      toolchain implementation left in the project, a second implementation
-      with no first left to agree with
-- [ ] [0047] run output should look exactly like cibuildwheel's | design
-      corrected 2026-08-28 against an installed cibuildwheel 4.1.0: the folds
-      are per *step* inside a build, not per build identifier -- the
-      `[ n/m ] <identifier>` spine stays unfolded, and one active group at a
-      time is enforced, not conventional. **`stepsummary.py` half shipped
-      2026-08-28**: HTML table (Output/Size/Build identifier/Time/SHA256),
-      options `<details>` block, right-aligned footer -- append-not-truncate
-      and hand-formatted sizes/durations (no `humanize` dep) kept as
-      deliberate departures. Terminal log folding, colour/symbols and
-      `::error::`/`::warning::`/`::notice::` annotations still not started
+      `cibuildmp --build "<glob>"` | 133 lines, never mentions cibuildmp, own
+      per-`ARCH` apt/xtensa/esp-idf installs -- since [0050] deleted
+      cibuildmp's bare-host natmod path, this is the only bare-host natmod
+      toolchain implementation left, with no first implementation left to
+      agree with. Confirmed unchanged as of the 2026-08-29 docs audit
+- [ ] [0047] run output should look exactly like cibuildwheel's |
+      `stepsummary.py` half shipped (HTML job-summary table, right-aligned
+      footer). Terminal log folding, colour/symbols, and
+      `::error::`/`::warning::`/`::notice::` annotations still not started;
+      design corrected 2026-08-28 against a real installed cibuildwheel
+      4.1.0 (folds are per *step*, not per identifier)
 - [ ] [0046] nothing notices when a pin goes stale, except container images |
-      independent of everything above, no urgency. `bin/update_docker.py` covers
-      both image tables; emsdk is the cheapest thing left (its own
-      `emscripten-releases-tags.json` maps version to build hash) and
-      `xtensa-lx106` the only genuinely hard one, having no version at all.
-      The four toolchain tarballs moved into `docker/natmod.Dockerfile` in
-      [0050] and are a fifth thing nothing watches
+      no longer hypothetical -- [0068]'s `mipsel`/`ubuntu:26.04` incident is a
+      real pin going stale with nothing scheduled to have caught it first.
+      `bin/update_docker.py` covers both image tables but runs on no schedule
+      (confirmed via [0068]'s own audit); emsdk is the cheapest thing left
+      unaddressed (its own `emscripten-releases-tags.json` maps version to
+      build hash), `xtensa-lx106` the hardest (no version at all). The four
+      toolchain tarballs `docker/natmod.Dockerfile` ([0050]) moved in are a
+      fifth thing nothing watches
+- [ ] [0068] docker Dependabot grouping fixed, and what the first grouped bump
+      exposed | the `docker` group now matches `github-actions`'s one-PR shape
+      (fixed, pushed). Its first real bump (PR #16) paired safe pypa digest
+      bumps with `ubuntu:24.04` -> `26.04` in one PR; CI confirmed
+      `manylinux_2_39_mipsel` breaks outright on the new base -- Ubuntu 26.04's
+      archive dropped the mipsel cross-toolchain package entirely (Debian
+      Trixie). Not done: splitting the group so a base-OS major bump can't hide
+      behind routine digest bumps again, and whether to move `mipsel` onto a
+      pinned tarball toolchain the way the embedded images already do
 - [ ] [0022] zephyr as a third usermod selector axis (epic) | phase outline
       M6-M9b mostly landed; `rp2`'s own build driver closed 2026-08-29 by
       [0060], live-verified. Zephyr itself still not started
@@ -93,10 +88,10 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
       seven runners already proven by `mp-usermod.yml`, not yet owned by
       cibuildmp
 - [ ] [0053] nine usermod ports have verified rows in `build-platforms.toml` but no real `build_<port>()` driver | `mimxrt`, `samd`, `stm32`, `psoc-edge`, `alif`, `esp8266`, `cc3200`, `renesas-ra`, `nrf` -- flagged by the user as the genuinely larger remaining piece. `rp2` closed 2026-08-29 by [0060]
-- [ ] [0054] an `examples/` usermod fixture on upstream's own `examples/usercmodule` | `template/`'s usermod side proves a module cibuildmp wrote for itself; upstream's proves the contract. Three things it adds that nothing here covers: C++ (`cppexample` needs `SRC_USERMOD_CXX` and `-lstdc++`, unverified on `windows`/`webassembly`/`qemu`), a separate `qstrdefs*.h`, and a dotted package. Ships both `micropython.mk` and `micropython.cmake` for one tree -- [0016]'s own reference implementation of both halves
-- [ ] [0055] an `examples/` natmod fixture on upstream's own `examples/natmod` | checking it first turned up the real finding: **upstream's own natmod modules do not satisfy cibuildmp's contract**. `py/dynruntime.mk` declares only `all`/`clean`, `all` leaves `$(MOD).mpy` at module root, and `BUILD ?= build` is not arch-scoped -- so `dist` plus `build/<arch>*/` is a *downstream* convention inherited from `micropython-native-ci`, not "every natmod Makefile in the wild". Shim, or teach `collect_output()` a fallback, or narrow the contract on purpose
-- [ ] [0056] build upstream MicroPython through the usermod path with no user C module | wanted, and the driver work is settled (the five drivers stop passing `USER_C_MODULES=` unconditionally; the mount list is *rebuilt*, not shortened, since the manifest reaches the container only via the `"."` mount; `verify_output()`'s module-symbol assertions become conditional). **How absence is expressed is open** -- (A) `no-user-c-modules = true`, mutually exclusive with `user-c-modules`, both given a load-time error rather than a precedence rule ([0048]'s lesson), checked via `opt("user-c-modules")` with no `default=` since the key always has a value otherwise; or (B) drop the `"."` default outright so unset means none, which removes a key and a rule instead of adding them and makes the key behave like `manifest` -- exactly one config in existence depends on that default, `examples/template`'s own. Upstream needs nothing under either
-- [ ] [0057] more than one module per build | **decided, both halves, and both are documentation rather than mechanism.** natmod: one config per module -- `examples/template` and `examples/wasm2mpy` already demonstrate it, and `collect_output()`'s two-`.mpy` refusal becomes the guard for a mis-scoped config. usermod: `user-c-modules` stays one path; N modules live in the consumer's own layout -- subdirectories on Make ports (`py/py.mk` globs `*/micropython.mk`), an aggregating `micropython.cmake` that `include()`s the others on CMake ports. No list, because the aggregator is the consumer's file rather than one cibuildmp generates ([0002]) and one key keeps one meaning ([0052]). The trap the docs must name: upstream's own `examples/usercmodule/micropython.cmake` lists only `cexample`/`cppexample`, so the same directory yields three modules on a Make port and two on a CMake one. [0054]'s fixture is what tests both forms -- neither has ever run here
+- [ ] [0054] an `examples/` usermod fixture on upstream's own `examples/usercmodule` | adds three things `template/`'s own fixture doesn't cover: C++ (`cppexample`, unverified on `windows`/`webassembly`/`qemu`), a separate `qstrdefs*.h`, a dotted package. Proposed, not built
+- [ ] [0055] an `examples/` natmod fixture on upstream's own `examples/natmod` | real finding: **upstream's own natmod modules don't satisfy cibuildmp's contract** (`dist` + `build/<arch>*/` is a downstream convention, not upstream's). Shim it, teach `collect_output()` a fallback, or narrow the contract on purpose -- undecided
+- [ ] [0056] build upstream MicroPython through the usermod path with no user C module | driver mechanics settled; open question is only how absence is expressed -- an explicit `no-user-c-modules = true` flag (A) vs. dropping `user-c-modules`'s `"."` default so unset means none (B). Exactly one existing config (`examples/template`) depends on that default either way
+- [ ] [0057] more than one module per build | **decided, documentation not mechanism**: natmod is one config per module (already demonstrated); usermod stays one `user-c-modules` path, N modules live in the consumer's own layout (subdirectories on Make ports, an aggregating `.cmake` on CMake ports) -- no list, since the aggregator is the consumer's own file. Left: writing this down where a user finds it, and [0054]'s fixture to actually test both forms, neither run here yet
 ### Implemented
 
 - [x] [0067] `resolve_user_c_modules()` auto-detects the flat make-module
@@ -314,3 +309,4 @@ record is added.
 [0065]: records/0065-bucketed-test-matrix-planning.md
 [0066]: records/0066-extra-cmake-args.md
 [0067]: records/0067-user-c-modules-flat-shape-autodetect.md
+[0068]: records/0068-docker-dependabot-grouping-and-mipsel-ubuntu-26-04.md

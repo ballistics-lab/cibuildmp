@@ -223,6 +223,7 @@ unlike a per-platform table, `[usermod]` is not a selection mechanism (it
 gates nothing), only a value-holding tier, the same category as any other
 global option.
 
+[0022]: ../records/0022-zephyr-third-selector-axis.md
 [0043]: ../records/0043-unix-adopts-cibuildwheel-native-image-model.md
 [0044]: ../records/0044-unix-native-images-landed.md
 [0051]: ../records/0051-usermod-identifiers-have-no-version-axis.md

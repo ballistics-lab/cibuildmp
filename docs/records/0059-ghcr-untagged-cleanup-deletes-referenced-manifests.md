@@ -91,5 +91,15 @@ cleanup"), not a script to add to [0046]'s own inventory.
   the operating rule above ("don't run untagged cleanup on these packages at all") makes it
   moot unless a maintainer wants automation later.
 
+**Addendum, 2026-08-29 (documentation audit).** The pruning script described above as
+"session-local, handed to a maintainer directly rather than committed" is committed now, as
+`bin/ghcr_prune_scan.py` — its own docstring matches this record's description exactly (scans
+for packages safe to delete, prints `gh api DELETE` commands, runs nothing itself). When it was
+added is not recorded anywhere; found only by a repo-wide script/CI-wiring audit, since nothing
+in `README.md`, `CHANGELOG.md`, or any record links to it. It is still not wired into any
+schedule or workflow — confirmed via `grep -rn "cron:" .github/workflows/*.yml`, one hit in the
+whole repo, unrelated. The first "not decided" bullet above (an automated, scheduled
+verify-sweep) is therefore still genuinely undecided; only the manual audit half exists.
+
 [0046]: 0046-pin-staleness-checker.md
 [0058]: 0058-image-groups-are-toolchains-not-ports.md
