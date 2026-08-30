@@ -26,7 +26,12 @@ plain Python step, before either build step ran — the same function `cibuildmp
 already calls internally (`orchestrate.build()`) — purely to read back its own return
 value. That duplicated the one real fetch for no reason: `sources.cache_root()` reads
 `CIBMP_CACHE_PATH` straight from the environment, unconditionally, so pinning it to a
-job-scoped literal (`${{ runner.temp }}/cibmp-cache`) makes the checkout's own eventual
+job-scoped literal (`${{ github.workspace }}/.cibmp-cache` — first tried as
+`${{ runner.temp }}`, reverted live: the `runner` context is only available in
+`jobs.<job_id>.steps`, not in job-level `env:` at all, and using it there is a genuine
+"invalid workflow file" — zero jobs ever created, the run's own display title falling
+back to the file's path, the tell that GitHub rejected the file before running anything)
+makes the checkout's own eventual
 path (`<CIBMP_CACHE_PATH>/micropython/<tag>`, `sources.micropython_dir()`) computable
 *before it exists* — nothing here needs to call `fetch_micropython()` itself at all.
 `cibuildmp`'s own real call, made once when the actual `uses: ./` build step runs, is

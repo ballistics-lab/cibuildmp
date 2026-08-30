@@ -63,14 +63,16 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CIBMP_VERSION: 0.0.0-ci
-      # runner.temp -- a real directory GitHub Actions already guarantees
-      # writable and job-scoped, outside the checkout itself. Job-level,
-      # not step-level: test-platforms.yml's own header comment already
-      # found the reason live -- a composite action's inner steps (this
-      # includes `uses: ./`'s own real "Run cibuildmp" step) only reliably
-      # see env set at job/workflow level.
-      CIBMP_CACHE_PATH: ${{ runner.temp }}/cibmp-cache
-      CIBMP_USER_C_MODULES: ${{ runner.temp }}/cibmp-cache/micropython/${{ env.CIBMP_UPSTREAM_TAG }}/examples/usercmodule
+      # github.workspace, not runner.temp: the `runner` context is only
+      # available in `jobs.<job_id>.steps`, not in job-level `env:` at all
+      # -- confirmed live, the hard way (a real "invalid workflow file"
+      # failure, zero jobs, before either job here ever started). Needs to
+      # be job-level, not step-level, regardless: test-platforms.yml's own
+      # header comment already found the reason live -- a composite
+      # action's inner steps (this includes `uses: ./`'s own real "Run
+      # cibuildmp" step) only reliably see env set at job/workflow level.
+      CIBMP_CACHE_PATH: ${{ github.workspace }}/.cibmp-cache
+      CIBMP_USER_C_MODULES: ${{ github.workspace }}/.cibmp-cache/micropython/${{ env.CIBMP_UPSTREAM_TAG }}/examples/usercmodule
     steps:
       - uses: actions/checkout@v7
 
@@ -115,7 +117,7 @@ jobs:
       contents: read
     env:
       CIBMP_VERSION: 0.0.0-ci
-      CIBMP_CACHE_PATH: ${{ runner.temp }}/cibmp-cache
+      CIBMP_CACHE_PATH: ${{ github.workspace }}/.cibmp-cache
       # "." -- examples/usercmodule/ itself, which holds this fixture's own
       # micropython.cmake (not upstream's).
       CIBMP_USER_C_MODULES: "."
@@ -125,7 +127,7 @@ jobs:
       # own mechanism, unextended here) -- see that file for why it needs
       # this at all rather than including upstream's own aggregator
       # directly.
-      CIBMP_EXTRA_CMAKE_ARGS: -DCIBMP_UPSTREAM_USERCMODULE_DIR=${{ runner.temp }}/cibmp-cache/micropython/${{ env.CIBMP_UPSTREAM_TAG }}/examples/usercmodule
+      CIBMP_EXTRA_CMAKE_ARGS: -DCIBMP_UPSTREAM_USERCMODULE_DIR=${{ github.workspace }}/.cibmp-cache/micropython/${{ env.CIBMP_UPSTREAM_TAG }}/examples/usercmodule
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-qemu-action@v4
