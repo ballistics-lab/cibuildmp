@@ -63,7 +63,7 @@ jobs:
         id: mpy
         run: |
           set -euo pipefail
-          dir=$(PYTHONPATH=src python3 -c "from cibuildmp.sources import fetch_micropython; print(fetch_micropython('${CIBMP_UPSTREAM_TAG}'))")
+          dir=$(PYTHONPATH=src python3 -c "from cibuildmp.sources import fetch_micropython; print(fetch_micropython('${CIBMP_UPSTREAM_TAG}', quiet=True))")
           echo "dir=$dir" >> "$GITHUB_OUTPUT"
 
       # CIBMP_USER_C_MODULES is exported below, job-wide, right after the
@@ -116,7 +116,7 @@ jobs:
         id: mpy
         run: |
           set -euo pipefail
-          dir=$(PYTHONPATH=src python3 -c "from cibuildmp.sources import fetch_micropython; print(fetch_micropython('${CIBMP_UPSTREAM_TAG}'))")
+          dir=$(PYTHONPATH=src python3 -c "from cibuildmp.sources import fetch_micropython; print(fetch_micropython('${CIBMP_UPSTREAM_TAG}', quiet=True))")
           echo "dir=$dir" >> "$GITHUB_OUTPUT"
 
       # Exported via $GITHUB_ENV, not this step's own `env:` block, and not
