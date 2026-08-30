@@ -19,30 +19,37 @@ existing option surface first, per this project's own discipline (**M-phase reco
 throughout this tracker exist because plans that skip that step drift**), settles whether
 that surface is even the right thing to extend before extending it.
 
-## The mechanism: resolve the checkout before `cibuildmp` runs, in the workflow itself
+## The mechanism: pin the cache root, and the checkout's future path is already known
 
-`.github/workflows/test-upstream-usermodule.yml` calls `sources.fetch_micropython()`
-directly, in a plain Python step, before either build step runs:
+The first version of this workflow called `sources.fetch_micropython()` directly, in a
+plain Python step, before either build step ran — the same function `cibuildmp` itself
+already calls internally (`orchestrate.build()`) — purely to read back its own return
+value. That duplicated the one real fetch for no reason: `sources.cache_root()` reads
+`CIBMP_CACHE_PATH` straight from the environment, unconditionally, so pinning it to a
+job-scoped literal (`${{ runner.temp }}/cibmp-cache`) makes the checkout's own eventual
+path (`<CIBMP_CACHE_PATH>/micropython/<tag>`, `sources.micropython_dir()`) computable
+*before it exists* — nothing here needs to call `fetch_micropython()` itself at all.
+`cibuildmp`'s own real call, made once when the actual `uses: ./` build step runs, is
+what populates it; every env value this workflow sets is just that same predictable path,
+spelled out.
 
-```
-PYTHONPATH=src python3 -c "
-from cibuildmp.sources import fetch_micropython
-print(fetch_micropython('v1.29.0'))"
-```
+No new option, no CLI change, no template syntax: `CIBMP_USER_C_MODULES` and
+`CIBMP_EXTRA_CMAKE_ARGS` already exist and already beat the config file (`options.py`'s
+own `opt()` — env checked before the cascade, unconditionally). Not set in
+`examples/usercmodule/cibuildmp.toml` either, even though the path is now deterministic
+*for this one workflow's own choice of `CIBMP_CACHE_PATH`*: baking that literal into the
+checked-in config file would make it wrong the moment anything invokes this fixture with
+a different cache root — a maintainer testing locally, a future CI change — which is
+exactly the "resolves to something real but wrong" failure that file's own header comment
+already warns against for the same reason. `CIBMP_CACHE_PATH` is env-only by construction
+(`cache_root()` never reads it through the TOML cascade at all, the same way it never
+reads `XDG_CACHE_HOME` through one either), so there is no config-file-shaped version of
+this to write even if that were otherwise desirable.
 
-This is the same function `cibuildmp` itself calls internally (`orchestrate.build()`),
-called early so its return value — the real, populated checkout path — can be threaded
-into env vars the later `uses: ./` steps set. No new option, no CLI change, no template
-syntax: `CIBMP_USER_C_MODULES` and `CIBMP_EXTRA_CMAKE_ARGS` already exist and already
-beat the config file (`options.py`'s own `opt()` — env checked before the cascade,
-unconditionally). This is the "pre-build" step — resolve what the container-side build
-will need before invoking it, the same shape `test-platforms.yml`'s own `plan` job
-already uses to compute a bucket's `--build` value in a plain Python step ahead of the
-real build. A vendored git submodule was considered and rejected for the same reason
-[0054] already rejected hand-vendoring: a submodule is a second pin with its own bump
-step, decoupled from the `v1.29.0` tag string `build =` already carries — exactly the
-un-noticed-staleness shape [0046] exists to name, just wearing git's clothing instead of
-a `NOTICE` file's.
+A vendored git submodule was considered and rejected for the same reason [0054] already
+rejected hand-vendoring: a submodule is a second pin with its own bump step, decoupled
+from the `v1.29.0` tag string `build =` already carries — exactly the un-noticed-staleness
+shape [0046] exists to name, just wearing git's clothing instead of a `NOTICE` file's.
 
 ## Why two ports, and why these two
 
@@ -106,6 +113,20 @@ resolving step has actually run, so it can't be a static job-level `env:` block 
 the same job, checked directly against this exact codebase's own prior live bug
 (`CIBMP_OUTPUT_DIR` silently exported as `""` — `action.yml`'s "Run cibuildmp" step's own
 comment).
+
+## `unix` also gets a real smoke test, not just a build check
+
+A produced binary that merely links is a weaker claim than this fixture is supposed to
+make -- `examples/usercmodule/smoke_test.py` is run under the actual built `unix` binary
+(`micropython smoke_test.py`) as a step after the build, and exercises the real,
+documented API of all three modules (`cexample.add_ints()`/`Timer`/`AdvancedTimer`,
+`cppexample.cppfunc()` -- whose own return value proves the lambda/`auto` it uses
+compiled as real C++11, not just that `-lstdc++` linked -- and `example_package`, the
+dotted package `subpackage/` registers itself as, not `subpackage` itself). `rp2` gets no
+equivalent: `firmware.uf2` needs real hardware or a board-specific emulator neither this
+fixture nor cibuildmp provides, where `unix`'s own output is a binary this runner can
+simply execute (a `manylinux_2_28`-built binary runs unmodified on the runner's newer
+glibc, the whole point of the manylinux floor).
 
 ## Why two jobs, not one job with four steps
 

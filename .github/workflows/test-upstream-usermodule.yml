@@ -8,14 +8,26 @@ name: Test upstream usercmodule
 #
 # Two jobs, one Make port and one CMake port -- [0054]'s own "one Make port
 # and one CMake port is enough to answer the three questions above", not
-# build-examples.yml's much broader examples/template matrix. Each job
-# resolves the pinned MicroPython checkout itself
-# (sources.fetch_micropython(), the same call cibuildmp makes internally)
-# *before* running cibuildmp, so the real checkout path can be threaded into
-# CIBMP_USER_C_MODULES/CIBMP_EXTRA_CMAKE_ARGS -- see 0069 for why this can't
-# just be a `user-c-modules` value in examples/usercmodule/cibuildmp.toml
-# (that path isn't known until the checkout exists, and this project has no
-# `{checkout}`-style template for it yet).
+# build-examples.yml's much broader examples/template matrix.
+#
+# Neither job fetches MicroPython itself: CIBMP_CACHE_PATH below pins
+# `sources.cache_root()` to a fixed, known directory, which makes the
+# checkout's own eventual path (`<CIBMP_CACHE_PATH>/micropython/<tag>`,
+# `sources.micropython_dir()`) computable in this workflow *before it
+# exists* -- cibuildmp's own real `fetch_micropython()` call, already made
+# from inside `orchestrate.build()` for every usermod build, is what
+# actually populates it, once, when the real build step below runs. A
+# separate pre-fetch step was tried first and dropped: it only duplicated
+# that same call for no reason other than learning its own return value,
+# which pinning CIBMP_CACHE_PATH makes unnecessary to ask for at all.
+#
+# Not set in examples/usercmodule/cibuildmp.toml, on purpose (see that
+# file's own header comment): the checkout's path is a fact about *this
+# run's own environment* (wherever CIBMP_CACHE_PATH/the default cache root
+# resolves), not about the project, and `cache_root()` reads
+# CIBMP_CACHE_PATH straight from the environment -- it is not a
+# cibuildmp.toml key at all, so there is nothing to hand this project's own
+# config schema even if that were otherwise desirable.
 #
 # push: (no branches: filter), same reasoning build-examples.yml's own header
 # already documents -- this needs to run on every push to a dev branch too.
@@ -51,28 +63,16 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CIBMP_VERSION: 0.0.0-ci
+      # runner.temp -- a real directory GitHub Actions already guarantees
+      # writable and job-scoped, outside the checkout itself. Job-level,
+      # not step-level: test-platforms.yml's own header comment already
+      # found the reason live -- a composite action's inner steps (this
+      # includes `uses: ./`'s own real "Run cibuildmp" step) only reliably
+      # see env set at job/workflow level.
+      CIBMP_CACHE_PATH: ${{ runner.temp }}/cibmp-cache
+      CIBMP_USER_C_MODULES: ${{ runner.temp }}/cibmp-cache/micropython/${{ env.CIBMP_UPSTREAM_TAG }}/examples/usercmodule
     steps:
       - uses: actions/checkout@v7
-
-      # No Docker, no `uv tool install` needed for this step alone --
-      # sources.py is stdlib-only (its own module docstring), so a bare
-      # PYTHONPATH=src invocation against the checkout is enough, the same
-      # pattern test-platforms.yml's own `plan` job already uses for a
-      # different resolution ahead of its own real build.
-      - name: Resolve the pinned MicroPython checkout (record 0069)
-        id: mpy
-        run: |
-          set -euo pipefail
-          dir=$(PYTHONPATH=src python3 -c "from cibuildmp.sources import fetch_micropython; print(fetch_micropython('${CIBMP_UPSTREAM_TAG}', quiet=True))")
-          echo "dir=$dir" >> "$GITHUB_OUTPUT"
-
-      # CIBMP_USER_C_MODULES is exported below, job-wide, right after the
-      # step above resolves it -- not set on this step's own `env:` block.
-      # test-platforms.yml's own header comment already found the reason
-      # live: a composite action's inner steps only reliably see env set at
-      # job/workflow level, not on the specific step that calls `uses: ./`.
-      - name: Export CIBMP_USER_C_MODULES for the rest of this job
-        run: echo "CIBMP_USER_C_MODULES=${{ steps.mpy.outputs.dir }}/examples/usercmodule" >> "$GITHUB_ENV"
 
       - name: Build upstream examples/usercmodule (unix, native)
         uses: ./
@@ -82,6 +82,19 @@ jobs:
 
       - name: List built artifacts
         run: ls -laR examples/usercmodule/mpyhouse
+
+      # A linked binary is not the same claim as one whose modules actually
+      # run -- unix is the one port here whose own output this runner can
+      # simply execute (a real manylinux_2_28 binary runs unmodified on a
+      # newer-glibc host, the whole point of the manylinux floor), unlike
+      # rp2's own firmware.uf2, which needs real hardware. See
+      # smoke_test.py's own header for what it actually exercises.
+      - name: "Smoke test (unix): run the built binary against smoke_test.py"
+        run: |
+          set -euo pipefail
+          identifier="${CIBMP_UPSTREAM_TAG}-manylinux_2_28_x86_64"
+          bin="examples/usercmodule/mpyhouse/${identifier}/micropython-${identifier}"
+          "$bin" examples/usercmodule/smoke_test.py
 
   # ── rp2: the CMake side ──────────────────────────────────────────────
   #
@@ -102,34 +115,20 @@ jobs:
       contents: read
     env:
       CIBMP_VERSION: 0.0.0-ci
+      CIBMP_CACHE_PATH: ${{ runner.temp }}/cibmp-cache
       # "." -- examples/usercmodule/ itself, which holds this fixture's own
-      # micropython.cmake (not upstream's), same job-level-env reasoning
-      # test-platforms.yml's own header comment already gives: a composite
-      # action's inner steps only reliably see env set at job/workflow
-      # level, not on the specific step that calls `uses: ./`.
+      # micropython.cmake (not upstream's).
       CIBMP_USER_C_MODULES: "."
+      # Reaches this fixture's own micropython.cmake as the plain CMake
+      # cache variable CIBMP_UPSTREAM_USERCMODULE_DIR
+      # (build_common.cmake_extra_args_env() -> CMAKE_ARGS, record 0066's
+      # own mechanism, unextended here) -- see that file for why it needs
+      # this at all rather than including upstream's own aggregator
+      # directly.
+      CIBMP_EXTRA_CMAKE_ARGS: -DCIBMP_UPSTREAM_USERCMODULE_DIR=${{ runner.temp }}/cibmp-cache/micropython/${{ env.CIBMP_UPSTREAM_TAG }}/examples/usercmodule
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-qemu-action@v4
-
-      - name: Resolve the pinned MicroPython checkout (record 0069)
-        id: mpy
-        run: |
-          set -euo pipefail
-          dir=$(PYTHONPATH=src python3 -c "from cibuildmp.sources import fetch_micropython; print(fetch_micropython('${CIBMP_UPSTREAM_TAG}', quiet=True))")
-          echo "dir=$dir" >> "$GITHUB_OUTPUT"
-
-      # Exported via $GITHUB_ENV, not this step's own `env:` block, and not
-      # a static job-level `env:` either -- the value depends on the
-      # previous step's own output, only known at runtime, and (same
-      # reasoning as build-unix's own step above) a composite action's
-      # inner steps only reliably see env set at job/workflow level, not on
-      # the specific step that calls `uses: ./`. Reaches this fixture's own
-      # micropython.cmake as the plain CMake cache variable
-      # CIBMP_UPSTREAM_USERCMODULE_DIR (build_common.cmake_extra_args_env()
-      # -> CMAKE_ARGS, record 0066's own mechanism, unextended here).
-      - name: Export CIBMP_EXTRA_CMAKE_ARGS for the rest of this job
-        run: echo "CIBMP_EXTRA_CMAKE_ARGS=-DCIBMP_UPSTREAM_USERCMODULE_DIR=${{ steps.mpy.outputs.dir }}/examples/usercmodule" >> "$GITHUB_ENV"
 
       - name: Build upstream examples/usercmodule (rp2)
         uses: ./
