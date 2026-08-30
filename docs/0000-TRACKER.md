@@ -68,9 +68,12 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
       `test-all-platforms.yml` skips its full matrix for a `dependabot[bot]`
       actor. PR #16 resolved: auto-closed once the group split landed,
       recreated as #18 (14 pypa-only updates) which merged; `ubuntu` itself
-      not yet re-proposed standalone, `main` still on `24.04`. Still open:
-      whether to move `manylinux_2_39_mipsel` onto a pinned tarball
-      toolchain like the embedded images already use
+      not yet re-proposed standalone, `main` still on `24.04`. `manylinux_2_39_mipsel`'s
+      toolchain move decided (2026-08-30 second addendum): a pinned Bootlin
+      tarball, glibc 2.41, renamed to `manylinux_2_41_mipsel`, delisted from
+      published images entirely (user builds the Dockerfile themselves,
+      reaches it via the existing `CIBMP_*_DOCKER_IMAGE` override) -- decided
+      only, none of it landed in code yet
 - [ ] [0022] zephyr as a third usermod selector axis (epic) | phase outline
       M6-M9b mostly landed; `rp2`'s own build driver closed 2026-08-29 by
       [0060], live-verified. Zephyr itself still not started
@@ -236,6 +239,8 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 - [reference/design.md](reference/design.md) — positioning, identifier scheme, phase-1 config
   schema, toolchain map, local-use table, non-goals
+- [reference/vendored-images.md](reference/vendored-images.md) — the pypa/vendored base images,
+  how an image group is formed, the full port/arch/board → group mapping, publishing flow
 - [reference/open-questions.md](reference/open-questions.md) — questions flagged but not yet
   designed or decided
 

@@ -56,8 +56,9 @@ once `version` is set.
 It never builds an image itself — it pulls pre-built, pinned images
 (`ghcr.io/ballistics-lab/<target>`) and launches sibling containers, one
 per target, the same way cibuildwheel's own container runtime does. That
-covers natmod (a single `docker/natmod.Dockerfile` for all ten arches) and
-every usermod port, `esp32` included — only the ESP-IDF `git clone` itself
+covers natmod (five toolchain-group images between them cover all ten
+arches — see [`docs/reference/vendored-images.md`](docs/reference/vendored-images.md))
+and every usermod port, `esp32` included — only the ESP-IDF `git clone` itself
 stays on the host (source, not a binary, the same reasoning `mpy_dir`
 mounts straight in everywhere else); installing ESP-IDF's own tools and
 building both run inside `esp_idf_base`. There is no
@@ -195,12 +196,17 @@ built artifact's directory/size/file listing or the error that stopped it:
 
 ### Natmod, per arch
 
-All ten `ARCH=` values `py/dynruntime.mk` accepts, all baked into one
-`docker/natmod.Dockerfile` image (`linux/amd64`, pulled from
-`ghcr.io/ballistics-lab/natmod`) — natmod builds no bare-host toolchain of
-any kind any more, `x86`'s 32-bit multilib included, which is exactly what
-makes it buildable on an arm64 runner too. Adopted in all three consuming
-repos and verified on real CI, arch by arch, not just `--dry-run`.
+All ten `ARCH=` values `py/dynruntime.mk` accepts, each running inside a
+pulled `linux/amd64` image — natmod builds no bare-host toolchain of any
+kind any more, `x86`'s 32-bit multilib included, which is exactly what makes
+it buildable on an arm64 runner too. There is no single `natmod` image any
+more either: five toolchain-group images between them cover all ten arches
+(`arm_embedded`, `riscv_embedded`, `xtensa_lx106`, `xtensa_esp`,
+`natmod_host`), and three of those five are shared with several usermod
+ports too, keyed by toolchain rather than by port — see
+[`docs/reference/vendored-images.md`](docs/reference/vendored-images.md) for
+the full group model. Adopted in all three consuming repos and verified on
+real CI, arch by arch, not just `--dry-run`.
 
 <table>
 <thead>
@@ -569,20 +575,24 @@ implemented, what's deliberately deferred. `docs/BACKLOG.md` is now just a
 short redirect into that scheme, not itself the plan.
 
 Natmod is done end to end — target selection, MicroPython/`mpy-cross`
-provisioning, and the build itself, all ten arches now running inside one
-pulled `docker/natmod.Dockerfile` image rather than a host-side
-toolchain resolver (that resolver, and its own `--toolchain` flag, are
-deleted) — verified on real CI in all three consuming repos, not just
-`--dry-run`. Usermod's own build drivers are wired into the CLI too (see
-[Target support](#target-support) above), covering every port with a
-real driver, not just three. All three consuming repos have repinned and
-are fully migrated off every `build-usermod-*`/`fetch-micropython`
-composite action onto the unified CLI/action, `cibuildmp@v0.4.0`, CI green
-on each repo's current `main` (`a7p` and `micropython-wasm3` each keep
-their own genuine cross-compile-with-no-native-host cell, `unix-mipsel`,
-on the old composite action deliberately). See the tracker's own [0038]
-row for current status rather than trusting this paragraph, which this
-project's own `CLAUDE.md` warns goes stale exactly this way.
+provisioning, and the build itself, all ten arches now running inside pulled
+toolchain-group images rather than a host-side toolchain resolver (that
+resolver, and its own `--toolchain` flag, are deleted) — verified on real CI
+in all three consuming repos, not just `--dry-run`. Usermod's own build
+drivers are wired into the CLI too (see [Target support](#target-support)
+above), covering every port with a real driver, not just three. All three
+consuming repos have repinned and are fully migrated off every
+`build-usermod-*`/`fetch-micropython` composite action onto the unified
+CLI/action, `cibuildmp@v0.4.0`, CI green on each repo's current `main` (`a7p`
+and `micropython-wasm3` each keep their own genuine
+cross-compile-with-no-native-host cell, `unix-mipsel`, on the old composite
+action deliberately). See the tracker's own [0038] row for current status
+rather than trusting this paragraph, which this project's own `CLAUDE.md`
+warns goes stale exactly this way. The container/image model itself —
+which build pulls what, and why — is
+[`docs/reference/vendored-images.md`](docs/reference/vendored-images.md),
+kept current the same way [`docs/reference/design.md`](docs/reference/design.md)
+is, not by memory.
 
 ## Contributing
 

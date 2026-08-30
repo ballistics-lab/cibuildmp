@@ -122,5 +122,51 @@ on no schedule at all (confirmed this session: `grep -rn "cron:" .github/workflo
 exactly one cron in the whole repo, unrelated to any of this). [0046]'s own tracker row is
 updated to point here as the concrete proof this is not hypothetical.
 
+**Addendum, 2026-08-30 (second) — the `manylinux_2_39_mipsel` toolchain decision, recorded here rather than as a new record.**
+
+Decided, **not yet executed in code**: `manylinux_2_39_mipsel`'s toolchain moves off `apt install
+gcc-mipsel-linux-gnu`/`libc6-dev-mipsel-cross` (unavailable since Debian 13 "Trixie", per this
+record's own root-cause section above) onto a pinned Bootlin tarball — the same version + URL +
+sha256 pattern `arm_embedded`/`riscv_embedded`/`xtensa_esp`/`xtensa_lx106` already use, independent
+of whatever the base OS's own apt archive currently carries.
+
+Bootlin's own releases are versioned by build date (`stable-YYYY.MM-N`), not by glibc version —
+`manylinux_2_39` was never a Bootlin release name, it is cibuildmp's own PEP 600-style floor claim
+(checked, in this record's own root-cause section, against the *apt* package specifically —
+`2.39-0ubuntu8cross2` — which a different toolchain vendor was never guaranteed to match, exactly
+the caveat this record raised and left open). Checked live against `toolchains.bootlin.com`'s own
+`mips32el` release list: `mips32el--glibc--stable-2024.05-1` bundles glibc `2.39-74` (matches
+today's floor exactly); the newest release, `mips32el--glibc--stable-2025.08-1`, bundles glibc
+`2.41-70`.
+
+**Chosen: the newest release (`2025.08-1`, glibc 2.41), not the floor-matching one.** Taking the
+newest maintained Bootlin release over freezing at the old floor means the identifier itself has
+to be renamed once this lands — `manylinux_2_39_mipsel` → `manylinux_2_41_mipsel` — a real PEP 600
+tag must not keep claiming a floor the image no longer has, the same principle [0031] already
+established for this exact cell.
+
+**Also decided: this image comes out of `pinned_docker_images.toml`'s `image_group` table
+entirely, not just repointed at a new pin.** mipsel is EOL upstream (this record's own root-cause
+section), and nothing here proposes to keep publishing and maintaining a GHCR image for an
+architecture Debian/Ubuntu no longer support at the OS level. A user who still needs it builds
+`docker/manylinux_2_41_mipsel.Dockerfile` themselves with a plain `docker build` and points
+cibuildmp at the result via the **already-existing** `CIBMP_UNIX_MANYLINUX_2_41_MIPSEL_DOCKER_IMAGE`
+override — `dockerrun.image_for()` already checks an env override before ever consulting the
+pinned table, and a group absent from that table already resolves to a clean `UsermodBuildError`
+("no image registered...") rather than any fallback build. No new cibuildmp code needed for this,
+and cibuildmp still never builds a Docker image itself ([0033]) — the user's own `docker build` is
+the only build that happens. This is a stronger version of [0044]'s own "descoped from CI, kept in
+the matrix" treatment for `ppc64le`/`s390x`/`riscv64`: those three still get a real,
+`bin/update_docker.py`-maintained digest with no CI leg; mipsel gets no digest published at all.
+
+**Not yet done** (code-level, tracked as this row's own follow-through, not a new record): the
+Dockerfile edit itself, the `pinned_docker_images.toml` row removal, the identifier rename across
+`build-platforms.toml`/README/tests, `verify-docker-images`/`test-all-platforms.yml` dropping their
+mipsel leg, and a README ⚠️ note explaining "build it yourself, nothing published" the way the
+three descoped cells above already carry one.
+
+[0031]: 0031-unix-musllinux-libc-axis.md
+[0033]: 0033-cibuildmp-never-builds-docker-image-itself.md
+[0044]: 0044-unix-native-images-landed.md
 [0046]: 0046-pin-staleness-checker.md
 [0059]: 0059-ghcr-untagged-cleanup-deletes-referenced-manifests.md
