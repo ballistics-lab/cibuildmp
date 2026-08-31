@@ -205,6 +205,31 @@ Naming a consuming repo stays fine as an *example*. Asserting its current
 state does not. The distinction is one a person can make and a regex cannot,
 which is the honest reason this is not a test.
 
+## Addendum, same day -- what a "finished" audit missed
+
+Asked whether the audit was complete, the honest answer was no, and two more
+turned up in the `README.md` sections the first pass had not reached --
+"Conventions this repo assumes" and "Versioning", neither of which looks like
+it carries version-dependent facts:
+
+- **"`dynruntime.mk` defaults `BUILD ?= build` unscoped."** True to v1.28.0,
+  false from v1.29.0, which made it `BUILD ?= build-$(ARCH)`. This one is not
+  cosmetic: the whole paragraph exists to tell a consumer to scope `BUILD`
+  themselves or watch a second `ARCH=` silently reuse the first one's objects,
+  and on the current pin that collision cannot happen by default at all.
+- **"`v0.4.0` is the current tag, and the one every example in this README
+  targets."** Both halves false, two releases running. The pin guard added
+  earlier that day did not catch it, because it only reads `@vX.Y.Z` in a
+  `uses:` line and this was bare prose.
+
+Neither is restated now -- the version lives in `CHANGELOG.md`, and the
+`BUILD` advice names the tag it applies to. The general lesson is the one
+this record keeps circling: a section with no version-shaped content in it
+still carries version-dependent claims, so "which files did I audit" is a
+weaker question than "which claims did I check". The mechanical guards cover
+the claims that have a machine-readable counterpart; everything else is
+found by reading, and is found in the places you did not expect to look.
+
 [0041]: 0041-docs-restructure.md
 [0050]: 0050-natmod-is-docker-only.md
 [0073]: 0073-composite-actions-are-a-permanent-legacy-fallback.md

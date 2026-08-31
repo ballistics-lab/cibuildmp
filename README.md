@@ -759,13 +759,19 @@ the consuming repo.
 before the `include`, kept outside `build/` so it does not collide with
 the `dist` output the CLI globs for (see
 `examples/template/natmod/Makefile`). `cibuildmp` runs every selected
-target sequentially in one `natmod/` tree, and `dynruntime.mk` defaults
-`BUILD ?= build` unscoped, so without this a second `ARCH=` in the same
-invocation finds the previous arch's own object files "up to date" and
-skips rebuilding — the merged `.mpy` silently stays the *first* arch's
-binary. `cibuildmp` catches this itself (a header-arch verification step
-fails loudly instead), but scoping `BUILD` avoids paying for the failed
-build at all.
+target sequentially in one `natmod/` tree, so a `BUILD` shared across
+arches makes a second `ARCH=` in the same invocation find the previous
+arch's own object files "up to date" and skip rebuilding — the merged
+`.mpy` silently stays the *first* arch's binary. `cibuildmp` catches that
+itself (a header-arch verification step fails loudly instead), but scoping
+`BUILD` avoids paying for the failed build at all.
+
+**How much this matters depends on the tag**, which this paragraph did not
+used to say: `dynruntime.mk` defaulted to an unscoped `BUILD ?= build` up
+to v1.28.0, and to `BUILD ?= build-$(ARCH)` from v1.29.0 — arch-scoped
+already. On v1.29.0 and later the collision cannot happen by default, so
+scoping `BUILD` yourself is only needed to put the objects somewhere other
+than beside the `dist` output, or to support an older `MPY_DIR`.
 
 If the module also builds `rv32imc` with more than one `arch-flags` value
 in the same invocation, `BUILD` needs `$(ARCH_FLAGS)` folded in too —
@@ -790,12 +796,14 @@ toolchain-group images rather than a host-side toolchain resolver (that
 resolver, and its own `--toolchain` flag, are deleted) — verified on real CI
 in all three consuming repos, not just `--dry-run`. Usermod's own build
 drivers are wired into the CLI too (see [Target support](#target-support)
-above), covering every port with a real driver, not just three. How far each consuming repo has migrated onto the
-unified CLI/action is **not stated here** — that is a claim about another
-repository's CI, which nothing in this repo can verify. The tracker's own
-[0038] row carries it, dated; [0077] has why this document no longer
-tries. The container/image model itself —
-which build pulls what, and why — is
+above), covering every port with a real driver, not just three.
+
+How far each consuming repo has migrated onto the unified CLI/action is
+**not stated here** — that is a claim about another repository's CI, which
+nothing in this repo can verify. The tracker's own [0038] row carries it,
+dated; [0077] has why this document no longer tries.
+
+The container/image model itself — which build pulls what, and why — is
 [`docs/reference/vendored-images.md`](docs/reference/vendored-images.md),
 kept current the same way [`docs/reference/design.md`](docs/reference/design.md)
 is, not by memory.
@@ -835,10 +843,14 @@ Pin consumers to a tag, not `@main` and not a commit SHA — bumping the tag
 a consumer references is a deliberate, visible edit in that repo, same as
 bumping any other CI dependency.
 
-The `cibuildmp` package and the actions share one version. `v0.4.0` is the
-current tag, and the one every example in this README targets — it's a
-breaking release (config surface rewritten, `unix` identifiers renamed;
-see `CHANGELOG.md`'s own `[0.4.0]` entry). `v0.3.0` was the first tag
+The `cibuildmp` package and the actions share one version. **Which tag is
+current is not restated here** — [`CHANGELOG.md`](CHANGELOG.md)'s own
+newest released heading is that, and `tests/test_docs.py` checks every
+`@vX.Y.Z` example in this file against it. (This paragraph named `v0.4.0`
+as current, and as "the one every example in this README targets", for two
+releases after that stopped being true.) `v0.4.0` is worth knowing as
+history: it is the breaking one — config surface rewritten, `unix`
+identifiers renamed, see `CHANGELOG.md`'s own `[0.4.0]` entry. `v0.3.0` was the first tag
 where the CLI actually built a module at all, not just planned it, and
 the line continues `micropython-native-ci`'s own version numbering rather
 than restarting it, since this repo absorbed that one (its consumers have

@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Two more stale claims in `README.md` sections the first audit pass had not
+  reached.** Its "Conventions" section said `dynruntime.mk` defaults to an
+  unscoped `BUILD ?= build`, true up to v1.28.0 and false from v1.29.0
+  (`BUILD ?= build-$(ARCH)`, arch-scoped already) — which changes the advice,
+  since the arch collision that paragraph warns about cannot happen by default
+  on the current pin. Its "Versioning" section called `v0.4.0` "the current
+  tag, and the one every example in this README targets", two releases after
+  both halves stopped being true. Neither is restated now: the current version
+  lives in `CHANGELOG.md`, and the `BUILD` advice names the tag it applies to.
+  Record 0077.
 - **Living docs no longer state another repository's status.** `README.md`,
   `docs/ACTIONS.md` and `docs/reference/design.md` all pointed at consuming
   repos' CI state; all three now point at `docs/0000-TRACKER.md`'s [0038] row,
