@@ -81,6 +81,15 @@ class PlatformModule(Protocol):
     should not have to rediscover it by shipping the bug again.
     """
 
+    # Declared, not just described above: `cli.py` reads both off a
+    # `PlatformModule`-typed element of `FAMILIES`, and a Protocol only
+    # documenting them in its docstring is an attribute error to pyright
+    # (caught by CI, after a local run of ruff + pytest alone said green).
+    # `__name__` is every module object's own, and is what supplies
+    # `known_option_names()`'s per-schema key.
+    __name__: str
+    OPTION_KEYS: frozenset[str]
+
     def resolve_options(
         self, args: Any, package_dir: Any, config_file: Any, preread: Any
     ) -> Any: ...

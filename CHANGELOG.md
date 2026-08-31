@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`README.md` now documents how to actually configure the thing**: a
+  `Configuration` section covering where the config file is looked for and in
+  what order, the flat key/`[override]`/`[publish]` shape, a table of all
+  fourteen option keys with defaults and which family reads each, the full
+  `CIBMP_*` environment surface (option forms, the per-platform
+  `CIBMP_BUILD_<PLATFORM>` form, and the machinery variables that have no
+  config-file counterpart), and — the part nothing stated anywhere before —
+  the two distinct precedence chains. Invocation-wide options resolve
+  `default → file → env → CLI`; per-target options resolve
+  `default → file → matching [override] → env`, so an environment variable
+  beats an `[override]` while a CLI flag beats an environment variable. Every
+  claim in the section was checked by running it, not read off the source:
+  that is how the `CIBMP_BUILD_<PLATFORM>` behaviour got documented correctly
+  — it does not replace the global selection, it scopes one platform's own
+  alongside it.
+- Every record number cited in `README.md` is now a working link. They were
+  bare bracketed text with no reference definition, rendering as a literal
+  `[0043]`.
+
 - **An unrecognised scalar key at the top level of `cibuildmp.toml` is now an
   error**, with a close-match suggestion — `buidl = "..."` answers "Perhaps you
   meant `build`?". Previously only unknown *tables* were caught; an unknown

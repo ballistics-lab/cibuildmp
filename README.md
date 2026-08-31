@@ -87,8 +87,9 @@ See [`examples/template`](examples/template) for a minimal natmod module
 and its `cibuildmp.toml`, and [`examples/wasm2mpy`](examples/wasm2mpy) for
 one whose native source is WebAssembly, compiled through `wasm2c` — the
 natmod contract doesn't care what produced the C. `cibuildmp --help` lists
-every flag; `CIBMP_*` environment variables and a `[tool.cibuildmp]` table
-in `pyproject.toml` both work as config overrides too.
+every flag, and [Configuration](#configuration) below covers the config
+file, every option key, the `CIBMP_*` environment forms and the order they
+all resolve in.
 
 ## Identifiers and selectors
 
@@ -191,6 +192,208 @@ built artifact's directory/size/file listing or the error that stopped it:
   ]
 }
 ```
+
+## Configuration
+
+### Where config lives
+
+`cibuildmp` reads exactly one config source, resolved in this order:
+
+1. `--config-file <path>`, if given (a missing file is an error, not a
+   fallback).
+2. `<package-dir>/cibuildmp.toml`.
+3. `[tool.cibuildmp]` in `<package-dir>/pyproject.toml`.
+4. Nothing. Every option has a default, so this is legitimate — but
+   `build` defaults to empty, and an empty `build` selects nothing, so a
+   config-less run builds nothing rather than everything.
+
+`<package-dir>` is the CLI's positional argument (`cibuildmp micropython/`)
+or the action's `package-dir` input, defaulting to `.`. Only the first
+source that exists is read — the three are alternatives, not layers.
+
+### The shape
+
+One flat table of scalar keys, plus two real sub-tables. There are no
+per-platform config tables: `[natmod]`, `[unix]`, `[esp32]`, `[usermod]`
+and friends were all retired ([0052]/[0074]) and writing one now is a
+plain "unknown table" error. Anything a per-platform table used to say, a
+sufficiently-scoped glob already says — every identifier carries its own
+platform marker.
+
+```toml
+# ── invocation-wide ───────────────────────────────────────────────────
+build = "mpy6.3-v1.29.0-* v1.29.0-manylinux_2_28_x86_64"
+skip  = "*-armv6m"
+name    = "mymod"          # .mpy/package.json naming; defaults to empty
+version = "1.2.0"
+output-dir = "mpyhouse"
+
+# ── defaults for every target, of either family ───────────────────────
+module-dir     = "natmod"      # natmod: where its Makefile lives
+user-c-modules = "usermod"     # usermod: the USER_C_MODULES path
+manifest       = "usermod/manifest.py"
+extra-make-args = ["LDFLAGS_EXTRA=-static"]
+
+# ── narrowed to the identifiers a glob matches ────────────────────────
+[override."*-manylinux_2_31_armv7l"]
+extra-make-args = ["LDFLAGS_EXTRA=-static"]
+
+[override."*-wasm32"]
+extra-make-args = ["VARIANT=pyscript"]
+inherit = { extra-make-args = "append" }   # or "prepend"; default replaces
+
+# ── natmod only: files copied beside every built .mpy ─────────────────
+[publish]
+extra-files = ["../src/mymod.py"]
+```
+
+`[override]` is keyed **directly by its own glob** — `[override."<glob>"]`,
+deliberately unlike cibuildwheel's `[[tool.cibuildwheel.overrides]]` with a
+`select =` field inside. Entries are matched in file order and every
+matching one applies, so two globs that both match one identifier layer
+onto each other rather than the first winning.
+
+### Every key
+
+| Key | Read by | Default | Also in `[override]`? |
+| --- | --- | --- | :-: |
+| `build` | both | `""` (selects nothing) | ✗ |
+| `skip` | both | `""` | ✗ |
+| `output-dir` | both | `"mpyhouse"` | ✗ |
+| `name` | both | `""` | ✗ |
+| `version` | both | `""` | ✗ |
+| `arch-flags` | natmod | `[]` | ✗ — resolved once for the whole config, before any target exists |
+| `micropython-submodules` | natmod | `[]` | ✗ |
+| `module-dir` | natmod | `"natmod"` | ✓ |
+| `make-target` | natmod | `"dist"` | ✓ |
+| `pre-build-command` | natmod | `""` | ✓ |
+| `extra-make-args` | both | `[]` | ✓ |
+| `user-c-modules` | usermod | `"."` | ✓ |
+| `manifest` | usermod | `""` | ✓ |
+| `extra-cmake-args` | usermod | `[]` | ✓ |
+
+Every key is valid at the top level whatever family reads it — the global
+layer is just every platform's own default, so a natmod-only key in a
+usermod-only project is accepted and ignored, not rejected. A key **no**
+family recognises is an error, with a close-match suggestion ([0075]):
+
+```console
+$ cibuildmp
+cibuildmp: error: cibuildmp.toml: unknown key `buidl`. Perhaps you meant `build`?
+```
+
+Two notes on individual keys:
+
+- `module-dir` and `user-c-modules` accept a literal `{micropython}`
+  placeholder, substituted with the pinned checkout cibuildmp itself
+  fetched ([0071]/[0072]) — `module-dir = "{micropython}/examples/natmod/btree"`
+  builds a module living inside MicroPython's own tree, with nothing
+  vendored into your repo.
+- `arch-flags` is a *list*, and each entry produces its own target: it is an
+  axis, not a flag. That is why it cannot live in `[override]` — an override
+  is matched against an identifier that arch-flags itself helped create.
+
+### Environment variables
+
+Every option key above has an environment form: `CIBMP_` + the key in
+`SCREAMING_SNAKE_CASE` (`extra-make-args` → `CIBMP_EXTRA_MAKE_ARGS`), the
+same shape cibuildwheel's own `CIBW_*` uses. `build` and `skip` also take a
+per-platform form, `CIBMP_BUILD_<PLATFORM>`/`CIBMP_SKIP_<PLATFORM>` —
+`CIBMP_BUILD_NATMOD`, `CIBMP_BUILD_UNIX`, `CIBMP_SKIP_ESP32`, … — and
+natmod's `arch-flags` takes `CIBMP_ARCH_FLAGS_NATMOD`.
+
+**The per-platform form does not replace the global selection — it scopes
+one platform's own, alongside it.** This surprises people, so it is worth
+seeing:
+
+```console
+$ CIBMP_BUILD_UNIX=v1.29.0-manylinux_2_28_x86_64 \
+  cibuildmp --build v1.29.0-win_amd64 --print-build-identifiers
+v1.29.0-manylinux_2_28_x86_64
+v1.29.0-win_amd64
+```
+
+`unix` used its own env-scoped selector; every other platform kept the
+global one. Use it to widen one platform in one CI job without touching the
+config file — not to narrow the run as a whole.
+
+A second group of variables configures the machinery rather than the build,
+and has no config-file counterpart at all:
+
+| Variable | Effect |
+| --- | --- |
+| `CIBMP_CACHE_PATH` | Where MicroPython checkouts and mpy-cross builds are cached. Defaults to `$XDG_CACHE_HOME/cibuildmp`, or `~/.cache/cibuildmp`. Pin it in CI when a later step needs the checkout by path — `<CIBMP_CACHE_PATH>/micropython/<tag>` |
+| `CIBMP_REPORT_PATH` | Where the JSON build report is written |
+| `CIBMP_TIMEOUT` | Seconds before a build container is killed (`docker kill`, not just the CLI). No limit by default |
+| `CIBMP_<PORT>_<TARGET>_TIMEOUT` | The same, for one container — `CIBMP_UNIX_MANYLINUX_2_28_X86_64_TIMEOUT` |
+| `CIBMP_<PORT>_<TARGET>_DOCKER_IMAGE` | Run this (port, target) in a different image — a locally built one, or a fork's. Wins over the pinned default. Omit the `<TARGET>` segment for a port with no per-build image axis (`CIBMP_WEBASSEMBLY_DOCKER_IMAGE`) |
+| `CIBMP_<PORT>_<TARGET>_DOCKER_PLATFORM` | Same shape, for the container's `--platform` |
+| `CIBMP_DEBUG_TRACEBACK` | Print a full traceback instead of a one-line error (same as `--debug-traceback`) |
+| `CIBMP_DISABLE_GITHUB_STEP_SUMMARY` | Suppress the step-summary table on GitHub Actions |
+
+### Precedence
+
+There are two chains, because two kinds of option resolve at two different
+times, and they do **not** order env and `[override]` the same way.
+
+**Invocation-wide options** — `build`, `skip`, `output-dir`, `name`,
+`version`, `arch-flags`, `micropython-submodules` — resolve once, before any
+target exists. Later wins:
+
+```
+built-in default  →  config file  →  CIBMP_<KEY>  →  CLI flag
+```
+
+with `CIBMP_BUILD_<PLATFORM>`/`CIBMP_SKIP_<PLATFORM>` applying *per
+platform* on top of whatever that chain produced, as shown above.
+
+Only three of these have a CLI flag at all — `--build`, `--skip` and
+`--output-dir` — and `--output-dir` is **natmod-only**: usermod's own
+`output-dir` comes from the config file or `CIBMP_OUTPUT_DIR`, and passing
+the flag does not move its collected files. Everything else is config file
+or environment.
+
+**Per-target options** — `module-dir`, `make-target`, `pre-build-command`,
+`extra-make-args`, `user-c-modules`, `manifest`, `extra-cmake-args` —
+resolve once per identifier, after selection. Later wins:
+
+```
+built-in default  →  config file (top level)  →  matching [override] entries  →  CIBMP_<KEY>
+```
+
+So an `[override]` beats the top-level default for the identifiers it
+matches, and an environment variable beats **everything**, override
+included — a one-off CI override stays a one-off, and cannot be
+accidentally re-narrowed by a glob in the config file. Matching
+`[override]` entries apply in file order, each replacing the running value
+unless its own `inherit` rule says otherwise:
+
+```toml
+extra-make-args = ["A=1"]
+
+[override."*-x64"]
+extra-make-args = ["B=2"]
+inherit = { extra-make-args = "append" }   # -> A=1 B=2   ("prepend" -> B=2 A=1)
+```                                        # without inherit -> B=2
+
+`inherit` only applies to list-valued options — `extra-make-args` is the one
+option genuinely list-shaped across every platform's own override surface;
+naming a scalar option in `inherit` is a config error, not a silent no-op.
+
+<!-- Every record this file cites, defined once. Reference definitions are
+     document-wide, so the numbers used in other sections resolve too --
+     they were bare bracketed text before, which rendered as literal
+     "[0043]" with nothing behind it. -->
+
+[0038]: docs/records/0038-m5-adopt-in-three-repos.md
+[0043]: docs/records/0043-unix-adopts-cibuildwheel-native-image-model.md
+[0052]: docs/records/0052-config-is-a-tree-not-a-selector-matrix.md
+[0058]: docs/records/0058-image-groups-are-toolchains-not-ports.md
+[0071]: docs/records/0071-micropython-placeholder-in-user-c-modules.md
+[0072]: docs/records/0072-natmod-micropython-placeholder-and-upstream-natmod-ci.md
+[0074]: docs/records/0074-usermod-family-table-and-retired-table-messages-removed.md
+[0075]: docs/records/0075-top-level-scalar-keys-are-validated.md
+[0076]: docs/records/0076-the-mipsel-holdout-is-bclibc-and-wasm3-not-a7p.md
 
 ## Target support
 
