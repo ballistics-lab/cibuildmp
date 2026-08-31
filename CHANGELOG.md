@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A `webassembly` smoke step in `test-upstream-usermodule.yml`**, running the
+  unmodified `examples/usercmodule/smoke_test.py` under `node` from `mpyhouse/`.
+  That job stopped at `ls` before, on the premise that a `.wasm` does not run on
+  this runner -- `node` is preinstalled there, every consuming repo already runs
+  its own wasm tests through it, and this is the check that would have caught the
+  collection bug above on the day it landed. Record 0079.
+
 - **Record 0078: handing the repo to an uncontexted reader is the docs test the
   suite cannot be.** Five rounds of it produced this session's findings, and the
   movement between rounds is the useful part — false user-facing claims, then
@@ -21,6 +28,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are generated, so the next reader does not rediscover that.
 
 ### Fixed
+
+- **A collected usermod artifact was always exactly one file, and for two ports
+  that is not the whole build.** `webassembly` collected `micropython.mjs`
+  without `micropython.wasm` -- the `.mjs` loads the blob by that literal name,
+  so the collected copy aborted with `failed to asynchronously prepare wasm:
+  ENOENT ... micropython.wasm`, having shipped 217,344 of the 680,703 bytes the
+  build actually produced. `esp32` collected `micropython.bin`, the application
+  image, never the combined `firmware.bin` that is the flashable one. Each port
+  now declares its own companions (`unix_companions()`,
+  `webassembly_companions()`, `esp32_companions()`), which `build_one()` copies
+  beside the primary under their own names -- both are references by exact name
+  from inside the primary, so only the primary is safely renameable. Record 0079.
+- **`qemu` builds collected 240K of build scratch.** Record 0070's fix copied any
+  `lib/` sitting beside the produced binary, for every port; `ports/qemu`'s own
+  `lib/` is `libm/`'s object files, so 54 `.o`/`.P` intermediates went into a real
+  collected identifier directory and out to a release from there. Only `unix`
+  declares a `lib/` companion now. Record 0079.
 
 - **CI caught a false positive in the new path guard that a development tree
   hides.** `action.yml` names `examples/template/mpyhouse/` — a real, correct

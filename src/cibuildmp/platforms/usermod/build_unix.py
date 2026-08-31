@@ -892,3 +892,22 @@ def build_unix(
         ),
     )
     return binary
+
+
+def unix_companions(produced: Path) -> list[Path]:
+    """`repair_unix_binary()`'s own vendored `lib/`, when it made one.
+
+    Record 0070 introduced this copy inside `orchestrate.build_one()`
+    itself, which looked for `produced.parent / "lib"` for *every* port.
+    Only `unix` has a `lib/` that means "shared objects this binary needs
+    at runtime". `qemu`'s build directory has one too, and it is
+    `libm/`'s own object files -- a real collected
+    `mpyhouse/v1.28.0-qemu-MPS2_AN385/lib/` on 2026-08-31 held 54
+    `.o`/`.P` intermediates, 240K of build scratch, shipped to a release
+    by a consumer that (correctly) uploads the whole identifier
+    directory. Which sibling of `produced` is part of the artifact is a
+    fact about the port, so the port answers it. Record 0079.
+    """
+    lib_dir = produced.parent / "lib"
+    return [lib_dir] if lib_dir.is_dir() else []
+

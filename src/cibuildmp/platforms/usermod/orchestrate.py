@@ -30,11 +30,15 @@ from typing import Any
 from ... import report, sources
 from . import manifests, portinfo
 from .build_common import UsermodBuildError
-from .build_esp32 import Esp32BuildOptions, build_esp32
+from .build_esp32 import Esp32BuildOptions, build_esp32, esp32_companions
 from .build_qemu import QemuBuildOptions, build_qemu
 from .build_rp2 import RP2_SUBMODULES, Rp2BuildOptions, build_rp2
-from .build_unix import UnixBuildOptions, build_unix
-from .build_webassembly import WebassemblyBuildOptions, build_webassembly
+from .build_unix import UnixBuildOptions, build_unix, unix_companions
+from .build_webassembly import (
+    WebassemblyBuildOptions,
+    build_webassembly,
+    webassembly_companions,
+)
 from .build_windows import WindowsBuildOptions, build_windows
 from .options import UsermodBuildOptions, UsermodConfigError, UsermodOptions
 from .targets import UsermodTarget, esp32_idf_info
@@ -64,6 +68,29 @@ _BUILD_FN: dict[str, Callable[..., Path]] = {
     "esp32": build_esp32,
     "rp2": build_rp2,
 }
+
+# port -> the files that have to travel with `produced` for the collected
+# artifact to work at all. A port absent from this table has none:
+# `windows` (one `.exe`), `rp2` (one `.uf2`) and `qemu` (one `.elf`) each
+# really are a single file.
+#
+# Declared by the port, not guessed by `build_one()`. The collector's own
+# guess -- copy any `lib/` sitting beside `produced`, record 0070's first
+# fix -- was right for `unix` and wrong for `qemu`, and could not have
+# known that `webassembly`'s `.mjs` is inert without its `.wasm` or that
+# `esp32`'s flashable image is a different file from the one its driver
+# returns. Record 0079.
+_COMPANION_FN: dict[str, Callable[[Path], list[Path]]] = {
+    "unix": unix_companions,
+    "webassembly": webassembly_companions,
+    "esp32": esp32_companions,
+}
+
+
+def _no_companions(_produced: Path) -> list[Path]:
+    """The `_COMPANION_FN` default -- a port whose primary really is the
+    whole artifact."""
+    return []
 
 
 @dataclass(frozen=True)
@@ -339,27 +366,41 @@ def build_one(
     # attempt to run it.
     shutil.copy(produced, dest)
 
-    # `unix`'s own `repair_unix_binary()` (build_unix.py) is this project's
-    # `auditwheel repair`: for a target whose floor lacks `libffi` as a
-    # baseline shared object (the dynamically-linked glibc cells), it
-    # vendors `libffi.so.<N>` into a `lib/` directory beside `produced` and
-    # points the binary at it with `patchelf --set-rpath '$ORIGIN/lib'` --
-    # `$ORIGIN` meaning "whatever directory the running executable actually
-    # lives in", not `produced`'s own original build directory specifically.
-    # Copying only `produced` above silently broke that portability
-    # contract for every target it applies to: the file collected into
-    # `identifier_dir` ran fine from inside `mpy_dir` (its own `lib/`
-    # sibling right there) and failed the moment it was actually executed
-    # from where cibuildmp says it lives -- "error while loading shared
-    # libraries: libffi.so.6: cannot open shared object file", live-caught
-    # by `examples/usercmodule/smoke_test.py` actually running a collected
-    # `manylinux_2_28_x86_64` binary for the first time anywhere in this
-    # project (`build-examples.yml` has only ever `ls`ed the output, never
-    # executed it). A no-op for every other target and every other port --
-    # only `repair_unix_binary()` ever creates this directory at all.
-    lib_dir = produced.parent / "lib"
-    if lib_dir.is_dir():
-        shutil.copytree(lib_dir, dest.parent / "lib", dirs_exist_ok=True)
+    # A build's own primary output is not always the whole artifact, and
+    # copying `produced` alone silently shipped something that could not
+    # run from where cibuildmp says its output lives. Record 0070 found
+    # the first case (`unix`'s `repair_unix_binary()` vendors
+    # `libffi.so.<N>` into a `lib/` beside the binary and points it there
+    # with `patchelf --set-rpath '$ORIGIN/lib'` -- `$ORIGIN` being
+    # wherever the executable actually runs from, so the collected copy
+    # failed with "error while loading shared libraries: libffi.so.6")
+    # and fixed it here, for every port, by copying any `lib/` next to
+    # `produced`. Record 0079 replaces that guess with each port's own
+    # `_COMPANION_FN` answer, because the guess was both too narrow and
+    # too broad:
+    #
+    #   too narrow -- `webassembly` collected `micropython.mjs` without
+    #   `micropython.wasm`, which the `.mjs` loads by that literal name;
+    #   a real collected artifact aborted with "failed to asynchronously
+    #   prepare wasm: ENOENT ... micropython.wasm". `esp32` collected
+    #   `micropython.bin`, the application image, never the combined
+    #   `firmware.bin` that is the flashable one.
+    #
+    #   too broad -- `qemu`'s build directory has a `lib/` too, holding
+    #   `libm/`'s object files. 54 `.o`/`.P` intermediates went into a
+    #   real collected identifier directory, and out to a release from
+    #   there.
+    #
+    # Companions keep their own filenames rather than going through
+    # `_dest_name()`: both `$ORIGIN/lib` and the `.mjs`'s own
+    # `micropython.wasm` are references by exact name from inside the
+    # primary. Only the primary is safely renameable.
+    for companion in _COMPANION_FN.get(target.port, _no_companions)(produced):
+        target_path = dest.parent / companion.name
+        if companion.is_dir():
+            shutil.copytree(companion, target_path, dirs_exist_ok=True)
+        else:
+            shutil.copy(companion, target_path)
 
     return UsermodBuildResult(
         identifier=target.identifier, output=dest, duration=time.time() - start

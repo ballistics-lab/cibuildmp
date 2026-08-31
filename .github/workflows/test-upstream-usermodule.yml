@@ -180,10 +180,16 @@ jobs:
   # already discovered by py.mk's own glob), one representative identifier
   # per port rather than each port's own full arch matrix -- [0054]'s own
   # "widen only if it finds something", not a cost-blind repeat of
-  # build-examples.yml's broader coverage. No smoke test for any of the
-  # three: none of their outputs (a .exe, a .wasm, a qemu ELF) runs
-  # directly on this runner the way unix's manylinux binary does (record
-  # 0069's own reasoning for why rp2 has none either).
+  # build-examples.yml's broader coverage. No smoke test for `windows` or
+  # `qemu`: a .exe needs wine and a qemu ELF needs qemu-system-arm, neither
+  # of which this runner has without a setup step (record 0069's own
+  # reasoning for why rp2 has none either -- its .uf2 needs hardware or a
+  # board emulator).
+  #
+  # `webassembly` was on that list too, and should not have been: node is
+  # preinstalled here, and its own smoke step now runs below. Record 0079
+  # is what that omission cost -- a collected artifact missing more than
+  # half its bytes, green in CI for as long as nothing ran it.
   build-windows:
     runs-on: ubuntu-latest
     env:
@@ -220,6 +226,29 @@ jobs:
 
       - name: List built artifacts
         run: ls -laR examples/usercmodule/mpyhouse
+
+      # The same smoke_test.py the unix job runs, unmodified -- the wasm
+      # build's own CLI takes a .py path exactly like the unix binary
+      # does. `node` is preinstalled on ubuntu-latest, and every consuming
+      # repo already runs its own wasm tests this way, so this needs no
+      # setup step of its own.
+      #
+      # This job used to stop at `ls`, on the premise (this file's own
+      # earlier comment) that "none of their outputs (a .exe, a .wasm, a
+      # qemu ELF) runs directly on this runner the way unix's manylinux
+      # binary does". For .wasm that was simply wrong, and it is the
+      # reason record 0079's bug lived as long as it did: the collected
+      # artifact was missing `micropython.wasm` entirely, and nothing
+      # anywhere ran the collected artifact to find out. It runs from
+      # `mpyhouse/` deliberately -- executing it from the port's own build
+      # directory is what hid the same class of bug for `unix` until
+      # record 0070.
+      - name: "Smoke test (webassembly): run the built .mjs against smoke_test.py"
+        run: |
+          set -euo pipefail
+          identifier="${CIBMP_UPSTREAM_TAG}-wasm32"
+          mjs="examples/usercmodule/mpyhouse/${identifier}/micropython-${identifier}.mjs"
+          node "$mjs" examples/usercmodule/smoke_test.py
 
   build-qemu:
     runs-on: ubuntu-latest

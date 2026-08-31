@@ -66,6 +66,7 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### Implemented
 
+- [x] [0079] a collected artifact is not always one file, and only the port knows
 - [x] [0078] handing the repo to an uncontexted reader is the docs test the suite cannot be
 - [x] [0077] docs drift is a failing test, not a discipline problem
 - [x] [0076] the `unix-mipsel` holdout is `micropython-bclibc` and `micropython-wasm3`, not `a7p`
@@ -238,3 +239,4 @@ record is added.
 [0076]: records/0076-the-mipsel-holdout-is-bclibc-and-wasm3-not-a7p.md
 [0077]: records/0077-docs-drift-is-a-failing-test-not-a-discipline-problem.md
 [0078]: records/0078-uncontexted-agent-audit-as-a-docs-test.md
+[0079]: records/0079-collected-artifact-is-more-than-one-file.md
