@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-08-31
+
 ### Added
 
 - **`{micropython}` — a placeholder in `user-c-modules` for a path inside the pinned
@@ -701,7 +703,8 @@ ballistics-lab/micropython-native-ci, but both tags exist here too, so every
 link resolves inside this repository -- the version line continues rather
 than restarting (see the 0.3.0a1 entry). -->
 
-[Unreleased]: https://github.com/ballistics-lab/cibuildmp/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/ballistics-lab/cibuildmp/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/ballistics-lab/cibuildmp/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/ballistics-lab/cibuildmp/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/ballistics-lab/cibuildmp/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/ballistics-lab/cibuildmp/compare/v0.3.0a1...v0.3.0
