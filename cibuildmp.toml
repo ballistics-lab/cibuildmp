@@ -8,8 +8,16 @@
 # no natmod/ directory. The values below are drawn from micropython-bclibc,
 # the most demanding of the three consuming repos.
 #
+# **It is not inert, though**, and that surprises people: `build` below names
+# real identifiers, so running `cibuildmp` at this repository's root resolves
+# ten natmod targets and then fails at build time on the missing natmod/.
+# That is expected — read this file, do not run it. To try the CLI from a
+# checkout, point it at a real module instead:
+#
+#     cibuildmp examples/template --build "mpy6.3-v1.29.0-x64"
+#
 # See docs/0000-TRACKER.md and docs/records/ for the decisions behind this
-# schema (docs/BACKLOG.md has been a redirect stub since 0041) and for
+# schema (the old BACKLOG file is a redirect stub now, since 0041) and for
 # what is and is not implemented yet.
 #
 # Location: cibuildmp.toml at the repo root. If the project also has a
@@ -130,7 +138,7 @@ extra-make-args = ["MP_BCLIBC_PRECISION=single"]
 # Sketched here so the intended shape is on record, but genuinely NOT
 # parsed by cibuildmp today -- unlike the real, working keys just above,
 # nothing below has a config surface at all yet. Do not rely on any of it.
-# See docs/BACKLOG.md.
+# See docs/0000-TRACKER.md and docs/records/.
 #
 #     variant = "pyscript"     # standard's ASYNCIFY is broken on modern
 #                               # emsdk -- WebassemblyBuildOptions has a

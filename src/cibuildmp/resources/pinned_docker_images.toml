@@ -140,7 +140,8 @@ musllinux_1_2_riscv64 = "quay.io/pypa/musllinux_1_2_riscv64@sha256:203b43d3c4965
 
 # mipsel is cibuildmp's own architecture, not one of cibuildwheel's
 # seven, and the one documented exception to record 0043's model: pypa
-# publishes no image for it, PEP 600 defines no `manylinux_*_mipsel` tag,
+# publishes no image for it, PEP 600 defines the tag *form* but no architecture list, so
+# `manylinux_*_mipsel` is well-formed and simply has no pypa image,
 # and there is no Docker official image for 32-bit mipsel either -- there
 # is nothing to be native to. It stays a cross-compile from an amd64
 # host on a plain `ubuntu:24.04` its own Dockerfile names, which is why

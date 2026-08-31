@@ -233,8 +233,8 @@ runs:
       # "empty" from "unset"), overriding `DEFAULT_OUTPUT_DIR` ("mpyhouse")
       # to nothing at all. Every natmod example built successfully but
       # collected its output one directory up from where `build-examples.yml`
-      # went looking for it (`examples/template/mpy6.3-natmod-x64/...`
-      # instead of `examples/template/mpyhouse/mpy6.3-natmod-x64/...`) --
+      # went looking for it (`examples/template/<identifier>/...` instead
+      # of `examples/template/mpyhouse/<identifier>/...`) --
       # confirmed directly from the real build's own "done in Xs -> <path>"
       # log line. `ACTION_*` cannot collide with any real `cibuildmp.toml`
       # key, present or future.

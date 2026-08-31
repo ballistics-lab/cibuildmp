@@ -67,7 +67,7 @@ class ConfigError(Exception):
 # or resolved per matched target through `[override]`
 # (`build_options()`'s own tier-2 check, `OVERRIDE_UNION_KEYS` below).
 # `[natmod]` is rejected outright by `read_config()`'s own caller
-# (`cli.py`'s `_reject_platform_tables()`) before any of this ever runs;
+# (`cli.py`'s `_validate_top_level_tables()`) before any of this ever runs;
 # `Options.load()` below still checks for it directly too, for a caller
 # that bypasses `cli.py` entirely (most tests).
 GENERIC_KEYS: frozenset[str] = frozenset(

@@ -215,11 +215,33 @@ name = "mymod"
 version = "1.0.0"
 ```
 
+**What each port produces**, since it is not a `.mpy` for any of them:
+
+| Port | Artifact |
+| --- | --- |
+| `unix` | `micropython` — plus a `lib/` sidecar, see below |
+| `windows` | `micropython.exe` |
+| `webassembly` | `micropython.mjs` (with its `.wasm` beside it) |
+| `qemu` | `firmware.elf` |
+| `esp32` | `micropython.bin` |
+| `rp2` | `firmware.uf2` |
+
+Flashing or running those is your own port's normal procedure —
+`cibuildmp` collects them and stops.
+
 **A `usermod` build is not one file.** `unix` in particular produces the
 binary *plus* a `lib/` directory beside it: `cibuildmp` copies every
 non-baseline shared library the binary needs into it and sets an
 `$ORIGIN/lib` rpath, so the binary runs outside the container it was built
 in. Upload or copy the whole identifier directory, not just the file in it.
+
+The `urls` entries in that `package.json` are **relative** — an on-device
+basename paired with the identifier-qualified filename sitting beside it —
+so `mip` resolves them against wherever it fetched the `package.json` from:
+
+```console
+$ mpremote mip install https://example.com/releases/v1.0.0/package.json
+```
 
 Publishing that directory — a GitHub Release, or anywhere else — stays your
 own CI step. `cibuildmp` assembles the tree and stops there, the same line
@@ -401,7 +423,10 @@ extra-files = ["../src/mymod.py"]
 
 `[override]` is keyed **directly by its own glob** — `[override."<glob>"]`,
 deliberately unlike cibuildwheel's `[[tool.cibuildwheel.overrides]]` with a
-`select =` field inside. Entries are matched in file order and every
+`select =` field inside. (Writing `select = "…"` *inside* an entry is an
+error, not a second spelling.) The table name takes the full selector
+syntax, so one entry can cover several globs:
+`[override."*-manylinux* *-win* *-wasm32"]`. Entries are matched in file order and every
 matching one applies, so two globs that both match one identifier layer
 onto each other rather than the first winning.
 
@@ -423,6 +448,10 @@ onto each other rather than the first winning.
 | `user-c-modules`         | usermod | `"."`                  |                                ✓                                 |
 | `manifest`               | usermod | `""`                   |                                ✓                                 |
 | `extra-cmake-args`       | usermod | `[]`                   |                                ✓                                 |
+
+Every list-valued key also accepts a plain string, split the way a shell
+would: `extra-make-args = "CXX=em++ CXXFLAGS_MOD=-Wno-macro-redefined"` is
+the same as the two-element list.
 
 A key a family does not read is accepted and ignored, so
 `pre-build-command` in a usermod-only config is silently inert — usermod has
@@ -594,10 +623,12 @@ naming a scalar option in `inherit` is a config error, not a silent no-op.
 
 ## When a build fails
 
-Every message below is one `cibuildmp` actually prints. Find yours, read the
-cause, apply the fix.
+Every heading below is the message `cibuildmp` actually prints, minus the
+`cibuildmp: error: ` prefix every error carries — so searching this page for
+the text in your terminal finds it. Find yours, read the cause, apply the
+fix.
 
-### `no targets selected. Pass --allow-empty if that is expected.`
+### no targets selected. Pass --allow-empty if that is expected.
 
 Your `build` glob matched nothing. This is the normal first-run result,
 because an unset `build` selects **nothing at all** — there is no "build
@@ -615,13 +646,13 @@ is not a MicroPython release) or a port spelled as a port when the
 identifier has no port segment — `unix`, `windows` and `webassembly`
 identifiers are `{tag}-{arch}`, with no `unix-` in them.
 
-### `unknown key 'buidl'. Perhaps you meant 'build'?`
+### unknown key &#96;buidl&#96;. Perhaps you meant &#96;build&#96;?
 
 A typo, or a key from a config schema older than v0.4.0. The suggestion is
 usually right. See [Configuration](#configuration) for every key that
 exists.
 
-### `unknown table(s) at the top level: [natmod]`
+### unknown table(s) at the top level: [natmod].
 
 Per-platform tables (`[natmod]`, `[unix]`, `[esp32]`, `[usermod]`, …) were
 removed in v0.4.0. Everything lives at the top level now, narrowed with

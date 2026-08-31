@@ -64,6 +64,15 @@ the same way [docs/0000-TRACKER.md](../0000-TRACKER.md) folds resolved
   reachable Docker daemon, so WSL2 with Docker Desktop is the shape that
   should work, and nobody has run it that way and reported back. Until
   someone does, this is the open question, not a recommendation.
+- **Is `qemu`'s host-built `mpy-cross` a real difference or an untested
+  assumption?** Every other port builds `mpy-cross` in its own image
+  (`container_mpy_cross()`), precisely so the tool matches the libc the
+  build uses. `qemu` is the exception (`_HOST_MPY_CROSS_PORTS`,
+  `usermod/orchestrate.py`) and is why `action.yml` still installs
+  `build-essential`. Whether that is the exact mismatch
+  `container_mpy_cross()` exists to prevent — just not yet hit for `qemu` —
+  or a genuine difference in what that port needs, is **not established**.
+  This was written down only in a source comment until now.
 - **Old tags vs. a modern host `gcc`.** Found while verifying **D13** live:
   `v1.21.0` fails to build `mpy-cross` under a recent `gcc`
   (`-Werror=unterminated-string-initialization` on upstream's own

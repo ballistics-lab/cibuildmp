@@ -55,7 +55,8 @@ def build_parser() -> argparse.ArgumentParser:
         description="Build MicroPython native C extensions across every target "
         "a module supports, from one declarative config.",
         epilog="Most options are supplied via cibuildmp.toml or CIBMP_* environment "
-        "variables. See docs/0000-TRACKER.md for the design and what is implemented.",
+        "variables. See the README for the config schema, every option key and "
+        "the identifier list.",
     )
     parser.add_argument(
         "package_dir",

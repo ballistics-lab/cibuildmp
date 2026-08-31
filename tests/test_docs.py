@@ -143,6 +143,11 @@ FOREIGN_PATHS = {
     "src/mymod.py",  # a consumer's module, in an illustrative config
     "bin/sh",  # from a `#!/bin/sh` shebang
     "docs/tasks/",  # an open question's proposed, not-yet-created directory
+    # cibuildwheel's own files, named for comparison, not ours.
+    "resources/defaults.toml",
+    "resources/pinned_docker_images.cfg",
+    "src/mpbuild/board_database.py",  # mpbuild's own file, vendored from
+    ".github/workflows/ports_windows.yml",  # MicroPython's own workflow
 }
 
 # `resources/x.toml` in the docs means the packaged resource, whose real
@@ -162,6 +167,14 @@ def _source_text() -> str:
 
 
 SOURCE = _source_text()
+
+
+def _record_prefix(candidate: str) -> bool:
+    """Whether `docs/records/0072` names a real record by number alone."""
+    prefix = candidate.removeprefix("docs/records/")
+    return prefix[:4].isdigit() and any(
+        (REPO / "docs" / "records").glob(f"{prefix[:4]}-*.md")
+    )
 
 
 def _latest_released_version() -> str:
@@ -451,7 +464,16 @@ def test_generated_doc_blocks_are_current() -> None:
 
 
 SOURCE_FILES = sorted(
-    [*(REPO / "src").rglob("*.py"), *(REPO / "bin").glob("*.py"), REPO / "action.yml"]
+    [
+        *(REPO / "src").rglob("*.py"),
+        *(REPO / "bin").glob("*.py"),
+        REPO / "action.yml",
+        # The config files a reader actually copies from. The root one is
+        # the most-read example in the repo and was in neither set, so it
+        # could -- and did -- point at a file that no longer exists.
+        REPO / "cibuildmp.toml",
+        *sorted((REPO / "examples").glob("*/cibuildmp.toml")),
+    ]
 )
 
 # Names that existed, were removed, and are still cited in comments,
@@ -464,10 +486,48 @@ REMOVED_NAMES = {
     "docker/natmod.Dockerfile": "the six toolchain-group Dockerfiles ([0058])",
     "usermod/build.py": "usermod/build_<port>.py ([0061])",
     "docs/BACKLOG.md": "docs/0000-TRACKER.md and docs/records/",
+    "_reject_platform_tables": "cli._validate_top_level_tables()",
 }
 
 
-@pytest.mark.parametrize("path", SOURCE_FILES, ids=lambda p: p.name)
+@pytest.mark.parametrize("path", SOURCE_FILES, ids=lambda p: str(p.relative_to(REPO)))
+def test_source_paths_exist(path: Path) -> None:
+    """A repo path named in source must exist.
+
+    `REMOVED_NAMES` below is hand-maintained, which makes that guard only
+    as good as someone remembering to add an entry -- a reviewer noticed
+    exactly that. This one needs no memory at all: it resolves every
+    repo-looking path a comment, docstring or error string mentions, so a
+    deleted or renamed file is caught the moment it is deleted, whether or
+    not anyone thought to record its name.
+    """
+    missing = []
+    # A file's own directory is a root too: `examples/template/cibuildmp.toml`
+    # naming `src/facade.py` means the one beside it, not the package's.
+    roots = (*PATH_ROOTS, path.parent)
+    for candidate in REPO_PATH.findall(_text(path)):
+        candidate = candidate.rstrip(".,;:)\"'`")
+        if PLACEHOLDER.search(candidate) or GLOB.search(candidate):
+            continue
+        if candidate in FOREIGN_PATHS:
+            continue
+        # `docs/records/0072` without the slug is the normal way to cite one.
+        if _record_prefix(candidate):
+            continue
+        # A resource named without its extension in prose is still a real
+        # reference, not a missing file.
+        if not any(
+            (root / name).exists()
+            for root in roots
+            for name in (candidate, f"{candidate}.toml")
+        ):
+            missing.append(candidate)
+    assert not missing, (
+        f"{path.relative_to(REPO)} names paths that do not exist: {sorted(set(missing))}"
+    )
+
+
+@pytest.mark.parametrize("path", SOURCE_FILES, ids=lambda p: str(p.relative_to(REPO)))
 def test_source_does_not_cite_removed_names(path: Path) -> None:
     """Source comments, docstrings and error strings must not name things
     this project deleted.

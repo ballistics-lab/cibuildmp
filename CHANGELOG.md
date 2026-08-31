@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A fourth uncontexted agent read the repo, and went for the guard itself.**
+  Its sharpest point: `REMOVED_NAMES` in `tests/test_docs.py` is hand-maintained,
+  so that check is only as good as someone remembering to add an entry — and it
+  proved the point by finding `_reject_platform_tables()` cited in the present
+  tense in two files, a name the list did not have. The guard no longer depends
+  on memory for the common case: it now resolves **every repo path** a source
+  comment, docstring or error string mentions, so a deleted file is caught
+  whether or not anyone recorded its name.
+  - The guarded set also grew to cover `cibuildmp.toml` and
+    `examples/*/cibuildmp.toml`, which were in neither `LIVING_DOCS` nor
+    `SOURCE_FILES` — the root one being, as the agent put it, arguably the
+    most-read example file in the repo. It was pointing at `docs/BACKLOG.md`.
+  - **The root `cibuildmp.toml` is a live trap** and now says so: it calls itself
+    a reference example, but its `build` names real identifiers, so running
+    `cibuildmp` at the repo root resolves ten targets and fails at build time on
+    the missing `natmod/`.
+  - **The troubleshooting headings did not match the real output** — missing the
+    `cibuildmp.toml:` prefix, the backticks, a trailing period — in a section
+    whose whole design is "search for your message verbatim". All three
+    corrected against actual runs, and the section now says the headings are the
+    message minus the `cibuildmp: error: ` prefix.
+  - `--help` sent readers to `docs/0000-TRACKER.md`, which opens by saying it is
+    not user-facing documentation. It points at the README now.
+  - `orchestrate.py` told a reader to opt into `[usermod.qemu] boards = [...]`,
+    which is an unknown-table error since 0052/0074.
+  - `tests/test_plan_test_matrix.py`'s skip guard was dead code: it checked a
+    returncode, but `subprocess.run` raises `FileNotFoundError` when the console
+    script is absent. Replaced with a `shutil.which` check, so a bare
+    `python -m pytest` now skips that one test instead of failing.
 - **A third uncontexted agent read the repo, and the drift had moved.** Every
   documented claim it checked in `README.md`/`CONTRIBUTING.md` reproduced exactly
   — the first-module transcript byte for byte, all six error messages, the
@@ -113,6 +142,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **What the fourth agent could only learn from source**: what each usermod port
+  actually produces (a table — `micropython.bin`, `firmware.uf2`,
+  `micropython.mjs`, `firmware.elf`, `micropython.exe`); that an `[override]`
+  table name takes the full selector syntax, so one entry can cover several globs
+  (`[override."*-manylinux* *-win* *-wasm32"]`), and that `select = "…"` inside an
+  entry is an error rather than a second spelling; that every list-valued key also
+  accepts a shell-split string; and how `mip install` actually consumes the
+  generated `package.json`, whose `urls` are relative to wherever it was fetched
+  from. The `qemu`-builds-`mpy-cross`-on-the-host open question, which existed
+  only as a source comment, is now in `open-questions.md`.
 - **What the third agent could only learn from source**: the `+0x<hex>`
   identifier suffix `arch-flags` produces (so `[override."*rv32imc+0x3"]` is
   writable from the docs now, and `skip = "*-rv32imc"` is documented as *not*

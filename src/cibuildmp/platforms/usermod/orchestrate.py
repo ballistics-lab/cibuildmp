@@ -167,11 +167,12 @@ def _port_build_options(
             extra_make_args=extra_make_args,
         )
     if port == "qemu":
-        # target.arch is "" unless a caller opts into [usermod.qemu]
-        # boards = [...] (targets.py's own _PORT_AXES default keeps the
-        # bare "" sentinel precisely so an unconfigured build's own
-        # identifier/board stay unchanged -- see that module's own
-        # comment) -- `or "MPS2_AN385"` is what turns the empty default
+        # target.arch is "" for a board port (targets.py's own _PORT_AXES
+        # default keeps the bare "" sentinel precisely so an unconfigured
+        # build's own identifier/board stay unchanged -- see that module's
+        # own comment). The `[usermod.qemu] boards = [...]` opt-in this
+        # comment used to describe was removed by 0052/0074 and is a plain
+        # unknown-table error now; the sentinel outlived it. -- `or "MPS2_AN385"` is what turns the empty default
         # back into QemuBuildOptions' own default board instead of
         # overriding it with an empty string.
         return QemuBuildOptions(

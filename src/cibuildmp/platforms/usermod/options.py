@@ -8,7 +8,7 @@ cascade tier: every port is always in scope, and `all_usermod_targets()`
 (`targets.py`) already enumerates every real `(port, tag, arch/board)`
 row `resources/build-platforms.toml` has -- there is nothing left for a
 per-port table to select or configure. `cli.py`'s own
-`_reject_platform_tables()` turns a config still writing one of these six
+`cli._validate_top_level_tables()` turns a config still writing one of these six
 names into a loud, specific error before this module ever sees it.
 
 `[usermod]` (a seventh, different kind of table -- not a selector, a
