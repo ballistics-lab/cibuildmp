@@ -1,6 +1,9 @@
 # 0031. unix usermod builds are glibc-only; there is no musllinux-equivalent, and identifiers carry no libc axis
 
-- Status: Accepted; manylinux half done, musllinux half not started
+- Status: Implemented — both halves; the musllinux half landed in [0044]
+  (four native cells green and in the default axis, the other three
+  descoped there). This line read "musllinux half not started" for weeks
+  after that, which is the drift [0077] is about.
 - Related: [0020], [0023], [0026], [0028]
 
 <!-- migrated verbatim from docs/BACKLOG.md lines 3161-3317 -->

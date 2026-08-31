@@ -9,7 +9,10 @@ inputs:
     required: false
     default: .
   output-dir:
-    description: 'Folder to place the outputs in, defaults to "mpyhouse"'
+    description: >
+      Folder to place the outputs in, defaults to "mpyhouse".
+      natmod only -- usermod reads its own output-dir from the config file
+      or CIBMP_OUTPUT_DIR, and ignores this input.
     required: false
     default: ""
   config-file:
@@ -36,7 +39,11 @@ inputs:
     required: false
     default: ""
   extras:
-    description: "Comma-separated list of cibuildmp extras to install"
+    description: >
+      Comma-separated list of cibuildmp extras to install. **There are none
+      today** -- pyproject.toml declares no [project.optional-dependencies]
+      at all, so any non-empty value makes the `uv tool install` step fail.
+      Kept as the input's own shape for when one exists; leave it empty.
     required: false
     default: ""
   keep-going:
@@ -49,7 +56,7 @@ inputs:
     required: false
     default: ""
 
-# Composite, not Docker -- docs/BACKLOG.md's own D28/D30 (container-per-port
+# Composite, not Docker -- docs/0000-TRACKER.md's own D28/D30 (container-per-port
 # migration, step 1). The Docker action this used to be ran *inside* one
 # container; cibuildmp itself is meant to launch sibling per-port containers
 # for usermod builds (D26's own "no Docker-in-Docker" reasoning), which needs
@@ -130,9 +137,11 @@ runs:
     # mpy-cross now builds inside the natmod image (natmod/build.py's
     # `build_mpy_cross()`), closing [0050]'s "still builds mpy-cross on
     # the host" item -- but `build-essential` still stays, because
-    # usermod's `qemu`/`esp32` ports build *their* mpy-cross on the host
-    # too (`_HOST_MPY_CROSS_PORTS`, usermod/orchestrate.py) and were never
-    # part of this item. Closing that pair the same way `unix`/`windows`/
+    # usermod's `qemu` port builds *its* mpy-cross on the host too
+    # (`_HOST_MPY_CROSS_PORTS`, usermod/orchestrate.py) and was never
+    # part of this item. (`esp32` was in that set once and is not now --
+    # this comment named both until 0077's own audit.) Closing it the same
+    # way `unix`/`windows`/
     # `webassembly` already were in [0044] is what would let this step go.
     - name: Install cibuildmp's own apt prerequisites
       # Slimmed live, D33: every package this used to install beyond
@@ -164,7 +173,8 @@ runs:
       # `Architectures: amd64,i386` into sources pointing at
       # ports.ubuntu.com guarantees a 404 for indices that do not exist
       # there. All of it is the image's problem now, where the host is
-      # amd64 by construction -- see docker/natmod.Dockerfile.
+      # amd64 by construction -- see docker/natmod_host.Dockerfile (one of
+      # the six toolchain-group images natmod.Dockerfile split into, 0058).
       shell: bash
       run: |
         set -eu
@@ -223,8 +233,8 @@ runs:
       # "empty" from "unset"), overriding `DEFAULT_OUTPUT_DIR` ("mpyhouse")
       # to nothing at all. Every natmod example built successfully but
       # collected its output one directory up from where `build-examples.yml`
-      # went looking for it (`examples/template/mpy6.3-natmod-x64/...`
-      # instead of `examples/template/mpyhouse/mpy6.3-natmod-x64/...`) --
+      # went looking for it (`examples/template/<identifier>/...` instead
+      # of `examples/template/mpyhouse/<identifier>/...`) --
       # confirmed directly from the real build's own "done in Xs -> <path>"
       # log line. `ACTION_*` cannot collide with any real `cibuildmp.toml`
       # key, present or future.

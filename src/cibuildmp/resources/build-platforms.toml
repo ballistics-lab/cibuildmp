@@ -7,8 +7,8 @@
 # at resolution time, not a silent guess. `[natmod]` covers five ports'
 # worth of natmod arches across every MicroPython tag since v1.12;
 # `[usermod.<port>]` covers fifteen usermod ports, of which
-# `platforms/usermod/targets.py`'s own `KNOWN_PORTS` wires five with a real
-# `build_<port>()` driver -- the other ten have verified rows here but no
+# `platforms/usermod/targets.py`'s own `KNOWN_PORTS` wires six with a real
+# `build_<port>()` driver -- the other nine have verified rows here but no
 # build pipeline yet (record 0053).
 #
 # Kept current by `bin/refresh_natmod_archs.py`/`bin/refresh_usermod_boards.py`,

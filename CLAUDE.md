@@ -93,15 +93,28 @@ least once, not hypothetically:
   host-side toolchain resolver as current for weeks after [0050] deleted it and made
   every build Docker-only.
 - **`docs/reference/vendored-images.md`** — the image-group model itself (which
-  arch/port/board resolves to which published image). A Dockerfile split/merge, a group
-  rename, or a `publish-docker-images.yml` change invalidates this file's own mapping
-  table directly, not just its prose.
-- **`docs/ACTIONS.md`** — the composite-action reference, carrying its own separate
-  `@vX.Y.Z` pin from README's; both drifted from the real published version at the same
-  time, caught in the same pass.
+  arch/port/board resolves to which published image). Its mapping table is
+  **generated** now (`bin/refresh_docs.py`, [0077]) and a test fails if it is stale,
+  so a Dockerfile split/merge or a group rename can no longer invalidate it silently —
+  the prose around it still can.
+- **`docs/ACTIONS.md`** — the composite-action reference. It pins the composite
+  sub-actions (`.../.github/actions/build-natmod@vX.Y.Z`), not `cibuildmp@vX.Y.Z`
+  as this bullet used to say; both it and README drifted from the real published
+  version at the same time, twice. Every such pin is checked against
+  `CHANGELOG.md`'s newest released heading now ([0077]).
 - **`CHANGELOG.md`** — append-only in principle, but a squash-merge has silently
   dropped an entire released-version section before, leaving a dangling link reference
   at the bottom with nothing in the body to anchor to.
+
+**Two of those files are now partly machine-checked, and one is partly generated.**
+`tests/test_docs.py` fails the build on a doc naming an identifier, option key,
+`CIBMP_*` variable, repo path, image group, record link or action pin that does not
+exist — over `README.md`, `CONTRIBUTING.md`, `docs/ACTIONS.md`, `docs/reference/*.md`,
+and (for paths and removed names) source comments and the example configs too.
+`bin/refresh_docs.py` generates the identifier-shape table, the image-group mapping
+and the toolchain map; edit those by hand and a test says so. What none of it checks
+is prose making a claim about *behaviour* — for that, [0078] is the procedure, and it
+is the one that found the false claims a reader could not.
 
 From there, drill down rather than infer:
 
@@ -133,3 +146,8 @@ From there, drill down rather than infer:
 [0049]: docs/records/0049-no-matrix-generation-archs-vocabulary.md
 [0050]: docs/records/0050-natmod-is-docker-only.md
 [0051]: docs/records/0051-usermod-identifiers-have-no-version-axis.md
+[0058]: docs/records/0058-image-groups-are-toolchains-not-ports.md
+[0060]: docs/records/0060-rp2-build-driver.md
+[0068]: docs/records/0068-docker-dependabot-grouping-and-mipsel-ubuntu-26-04.md
+[0077]: docs/records/0077-docs-drift-is-a-failing-test-not-a-discipline-problem.md
+[0078]: docs/records/0078-uncontexted-agent-audit-as-a-docs-test.md

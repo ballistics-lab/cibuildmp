@@ -54,3 +54,15 @@ place to grow, not to answer those questions.
 
 [0022]: 0022-zephyr-third-selector-axis.md
 [0052]: 0052-config-is-a-tree-not-a-selector-matrix.md
+
+## Correction, 2026-08-31 — `rp2` is not one of these ports
+
+This record lists `rp2` among the ports with verified rows and no driver, and
+its own §27 defers to [0022] for it. Both are out of date: [0060] shipped
+`build_rp2()`, and `usermod/targets.py`'s `KNOWN_PORTS` has held six entries
+including `rp2` since. The real list here is **nine** ports, not ten:
+`mimxrt`, `samd`, `stm32`, `psoc-edge`, `alif`, `esp8266`, `cc3200`,
+`renesas-ra`, `nrf`.
+
+The tracker's own conventions call this exact claim out as a repeat offender,
+and [0022]'s status line was corrected while this record's was not.

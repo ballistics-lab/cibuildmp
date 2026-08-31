@@ -63,7 +63,7 @@ def build_webassembly(
     Docker-only (D30's own later call: no bare-host path for any usermod
     port, `unix` included). `dockerrun.ensure_image("webassembly")`
     resolves an explicit `CIBMP_WEBASSEMBLY_DOCKER_IMAGE` override or a
-    `dockerrun.PORT_IMAGES`-registered, digest-pinned default published
+    `dockerrun.resources/pinned_docker_images.toml`-registered, digest-pinned default published
     by `publish-docker-images.yml` -- cibuildmp itself never builds
     `docker/webassembly.Dockerfile` (see usermod/dockerrun.py's own
     docstring for why). emsdk itself is baked into that image, which is
@@ -87,7 +87,7 @@ def build_webassembly(
             "and usermod builds are Docker-only -- set "
             "CIBMP_WEBASSEMBLY_DOCKER_IMAGE, or wait for "
             "publish-docker-images.yml to publish one and register it in "
-            "dockerrun.PORT_IMAGES"
+            "resources/pinned_docker_images.toml"
         )
 
     command = webassembly_make_command(

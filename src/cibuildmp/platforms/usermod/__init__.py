@@ -2,7 +2,7 @@
 usermod ports with a real `build_<port>()` driver, one module per port
 (`usermod/build_<port>.py`, plus shared `build_common.py` -- see
 docs/records/0061-usermod-build-drivers-split-per-port.md). See
-docs/BACKLOG.md, "Later -- usermod".
+docs/0000-TRACKER.md, "Later -- usermod".
 
 Also usermod's own half of the CLI dispatch (Phase H, record 0051; the
 `--platform`/`--only`/`--archs`/`--enable` retraction folded into this
@@ -17,9 +17,11 @@ is the only thing left that decides what actually gets built. Driven by
 `cli.py` so that file does not grow a second, differently-shaped copy of
 the same dispatch logic.
 
-`--toolchain` is natmod-specific and stays that way: toolchain resolution
-always goes through whatever each `build_<port>()` already does
-internally, with no `auto`/`host`/`download` override.
+There is no `--toolchain` flag on either family any more: record 0050
+deleted natmod's host toolchain resolver outright, and every build of
+either family runs in a pulled image whose own contents are the toolchain.
+This paragraph used to say the flag was "natmod-specific and stays that
+way", which outlived the flag itself.
 
 `--archs auto`/`native`/`all` (record 0049) and `--enable`/`GROUPS`
 (record 0051 point 8) are both retracted, live, in the same session that
@@ -42,8 +44,12 @@ from ...sources import SourceError
 from ...stepsummary import write_step_summary
 from . import orchestrate
 from .build_common import UsermodBuildError
-from .options import UsermodConfigError, UsermodOptions, check_usermod_family_table
+from .options import USERMOD_TOP_LEVEL_KEYS, UsermodConfigError, UsermodOptions
 from .targets import UsermodTarget
+
+# This family's own half of the `PlatformModule` contract's `OPTION_KEYS`
+# -- see `natmod/__init__.py`'s own identical declaration (record 0075).
+OPTION_KEYS: frozenset[str] = USERMOD_TOP_LEVEL_KEYS
 
 # Every exception UsermodOptions.load()/.targets() can raise -- what
 # cli.py's own coordinator catches around "load config, resolve targets"
@@ -69,18 +75,6 @@ BUILD_ERRORS: tuple[type[Exception], ...] = (
 def _plan_line(index: int, total: int, target: UsermodTarget) -> str:
     counter = f"[{index:>{len(str(total))}}/{total}]"
     return f"{counter} {target.identifier}"
-
-
-def validate_family_table(
-    raw: dict[str, Any], *, error: type[Exception] = UsermodConfigError
-) -> None:
-    """Part of the `PlatformModule` contract (`platforms/__init__.py`'s
-    own docstring has the full reasoning) -- validates `[usermod]`
-    unconditionally, on every invocation. Thin wrapper:
-    `check_usermod_family_table()` does the real work, and is also called
-    again, independently, by `UsermodOptions.load()` itself for callers
-    that bypass `cli.py` entirely (most tests)."""
-    check_usermod_family_table(raw, error=error)
 
 
 def resolve_options(

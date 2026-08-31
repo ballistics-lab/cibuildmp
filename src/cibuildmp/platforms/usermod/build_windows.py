@@ -19,7 +19,7 @@ compiler. It is the exact same `ports/windows/Makefile` MSYS2 runs either
 way -- `USER_C_MODULES`/`FROZEN_MANIFEST` work identically, confirmed
 live with a real custom C module linked into a genuine `micropython.exe`
 for all three arches (x64, x86, arm64/PE32+ Aarch64). See
-docs/BACKLOG.md's D18 for the full MSVC-then-MSYS2-then-cross-compile
+docs/0000-TRACKER.md's D18 for the full MSVC-then-MSYS2-then-cross-compile
 history, including the three Clang-specific `CFLAGS_EXTRA` suppressions
 `arm64` alone needs and why each earlier conclusion was corrected rather
 than silently replaced.
@@ -243,11 +243,11 @@ def build_windows(
     doesn't cover yet outside these three.
 
     Docker-only (D30), closing D32's own last named gap: `windows` was
-    the port whose `PORT_IMAGES` entries were registered but dead code,
+    the port whose `resources/pinned_docker_images.toml` entries were registered but dead code,
     since nothing here ever called `ensure_image()`. All three arches now
     run inside docker/windows.Dockerfile's own image, resolved through an
     explicit `CIBMP_WINDOWS_<ARCH>_DOCKER_IMAGE` override or a
-    `dockerrun.PORT_IMAGES`-registered, digest-pinned default published by
+    `dockerrun.resources/pinned_docker_images.toml`-registered, digest-pinned default published by
     publish-docker-images.yml -- cibuildmp itself never builds that image
     (see usermod/dockerrun.py's own docstring for why). No `libc`
     argument, unlike build_unix(): D31's manylinux/musllinux axis is real
@@ -298,7 +298,7 @@ def build_windows(
             f"arch and usermod builds are Docker-only -- set "
             f"CIBMP_WINDOWS_{opts.arch.upper()}_DOCKER_IMAGE, or "
             f"wait for publish-docker-images.yml to publish one and "
-            f"register it in dockerrun.PORT_IMAGES"
+            f"register it in resources/pinned_docker_images.toml"
         )
 
     command = windows_make_command(

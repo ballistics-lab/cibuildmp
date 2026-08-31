@@ -4,8 +4,11 @@ Living reference for how cibuildmp resolves a container image for a build.
 This is not a decision history — [0043], [0044], [0050] and [0058] are, and
 this file cross-links back to them for *why*; keep this file itself current
 with *what is true today*. Every build cibuildmp runs — natmod, every usermod
-port, `qemu` — runs inside one of these; there is no bare-host build path left
-at all ([0030], [0033], [0050]).
+port, `qemu` — runs inside one of these ([0030], [0033], [0050]). The one
+thing that still runs on the host is `qemu`'s own `mpy-cross`, built before
+its container starts (`_HOST_MPY_CROSS_PORTS`, `usermod/orchestrate.py`);
+that port alone needs a host C compiler, and nothing else in either family
+does.
 
 ## Two tables, two different questions
 
@@ -84,7 +87,9 @@ isolation argument that drives `unix`'s split does not apply.
 
 **3. `webassembly`** — one shared image, no per-build axis.
 
-**4. Six toolchain-group images ([0058]).** Before [0058], `natmod.Dockerfile`
+**4. Six toolchain-group images ([0058]).** Five of the six cover natmod's
+own ten arches; `ppc64le_linux` is `qemu`-only and reaches no natmod arch,
+which is why README counts five and this file counts six. Before [0058], `natmod.Dockerfile`
 baked all ten `dynruntime.mk` toolchains into one image, and `qemu.Dockerfile`
 carried one board's worth of `arm-none-eabi`. Both are gone: an **image group
 is a toolchain, not a port** — ten of the fifteen usermod ports and four of
@@ -93,7 +98,7 @@ routinely pulled in by more than one (port, target) pair.
 
 | Group | Holds | Named for |
 | --- | --- | --- |
-| `arm_embedded` | `arm-none-eabi-` | ten usermod ports (`rp2`, `mimxrt`, `samd`, `stm32`, `psoc-edge`, `alif`, `cc3200`, `renesas-ra`, `nrf`) + natmod's four Cortex-M arches + six `qemu` boards |
+| `arm_embedded` | `arm-none-eabi-` | nine usermod ports (`rp2`, `mimxrt`, `samd`, `stm32`, `psoc-edge`, `alif`, `cc3200`, `renesas-ra`, `nrf`) + natmod's four Cortex-M arches + six `qemu` boards |
 | `riscv_embedded` | `riscv64-unknown-elf-`/`riscv-none-elf-` | natmod's `rv32imc`/`rv64imc` + `qemu`'s `VIRT_RV32`/`VIRT_RV64` |
 | `xtensa_lx106` | `xtensa-lx106-elf-` (standalone tarball, micropython.org) | natmod's `xtensa` + usermod's `esp8266` |
 | `xtensa_esp` | `xtensa-esp32-elf-`/`xtensa-esp-elf-` (Espressif crosstool-NG) | natmod's `xtensawin` only |
@@ -109,43 +114,103 @@ one is 106 MB against the other's 565 MB — merging them would make every
 `esp8266` build pull 6.3x what it needs.
 
 **5. `esp_idf_base` — not a toolchain image.** ESP-IDF is installed into it
-*at build time* by `usermod/espidf.py`, not baked in, since this port's own
-config table carries eight distinct `idf_version`s across its rows. `esp32`
-names it directly (`image = "esp_idf_base"`).
+*at build time*, not baked in, since this port's own config table carries
+eight distinct `idf_version`s across its rows. `esp32` names it directly
+(`image = "esp_idf_base"`).
+
+The host/container split for this port, exactly:
+
+| step | where | what |
+| --- | --- | --- |
+| `git clone` ESP-IDF + submodules | **host** | `espidf.py`'s `fetch_esp_idf()`, into `<cache>/esp-idf/<version>` — source, not binaries, the same rule `mpy_dir` follows |
+| `idf_tools.py install --targets=<target>` | container | downloads the compilers for that MCU |
+| `idf_tools.py install-python-env` | container | ESP-IDF's own venv |
+| `idf_tools.py export` + `idf.py` | container | the build itself |
+
+The three container steps are guarded by a `.installed` marker inside the
+tools directory (`build_esp32.py`'s own script), which lives on the host
+through the mount — so the tool download is paid once per
+(`idf_version`, `idf_target`) and reused by every later build, including
+ones in a fresh container.
 
 ## Full port/arch → group mapping
 
-From `resources/build-platforms.toml`, current as of this file's own last
-edit — the toml file itself is the source of truth if these ever drift apart:
+Generated from `resources/build-platforms.toml` by `bin/refresh_docs.py`,
+not maintained by hand — the previous version of this section promised it was
+"current as of this file's own last edit", which is exactly the promise that
+goes stale without anyone noticing. `tests/test_docs.py` fails the build if
+the block below is out of date, and a group named here that
+`resources/pinned_docker_images.toml` does not carry is marked inline rather
+than quietly resolving to nothing at build time.
 
-**natmod** (`images.<arch>`):
+<!-- generated: image-group-mapping -- bin/refresh_docs.py, do not edit by hand -->
+**natmod (`images.<arch>`)**
 
 | Arch | Group |
 | --- | --- |
-| `x64`, `x86` | `natmod_host` |
-| `armv6m`, `armv7m`, `armv7emsp`, `armv7emdp` | `arm_embedded` |
-| `rv32imc`, `rv64imc` | `riscv_embedded` |
+| `armv6m` | `arm_embedded` |
+| `armv7emdp` | `arm_embedded` |
+| `armv7emsp` | `arm_embedded` |
+| `armv7m` | `arm_embedded` |
+| `rv32imc` | `riscv_embedded` |
+| `rv64imc` | `riscv_embedded` |
+| `x64` | `natmod_host` |
+| `x86` | `natmod_host` |
 | `xtensa` | `xtensa_lx106` |
 | `xtensawin` | `xtensa_esp` |
 
-**usermod** (`image = "..."` unless noted):
+**usermod, one image for the whole port (`image = "..."`)**
 
 | Port | Group |
 | --- | --- |
-| `unix` | `images.<tag> = "<tag>"` — identity map, see the table above |
-| `windows` | `windows` |
-| `webassembly` | `webassembly` |
+| `alif` | `arm_embedded` |
+| `cc3200` | `arm_embedded` |
 | `esp32` | `esp_idf_base` |
-| `rp2`, `mimxrt`, `samd`, `stm32`, `psoc-edge`, `alif`, `cc3200`, `renesas-ra`, `nrf` | `arm_embedded` |
 | `esp8266` | `xtensa_lx106` |
+| `mimxrt` | `arm_embedded` |
+| `nrf` | `arm_embedded` |
+| `psoc-edge` | `arm_embedded` |
+| `renesas-ra` | `arm_embedded` |
+| `rp2` | `arm_embedded` |
+| `samd` | `arm_embedded` |
+| `stm32` | `arm_embedded` |
+| `webassembly` | `webassembly` |
+| `windows` | `windows` |
 
-**`qemu`** (`images.<board>`):
+**usermod `qemu` (`images.<target>`)**
 
 | Board | Group |
 | --- | --- |
-| `MICROBIT`, `MPS2_AN385`, `MPS2_AN500`, `MPS3_AN547`, `NETDUINO2`, `SABRELITE` | `arm_embedded` |
-| `VIRT_RV32`, `VIRT_RV64` | `riscv_embedded` |
+| `MICROBIT` | `arm_embedded` |
+| `MPS2_AN385` | `arm_embedded` |
+| `MPS2_AN500` | `arm_embedded` |
+| `MPS3_AN547` | `arm_embedded` |
+| `NETDUINO2` | `arm_embedded` |
 | `POWERNV9` | `ppc64le_linux` |
+| `SABRELITE` | `arm_embedded` |
+| `VIRT_RV32` | `riscv_embedded` |
+| `VIRT_RV64` | `riscv_embedded` |
+
+**usermod `unix` (`images.<target>`)**
+
+| Target | Group |
+| --- | --- |
+| `manylinux_2_28_aarch64` | `manylinux_2_28_aarch64` |
+| `manylinux_2_28_i686` | `manylinux_2_28_i686` |
+| `manylinux_2_28_ppc64le` | `manylinux_2_28_ppc64le` |
+| `manylinux_2_28_s390x` | `manylinux_2_28_s390x` |
+| `manylinux_2_28_x86_64` | `manylinux_2_28_x86_64` |
+| `manylinux_2_31_armv7l` | `manylinux_2_31_armv7l` |
+| `manylinux_2_39_mipsel` | `manylinux_2_39_mipsel` |
+| `manylinux_2_39_riscv64` | `manylinux_2_39_riscv64` |
+| `musllinux_1_2_aarch64` | `musllinux_1_2_aarch64` |
+| `musllinux_1_2_armv7l` | `musllinux_1_2_armv7l` |
+| `musllinux_1_2_i686` | `musllinux_1_2_i686` |
+| `musllinux_1_2_ppc64le` | `musllinux_1_2_ppc64le` |
+| `musllinux_1_2_riscv64` | `musllinux_1_2_riscv64` |
+| `musllinux_1_2_s390x` | `musllinux_1_2_s390x` |
+| `musllinux_1_2_x86_64` | `musllinux_1_2_x86_64` |
+<!-- /generated: image-group-mapping -->
 
 ## Publishing flow
 

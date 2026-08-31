@@ -13,7 +13,7 @@ Also cibuildwheel-shaped: `collect_output()`/`verify_output()` mirror its
 RepairStepProducedMultipleWheelsError), and the BuildResult accumulated per
 target mirrors its BuildInfo summary line.
 
-No separate `cibuildmp publish` step (see docs/BACKLOG.md D14): each
+No separate `cibuildmp publish` step (see docs/0000-TRACKER.md D14): each
 target's own directory under `output-dir` already holds everything mip
 needs -- the `.mpy`, any `extra-files` companions, and a `package.json` --
 the moment the build finishes. Assembling a ready-to-upload tree is as far
@@ -86,7 +86,7 @@ def make_command(
         # That mechanism cannot cross a container boundary: the path
         # `sys.executable` names is in the *host's* virtual environment
         # and does not exist inside the image. Record 0049 moved the
-        # requirement into the image instead -- `docker/natmod.Dockerfile`
+        # requirement into the image instead -- each toolchain-group Dockerfile
         # apt-installs `python3-pyelftools` -- so the plain interpreter is
         # now sufficient, and it is the only one that is addressable
         # from both sides of the mount.
@@ -113,7 +113,7 @@ def _natmod_image(arch: str) -> str:
     emulated, like every other port.
 
     One image per *toolchain group*, not one shared by every arch any
-    more (record 0058 split `docker/natmod.Dockerfile`'s own ten
+    more (record 0058 split the single natmod image's own ten
     toolchains into six group images, keyed by `arch` in
     `resources/build-platforms.toml`'s own `[natmod].images`).
     """
@@ -192,7 +192,7 @@ def build_mpy_cross(mpy_dir: Path, arch: str) -> Path:
     Building it on the host (`sources.build_mpy_cross()`, still used for
     usermod's `qemu`) worked here only because host glibc happened to
     match the image's own glibc -- the same coincidence
-    `usermod/build.py`'s own `container_mpy_cross()` already documents and
+    `usermod/build_<port>.py`'s own `container_mpy_cross()` already documents and
     fixed for the port builds (a real `GLIBC_2.34' not found` failure). No
     `slug` scoping here the way that function needs, even after record
     0058 split natmod's one image into six: mpy-cross is a *host* tool
@@ -441,7 +441,7 @@ def package_target(
     """Copy `extra-files` alongside the built `.mpy` and write this
     identifier's own `package.json` (**D14**): today's plain, always-
     supported two-element `urls` schema, not a unified multi-arch manifest
-    -- see build.__doc__ and docs/BACKLOG.md D14 for why.
+    -- see build.__doc__ and docs/0000-TRACKER.md D14 for why.
 
     `urls` entries are `[target_path, url]`, deliberately not the same
     string twice: `target_path` is what `import <module>` needs on-device

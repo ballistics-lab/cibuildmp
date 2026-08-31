@@ -70,9 +70,11 @@ cibuildmp = "cibuildmp:main"
 where = ["src"]
 include = ["cibuildmp*"]
 
-# Explicit rather than relying on include-package-data: resources/natmod.toml
-# holds every pinned toolchain URL, checksum and arch table, so a wheel that
-# silently omits it is a wheel that fails at import.
+# Explicit rather than relying on include-package-data: build-platforms.toml
+# is the fact table every identifier is read from, and natmod.toml holds the
+# arch and rv32imc arch-flags tables (its toolchain URLs/checksums moved into
+# docker/*.Dockerfile ARGs, 0050) -- a wheel that silently omits either is a
+# wheel that fails at import.
 #
 # The per-port Dockerfiles used to ship here too (resources/docker/*, D28),
 # back when an installed cibuildmp with no image registered would build one

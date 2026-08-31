@@ -1,7 +1,9 @@
 # 0046 — nothing notices when a pin goes stale, except container images
 
-Status: Accepted (design; container images covered, the docker base-OS tag partially
-covered by [0068], the rest not built)
+Status: Implemented in part — container images ([0044]), the docker base-OS tag
+([0068]), and the six toolchain-tarball pins plus a weekly schedule (this record's
+own 2026-08-31 addendum). Still open: results go only to a job log, and whether
+consumers' own `micropython` pins are in scope.
 
 Lifted out of [reference/open-questions.md](../reference/open-questions.md),
 where it had grown into a real work item sitting in a living document. It
@@ -140,7 +142,58 @@ schedule instead of a new script.
 Everything else this record names is still unbuilt: `bin/update_toolchains.py` for
 `resources/natmod.toml`, an emsdk checker, a decision on xtensa-lx106, and `update_docker.py`'s
 own `--check` still runs on no schedule at all ([0068] confirmed this directly: no `cron:`
-anywhere relevant in `.github/workflows/*.yml`).
+anywhere relevant in `.github/workflows/*.yml`). *(All four of those are built as of the
+next addendum below, 2026-08-31.)*
+
+## Addendum, 2026-08-31 — the toolchain checker and the schedule, both built
+
+Two of the three things this record asked for now exist, and the inventory table
+above needs one correction before either makes sense.
+
+**The table is wrong about where the toolchain pins live.** It says
+`resources/natmod.toml`; they moved out of it, and today the four
+`TOOLCHAIN_URL`/`TOOLCHAIN_SHA256` pairs are `ARG`s in
+`docker/{arm_embedded,riscv_embedded,xtensa_esp,xtensa_lx106}.Dockerfile`, with
+llvm-mingw and emsdk inline in `docker/{windows,webassembly}.Dockerfile`. That
+is [0058]'s own still-open "`resources/pinned_toolchains.toml` not written" item
+seen from the other side; noted here rather than silently, since anyone picking
+this work up from the table alone would look in the wrong file.
+
+**The emsdk bullet above is wrong about `resources/usermod.toml` too.** It says
+that file's own `[emsdk]` table records the human-readable version separately;
+[0042] had already deleted `[emsdk]` and `[llvm-mingw]` from it before this
+record was written. What `usermod.toml` still carries is one table, `[port]`,
+and `natmod.toml` two, `[arch]` and `[arch-flags.rv32imc]` -- all three live,
+all three read (`usermod/portinfo.py`, `natmod/targets.py`). The emsdk version
+is only in `emscripten-releases-tags.json` upstream, which is where
+`bin/update_toolchains.py` reads it from.
+
+**`bin/update_toolchains.py`** covers all six, in the three shapes this record
+predicted: four GitHub releases (one API call each), emsdk via
+`emscripten-releases-tags.json` (which is as easy as this record said), and
+`xtensa-lx106`'s unversioned URL, reported *as* unversioned rather than
+pretended into a version — with `--slow` to re-download and compare the served
+sha256, since that is its only real signal.
+
+It reports and never rewrites, which is a deliberate narrowing of
+`update_docker.py`'s shape: moving one of these means re-downloading a tarball
+to recompute a sha256, and this record already says a pin moves in a reviewed
+PR. `--check` is accepted purely so the scheduled invocation reads the same as
+`update_docker.py --check`.
+
+It justified itself on the first run, the same way `update_docker.py` did:
+**llvm-mingw pinned at `20260616`, upstream at `20260826`** — a bit over two
+months behind, and nothing would have said so.
+
+**`.github/workflows/pin-staleness.yml`** is the "scheduled, not per-push" half.
+Weekly, Mondays 04:00 UTC, calling both checkers, running both even when the
+first reports drift so one run names everything that is behind. Until it
+existed, `update_docker.py --check` had been written for exactly this purpose
+and had no caller at all.
+
+Still unbuilt from this record: nothing writes results anywhere but the job log
+([0029]'s `stepsummary.py` is still unreused here), and the "are consumers' own
+`micropython` pins in scope" question stays open.
 
 [0002]: 0002-delegate-compile-own-environment.md
 [0010]: 0010-pinned-data-in-resources.md

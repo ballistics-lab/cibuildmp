@@ -8,7 +8,16 @@
 # no natmod/ directory. The values below are drawn from micropython-bclibc,
 # the most demanding of the three consuming repos.
 #
-# See docs/BACKLOG.md for the decisions behind this schema (D1-D8) and for
+# **It is not inert, though**, and that surprises people: `build` below names
+# real identifiers, so running `cibuildmp` at this repository's root resolves
+# ten natmod targets and then fails at build time on the missing natmod/.
+# That is expected — read this file, do not run it. To try the CLI from a
+# checkout, point it at a real module instead:
+#
+#     cibuildmp examples/template --build "mpy6.3-v1.29.0-x64"
+#
+# See docs/0000-TRACKER.md and docs/records/ for the decisions behind this
+# schema (the old BACKLOG file is a redirect stub now, since 0041) and for
 # what is and is not implemented yet.
 #
 # Location: cibuildmp.toml at the repo root. If the project also has a
@@ -23,13 +32,13 @@
 #   defaults -> this file -> matching [override] -> environment -> CLI
 #
 # There is no per-platform table at all any more -- no [natmod], no
-# [unix]/[windows]/[qemu]/[webassembly]/[esp32]. Every platform is always
-# in scope; every option key below lives at the bare top level (or, for a
-# usermod-only default shared across every port, inside [usermod] -- see
-# examples/template/cibuildmp.toml). What actually gets built is decided
-# purely by `build`/`skip` glob-matching the real identifier, or by a
-# specific `[override."<glob>"]` entry. An unconfigured `build` selects
-# nothing at all, from any platform -- there is no implicit default.
+# [unix]/[windows]/[qemu]/[webassembly]/[esp32], and no [usermod] either
+# (record 0074): every option key lives at the bare top level, usermod's
+# own user-c-modules/manifest/extra-make-args included. What actually gets
+# built is decided purely by `build`/`skip` glob-matching the real
+# identifier, or by a specific `[override."<glob>"]` entry. An unconfigured
+# `build` selects nothing at all, from any platform -- there is no
+# implicit default.
 
 # ── Global ────────────────────────────────────────────────────────────────
 
@@ -129,7 +138,7 @@ extra-make-args = ["MP_BCLIBC_PRECISION=single"]
 # Sketched here so the intended shape is on record, but genuinely NOT
 # parsed by cibuildmp today -- unlike the real, working keys just above,
 # nothing below has a config surface at all yet. Do not rely on any of it.
-# See docs/BACKLOG.md.
+# See docs/0000-TRACKER.md and docs/records/.
 #
 #     variant = "pyscript"     # standard's ASYNCIFY is broken on modern
 #                               # emsdk -- WebassemblyBuildOptions has a

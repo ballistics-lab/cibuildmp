@@ -49,14 +49,24 @@ An unconfigured `build` matches nothing at all, from any platform — see
 [Identifiers and selectors](#identifiers-and-selectors) below for the full
 identifier list and glob syntax. Drop `--dry-run` and it builds for real:
 each target lands in its own `output-dir/<identifier>/` directory
-(`mpyhouse/mpy6.3-x64/`, …), with a `package.json` mip can install from
+(`mpyhouse/mpy6.3-v1.29.0-x64/`, …), with a `package.json` mip can install from
 once `version` is set.
 
-**`cibuildmp` needs a reachable Docker daemon on whatever host runs it.**
+**Host prerequisites, in full:** Docker (below), `git` — needed only for a
+preview tag, which publishes no release tarball and is therefore cloned —
+and a C compiler for the one `qemu` usermod cell. natmod additionally
+bind-mounts *cibuildmp's own installed* `pyelftools`/`ar` into every
+container rather than baking them into six images, so those come from your
+`cibuildmp` install, not from the image and not from your system Python.
+
+**`cibuildmp` needs a reachable Docker daemon on whatever host runs it —
+one that shares this machine's filesystem.** Every path is bind-mounted
+into the container at its identical host path, so a remote or
+VM-isolated daemon that cannot see your working tree will not work.
 It never builds an image itself — it pulls pre-built, pinned images
 (`ghcr.io/ballistics-lab/<target>`) and launches sibling containers, one
 per target, the same way cibuildwheel's own container runtime does. That
-covers natmod (five toolchain-group images between them cover all ten
+covers natmod (five of the six toolchain-group images cover all ten
 arches — see [`docs/reference/vendored-images.md`](docs/reference/vendored-images.md))
 and every usermod port, `esp32` included — only the ESP-IDF `git clone` itself
 stays on the host (source, not a binary, the same reasoning `mpy_dir`
@@ -68,6 +78,12 @@ sibling containers of its own (Docker-in-Docker was ruled out); `uv tool
 install cibuildmp`/`pip install cibuildmp` directly is the one supported
 way to run it outside CI.
 
+**A container build looks exactly like a host build in the log.** Every
+path is bind-mounted at its identical host path, so `make` prints the same
+directory names it would locally, and a digest-pinned image shows as
+`<none>` in `docker images`. Nothing has escaped the container; there is
+just no visible difference to escape into.
+
 A non-native target (anything other than your own machine's architecture)
 also needs an emulator registered: `docker/setup-qemu-action@v4` on CI, or
 once per machine locally, `docker run --privileged --rm tonistiigi/binfmt
@@ -78,17 +94,256 @@ On CI, use the action instead of installing the CLI yourself — it already
 runs on a bare runner with the runner's own Docker daemon reachable:
 
 ```yaml
-- uses: ballistics-lab/cibuildmp@v0.4.1
+- uses: ballistics-lab/cibuildmp@v0.4.2
   with:
     build: "mpy6.3-* v1.29.0-manylinux_2_28_x86_64"
 ```
+
+The action takes seven inputs, all optional — every one overrides the
+config file rather than replacing it:
+
+| Input | Default | What it does |
+| --- | --- | --- |
+| `package-dir` | `.` | Directory holding the module and its config |
+| `config-file` | — | Config to use instead of `<package-dir>/cibuildmp.toml` |
+| `build` | — | Override the config's own `build` selector |
+| `skip` | — | Override the config's own `skip` selector |
+| `output-dir` | `mpyhouse` | Where to collect output. **natmod only** — usermod reads it from the config or `CIBMP_OUTPUT_DIR` |
+| `keep-going` | — | Any non-empty value: build every selected target even after one fails |
+| `extras` | — | **Leave empty.** There are no extras today; a non-empty value fails the install |
+
+Anything without an input has an environment form instead — see
+[Configuration](#configuration).
+
+**An empty `CIBMP_*` environment variable is a value, not an absence.** Only
+an *unset* variable is skipped; `CIBMP_VERSION=""` overrides a
+`version = "1.0.0"` in your config with the empty string, which silently
+disables `package.json` and `[publish] extra-files`. This matters on Actions
+specifically, because the usual conditional-env idiom sets the variable
+either way:
+
+```yaml
+env:
+  CIBMP_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}   # WRONG
+```
+
+Write the variable only when you mean it:
+
+```yaml
+- if: startsWith(github.ref, 'refs/tags/v')
+  run: echo "CIBMP_VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
+```
+
+### A complete workflow
+
+Every natmod arch cross-compiles inside a `linux/amd64` container, so this
+needs **no matrix and no `docker/setup-qemu-action`** — one job builds all
+ten:
+
+```yaml
+name: build
+on: [push, pull_request]
+
+jobs:
+  natmod:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ballistics-lab/cibuildmp@v0.4.2
+        with:
+          build: "mpy6.3-v1.29.0-*"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mpy
+          path: mpyhouse/
+```
+
+usermod is the case that *does* need a matrix, because some of its
+identifiers are native to a non-amd64 runner (`*_aarch64`, `*_armv7l` →
+`ubuntu-24.04-arm`) and the rest are emulated — add
+`docker/setup-qemu-action` to any job building an emulated cell. See
+[`.github/workflows/build-examples.yml`](.github/workflows/build-examples.yml)
+for a worked multi-runner version.
 
 See [`examples/template`](examples/template) for a minimal natmod module
 and its `cibuildmp.toml`, and [`examples/wasm2mpy`](examples/wasm2mpy) for
 one whose native source is WebAssembly, compiled through `wasm2c` — the
 natmod contract doesn't care what produced the C. `cibuildmp --help` lists
-every flag; `CIBMP_*` environment variables and a `[tool.cibuildmp]` table
-in `pyproject.toml` both work as config overrides too.
+every flag, and [Configuration](#configuration) below covers the config
+file, every option key, the `CIBMP_*` environment forms and the order they
+all resolve in.
+
+## Your first module
+
+Empty directory to a working `.mpy`, in three files. Every command and every
+output below is from a real run, not an illustration.
+
+**1. `natmod/mymod.c`** — the module itself:
+
+```c
+#include "py/dynruntime.h"
+
+static mp_obj_t add(mp_obj_t a_obj, mp_obj_t b_obj) {
+    return mp_obj_new_int(mp_obj_get_int(a_obj) + mp_obj_get_int(b_obj));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(add_obj, add);
+
+mp_obj_t mpy_init(mp_obj_fun_bc_t *self, size_t n_args, size_t n_kw, mp_obj_t *args) {
+    MP_DYNRUNTIME_INIT_ENTRY
+    mp_store_global(MP_QSTR_add, MP_OBJ_FROM_PTR(&add_obj));
+    MP_DYNRUNTIME_INIT_EXIT
+}
+```
+
+`py/dynruntime.h` in the pinned checkout is the whole API a natmod may
+use — `mp_obj_get_int`, `mp_obj_new_int`, `mp_get_buffer_raise` and the
+rest. Read it when you need something this example does not show.
+
+**2. `natmod/Makefile`** — `MPY_DIR` and `ARCH` arrive on the command line;
+don't hardcode them. **`BUILD` and the `dist` output must be different
+directories**: `cibuildmp` globs `build/<arch>*/*.mpy` for the finished
+file, so leaving make's own intermediates there gives it two `.mpy` files
+and the `ambiguous output` error below:
+
+```make
+MOD = mymod
+SRC = mymod.c
+
+# Keep make's own object files out of build/, and scope them per arch.
+BUILD = .obj/$(ARCH)
+
+include $(MPY_DIR)/py/dynruntime.mk
+
+# cibuildmp looks for the finished .mpy in build/<arch>*/
+dist:
+	rm -f $(MOD).mpy
+	$(MAKE) all
+	mkdir -p build/$(ARCH)
+	cp $(MOD).mpy build/$(ARCH)/
+```
+
+**3. `cibuildmp.toml`** — what to build. Start with one target:
+
+```toml
+build = "mpy6.3-v1.29.0-x64"
+```
+
+Then run it:
+
+```console
+$ cibuildmp
+cibuildmp: 1 target(s) against MicroPython v1.29.0
+  [1/1] mpy6.3-v1.29.0-x64        make -C natmod ARCH=x64 dist
+...
+cibuildmp: 1 target(s) built in 0.7s
+  mpy6.3-v1.29.0-x64: mymod-mpy6.3-v1.29.0-x64.mpy (210 bytes)
+```
+
+The result is in `mpyhouse/mpy6.3-v1.29.0-x64/`. That is the whole loop —
+the same command, with a wider `build`, is what CI runs.
+
+### Widening it
+
+Change one line to build every arch instead of one:
+
+```toml
+build = "mpy6.3-v1.29.0-*"
+```
+
+`cibuildmp --print-build-identifiers` lists exactly what a glob selects
+before you build it, and `--dry-run` shows the `make` command line each
+target will get. Neither builds anything, so both are safe to run
+repeatedly while you get the glob right.
+
+### Using what you built
+
+The `.mpy` is a normal MicroPython native module. On a board:
+
+```console
+$ mpremote cp mpyhouse/mpy6.3-v1.29.0-armv6m/mymod-*.mpy :mymod.mpy
+$ mpremote exec "import mymod; print(mymod.add(2, 3))"
+5
+```
+
+The filename carries its identifier so several arches can sit side by side;
+rename it to plain `mymod.mpy` on the device, because `import mymod` looks
+for exactly that name.
+
+**Ask the device which arch it wants** rather than guessing from the board:
+
+```python
+>>> import sys; print(sys.implementation._mpy >> 10)
+```
+
+That number is the `MP_NATIVE_ARCH_*` index — 1 `x86`, 2 `x64`, 4 `armv6m`,
+5 `armv7m`, 7 `armv7emsp`, 8 `armv7emdp`, 9 `xtensa`, 10 `xtensawin`,
+11 `rv32imc`, 12 `rv64imc`.
+
+**For `mip install`**, set `version` in your config. `cibuildmp` then writes
+a `package.json` beside each `.mpy` naming the ABI and arch it is
+compatible with, which is what lets one release serve every device:
+
+```toml
+name = "mymod"
+version = "1.0.0"
+```
+
+**What each port produces**, since it is not a `.mpy` for any of them:
+
+| Port | Artifact |
+| --- | --- |
+| `unix` | `micropython` — plus a `lib/` sidecar, see below |
+| `windows` | `micropython.exe` |
+| `webassembly` | `micropython.mjs` (with its `.wasm` beside it) |
+| `qemu` | `firmware.elf` |
+| `esp32` | `micropython.bin` |
+| `rp2` | `firmware.uf2` |
+
+Flashing or running those is your own port's normal procedure —
+`cibuildmp` collects them and stops.
+
+**A `usermod` build is not one file.** `unix` in particular produces the
+binary *plus* a `lib/` directory beside it: `cibuildmp` copies every
+non-baseline shared library the binary needs into it and sets an
+`$ORIGIN/lib` rpath, so the binary runs outside the container it was built
+in. Upload or copy the whole identifier directory, not just the file in it.
+
+The `urls` entries in that `package.json` are **relative** — an on-device
+basename paired with the identifier-qualified filename sitting beside it —
+so `mip` resolves them against wherever it fetched the `package.json` from:
+
+```console
+$ mpremote mip install https://example.com/releases/v1.0.0/package.json
+```
+
+Publishing that directory — a GitHub Release, or anywhere else — stays your
+own CI step. `cibuildmp` assembles the tree and stops there, the same line
+cibuildwheel draws at `wheelhouse/`.
+
+### When you outgrow three files
+
+Two more example trees exist and are built by CI on every push:
+[`examples/natmod`](examples/natmod) and
+[`examples/usercmodule`](examples/usercmodule) are MicroPython's *own*
+upstream examples, built through `cibuildmp` unmodified — proof the tool
+works on modules it did not shape, and the closest thing here to a
+compatibility suite.
+
+The Makefile above is the **minimum for one arch at a time**.
+[`examples/template`](examples/template)'s own differs deliberately and is
+what a full matrix needs: `BUILD` folds in `$(ARCH_FLAGS)` (so two
+`rv32imc` variants do not share objects), carries an extra directory level
+(so a `../src/` source stays arch-scoped), and `dist` deletes `$(MOD).mpy`
+before rebuilding (so a second run in the same tree cannot collect the
+previous arch's file). Each of those is a real silent-wrong-binary bug
+its comments record.
+
+[`examples/template`](examples/template) is the same module with everything
+a real project ends up needing: a shared `src/` core compiled by both the
+natmod and the usermod path, a `usermod/` half, and a `Makefile` whose
+comments record three separate ways a shared `BUILD` directory silently
+produces the *wrong* arch's binary. Read it when your own build starts
+doing something strange, not before.
 
 ## Identifiers and selectors
 
@@ -106,15 +361,17 @@ platform.**
 
 Identifier shapes, one per platform:
 
-| Platform              | Shape                   | Example                         |
-| --------------------- | ----------------------- | ------------------------------- |
-| natmod                | `mpy{abi}-{tag}-{arch}` | `mpy6.3-v1.29.0-armv7emsp`      |
-| usermod `unix`        | `{tag}-{arch}`          | `v1.29.0-manylinux_2_28_x86_64` |
-| usermod `windows`     | `{tag}-{arch}`          | `v1.29.0-win_amd64`             |
-| usermod `webassembly` | `{tag}-{arch}`          | `v1.29.0-wasm32`                |
-| usermod `qemu`        | `{tag}-qemu-{board}`    | `v1.24.0-qemu-MICROBIT`         |
-| usermod `esp32`       | `{tag}-esp32-{board}`   | `v1.29.0-esp32-ESP32_GENERIC`   |
-| usermod `rp2`         | `{tag}-rp2-{board}`     | `v1.29.0-rp2-RPI_PICO`          |
+<!-- generated: identifier-shapes -- bin/refresh_docs.py, do not edit by hand -->
+| Platform | Shape | Example |
+| --- | --- | --- |
+| natmod | `mpy{abi}-{tag}-{arch}` | `mpy6.3-v1.29.0-armv6m` |
+| usermod `esp32` | `{tag}-esp32-{board}` | `v1.29.0-esp32-ARDUINO_NANO_ESP32` |
+| usermod `qemu` | `{tag}-qemu-{board}` | `v1.29.0-qemu-MICROBIT` |
+| usermod `rp2` | `{tag}-rp2-{board}` | `v1.29.0-rp2-ADAFRUIT_FEATHER_RP2040` |
+| usermod `unix` | `{tag}-{arch}` | `v1.29.0-manylinux_2_28_aarch64` |
+| usermod `webassembly` | `{tag}-{arch}` | `v1.29.0-wasm32` |
+| usermod `windows` | `{tag}-{arch}` | `v1.29.0-win32` |
+<!-- /generated: identifier-shapes -->
 
 The shape genuinely differs per usermod port — `unix`/`windows`/
 `webassembly` carry no port name at all in the identifier, only `qemu`/
@@ -192,6 +449,393 @@ built artifact's directory/size/file listing or the error that stopped it:
 }
 ```
 
+## Configuration
+
+### Where config lives
+
+`cibuildmp` reads exactly one config source, resolved in this order:
+
+1. `--config-file <path>`, if given (a missing file is an error, not a
+   fallback).
+2. `<package-dir>/cibuildmp.toml`.
+3. `[tool.cibuildmp]` in `<package-dir>/pyproject.toml`.
+4. Nothing. Every option has a default, so this is legitimate — but
+   `build` defaults to empty, and an empty `build` selects nothing, so a
+   config-less run builds nothing rather than everything.
+
+`<package-dir>` is the CLI's positional argument (`cibuildmp micropython/`)
+or the action's `package-dir` input, defaulting to `.`. Only the first
+source that exists is read — the three are alternatives, not layers.
+
+### The shape
+
+One flat table of scalar keys, plus two real sub-tables. There are no
+per-platform config tables: `[natmod]`, `[unix]`, `[esp32]`, `[usermod]`
+and friends were all retired ([0052]/[0074]) and writing one now is a
+plain "unknown table" error. Anything a per-platform table used to say, a
+sufficiently-scoped glob already says — every identifier carries its own
+platform marker.
+
+```toml
+# ── invocation-wide ───────────────────────────────────────────────────
+build = "mpy6.3-v1.29.0-* v1.29.0-manylinux_2_28_x86_64"
+skip  = "*-armv6m"
+name    = "mymod"          # .mpy/package.json naming; defaults to empty
+version = "1.2.0"
+output-dir = "mpyhouse"
+
+# ── defaults for every target, of either family ───────────────────────
+module-dir     = "natmod"      # natmod: where its Makefile lives
+user-c-modules = "usermod"     # usermod: the USER_C_MODULES path
+manifest       = "usermod/manifest.py"
+extra-make-args = ["LDFLAGS_EXTRA=-static"]
+
+# ── narrowed to the identifiers a glob matches ────────────────────────
+[override."*-manylinux_2_31_armv7l"]
+extra-make-args = ["LDFLAGS_EXTRA=-static"]
+
+[override."*-wasm32"]
+extra-make-args = ["VARIANT=pyscript"]
+inherit = { extra-make-args = "append" }   # or "prepend"; default replaces
+
+# ── natmod only: files copied beside every built .mpy ─────────────────
+[publish]
+extra-files = ["../src/mymod.py"]
+```
+
+`[override]` is keyed **directly by its own glob** — `[override."<glob>"]`,
+deliberately unlike cibuildwheel's `[[tool.cibuildwheel.overrides]]` with a
+`select =` field inside. (Writing `select = "…"` *inside* an entry is an
+error, not a second spelling.) The table name takes the full selector
+syntax, so one entry can cover several globs:
+`[override."*-manylinux* *-win* *-wasm32"]`. Entries are matched in file order and every
+matching one applies, so two globs that both match one identifier layer
+onto each other rather than the first winning.
+
+### Every key
+
+| Key                      | Read by | Default                |                      Also in `[override]`?                       |
+| ------------------------ | ------- | ---------------------- | :--------------------------------------------------------------: |
+| `build`                  | both    | `""` (selects nothing) |                                ✗                                 |
+| `skip`                   | both    | `""`                   |                                ✗                                 |
+| `output-dir`             | both    | `"mpyhouse"`           |                                ✗                                 |
+| `name`                   | both    | `""`                   |                                ✗                                 |
+| `version`                | both    | `""`                   |                                ✗                                 |
+| `arch-flags`             | natmod  | `[]`                   | ✗ — resolved once for the whole config, before any target exists |
+| `micropython-submodules` | natmod  | `[]`                   |                                ✗                                 |
+| `module-dir`             | natmod  | `"natmod"`             |                                ✓                                 |
+| `make-target`            | natmod  | `"dist"`               |                                ✓                                 |
+| `pre-build-command`      | natmod  | `""`                   |                                ✓                                 |
+| `extra-make-args`        | both    | `[]`                   |                                ✓                                 |
+| `user-c-modules`         | usermod | `"."`                  |                                ✓                                 |
+| `manifest`               | usermod | `""`                   |                                ✓                                 |
+| `extra-cmake-args`       | usermod | `[]`                   |                                ✓                                 |
+
+Every list-valued key also accepts a plain string, split the way a shell
+would: `extra-make-args = "CXX=em++ CXXFLAGS_MOD=-Wno-macro-redefined"` is
+the same as the two-element list.
+
+A key a family does not read is accepted and ignored, so
+`pre-build-command` in a usermod-only config is silently inert — usermod has
+no pre-build hook at all. The "Read by" column is the one to check.
+
+Two more keys live in tables rather than at the top level, so they are not
+in the list above: `[publish] extra-files` (natmod — files copied beside
+every built `.mpy`) and `inherit` inside an `[override]` entry.
+
+**`name` and `version` do different things per family.** For natmod they
+name the artifact *and* gate `package.json`; for usermod they only replace
+the output filename's stem — there is no manifest for a firmware image.
+
+**`version` gates more than the version string.** For natmod, with `version` unset,
+`cibuildmp` writes no `package.json` *and copies no `[publish] extra-files`*
+— the identifier directory holds the built artifact alone. Set `name` and
+`version` as soon as you want either.
+
+Every key is valid at the top level whatever family reads it — the global
+layer is just every platform's own default, so a natmod-only key in a
+usermod-only project is accepted and ignored, not rejected. A key **no**
+family recognises is an error, with a close-match suggestion ([0075]):
+
+```console
+$ cibuildmp
+cibuildmp: error: cibuildmp.toml: unknown key `buidl`. Perhaps you meant `build`?
+```
+
+Two notes on individual keys:
+
+- `user-c-modules` is **rewritten to its parent** for a Make port when the
+  directory you name contains `micropython.mk` itself. MicroPython's own
+  `py/py.mk` globs `<USER_C_MODULES>/*/micropython.mk`, one level *below*
+  the path it is given, so a flat single-module layout would otherwise link
+  nothing and still succeed. `cibuildmp` detects that shape and adjusts;
+  you do not need to point one level up yourself.
+- `module-dir` and `user-c-modules` accept a literal `{micropython}`
+  placeholder, substituted with the pinned checkout cibuildmp itself
+  fetched ([0071]/[0072]) — `module-dir = "{micropython}/examples/natmod/btree"`
+  builds a module living inside MicroPython's own tree, with nothing
+  vendored into your repo.
+- `arch-flags` is a *list*, and each entry produces its own target: it is an
+  axis, not a flag. That is why it cannot live in `[override]` — an override
+  is matched against an identifier that arch-flags itself helped create.
+  The extra entries get a `+0x<hex>` suffix, which the generated shape table
+  above cannot express because it is built from `identifier_format`:
+
+  ```console
+  $ cibuildmp --print-build-identifiers   # arch-flags = ["", "zba,zcmp"]
+  mpy6.3-v1.29.0-rv32imc
+  mpy6.3-v1.29.0-rv32imc+0x3
+  ```
+
+  So an override for the flagged variant is `[override."*rv32imc+0x3"]`, and
+  a plain `skip = "*-rv32imc"` will *not* match it — `*-rv32imc*` does.
+
+### Environment variables
+
+Every option key above has an environment form: `CIBMP_` + the key in
+`SCREAMING_SNAKE_CASE` (`extra-make-args` → `CIBMP_EXTRA_MAKE_ARGS`), the
+same shape cibuildwheel's own `CIBW_*` uses. `build` and `skip` also take a
+per-platform form, `CIBMP_BUILD_<PLATFORM>`/`CIBMP_SKIP_<PLATFORM>` —
+`CIBMP_BUILD_NATMOD`, `CIBMP_BUILD_UNIX`, `CIBMP_SKIP_ESP32`, … — and
+natmod's `arch-flags` takes `CIBMP_ARCH_FLAGS_NATMOD`.
+
+**The per-platform form does not replace the global selection — it scopes
+one platform's own, alongside it.** This surprises people, so it is worth
+seeing:
+
+```console
+$ CIBMP_BUILD_UNIX=v1.29.0-manylinux_2_28_x86_64 \
+  cibuildmp --build v1.29.0-win_amd64 --print-build-identifiers
+v1.29.0-manylinux_2_28_x86_64
+v1.29.0-win_amd64
+```
+
+`unix` used its own env-scoped selector; every other platform kept the
+global one. Use it to widen one platform in one CI job without touching the
+config file — not to narrow the run as a whole.
+
+A second group of variables configures the machinery rather than the build,
+and has no config-file counterpart at all. **What `<TARGET>` is depends on
+the port**, because it is that port's own build axis:
+
+| `<PORT>` | `<TARGET>` | example |
+| --- | --- | --- |
+| `unix` | the platform tag | `CIBMP_UNIX_MANYLINUX_2_28_X86_64_DOCKER_IMAGE` |
+| `windows` | the arch | `CIBMP_WINDOWS_WIN_AMD64_DOCKER_IMAGE` |
+| `qemu` | the board | `CIBMP_QEMU_MPS2_AN385_DOCKER_IMAGE` |
+| `natmod` | the arch | `CIBMP_NATMOD_ARMV7EMSP_DOCKER_IMAGE` |
+| `esp32`, `rp2`, `webassembly` | *none* | `CIBMP_WEBASSEMBLY_DOCKER_IMAGE` |
+
+
+| Variable                                | Effect                                                                                                                                                                                                                            |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CIBMP_CACHE_PATH`                      | Where MicroPython checkouts and mpy-cross builds are cached. Defaults to `$XDG_CACHE_HOME/cibuildmp`, or `~/.cache/cibuildmp`. Pin it in CI when a later step needs the checkout by path — `<CIBMP_CACHE_PATH>/micropython/<tag>` |
+| `CIBMP_REPORT_PATH`                     | Where the JSON build report is written                                                                                                                                                                                            |
+| `CIBMP_TIMEOUT`                         | Seconds before a build container is killed (`docker kill`, not just the CLI). No limit by default. **usermod only** -- natmod's own container call does not consult it |
+| `CIBMP_<PORT>_<TARGET>_TIMEOUT`         | The same, for one container — `CIBMP_UNIX_MANYLINUX_2_28_X86_64_TIMEOUT`                                                                                                                                                          |
+| `CIBMP_<PORT>_<TARGET>_DOCKER_IMAGE`    | Run this (port, target) in a different image — a locally built one, or a fork's. Wins over the pinned default. Omit the `<TARGET>` segment for a port with no per-build image axis (`CIBMP_WEBASSEMBLY_DOCKER_IMAGE`)             |
+| `CIBMP_<PORT>_<TARGET>_DOCKER_PLATFORM` | Same shape, for the container's `--platform`                                                                                                                                                                                      |
+| `CIBMP_DEBUG_TRACEBACK`                 | Print a full traceback instead of a one-line error (same as `--debug-traceback`)                                                                                                                                                  |
+| `CIBMP_DISABLE_GITHUB_STEP_SUMMARY`     | Suppress the step-summary table on GitHub Actions                                                                                                                                                                                 |
+
+### Precedence
+
+There are two chains, because two kinds of option resolve at two different
+times, and they do **not** order env and `[override]` the same way.
+
+**Invocation-wide options** — `build`, `skip`, `output-dir`, `name`,
+`version`, `arch-flags`, `micropython-submodules` — resolve once, before any
+target exists. Later wins:
+
+```
+built-in default  →  config file  →  CIBMP_<KEY>  →  CLI flag
+```
+
+with `CIBMP_BUILD_<PLATFORM>`/`CIBMP_SKIP_<PLATFORM>` applying *per
+platform* on top of whatever that chain produced, as shown above.
+
+Only three of these have a CLI flag at all — `--build`, `--skip` and
+`--output-dir` — and `--output-dir` is **natmod-only**: usermod's own
+`output-dir` comes from the config file or `CIBMP_OUTPUT_DIR`, and passing
+the flag does not move its collected files. Everything else is config file
+or environment.
+
+**Per-target options** — `module-dir`, `make-target`, `pre-build-command`,
+`extra-make-args`, `user-c-modules`, `manifest`, `extra-cmake-args` —
+resolve once per identifier, after selection. Later wins:
+
+```
+built-in default  →  config file (top level)  →  matching [override] entries  →  CIBMP_<KEY>
+```
+
+So an `[override]` beats the top-level default for the identifiers it
+matches, and an environment variable beats **everything**, override
+included — a one-off CI override stays a one-off, and cannot be
+accidentally re-narrowed by a glob in the config file. Matching
+`[override]` entries apply in file order, each replacing the running value
+unless its own `inherit` rule says otherwise:
+
+```toml
+extra-make-args = ["A=1"]
+
+[override."*-x64"]
+extra-make-args = ["B=2"]
+inherit = { extra-make-args = "append" }  # -> A=1 B=2   ("prepend" -> B=2 A=1)
+                                          # without inherit -> B=2
+```
+`inherit` only applies to list-valued options — `extra-make-args` is the one
+option genuinely list-shaped across every platform's own override surface;
+naming a scalar option in `inherit` is a config error, not a silent no-op.
+
+<!-- Every record this file cites, defined once. Reference definitions are
+     document-wide, so the numbers used in other sections resolve too --
+     they were bare bracketed text before, which rendered as literal
+     "[0043]" with nothing behind it. -->
+
+[0038]: docs/records/0038-m5-adopt-in-three-repos.md
+[0043]: docs/records/0043-unix-adopts-cibuildwheel-native-image-model.md
+[0052]: docs/records/0052-config-is-a-tree-not-a-selector-matrix.md
+[0058]: docs/records/0058-image-groups-are-toolchains-not-ports.md
+[0071]: docs/records/0071-micropython-placeholder-in-user-c-modules.md
+[0072]: docs/records/0072-natmod-micropython-placeholder-and-upstream-natmod-ci.md
+[0074]: docs/records/0074-usermod-family-table-and-retired-table-messages-removed.md
+[0075]: docs/records/0075-top-level-scalar-keys-are-validated.md
+[0076]: docs/records/0076-the-mipsel-holdout-is-bclibc-and-wasm3-not-a7p.md
+[0077]: docs/records/0077-docs-drift-is-a-failing-test-not-a-discipline-problem.md
+
+## When a build fails
+
+Every heading below is the message `cibuildmp` actually prints, minus the
+`cibuildmp: error: ` prefix every error carries — so searching this page for
+the text in your terminal finds it. Find yours, read the cause, apply the
+fix.
+
+### no targets selected. Pass --allow-empty if that is expected.
+
+Your `build` glob matched nothing. This is the normal first-run result,
+because an unset `build` selects **nothing at all** — there is no "build
+everything" default.
+
+Check what you asked for against what exists:
+
+```console
+$ cibuildmp --print-build-identifiers        # what your config selects
+$ cibuildmp --build "*" --print-build-identifiers | head   # what exists
+```
+
+A glob that matches nothing is usually a tag that has no rows (`v1.28.1`
+is not a MicroPython release) or a port spelled as a port when the
+identifier has no port segment — `unix`, `windows` and `webassembly`
+identifiers are `{tag}-{arch}`, with no `unix-` in them.
+
+### unknown key &#96;buidl&#96;. Perhaps you meant &#96;build&#96;?
+
+A typo, or a key from a config schema older than v0.4.0. The suggestion is
+usually right. See [Configuration](#configuration) for every key that
+exists.
+
+### unknown table(s) at the top level: [natmod].
+
+Per-platform tables (`[natmod]`, `[unix]`, `[esp32]`, `[usermod]`, …) were
+removed in v0.4.0. Everything lives at the top level now, narrowed with
+`[override."<glob>"]`. Move the keys up and delete the table.
+
+### `docker run against image '…' was requested but the docker CLI itself is not on PATH`
+
+`cibuildmp` builds in containers, with **one exception**: a `qemu` usermod
+build compiles `mpy-cross` on the host first (`_HOST_MPY_CROSS_PORTS` in
+`usermod/orchestrate.py`), so that one port needs a working host C
+compiler as well as Docker. Everything else — natmod included — has no
+bare-host path
+for any target. Install Docker and make sure `docker info` works as the
+user running the build.
+
+### `… cannot run as linux/arm64 on this host (x86_64): the kernel has no binfmt handler registered`
+
+You asked for a target that is not your machine's architecture. `cibuildmp`
+does not install emulation itself:
+
+```console
+$ docker run --privileged --rm tonistiigi/binfmt --install all   # locally, once
+```
+
+On CI, add `docker/setup-qemu-action` to the job before the build step.
+
+### `ambiguous output -- found 2 .mpy files under natmod/build/x64*: mymod.mpy, mymod_x64.mpy`
+
+Your `dist` target left an intermediate file next to the one it produced.
+This bites when a MicroPython bump renames that intermediate — v1.29.0
+renamed `$(BUILD)/$(MOD).native.mpy` to `$(BUILD)/$(MOD).mpy`, so a `dist`
+cleaning up only the old name suddenly leaves the new one behind. Remove
+both:
+
+```make
+dist: all
+	mv $(MOD).mpy $(BUILD)/mymod.mpy
+	rm -f $(BUILD)/$(MOD).native.mpy $(BUILD)/$(MOD).mpy
+```
+
+### `'dist' produced no .mpy under natmod/build/x64*/ or directly in natmod`
+
+Either `module-dir` points at the wrong directory, or your `make-target`
+does not put its output where `cibuildmp` looks. It looks in
+`<module-dir>/build/<arch>*/` first, then in `<module-dir>` itself.
+
+### `mymod.mpy's header encodes native arch code 2, expected 4 (armv6m)`
+
+Two arches shared one build directory, so the second one reused the first
+one's object files and the `.mpy` is the *first* arch's binary.
+`cibuildmp` catches this rather than shipping it. Scope `BUILD` by arch in
+your Makefile, before the `include`:
+
+```make
+BUILD = .obj/$(ARCH)
+```
+
+(MicroPython v1.29.0 and later already default to `build-$(ARCH)`, so this
+only matters on older tags or if you set `BUILD` yourself.)
+
+### `no image registered for …` / `… is not published for linux/…`
+
+The image that target needs is not in
+`resources/pinned_docker_images.toml`, or the pinned reference does not
+cover your platform. If you are testing a locally built image, point at it
+directly — `CIBMP_UNIX_MANYLINUX_2_28_X86_64_DOCKER_IMAGE=my-image:local`
+and the equivalent for other ports. Otherwise this is a bug here: please
+open an issue.
+
+### `config file not found: …`
+
+`--config-file` was given a path that does not exist. Without that flag,
+`cibuildmp` looks for `<package-dir>/cibuildmp.toml`, then
+`[tool.cibuildmp]` in `<package-dir>/pyproject.toml`.
+
+### Disk, and clearing it
+
+The first run downloads a MicroPython release tarball, builds `mpy-cross`,
+and pulls a toolchain image — so it is minutes and gigabytes, not the
+sub-second rebuilds shown above. A cache with a few tags and an ESP-IDF in
+it runs to several GB. `cibuildmp --clean-cache` deletes the lot
+(`$XDG_CACHE_HOME/cibuildmp`, or wherever `CIBMP_CACHE_PATH` points);
+Docker images are Docker's own to prune.
+
+That includes the JSON build reports: one per invocation, never
+overwritten, under the same cache root — so they accumulate until you clean
+the cache, and cleaning the cache takes them with it. Set
+`CIBMP_REPORT_PATH` if you want one kept somewhere you control.
+
+### Still stuck
+
+`--dry-run` prints what would be built, without building — with the `make`
+command line for natmod targets, and identifiers alone for usermod ones
+(each port's own driver composes its command far too late for a preview). It prints a `{micropython}` placeholder
+literally rather than resolved — the checkout it would point at is not
+fetched during a dry run, so `make -C {micropython}/examples/natmod/btree`
+in that output is correct, not a broken config. `--debug-traceback` turns a
+one-line error
+into a full traceback. Both are the fastest way to turn "it failed" into a
+specific question.
+
 ## Target support
 
 ### Natmod, per arch
@@ -200,7 +844,7 @@ All ten `ARCH=` values `py/dynruntime.mk` accepts, each running inside a
 pulled `linux/amd64` image — natmod builds no bare-host toolchain of any
 kind any more, `x86`'s 32-bit multilib included, which is exactly what makes
 it buildable on an arm64 runner too. There is no single `natmod` image any
-more either: five toolchain-group images between them cover all ten arches
+more either: five of the six toolchain-group images cover all ten arches
 (`arm_embedded`, `riscv_embedded`, `xtensa_lx106`, `xtensa_esp`,
 `natmod_host`), and three of those five are shared with several usermod
 ports too, keyed by toolchain rather than by port — see
@@ -295,9 +939,12 @@ through that path). `esp32` and `rp2` are not in that smoke test, but not
 because either is unproven -- both are exercised far more broadly, on a
 weekly schedule (or manual dispatch any time sooner), through
 `test-all-platforms.yml`'s own real matrix
-(`bin/plan_test_matrix.py`, record 0065): 83 real `esp32` identifiers and
-74 real `rp2` ones, every board/tag row `resources/build-platforms.toml`
-carries, not a spot check. **Both build through the exact same `cibuildmp`
+(`bin/plan_test_matrix.py`, record 0065): every board/tag row
+`resources/build-platforms.toml` carries for either port, not a spot check.
+(No count here on purpose. It used to say "83 real `esp32` identifiers and
+74 real `rp2` ones" — a two-tag slice that was accurate when written and is
+now off by five times, since each new MicroPython tag adds a full board set.
+The rows are the fact; their number is a snapshot.) **Both build through the exact same `cibuildmp`
 CLI/action every other ✅ row does** -- `esp32`'s own composite action
 (tracker item [0038]) was only ever needed while `build_esp32()` still
 provisioned onto the bare host; record 0028 moved it fully into
@@ -518,7 +1165,7 @@ scheduled `test-all-platforms.yml` run since.
 [^nodriver]: `resources/build-platforms.toml` has real, independently-verified rows for each of these ports (walked against a real MicroPython checkout the same way every ✅ row above was); a config can name their identifiers today. What's missing is a `build_<port>()` driver (`platforms/usermod/build_<port>.py`) to actually run one — not a scope decision, just not built yet.
 [^rp2ci]: `build_rp2()` runs no provisioning step inside the container at all — the Pico SDK and everything it needs (`lib/pico-sdk`/`lib/tinyusb`/`lib/lwip`/`lib/btstack`/`lib/cyw43-driver`) are plain git submodules of the MicroPython checkout, already vendored as real files by the release tarball this project prefers. Running the port's own `make ... submodules` target was tried first and failed live against a real tarball checkout ("fatal: not a git repository", since a release tarball is not a git checkout at all); those submodules are threaded into `sources.fetch_micropython()` instead, reached only on its clone path (a preview tag with no tarball). Live-verified: a real `examples/template` build against `v1.29.0-rp2-RPI_PICO` producing a genuine 681984-byte `firmware.uf2` with the project's own C module linked in. Record 0060.
 
-[^esp32ci]: `build_esp32()` went Docker 2026-08-28 (`esp_idf_base`, [0058]), closing the venv conflict that made every real esp32 build fail on the bare host; `idf_version`/`idf_target` are threaded from each board's own real row rather than a fixed default, and `HOME` is exported explicitly for the same reason `esp32`'s own `ports/esp32` needs a real per-user cache dir that `dockerrun.run()`'s `--user <uid>:<gid>` doesn't otherwise give it (unmapped on GitHub's own runners specifically, live-caught on real CI). `test-platforms.yml`'s own broad sweep is what actually proves this across the whole board matrix, not a spot check — Xtensa and RISC-V both, both MicroPython tags this project currently tracks.
+[^esp32ci]: `build_esp32()` went Docker 2026-08-28 (`esp_idf_base`, [0058]), closing the venv conflict that made every real esp32 build fail on the bare host; `idf_version`/`idf_target` are threaded from each board's own real row rather than a fixed default, and `HOME` is exported explicitly for the same reason `esp32`'s own `ports/esp32` needs a real per-user cache dir that `dockerrun.run()`'s `--user <uid>:<gid>` doesn't otherwise give it (unmapped on GitHub's own runners specifically, live-caught on real CI). `test-all-platforms.yml`'s own broad sweep is what actually proves this across the whole board matrix, not a spot check — Xtensa and RISC-V both, both MicroPython tags this project currently tracks.
 
 [^windowsimg]: One combined `docker/windows.Dockerfile` image (`ghcr.io/ballistics-lab/windows`) for all three arches, not split per arch like `unix`'s own five images — there is no second Windows libc a binary could be built against, so the isolation argument that drives `unix`'s split doesn't apply here. `x64`/`x86` are plain apt-installed `gcc-mingw-w64-x86-64`/`gcc-mingw-w64-i686` inside the image; `arm64` is a pinned `llvm-mingw` tarball baked into the same image (no Debian/Ubuntu package targets `aarch64-w64-mingw32` at all). None of this runs on the CI runner itself any more — `apt install gcc-mingw-w64-*` on the bare host was removed as part of Record 0042's own container migration.
 
@@ -539,7 +1186,7 @@ usermod/
   manifest.py
 ```
 
-`build-natmod` only assumes `natmod/Makefile` (or whatever `natmod_dir`
+`cibuildmp` only assumes `natmod/Makefile` (or whatever `module-dir`
 points at) accepts `ARCH=` and `MPY_DIR=` and has a `dist` target that
 drops the built `.mpy` under `build/<arch>*/`. Nothing here assumes a
 specific module name, precision scheme, or test framework — those stay in
@@ -550,13 +1197,19 @@ the consuming repo.
 before the `include`, kept outside `build/` so it does not collide with
 the `dist` output the CLI globs for (see
 `examples/template/natmod/Makefile`). `cibuildmp` runs every selected
-target sequentially in one `natmod/` tree, and `dynruntime.mk` defaults
-`BUILD ?= build` unscoped, so without this a second `ARCH=` in the same
-invocation finds the previous arch's own object files "up to date" and
-skips rebuilding — the merged `.mpy` silently stays the *first* arch's
-binary. `cibuildmp` catches this itself (a header-arch verification step
-fails loudly instead), but scoping `BUILD` avoids paying for the failed
-build at all.
+target sequentially in one `natmod/` tree, so a `BUILD` shared across
+arches makes a second `ARCH=` in the same invocation find the previous
+arch's own object files "up to date" and skip rebuilding — the merged
+`.mpy` silently stays the *first* arch's binary. `cibuildmp` catches that
+itself (a header-arch verification step fails loudly instead), but scoping
+`BUILD` avoids paying for the failed build at all.
+
+**How much this matters depends on the tag**, which this paragraph did not
+used to say: `dynruntime.mk` defaulted to an unscoped `BUILD ?= build` up
+to v1.28.0, and to `BUILD ?= build-$(ARCH)` from v1.29.0 — arch-scoped
+already. On v1.29.0 and later the collision cannot happen by default, so
+scoping `BUILD` yourself is only needed to put the objects somewhere other
+than beside the `dist` output, or to support an older `MPY_DIR`.
 
 If the module also builds `rv32imc` with more than one `arch-flags` value
 in the same invocation, `BUILD` needs `$(ARCH_FLAGS)` folded in too —
@@ -581,16 +1234,14 @@ toolchain-group images rather than a host-side toolchain resolver (that
 resolver, and its own `--toolchain` flag, are deleted) — verified on real CI
 in all three consuming repos, not just `--dry-run`. Usermod's own build
 drivers are wired into the CLI too (see [Target support](#target-support)
-above), covering every port with a real driver, not just three. All three
-consuming repos have repinned and are fully migrated off every
-`build-usermod-*`/`fetch-micropython` composite action onto the unified
-CLI/action, `cibuildmp@v0.4.1`, CI green on each repo's current `main` (`a7p`
-and `micropython-wasm3` each keep their own genuine
-cross-compile-with-no-native-host cell, `unix-mipsel`, on the old composite
-action deliberately). See the tracker's own [0038] row for current status
-rather than trusting this paragraph, which this project's own `CLAUDE.md`
-warns goes stale exactly this way. The container/image model itself —
-which build pulls what, and why — is
+above), covering every port with a real driver, not just three.
+
+How far each consuming repo has migrated onto the unified CLI/action is
+**not stated here** — that is a claim about another repository's CI, which
+nothing in this repo can verify. The tracker's own [0038] row carries it,
+dated; [0077] has why this document no longer tries.
+
+The container/image model itself — which build pulls what, and why — is
 [`docs/reference/vendored-images.md`](docs/reference/vendored-images.md),
 kept current the same way [`docs/reference/design.md`](docs/reference/design.md)
 is, not by memory.
@@ -601,14 +1252,28 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the dev loop, and
 [`CLAUDE.md`](CLAUDE.md) before touching anything with a `cibuildwheel`
 counterpart — selectors, identifiers, options, container invocation.
 
-## Composite actions
+## Legacy composite actions (not a way to use `cibuildmp`)
 
-The pre-CLI building blocks — one GitHub Action per build step
-(`fetch-micropython`, `build-natmod`, `build-usermod-unix`/`-windows`/
-`-webassembly`/`-rp2040`/`-armv7m`/`-esp32`, …). Still fully supported for
-CI, but no longer where new work starts — new usermod ports and arches
-land in the CLI's own `usermod/build_<port>.py` first. Full input/output
-reference and a usage example: [`docs/ACTIONS.md`](docs/ACTIONS.md).
+`.github/actions/{fetch-micropython,clone-micropython,build-natmod,
+build-usermod-unix/-windows/-webassembly/-rp2040/-armv7m/-esp32}` predate
+the CLI and don't invoke `cibuildmp` at all — each is its own bare-host
+toolchain-install-then-`make`/`idf.py` implementation, one GitHub Action
+per build step. They are **not** a second supported way to use this
+project; `action.yml` above (wrapping the real CLI) is the only current
+path for a new integration.
+
+This layer is a deliberate fallback, not something being absorbed into the
+CLI over time — folding `build-natmod` into a thin `cibuildmp --build`
+wrapper was proposed and explicitly rejected (tracker [0038], see
+"Rejected"). It stays because consuming repos still call it — a
+`unix-mipsel` cross-compile has no native runner, and [0043]'s vendored
+`MICROPY_STANDALONE=1`/`deplibs` static path was kept for exactly that
+cell. **Which repos, and how much of each, is in the tracker's own [0038]
+row rather than here**, dated: this paragraph named the wrong repo for a
+week and was copied to four other files before anyone checked ([0076],
+[0077]). Read [`docs/ACTIONS.md`](docs/ACTIONS.md) if you are maintaining
+or migrating off a holdout like that — not as a starting point for a new
+module.
 
 ## Versioning
 
@@ -616,10 +1281,14 @@ Pin consumers to a tag, not `@main` and not a commit SHA — bumping the tag
 a consumer references is a deliberate, visible edit in that repo, same as
 bumping any other CI dependency.
 
-The `cibuildmp` package and the actions share one version. `v0.4.0` is the
-current tag, and the one every example in this README targets — it's a
-breaking release (config surface rewritten, `unix` identifiers renamed;
-see `CHANGELOG.md`'s own `[0.4.0]` entry). `v0.3.0` was the first tag
+The `cibuildmp` package and the actions share one version. **Which tag is
+current is not restated here** — [`CHANGELOG.md`](CHANGELOG.md)'s own
+newest released heading is that, and `tests/test_docs.py` checks every
+`@vX.Y.Z` example in this file against it. (This paragraph named `v0.4.0`
+as current, and as "the one every example in this README targets", for two
+releases after that stopped being true.) `v0.4.0` is worth knowing as
+history: it is the breaking one — config surface rewritten, `unix`
+identifiers renamed, see `CHANGELOG.md`'s own `[0.4.0]` entry. `v0.3.0` was the first tag
 where the CLI actually built a module at all, not just planned it, and
 the line continues `micropython-native-ci`'s own version numbering rather
 than restarting it, since this repo absorbed that one (its consumers have

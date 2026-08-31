@@ -177,36 +177,30 @@ def test_cli_build_can_name_exactly_one_identifier(tmp_path, capsys):
 # ── the flattened config tree: retired tables ────────────────────────────
 
 
-def test_legacy_usermod_ports_key_is_a_clear_error(tmp_path, capsys):
+def test_usermod_table_is_just_an_unknown_table_now(tmp_path, capsys):
+    # [usermod] (record 0051's ninth addendum) is gone (record 0074), with
+    # no dedicated migration message: no real config in this project's own
+    # examples ever actually used it, unlike the six real tables below --
+    # a stray [usermod] falls through to the same plain "unknown table"
+    # error as any other unrecognised name.
     write(tmp_path, '[usermod]\nports = ["unix"]\n')
 
     assert main([str(tmp_path)]) == 2
-    assert "[usermod] ports = [...] no longer exists" in capsys.readouterr().err
+    assert "unknown table(s) at the top level: [usermod]" in capsys.readouterr().err
 
 
-def test_usermod_family_table_still_works_as_shared_defaults(tmp_path, capsys):
-    make_module_dir(tmp_path)
-    write(
-        tmp_path,
-        f'[usermod]\nuser-c-modules = "."\nbuild = "{UNIX_V129_X86_64}"\n',
-    )
-
-    assert main([str(tmp_path), "--print-build-identifiers"]) == 0
-    assert capsys.readouterr().out.split() == [UNIX_V129_X86_64]
-
-
-def test_retired_natmod_table_is_a_clear_error(tmp_path, capsys):
+def test_retired_natmod_table_is_just_an_unknown_table_now(tmp_path, capsys):
     write(tmp_path, "[natmod]\n")
 
     assert main([str(tmp_path)]) == 2
-    assert "[natmod] no longer exists" in capsys.readouterr().err
+    assert "unknown table(s) at the top level: [natmod]" in capsys.readouterr().err
 
 
-def test_retired_unix_table_is_a_clear_error(tmp_path, capsys):
+def test_retired_unix_table_is_just_an_unknown_table_now(tmp_path, capsys):
     write(tmp_path, "[unix]\n")
 
     assert main([str(tmp_path)]) == 2
-    assert "[unix] no longer exists" in capsys.readouterr().err
+    assert "unknown table(s) at the top level: [unix]" in capsys.readouterr().err
 
 
 def test_unknown_top_level_table_is_an_error(tmp_path, capsys):
@@ -214,6 +208,84 @@ def test_unknown_top_level_table_is_an_error(tmp_path, capsys):
 
     assert main([str(tmp_path)]) == 2
     assert "unknown table(s) at the top level: [stm32]" in capsys.readouterr().err
+
+
+# ── the same treatment for scalar keys (record 0075) ─────────────────────
+
+
+def test_unknown_top_level_scalar_key_is_an_error(tmp_path, capsys):
+    # The gap record 0074 found while checking a claim in design.md:
+    # neither family's own load() validated the top-level scalar keyset at
+    # all, so a key no family reads was silently absent -- the config
+    # looked accepted and the option simply never applied. `micropython =`
+    # is the real shape this bites (record 0052 retired that key; a config
+    # written against the old schema keeps it and gets no complaint).
+    write(tmp_path, 'micropython = "v1.29.0"\n')
+
+    assert main([str(tmp_path)]) == 2
+    assert "unknown key `micropython`" in capsys.readouterr().err
+
+
+def test_unknown_top_level_scalar_key_suggests_a_close_match(tmp_path, capsys):
+    write(tmp_path, 'buidl = "mpy*-x64"\n')
+
+    assert main([str(tmp_path)]) == 2
+    err = capsys.readouterr().err
+    assert "unknown key `buidl`" in err
+    assert "Perhaps you meant `build`?" in err
+
+
+def test_every_family_own_top_level_keys_are_accepted(tmp_path, capsys):
+    # The union across FAMILIES, not one family's own set: natmod-only
+    # (`module-dir`, `make-target`, `arch-flags`, `pre-build-command`,
+    # `micropython-submodules`) and usermod-only (`user-c-modules`,
+    # `manifest`, `extra-cmake-args`) keys are both valid at the bare top
+    # level, since the global layer is every platform's own default.
+    write(
+        tmp_path,
+        """
+        name = "mod"
+        version = "1.0"
+        output-dir = "mpyhouse"
+        build = ""
+        skip = ""
+        extra-make-args = []
+        micropython-submodules = []
+        module-dir = "natmod"
+        make-target = "all"
+        pre-build-command = ""
+        arch-flags = []
+        user-c-modules = "."
+        manifest = ""
+        extra-cmake-args = []
+        """,
+    )
+
+    assert main([str(tmp_path), "--print-build-identifiers"]) == 0
+    assert capsys.readouterr().err == ""
+
+
+def test_unknown_array_of_tables_is_reported_as_a_table(tmp_path, capsys):
+    # `[[name]]` parses to a list of dicts, not a dict -- a `dict`-only
+    # test would hand it to the scalar keyset check and report "unknown
+    # key `stm32`" for something that is plainly a table.
+    write(tmp_path, '[[stm32]]\nboard = "PYBV11"\n')
+
+    assert main([str(tmp_path)]) == 2
+    assert "unknown table(s) at the top level: [stm32]" in capsys.readouterr().err
+
+
+def test_publish_and_override_tables_are_not_scalar_keys(tmp_path, capsys):
+    # The scalar check skips table-valued keys outright -- neither is in
+    # any family's own OPTION_KEYS, and _validate_top_level_tables() is
+    # what judges those.
+    write(
+        tmp_path,
+        '[publish]\nextra-files = []\n\n[override."*"]\nmodule-dir = "natmod"\n',
+    )
+
+    assert main([str(tmp_path), "--print-build-identifiers"]) == 0
+    assert capsys.readouterr().err == ""
 
 
 def test_platform_and_only_flags_no_longer_exist(tmp_path, capsys):

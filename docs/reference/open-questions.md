@@ -8,21 +8,26 @@ the same way [docs/0000-TRACKER.md](../0000-TRACKER.md) folds resolved
 
 <!-- migrated verbatim from docs/BACKLOG.md lines 3568-3648 -->
 
-- **MSYS2 and ESP-IDF orchestration for usermod (D18, D19).** Neither fits
-  the existing `host`/`download`/`docker` toolchain-strategy shape as-is —
-  MSYS2 is an environment a caller sets up around the job, not a toolchain
-  `cibuildmp` fetches into a cache directory, and ESP-IDF's own install is
-  heavy enough that it may need its own strategy rather than reusing
-  `download` unmodified. Not designed yet; flagged so M6+ doesn't rediscover
-  the gap from scratch. (Largely resolved in practice — see [0018] and
-  [0019] — kept here as the original framing.)
+- ~~**MSYS2 and ESP-IDF orchestration for usermod (D18, D19).**~~ **Closed,
+  and the question's own premise is gone with it.** It asked how MSYS2 and
+  ESP-IDF fit "the existing `host`/`download`/`docker` toolchain-strategy
+  shape" — there is no such shape any more: [0050] deleted the host
+  toolchain resolver and the `--toolchain` flag outright, and every build of
+  either family now runs in a pulled image ([0030]/[0033]/[0058]). Windows
+  cross-builds inside the `windows` image with apt `mingw-w64`, no MSYS2 at
+  build time at all; `esp32` installs ESP-IDF into `esp_idf_base` at build
+  time, from each row's own `idf_version` ([0028]).
 - **Windows/macOS hosts.** The download strategy makes a macOS host plausible
   for the arm/riscv/xtensa arches; `x86`'s multilib and the whole
   `docker` strategy are Linux-only. Decide whether phase 1 claims anything
-  beyond Linux, or explicitly does not. A real `windows-latest` CI run
-  (`usermod-dev.yml`, added for M9's own D18 work) already surfaced two
-  concrete data points either way this gets decided, both fixed on sight
-  rather than left for whenever that decision happens:
+  beyond Linux, or explicitly does not. **Both halves of the framing have
+  moved since**: there is no download strategy left to make a macOS host
+  plausible ([0050] — every build is a pulled image now), so the real
+  question is narrower and only about reaching a Docker daemon. A real
+  `windows-latest` CI run (in `usermod-dev.yml`, a workflow that has since
+  been deleted) surfaced two concrete data points either way this gets
+  decided, both fixed on sight rather than left for whenever that decision
+  happens:
   - `tests/test_build.py`'s `test_pre_build_command_runs_in_module_root`
     used `touch marker` as its example `pre-build-command` -- `touch` has
     no `cmd.exe` equivalent, so it failed there, not because
@@ -48,17 +53,26 @@ the same way [docs/0000-TRACKER.md](../0000-TRACKER.md) folds resolved
   cross-compile from Linux — see **D18**'s own addenda), so `cibuildmp`
   itself running natively on Windows stopped being a real question for
   usermod specifically. `x86`'s multilib and `docker` (D3) are still
-  Linux-only, unchanged. The repo's own root `Dockerfile` + README's own
-  "Target support" tables are the answer for an actual Windows end user
-  today: run `cibuildmp` inside Docker under WSL2, not natively on
-  Windows Python — not verified with a real `docker build`/`docker run`
-  in this project's own dev sandbox (Docker does not run there at all,
-  the same finding **D19**'s own addendum already recorded), but every
-  ingredient in it was checked directly: each `apt install` package
-  live-installed and used for a real build earlier in this same session,
-  and `uv tool install .` → `cibuildmp --dry-run` run for real outside
-  the container. (The root `Dockerfile` itself was later deleted — see
-  [0033].)
+  Linux-only, unchanged.
+
+  **There is no stated answer for a Windows end user right now.** This
+  paragraph used to give one — run `cibuildmp` inside Docker under WSL2,
+  using the repo's own root `Dockerfile` — and then negated it in its own
+  final sentence, because [0033] deleted that `Dockerfile` once usermod
+  needed to launch sibling containers (Docker-in-Docker was ruled out).
+  What is true today: `cibuildmp` is a Python package that needs a
+  reachable Docker daemon, so WSL2 with Docker Desktop is the shape that
+  should work, and nobody has run it that way and reported back. Until
+  someone does, this is the open question, not a recommendation.
+- **Is `qemu`'s host-built `mpy-cross` a real difference or an untested
+  assumption?** Every other port builds `mpy-cross` in its own image
+  (`container_mpy_cross()`), precisely so the tool matches the libc the
+  build uses. `qemu` is the exception (`_HOST_MPY_CROSS_PORTS`,
+  `usermod/orchestrate.py`) and is why `action.yml` still installs
+  `build-essential`. Whether that is the exact mismatch
+  `container_mpy_cross()` exists to prevent — just not yet hit for `qemu` —
+  or a genuine difference in what that port needs, is **not established**.
+  This was written down only in a source comment until now.
 - **Old tags vs. a modern host `gcc`.** Found while verifying **D13** live:
   `v1.21.0` fails to build `mpy-cross` under a recent `gcc`
   (`-Werror=unterminated-string-initialization` on upstream's own
@@ -70,7 +84,11 @@ the same way [docs/0000-TRACKER.md](../0000-TRACKER.md) folds resolved
   works around per-project.
 - **Toolchain pinning vs. reproducibility.** Pinned tarball versions make
   builds reproducible but drift from what a contributor has on `PATH`. The
-  `host` strategy running first means a laptop and CI can silently use
+  **premise is gone** — [0050] deleted the resolver, and every build now runs
+  in a pulled, digest-pinned image, so a laptop and CI get the same compiler by
+  construction. What survives is narrower and belongs to [0046]: whether those
+  pins are refreshed often enough. The old wording follows. The
+  `host` strategy running first meant a laptop and CI could silently use
   different compilers — acceptable, but the summary output must always say
   which toolchain was actually used.
 - **Pin staleness** moved out of this file and into its own record, [0046] --
@@ -132,10 +150,14 @@ the same way [docs/0000-TRACKER.md](../0000-TRACKER.md) folds resolved
 
 [0018]: ../records/0018-windows-provisioning-fourth-story.md
 [0019]: ../records/0019-esp-idf-provisioning-heaviest.md
-[0043]: ../records/0043-unix-adopts-cibuildwheel-native-image-model.md
+[0028]: ../records/0028-container-per-port-migration-plan.md
+[0030]: ../records/0030-container-approach-natmod-and-docker-vs-qemu.md
 [0031]: ../records/0031-unix-musllinux-libc-axis.md
 [0033]: ../records/0033-cibuildmp-never-builds-docker-image-itself.md
 [0042]: ../records/0042-windows-docker-wiring-and-resolver-removal.md
+[0043]: ../records/0043-unix-adopts-cibuildwheel-native-image-model.md
 [0044]: ../records/0044-unix-native-images-landed.md
 [0045]: ../records/0045-only-is-a-filter-not-a-forced-identifier.md
 [0046]: ../records/0046-pin-staleness-checker.md
+[0050]: ../records/0050-natmod-is-docker-only.md
+[0058]: ../records/0058-image-groups-are-toolchains-not-ports.md

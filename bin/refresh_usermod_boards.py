@@ -8,13 +8,13 @@ list and crossing it against every MicroPython tag, this shallow-clones
 each tag given on the command line and reads its own real
 `ports/<port>/boards/*/board.json` files -- reusing
 `cibuildmp.platforms.usermod.boards.Database`, the same vendored `mpbuild`
-board-database reader `usermod/build.py` already trusts, rather than
+board-database reader `usermod/build_<port>.py` already trusts, rather than
 parsing the JSON a second time by hand.
 
     bin/refresh_usermod_boards.py esp32 v1.20.0 v1.21.0 v1.24.0 v1.29.0 > /tmp/esp32.toml
     bin/refresh_usermod_boards.py stm32 v1.20.0 v1.28.0 v1.29.0 > /tmp/stm32.toml
 
-Generalized from an esp32-only version (`bin/refresh_esp32_boards.py`) once
+Generalized from an esp32-only predecessor (since deleted) once
 a second board.json-backed port (rp2) needed the exact same treatment --
 `Database`'s own `port_filter` was already port-agnostic, only this
 script's own PORT constant was not. `port` is a plain positional

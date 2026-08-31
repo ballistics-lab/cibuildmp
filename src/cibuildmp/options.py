@@ -127,11 +127,22 @@ def suggest(name: str, known: frozenset[str]) -> str | None:
 
 
 def check_known_keys(
-    table: Mapping[str, Any], known: frozenset[str], *, where: str
+    table: Mapping[str, Any],
+    known: frozenset[str],
+    *,
+    where: str,
+    error: type[Exception] = ConfigError,
 ) -> None:
     """Reject any key in `table` that is not in `known` anywhere -- the
     one placement-independent error the cascade still needs: a key no
     platform's schema recognises at all is a typo, not a location choice.
+
+    `error` follows the same convention `matching_overrides()` and
+    `check_selector_reachable()` below already use: this module's own
+    `ConfigError` is not the class any caller catches, since each family
+    owns its own hierarchy (`platforms/__init__.py`'s own Protocol
+    docstring has the reasoning). `cli.py`'s own top-level keyset check
+    passes the class it already catches around the sibling table check.
     """
     for key in table:
         if key in known:
@@ -140,7 +151,7 @@ def check_known_keys(
         hint = suggest(key, known)
         if hint:
             msg += f" Perhaps you meant `{hint}`?"
-        raise ConfigError(msg)
+        raise error(msg)
 
 
 def matching_overrides(
@@ -219,38 +230,35 @@ class Options:
     """One config's worth of cascade-resolvable option tables.
 
     `global_table` is the top-level config dict, meaningful to *every*
-    family (natmod included). `family_table` sits above it: one dict
-    shared by every platform in *one* family and no other (record 0051's
-    ninth addendum) -- usermod's own `[usermod]` table
-    (`user-c-modules`/`manifest`/`extra-make-args`, defaults for all five
-    ports at once), empty for natmod, whose one platform already *is* its
-    only family, so it has nothing a separate family tier would add.
-    `env` is the environment mapping (`os.environ` by default, injectable
-    so tests never touch the real process environment). Neither
-    CLI-supplied values nor `[override]` matches live here -- both are
-    the caller's own, layered in via `get()`'s own `extra_layers`, so
-    this class stays config-file-and-environment-only, the same split
-    upstream keeps between its own `Options` (file + env) and `argparse`
-    (CLI).
+    family (natmod included). `env` is the environment mapping
+    (`os.environ` by default, injectable so tests never touch the real
+    process environment). Neither CLI-supplied values nor `[override]`
+    matches live here -- both are the caller's own, layered in via
+    `get()`'s own `extra_layers`, so this class stays
+    config-file-and-environment-only, the same split upstream keeps
+    between its own `Options` (file + env) and `argparse` (CLI).
 
-    **There is no `platform_tables` tier any more** (record 0052's own
-    live-caught correction, retracting the "per-platform build/skip"
-    addendum this docstring used to describe): a per-platform TOML table
-    (`[unix] key = "..."`) is always exactly a sufficiently-scoped global
-    value restated, since every platform's own real identifier already
-    carries a marker a `build`/`skip` glob or an `[override]` entry can
-    address directly (`manylinux`/`musllinux` for unix, `win32` for
-    windows, the literal `mpy` prefix for natmod, ...) -- a second way to
-    say the same thing this project keeps refusing to build, the same
-    argument that already removed natmod's own `archs` config key one
-    axis over. What replaces it: option values resolve from
-    `default -> global -> family -> env -> extra_layers` only, and
-    per-target customisation goes through `[override]`'s own glob match
-    (`extra_layers`), never a per-platform table.
+    **There is no `platform_tables` tier** (record 0052's own live-caught
+    correction, retracting the "per-platform build/skip" addendum this
+    docstring used to describe) **and no family tier either** (record
+    0074 removed usermod's own `[usermod]` table, the one thing that ever
+    populated one -- record 0051's ninth addendum originally kept it "at
+    the user's own explicit insistence", but no real config in this
+    project ever used it): a per-platform TOML table (`[unix] key = "..."`)
+    is always exactly a sufficiently-scoped global value restated, since
+    every platform's own real identifier already carries a marker a
+    `build`/`skip` glob or an `[override]` entry can address directly
+    (`manylinux`/`musllinux` for unix, `win32` for windows, the literal
+    `mpy` prefix for natmod, ...) -- a second way to say the same thing
+    this project keeps refusing to build, the same argument that already
+    removed natmod's own `archs` config key one axis over. What replaces
+    it: option values resolve from `default -> global -> env ->
+    extra_layers` only, and per-target customisation goes through
+    `[override]`'s own glob match (`extra_layers`), never a per-platform
+    or per-family table.
     """
 
     global_table: Mapping[str, Any]
-    family_table: Mapping[str, Any] = field(default_factory=dict)
     env: Mapping[str, str] = field(default_factory=dict)
 
     def get(
@@ -262,20 +270,11 @@ class Options:
         env_plat: bool = True,
         extra_layers: Sequence[tuple[Any | None, str]] = (),
     ) -> Any:
-        """`default -> global -> family -> env -> env(platform) ->
-        extra_layers`, most-specific-wins. `extra_layers` is where a
-        caller threads in CLI-supplied values or matching `[override]`
-        entries (Phase G), each with its own inherit rule -- this method
-        does not know about either.
-
-        `family_table` sits strictly between `global` and `env`: more
-        specific than "every platform's own default" (natmod never sees
-        it -- its own `Options` instance is always constructed with an
-        empty one), less specific than the environment. A caller with no
-        real family tier (natmod, or a direct test construction) passes
-        nothing and gets exactly today's three-layer behaviour -- an
-        empty `Mapping.get()` always contributes `None`, which
-        `resolve_cascade()` skips.
+        """`default -> global -> env -> env(platform) -> extra_layers`,
+        most-specific-wins. `extra_layers` is where a caller threads in
+        CLI-supplied values or matching `[override]` entries (Phase G),
+        each with its own inherit rule -- this method does not know about
+        either.
 
         `platform` no longer selects a TOML table (there is none left to
         select) -- it is kept purely to build the env var's own
@@ -291,7 +290,6 @@ class Options:
         layers: list[tuple[Any | None, str]] = [
             (default, InheritRule.NONE),
             (self.global_table.get(name), InheritRule.NONE),
-            (self.family_table.get(name), InheritRule.NONE),
             (self.env.get(env_key), InheritRule.NONE),
         ]
         if platform is not None and env_plat:

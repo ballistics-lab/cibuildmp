@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = REPO_ROOT / "bin" / "plan_test_matrix.py"
@@ -76,6 +79,13 @@ def test_identifiers_output_matches_print_build_identifiers_order():
     plan = json.loads(result.stdout)
 
     env = dict(os.environ)
+    # The console script, not `python -m`: this asserts the *CLI's* own
+    # ordering. `subprocess.run` raises FileNotFoundError rather than
+    # returning non-zero when it is absent, so a returncode-based skip
+    # guard never ran -- it was dead code that read like a safety net.
+    # Skip explicitly instead, and say how to get it.
+    if shutil.which("cibuildmp") is None:
+        pytest.skip("cibuildmp console script not on PATH -- run via `uv run pytest`")
     ref = subprocess.run(
         [
             "cibuildmp",
@@ -90,15 +100,6 @@ def test_identifiers_output_matches_print_build_identifiers_order():
         env=env,
         check=False,
     )
-    if ref.returncode != 0:
-        # cibuildmp itself isn't necessarily on PATH in every environment
-        # this test runs in -- the ordering guarantee this test is really
-        # about is covered by the resolve_entries()/cli._resolve_all()
-        # call plan_test_matrix.py itself makes, so skip rather than fail
-        # on an unrelated PATH issue.
-        import pytest
-
-        pytest.skip("cibuildmp CLI not on PATH")
     assert plan["identifiers"] == json.loads(ref.stdout)
 
 

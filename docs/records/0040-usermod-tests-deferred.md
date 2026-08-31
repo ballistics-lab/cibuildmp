@@ -1,4 +1,4 @@
-# 0040. Later — tests
+# 0040. usermod's own test-runner axis, deferred
 
 - Status: Not scheduled ([0006] holds for natmod)
 - Related: [0006], [0021]

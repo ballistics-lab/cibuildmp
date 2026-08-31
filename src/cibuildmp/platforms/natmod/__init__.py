@@ -35,8 +35,19 @@ from ...sources import (
 )
 from ...stepsummary import write_step_summary
 from .build import BuildError, BuildResult, build_mpy_cross, build_target
-from .options import BuildOptions, ConfigError, Options
+from .options import (
+    NATMOD_TOP_LEVEL_KEYS,
+    BuildOptions,
+    ConfigError,
+    Options,
+)
 from .targets import Target, UnknownArchError, UnknownTagError
+
+# This family's own half of the `PlatformModule` contract's `OPTION_KEYS`
+# -- every scalar key it reads from the bare top level. `cli.py`'s own
+# coordinator unions this with every other family's, so a key no family
+# recognises is a loud error instead of silently absent (record 0075).
+OPTION_KEYS: frozenset[str] = NATMOD_TOP_LEVEL_KEYS
 
 
 def _plan_line(index: int, total: int, options: BuildOptions) -> str:
@@ -126,7 +137,8 @@ def build_all(
     # not where do we get one" -- apt probe, pinned tarball, host
     # multilib -- and to reconcile a prefix the tarball ships with the
     # one dynruntime.mk hardcodes. Every one of those questions is
-    # answered by `docker/natmod.Dockerfile` now: the image has all ten
+    # answered by the toolchain-group images now ([0058]): between them
+    # they carry all ten
     # arches' compilers under exactly the names dynruntime.mk expects,
     # so there is nothing to probe, nothing to download and no `CROSS=`
     # override to add.
@@ -277,16 +289,6 @@ def build_all(
         )
         return 1
     return 0
-
-
-def validate_family_table(
-    raw: dict[str, Any], *, error: type[Exception] = ConfigError
-) -> None:
-    """No-op -- part of the `PlatformModule` contract (`platforms/__init__.py`'s
-    own docstring has the full reasoning), satisfied trivially here:
-    natmod's one platform already *is* its only family, so there is no
-    separate family-level table for a stale/misplaced key to hide in."""
-    return
 
 
 # Every exception Options.load()/.targets() can raise -- what cli.py's own

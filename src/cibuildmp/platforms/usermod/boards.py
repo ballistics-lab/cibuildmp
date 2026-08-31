@@ -1,5 +1,5 @@
 """The board/port/variant database MicroPython's own `board.json` files
-describe -- vendored from `mpbuild`, not depended on (docs/BACKLOG.md D7).
+describe -- vendored from `mpbuild`, not depended on (docs/0000-TRACKER.md D7).
 
 `mpbuild` (https://github.com/mattytrentini/mpbuild, PyPI `mpbuild`) has a
 board database worth reusing, but the package itself drags in `rich` +
@@ -115,7 +115,7 @@ from glob import glob
 from pathlib import Path
 
 # Ports with no board.json at all: they select a `variant:` (from
-# `variants/*/`) instead of a `board:`. See docs/BACKLOG.md, "Two different
+# `variants/*/`) instead of a `board:`. See docs/0000-TRACKER.md, "Two different
 # selector axes". `zephyr` is NOT one of these -- it has neither a board.json
 # nor a variants/ directory in this sense (D22).
 _VARIANT_ONLY_PORTS = ("unix", "webassembly", "windows")

@@ -8,16 +8,22 @@ cascade tier: every port is always in scope, and `all_usermod_targets()`
 (`targets.py`) already enumerates every real `(port, tag, arch/board)`
 row `resources/build-platforms.toml` has -- there is nothing left for a
 per-port table to select or configure. `cli.py`'s own
-`_reject_platform_tables()` turns a config still writing one of these six
+`cli._validate_top_level_tables()` turns a config still writing one of these six
 names into a loud, specific error before this module ever sees it.
 
-`[usermod]` is not one of the six -- it survives, unaffected by any of
-this, as shared defaults for every usermod port at once (`user-c-modules`/
-`manifest`/`extra-make-args`/`build`/`skip`), sibling to the bare top
-level rather than a selector of any kind (record 0051's ninth addendum,
-kept at the user's own explicit insistence through every later round of
-retraction: it is a value-holding table, the same category as "global
-keys", not a selection mechanism).
+`[usermod]` (a seventh, different kind of table -- not a selector, a
+value-holding tier of shared defaults for every port at once) is gone too
+now (record 0074). Unlike the six tables above, it was never a real,
+load-bearing config surface any real consumer of this project actually
+wrote -- it survived every earlier round of retraction "at the user's own
+explicit insistence" (record 0051's ninth addendum) on principle alone,
+with no real config ever using it: every one either sets these keys at
+the bare top level or narrows one port at a time through
+`[override."<glob>"]`. Removed outright rather than added to
+`cli.py`'s own retired-table list with its own migration message --
+there is no real config to migrate, so a stray `[usermod]` table now
+falls through to the same plain "unknown table" error any other
+unrecognised top-level table gets.
 
 `[override]` is shared with natmod (Phase G, record 0051's third
 addendum) -- `natmod/options.py`'s own `load_overrides()` parses and
@@ -31,9 +37,8 @@ Deliberately narrower than `natmod/options.py`'s own `Options` still: no
 `variant` (a real field on three of five ports' `*BuildOptions`, still
 config-surface-less) yet.
 
-`user-c-modules`/`manifest`/`extra-make-args` are genuinely global-with-
-`[usermod]`-level-override: resolved per target through the same
-`cibuildmp.options.Options` cascade `natmod/options.py` uses, not
+`user-c-modules`/`manifest`/`extra-make-args` resolve per target through
+the same `cibuildmp.options.Options` cascade `natmod/options.py` uses, not
 eagerly-resolved scalar fields.
 
 No `package.json` here at all: usermod output is a full port binary meant
@@ -65,6 +70,7 @@ from ...options import (
 from ...selector import parse_selector, select
 from ..natmod.options import (
     DEFAULT_OUTPUT_DIR,
+    GENERIC_KEYS,
     check_keys,
     load_overrides,
     read_config,
@@ -86,8 +92,8 @@ from .targets import KNOWN_PORTS, UsermodTarget, all_usermod_targets
 # usermod) that the narrower default's own bind-mount could not reach.
 DEFAULT_USER_C_MODULES = "."
 
-# The three per-target option keys usermod's own `[override]` entries and
-# `[usermod]` family table both read. `user-c-modules`, not `module-dir`
+# The three per-target option keys usermod's own `[override]` entries
+# read. `user-c-modules`, not `module-dir`
 # -- natmod's own `module-dir` names the directory `make -C` runs in
 # directly (it must contain that project's own Makefile); this key's
 # value is instead forwarded as `USER_C_MODULES=` into the *MicroPython
@@ -117,83 +123,21 @@ USERMOD_ONLY_GENERIC_KEYS: frozenset[str] = frozenset(
     {"user-c-modules", "manifest", "extra-cmake-args"}
 )
 
-# `[usermod]` (the family table) carries `user-c-modules`/`manifest`/
-# `extra-make-args`/`build`/`skip` as shared defaults for every port at
-# once -- that tier was never in question (record 0051's ninth addendum,
-# kept at the user's own explicit insistence through every later round of
-# retraction). There is no *per-port* table left to carry a narrower copy
-# of the same settability at all any more (`[unix]`, `[esp32]`, ... do not
-# exist as config tables) -- every port's own real identifier already
-# carries a marker a `build`/`skip` glob or an `[override."<glob>"]` entry
-# can address directly, so a per-port table was always exactly that,
-# restated.
-USERMOD_PLATFORM_KEYS: frozenset[str] = USERMOD_PORT_BASE | {"build", "skip"}
+# Every scalar key this family reads from the bare top level, natmod's own
+# `NATMOD_TOP_LEVEL_KEYS` counterpart (record 0075). `GENERIC_KEYS` is
+# natmod's module but genuinely shared, not natmod-owned -- `build`,
+# `skip`, `output-dir`, `name` and `version` are all read by
+# `UsermodOptions.load()` below under exactly those names.
+USERMOD_TOP_LEVEL_KEYS: frozenset[str] = GENERIC_KEYS | USERMOD_ONLY_GENERIC_KEYS
 
 __all__ = [
     "UsermodBuildOptions",
     "UsermodOptions",
-    "check_usermod_family_table",
 ]
 
 
 class UsermodConfigError(Exception):
     pass
-
-
-def check_usermod_family_table(
-    raw: Mapping[str, Any], *, error: type[Exception] = UsermodConfigError
-) -> dict[str, Any]:
-    """Parse and validate `[usermod]` -- shared defaults for every usermod
-    port at once (record 0051's ninth addendum), sibling to the bare top
-    level. Not a container over `[unix]`/`[esp32]`/etc. (those tables do
-    not exist at all any more) and not a selector of any kind: every port
-    is always in scope, glob-matched by `build`/`skip` against its own
-    real identifiers -- `all_usermod_targets()` (`targets.py`) already
-    enumerates every one of them.
-
-    Two failure shapes get distinct treatment. The pre-retraction shape --
-    `ports = [...]`, or a nested `[usermod.<port>]` sub-table TOML parses
-    as a dict value here -- means this config predates the current model
-    entirely, and gets a dedicated, specific message naming the real
-    replacement rather than a bare "unknown key". Anything else unknown to
-    `USERMOD_PLATFORM_KEYS` (a typo) falls through to the ordinary
-    `check_keys()` error.
-
-    Exported (not `_`-private) because `cli.py`'s own
-    `_reject_platform_tables()` calls this unconditionally, on every
-    invocation -- unlike the retired table-presence model, every usermod
-    port is always considered now, so there is no "usermod never even
-    loads far enough to see this" case left to guard against the way
-    there used to be (record 0048's own bug class); this early call is
-    kept anyway so a config mistake here is reported before any of the
-    heavier per-family resolution work runs. `UsermodOptions.load()` below
-    calls this again for direct callers that bypass `cli.py` entirely
-    (most tests) -- cheap, no I/O, not the "parsing the file twice"
-    `read_config()`'s own `preread` already avoids.
-    """
-    table = dict(raw.get("usermod") or {})
-    if "ports" in table:
-        raise error(
-            "[usermod] ports = [...] no longer exists. Every usermod port "
-            "is always in scope now -- there is no [unix]/[esp32]/etc. "
-            "table to select one, and no port list to write here either. "
-            "[usermod] itself only holds shared defaults (build/skip, "
-            "user-c-modules/manifest/extra-make-args/extra-cmake-args) for "
-            "every port at once; narrow which targets actually build with a build/skip "
-            'glob (e.g. build = "*manylinux*") or an '
-            '[override."<glob>"] entry.'
-        )
-    nested = sorted(k for k, v in table.items() if isinstance(v, dict))
-    if nested:
-        raise error(
-            f"[usermod.{nested[0]}] no longer exists -- there is no more "
-            f"nesting under [usermod], and [{nested[0]}] does not exist as "
-            "its own top-level table either. Move any option value to the "
-            "top level, or into [usermod] for a usermod-wide default, and "
-            "narrow with a build/skip glob or [override] instead."
-        )
-    check_keys(table, USERMOD_PLATFORM_KEYS, where="[usermod]", error=error)
-    return table
 
 
 def _as_list(value: Any, key: str) -> list[str]:
@@ -419,25 +363,18 @@ class UsermodOptions:
                 return env_value
             return raw.get(key, default)
 
-        family_table = check_usermod_family_table(raw, error=UsermodConfigError)
-
-        cascade = OptionCascade(global_table=raw, family_table=family_table, env={})
+        cascade = OptionCascade(global_table=raw, env={})
         # Env-aware sibling of `cascade` above -- build/skip's own
         # resolution (targets() below) reads through this one directly,
         # the same way natmod/options.py's own cascade_env already does.
-        cascade_env = OptionCascade(
-            global_table=raw, family_table=family_table, env=os.environ
-        )
+        cascade_env = OptionCascade(global_table=raw, env=os.environ)
 
         overrides = load_overrides(raw, error=UsermodConfigError)
 
-        # `self.build`/`self.skip` are the global+family-resolved
-        # baseline -- `family_table.get()` is consulted by `.get()`
-        # regardless of whether `platform=` is passed, so `[usermod]`'s
-        # own build/skip already applies here. No implicit "*" default any
-        # more (record 0052's own live-caught correction): an unconfigured
-        # build selects nothing, the same retraction natmod's own default
-        # got.
+        # `self.build`/`self.skip` are the global-resolved baseline. No
+        # implicit "*" default any more (record 0052's own live-caught
+        # correction): an unconfigured build selects nothing, the same
+        # retraction natmod's own default got.
         build_value = cascade_env.get("build", default="")
         skip_value = cascade_env.get("skip", default="")
 
@@ -457,7 +394,7 @@ class UsermodOptions:
 
     def _port_build_skip(self, port: str) -> tuple[list[str], list[str]]:
         """This port's own `build`/`skip` -- `self.build`/`self.skip` (the
-        global+family-resolved baseline, already reflecting `--build`/
+        global-resolved baseline, already reflecting `--build`/
         `--skip` CLI overrides applied after `load()`) unless a
         per-platform environment override (`CIBMP_BUILD_<PORT>`/
         `CIBMP_SKIP_<PORT>`) is set. No `[port]`-table tier any more
@@ -473,7 +410,7 @@ class UsermodOptions:
         Reads the env var directly rather than through
         `self._cascade_env.get(..., default=self.build)`: that cascade
         call re-derives its own "no env override" fallback from the raw
-        file/family tables it was built from, which -- once `self.build`
+        file table it was built from, which -- once `self.build`
         has been reassigned after `load()` (`resolve_options()`'s own
         `--build`/`--skip` handling) -- disagrees with the value actually
         meant to apply. Reading the env var alone and falling back to the

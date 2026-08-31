@@ -1,10 +1,24 @@
-# Composite actions reference
+# Legacy composite actions reference
 
-The pre-CLI building blocks — one GitHub Action per build step, still fully
-supported for CI, but no longer where new work starts (see the main
-[README](../README.md)). New usermod ports and arches land in the
-`cibuildmp` CLI's own `usermod/build_<port>.py` first; these actions absorb the
-CLI's work once it's wired up, not the other way around.
+**This is not usage documentation for `cibuildmp`.** These actions predate
+the CLI and don't invoke `cibuildmp` at all — each installs a toolchain by
+hand and runs the port's own `make`/`idf.py` directly. The current, only
+recommended way to use this project is the root
+[`action.yml`](../action.yml) wrapping the CLI — see the main
+[README](../README.md)'s Quick start.
+
+This layer is a deliberate fallback, not a parallel track being absorbed
+into the CLI over time: folding `build-natmod` into a thin
+`cibuildmp --build` wrapper was proposed and explicitly rejected (tracker
+[0038], see "Rejected" in [`docs/0000-TRACKER.md`](0000-TRACKER.md)). It
+survives because consuming repos still call it — a `unix-mipsel`
+cross-compile has no native runner, and [0043]'s vendored
+`MICROPY_STANDALONE=1`/`deplibs` static path was kept for that one cell —
+not because these actions are on any track toward being replaced. **Which
+repos, and how much of each, lives in the tracker's own [0038] row**, dated,
+rather than here: this paragraph named the wrong repo for a week ([0076],
+[0077]). Read on only if you are maintaining or migrating off a holdout like
+that, not as a starting point for a new module.
 
 Every table below is the action's complete input surface — if it isn't
 listed here, the action doesn't accept it. `MPY_DIR` in a "Requires" line
@@ -33,9 +47,10 @@ Shallow git-clones a MicroPython release branch instead of fetching a
 tarball, with a chosen set of submodules initialised, and exports
 `MPY_DIR`. Use this when the build needs a submodule the release tarball
 doesn't vendor (`lib/pico-sdk` for an rp2 firmware build, for instance) --
-or, as a7p and now bclibc/wasm3's own webassembly/rp2040/windows-adjacent
-jobs use it, any time the caller needs `MPY_DIR` set without dragging in
-`fetch-micropython`'s `wget` dependency.
+or any time the caller needs `MPY_DIR` set without dragging in
+`fetch-micropython`'s `wget` dependency. (This sentence used to name which
+consuming repos use it that way, and "now" was doing real work in it; who
+calls what is the tracker's [0038] row, not this file's.)
 
 | Input                 | Required | Default         | Description                                                                                                                                                                                                                         |
 | --------------------- | -------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -285,11 +300,11 @@ jobs:
         with:
           submodules: recursive
 
-      - uses: ballistics-lab/cibuildmp/.github/actions/fetch-micropython@v0.4.1
+      - uses: ballistics-lab/cibuildmp/.github/actions/fetch-micropython@v0.4.2
         with:
           mpy_tag: v1.28.0
 
-      - uses: ballistics-lab/cibuildmp/.github/actions/build-natmod@v0.4.1
+      - uses: ballistics-lab/cibuildmp/.github/actions/build-natmod@v0.4.2
         with:
           arch: ${{ matrix.arch }}
           # natmod_dir: natmod              # default; a7p passes micropython/natmod
@@ -310,3 +325,8 @@ leg, identical across every consuming repo.
 Artifact upload is left to the caller on purpose -- artifact names and the
 exact glob under `natmod/build/` differ per repo/module and aren't part of
 the shared contract.
+
+[0038]: records/0038-m5-adopt-in-three-repos.md
+[0043]: records/0043-unix-adopts-cibuildwheel-native-image-model.md
+[0076]: records/0076-the-mipsel-holdout-is-bclibc-and-wasm3-not-a7p.md
+[0077]: records/0077-docs-drift-is-a-failing-test-not-a-discipline-problem.md

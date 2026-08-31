@@ -40,23 +40,12 @@ class PlatformModule(Protocol):
     """Documentation only, not enforced through isinstance/runtime checks
     -- the same PEP 544 module-as-Protocol shape cibuildwheel's own
     `platforms/__init__.py` uses. Every family module exposes exactly
-    these five names.
-
-    `validate_family_table()` exists so `cli.py` never has to name
-    `usermod` to call its own validation: every registered family gets
-    called once, unconditionally, before any target resolution happens --
-    a stale family table (the old `[usermod] ports = [...]`) must still
-    be caught even on an invocation where this family's own `targets()`
-    would otherwise select nothing and never load its own config far
-    enough to see it (record 0048's own bug class: a misplaced/stale key
-    silently doing nothing). `natmod`'s own implementation is a no-op --
-    its one platform already *is* its only family, so there is no
-    separate family-level table for a stale key to hide in. `error` is
-    always the caller's `ConfigError` (natmod's own, the class every
-    other startup-time failure already raises) -- not each family's
-    native exception class, so `cli.py`'s own top-level `except
-    ConfigError` does not need widening for a failure that happens before
-    any family-specific resolution begins.
+    these four names, plus `OPTION_KEYS` -- a frozenset of every scalar
+    key that family reads from the bare top level of the config.
+    `cli.py`'s own coordinator unions those across `FAMILIES` so a
+    top-level key no family recognises at all is a loud error rather
+    than silently absent (record 0075); a new family's keys become
+    valid by declaring them, with no edit to `cli.py`.
 
     `resolve_options()` loads config and applies this family's own
     CLI overrides (`--build`/`--skip`, `--output-dir` for natmod);
@@ -92,13 +81,20 @@ class PlatformModule(Protocol):
     should not have to rediscover it by shipping the bug again.
     """
 
+    # Declared, not just described above: `cli.py` reads both off a
+    # `PlatformModule`-typed element of `FAMILIES`, and a Protocol only
+    # documenting them in its docstring is an attribute error to pyright
+    # (caught by CI, after a local run of ruff + pytest alone said green).
+    # `__name__` is every module object's own, and is what supplies
+    # `known_option_names()`'s per-schema key.
+    __name__: str
+    OPTION_KEYS: frozenset[str]
+
     def resolve_options(
         self, args: Any, package_dir: Any, config_file: Any, preread: Any
     ) -> Any: ...
 
     def run_resolved(self, args: Any, options: Any, targets: list[Any]) -> int: ...
-
-    def validate_family_table(self, raw: dict, *, error: type[Exception]) -> None: ...
 
 
 # The two family implementations, always both resolved -- there is no

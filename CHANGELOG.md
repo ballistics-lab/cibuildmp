@@ -7,6 +7,435 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Record 0078: handing the repo to an uncontexted reader is the docs test the
+  suite cannot be.** Five rounds of it produced this session's findings, and the
+  movement between rounds is the useful part — false user-facing claims, then
+  stale docstrings plus two holes in the guards themselves, then source comments
+  once the docs were clean, then the guard's own dependence on human memory, then
+  (given a *task* instead of a survey) a silent config footgun no reader would
+  ever see. `CONTRIBUTING.md` carries the procedure and the two things that make
+  a round useful: give no hints, and switch from survey to task once surveys
+  saturate. `CLAUDE.md` now also says which docs are machine-checked and which
+  are generated, so the next reader does not rediscover that.
+
+### Fixed
+
+- **CI caught a false positive in the new path guard that a development tree
+  hides.** `action.yml` names `examples/template/mpyhouse/` — a real, correct
+  reference to where output lands, but a build output that exists only after a
+  build. It passed locally and failed on a clean checkout. Build-output
+  directories are excluded now, and the fix was verified by deleting them
+  locally first.
+
+- **A fifth agent was given a task rather than a survey** — "set up cibuildmp
+  for my module, build it, put it on CI, tell me how to install it" — which
+  surfaced a different class of gap than four read-throughs had:
+  - **An empty `CIBMP_*` environment variable is a value, not an absence**, and
+    the standard Actions conditional-env idiom
+    (`${{ cond && x || '' }}`) sets one either way. `CIBMP_VERSION=""` silently
+    overrides a configured `version`, so every non-tag build quietly loses its
+    `package.json` and `[publish] extra-files` with no error. Verified directly:
+    with the variable unset the option resolves to `1.0.0`, with it empty to
+    `''`. Now documented in bold, with the spelling that actually works.
+  - **There was no complete CI workflow anywhere** — a four-line `uses:` fragment
+    in Quick start, and a legacy-actions page that opens by telling you not to
+    read it. For a CI tool. README now carries a full workflow, and says outright
+    that natmod needs no matrix and no `setup-qemu-action` because every natmod
+    image is `linux/amd64` (checked with `platform_for()`, not assumed).
+  - The README Makefile set `BUILD = .obj/$(ARCH)` one line above a comment
+    saying output goes to `build/<arch>*/`, with nothing saying the two must
+    differ — and that collision is the `ambiguous output` error three sections
+    away. Said at the point of use now, along with what
+    `examples/template`'s Makefile adds and why.
+  - `py/dynruntime.h` is named as the API surface; `sys.implementation._mpy >> 10`
+    is given as the way to ask a device which `.mpy` it wants (the docs handed
+    you ten files and never said how to choose); and a container build is
+    explained as looking identical to a host build, because identical-path bind
+    mounts leave nothing visibly different.
+- **A fourth uncontexted agent read the repo, and went for the guard itself.**
+  Its sharpest point: `REMOVED_NAMES` in `tests/test_docs.py` is hand-maintained,
+  so that check is only as good as someone remembering to add an entry — and it
+  proved the point by finding `_reject_platform_tables()` cited in the present
+  tense in two files, a name the list did not have. The guard no longer depends
+  on memory for the common case: it now resolves **every repo path** a source
+  comment, docstring or error string mentions, so a deleted file is caught
+  whether or not anyone recorded its name.
+  - The guarded set also grew to cover `cibuildmp.toml` and
+    `examples/*/cibuildmp.toml`, which were in neither `LIVING_DOCS` nor
+    `SOURCE_FILES` — the root one being, as the agent put it, arguably the
+    most-read example file in the repo. It was pointing at `docs/BACKLOG.md`.
+  - **The root `cibuildmp.toml` is a live trap** and now says so: it calls itself
+    a reference example, but its `build` names real identifiers, so running
+    `cibuildmp` at the repo root resolves ten targets and fails at build time on
+    the missing `natmod/`.
+  - **The troubleshooting headings did not match the real output** — missing the
+    `cibuildmp.toml:` prefix, the backticks, a trailing period — in a section
+    whose whole design is "search for your message verbatim". All three
+    corrected against actual runs, and the section now says the headings are the
+    message minus the `cibuildmp: error: ` prefix.
+  - `--help` sent readers to `docs/0000-TRACKER.md`, which opens by saying it is
+    not user-facing documentation. It points at the README now.
+  - `orchestrate.py` told a reader to opt into `[usermod.qemu] boards = [...]`,
+    which is an unknown-table error since 0052/0074.
+  - `tests/test_plan_test_matrix.py`'s skip guard was dead code: it checked a
+    returncode, but `subprocess.run` raises `FileNotFoundError` when the console
+    script is absent. Replaced with a `shutil.which` check, so a bare
+    `python -m pytest` now skips that one test instead of failing.
+- **A third uncontexted agent read the repo, and the drift had moved.** Every
+  documented claim it checked in `README.md`/`CONTRIBUTING.md` reproduced exactly
+  — the first-module transcript byte for byte, all six error messages, the
+  env-var scoping example, the version pins. What it found instead was in
+  **source comments, docstrings and error strings**, which the drift guards did
+  not cover at all:
+  - `docker/natmod.Dockerfile` cited in the present tense in two files, two
+    records after 0058 split it into six; `PORT_IMAGES` (removed by 0043) at
+    five sites and `PORT_PLATFORMS` (never existed under that name) in a message
+    a *user* sees; `usermod/build.py` (split by 0061) and `docs/BACKLOG.md` (a
+    redirect stub since 0041) across ten files.
+  - `tests/test_docs.py` now checks source for removed names, which is how all
+    13 files were found. The guards' scope was the boundary the drift moved past.
+  - `Target.tag`'s field comment said the tag is "not part of the identifier"
+    fifteen lines above the property that puts it there.
+  - `_BUILD_FN`'s comment stated a driver signature missing `package_dir`, which
+    `build_one()` always passes — a new port author following it writes a broken
+    one. `toolchain_root` is documented as what it is: dead in production, set
+    only by tests.
+  - Records 0053 and 0056 still listed `rp2` as driverless (0060 shipped it) and
+    cited a `usermod/build.py` that 0061 split; both now carry a dated
+    correction. 0046's status line said "the rest not built" below its own
+    addendum saying it was built.
+  - `open-questions.md` still reasoned about a `host` toolchain strategy that
+    0050 deleted, and the tracker's own conventions listed `0054`-`0057` as
+    "Proposed" after two of them shipped. Neither carries examples now.
+- **A second uncontexted agent read the repo; these are its findings.** It
+  confirmed the previous round (every quoted error message reproduced verbatim,
+  the `CIBMP_BUILD_UNIX` example produced exactly the documented two lines), and
+  found a sharper set:
+  - `README.md` still showed `mpyhouse/mpy6.3-x64/` — the tagless identifier form
+    retired by record 0051. **The drift guard could not see it**: `IDENTIFIER_SHAPED`
+    anchors on the `v<tag>` segment, so an identifier with the tag *dropped* is
+    not identifier-shaped at all — exactly the regression the guard exists for.
+    Both fixed; the guard now matches the tagless form explicitly.
+  - One tracker row escaped the "a row is its record's title" test by being
+    indented two spaces. Row and test both fixed.
+  - `--dry-run` prints a `{micropython}` placeholder literally, while README
+    claimed it shows "exactly what would be built". Documented as expected output.
+  - The root action's seven inputs were documented in no markdown at all — only
+    `action.yml` itself. README now has the table.
+  - The `extras` input can only ever fail: `pyproject.toml` declares no
+    `[project.optional-dependencies]`. Said so in the input's own description.
+  - `action.yml` said `qemu`/`esp32` build `mpy-cross` on the host; only `qemu`
+    does.
+  - `dockerrun.py`'s module docstring still said `esp32` had no image and `qemu`
+    was an open gap, long after records 0028 and 0058 closed both.
+  - `cli.py`'s docstring claimed the module "never names `natmod`/`usermod`",
+    while importing `read_config`/`ConfigError` from `platforms/natmod/options.py`
+    on line 43. Reworded to what is actually true: the *dispatch* is
+    family-agnostic, the imports are not.
+  - `pinned_docker_images.toml`'s header taught `unix-manylinux_2_28_x86_64`, an
+    identifier shape README explicitly warns against.
+  - Record 0031's Status line said "musllinux half not started" after record 0044
+    built it; the tracker's Conventions section cited that and `0022`'s "unstarted
+    `rp2` driver" (shipped in 0060) as live examples — the exact claim `CLAUDE.md`
+    records being repeated downstream as fact. The bullet no longer carries
+    examples.
+  - `cibuildmp.toml` pointed at `docs/BACKLOG.md`, a redirect stub since 0041.
+- **`bin/publish_images.py` was broken and nothing noticed** — it still read
+  `pinned_docker_images.toml`'s pre-0058 `[image.<arch>]` shape, so every
+  invocation raised `KeyError: 'image'`. No workflow calls it (it exists for
+  publishing one cell by hand and for reading GHCR package visibility back,
+  neither of which the workflow can do), so it drifted unseen. Fixed to read the
+  flat `[image_group]`, and a test now asserts it names exactly the same
+  (image, platform) cells as `publish-docker-images.yml` — verified identical,
+  all 15.
+- **Contradictions between files, each now stated once**: "five toolchain-group
+  images" (README) vs "six" (`design.md`, `vendored-images.md`) — five of the six
+  cover natmod, `ppc64le_linux` is qemu-only, and `vendored-images.md` now says
+  so; `arm_embedded` served "ten usermod ports" above a list of nine;
+  `open-questions.md` recommended running cibuildmp inside a root `Dockerfile`
+  that record 0033 deleted, and negated itself in its own last sentence; README
+  credited `test-platforms.yml` with a sweep that is `test-all-platforms.yml`'s;
+  `CONTRIBUTING.md` named `CIBMP_<TARGET>_DOCKER_IMAGE` without its `<PORT>`
+  segment. There is no record 0064, and the tracker now says so.
+- **Consuming-repo status had nowhere left to live.** README/ACTIONS/design were
+  changed to point at record 0038 for it, and the tracker rework then flattened
+  that row to a title — so nothing stated it at all. It is in record 0038 now,
+  dated, with the method used to check it.
+- **Three user-facing claims that were provably false**, found by handing the
+  repository to an agent with no context and asking it to explain the project:
+  - `README.md`, `docs/reference/design.md` and `docs/reference/vendored-images.md`
+    all said there is no bare-host build path for any target. A `qemu` usermod
+    build compiles `mpy-cross` on the host first (`_HOST_MPY_CROSS_PORTS`), so
+    that one port needs a host C compiler — which is why `action.yml` installs
+    `build-essential`. All three corrected.
+  - README's "When a build fails" listed a `checksum mismatch` error the tool
+    cannot emit: `sources.verify_sha256()` has no callers, and the real check is
+    `sha256sum -c` inside the Dockerfiles at image-build time. Entry removed.
+  - `UnknownTagError` told the user to "pass `mpy-abi` explicitly", a key the
+    config rejects outright, and to run `bin/refresh_natmod_archs.py <tag>`,
+    which takes no arguments. `CONTRIBUTING.md` repeated the second one.
+- **Two error messages pointed at `dockerrun.PORT_IMAGES`**, a dict moved into
+  `resources/pinned_docker_images.toml` by record 0043. `build_windows.py` and
+  `build_webassembly.py` now name the real file.
+- **Stale pointers in live files**: `build-platforms.toml` said five wired ports
+  and ten driverless (six and nine), `README.md` named a `natmod_dir` option that
+  is `module-dir`, `action.yml` and `pyproject.toml` pointed at files deleted by
+  records 0050/0058, and `stepsummary.py` named a `usermod.cli` module that does
+  not exist.
+
+### Added
+
+- **What the fourth agent could only learn from source**: what each usermod port
+  actually produces (a table — `micropython.bin`, `firmware.uf2`,
+  `micropython.mjs`, `firmware.elf`, `micropython.exe`); that an `[override]`
+  table name takes the full selector syntax, so one entry can cover several globs
+  (`[override."*-manylinux* *-win* *-wasm32"]`), and that `select = "…"` inside an
+  entry is an error rather than a second spelling; that every list-valued key also
+  accepts a shell-split string; and how `mip install` actually consumes the
+  generated `package.json`, whose `urls` are relative to wherever it was fetched
+  from. The `qemu`-builds-`mpy-cross`-on-the-host open question, which existed
+  only as a source comment, is now in `open-questions.md`.
+- **What the third agent could only learn from source**: the `+0x<hex>`
+  identifier suffix `arch-flags` produces (so `[override."*rv32imc+0x3"]` is
+  writable from the docs now, and `skip = "*-rv32imc"` is documented as *not*
+  matching it); which `<TARGET>` segment each port uses in
+  `CIBMP_<PORT>_<TARGET>_*`, as a table; that `--dry-run` shows a `make` line
+  for natmod and identifiers alone for usermod; that `name`/`version` replace a
+  usermod filename stem but produce no manifest; that a key a family does not
+  read is accepted and ignored; the full host prerequisite list including `git`
+  and the bind-mounted `pyelftools`; that JSON reports accumulate under the
+  cache root until `--clean-cache`; and that the suite must be run with
+  `uv run pytest`, since one test needs the console script on `PATH`.
+- **The three things the second agent said it still would not know.**
+  `CONTRIBUTING.md` now gives the exact one-line local check for each of the six
+  usermod ports (`cibuildmp examples/template --build "<identifier>"` — one real
+  container, the same code path CI runs), says that `bin/plan_test_matrix.py`
+  prints what a wide glob would cost before you dispatch it, and explains that
+  local images showing `<none>` for a tag is the digest pinning working, not a
+  problem. `docs/reference/vendored-images.md` now has the esp32 host/container
+  split as a table — only the `git clone` is on the host; the tool install,
+  Python env, export and `idf.py` all run in `esp_idf_base`, guarded by a
+  `.installed` marker so the download is paid once per (version, target).
+- **`CONTRIBUTING.md` is a living doc now**, so the drift guards cover it:
+  identifiers, `CIBMP_*` names, repo paths, record links and the action pin.
+  Adding it surfaced a truncation bug in the path check — `build_<port>.py`
+  matched as far as `build_` and was reported missing — the same bug the
+  identifier check had already been fixed for.
+- **`CONTRIBUTING.md` now says that a green local test run proves nothing about
+  a build.** All 452 tests pass without Docker in seconds because every build
+  driver is mocked; a broken `build_esp32()` stays green locally, on push and on
+  a PR. The section names what actually compiles something and when.
+- **Behaviour the docs never mentioned and a user hits on the first run**:
+  `version` gates not just `package.json` but `[publish] extra-files` too (both
+  are silently skipped without it); `CIBMP_TIMEOUT` is usermod-only; a `unix`
+  build produces a binary *plus* an `$ORIGIN/lib` sidecar that must be shipped
+  with it; `--clean-cache` exists and the first run costs gigabytes. Also names
+  `[publish] extra-files` and `inherit` as the two keys that live in tables
+  rather than the "Every key" list.
+
+- **The tracker is one line per record, and a test keeps it that way.** Every row
+  under "In progress / Proposed" and "Implemented" is now its record's own `# `
+  title, verbatim — 75 rows, down from paragraph-long summaries that had grown
+  past 1700 characters and then gone stale independently of the record they
+  summarised. `tests/test_docs.py` compares each row against its record's
+  heading, so the two cannot drift. "Rejected" rows are exempt and name the
+  rejected proposal, since one record can hold several (`[0052]` holds two).
+  `docs/records/0040`'s own title was "Later — tests", which says nothing in a
+  row, so the record was retitled rather than the row padded — which is the rule
+  working as intended. The file went from 433 lines to 226.
+- **A "Your first module" walkthrough in `README.md`** — empty directory to a
+  working `.mpy` in three files, then how to widen it, then what to do with the
+  result (`mpremote cp` onto a board, or set `version` to get the `package.json`
+  that `mip install` needs). The three files were actually built while writing
+  it: a real `cibuildmp` run producing a 210-byte `mymod-mpy6.3-v1.29.0-x64.mpy`
+  whose header reads back as arch code 2, x64. Quick start showed the command
+  and never the module it needs.
+- **Contributor guides in `CONTRIBUTING.md`** for the three real changes someone
+  makes here: adding a MicroPython tag (a data edit — the refresh scripts walk
+  the tag's own source, which is why v1.29.0's new `x64`/`x86` cross prefixes
+  were picked up rather than assumed from v1.28.0), wiring a usermod port driver
+  (four edits, two of them one-line registrations), and adding a natmod arch —
+  which you do not, because the arch table reports what upstream has.
+- **A "When a build fails" section in `README.md`.** Twelve real error messages
+  the tool actually prints — `no targets selected`, `unknown key`, the missing
+  Docker CLI, the missing binfmt handler, `ambiguous output`, the arch-code
+  mismatch that means two arches shared a build directory — each with what
+  causes it and what to do. Every message is quoted from the source that raises
+  it, not paraphrased. Until now the docs said what `cibuildmp` does and never
+  what to do when it stops.
+
+### Fixed
+
+- **`bin/refresh_docs.py` no longer fights a markdown table formatter.** Its
+  generated blocks were compared byte-for-byte, so an editor's format-on-save
+  padding table cells to a common column width — a no-op to every renderer —
+  made `--check` fail and a plain run churn the padding straight back out. The
+  comparison is semantic now (cell content, column count, row order; padding,
+  separator width and trailing whitespace ignored), and a block equivalent
+  modulo whitespace is left alone rather than rewritten. Verified both ways: a
+  simulated format-on-save leaves `--check` clean and rewrites nothing, and
+  changing one real value in the same block still fails. Record 0077.
+
+### Added
+
+- **`bin/update_toolchains.py` and a weekly `pin-staleness.yml`** — record 0046's
+  own "make staleness visible on a schedule", for the six compiler-tarball pins
+  neither `update_docker.py` nor Dependabot could see. Three upstream shapes:
+  four GitHub releases (one API call each), emsdk resolved through
+  `emscripten-releases-tags.json` (a build hash is comparable after all, because
+  emsdk publishes the mapping), and `xtensa-lx106`'s unversioned URL reported
+  *as* unversioned rather than pretended into a version, with `--slow` to
+  re-download and compare the served sha256. It reports and never rewrites:
+  moving one of these means recomputing a sha256, and 0046 is explicit that a pin
+  moves in a reviewed PR.
+  - Found real drift on its first run: **llvm-mingw pinned at `20260616` with
+    `20260826` upstream**, a bit over two months behind, and nothing would have
+    said so.
+  - The weekly workflow also gives `update_docker.py --check` its first caller —
+    it had been written for this and run on no schedule at all.
+  - Record 0046's own inventory table said these pins live in
+    `resources/natmod.toml`; they are `ARG`s in `docker/*.Dockerfile` now.
+    Corrected in its addendum, since anyone working from the table alone would
+    look in the wrong file.
+
+- **Two more stale claims in `README.md` sections the first audit pass had not
+  reached.** Its "Conventions" section said `dynruntime.mk` defaults to an
+  unscoped `BUILD ?= build`, true up to v1.28.0 and false from v1.29.0
+  (`BUILD ?= build-$(ARCH)`, arch-scoped already) — which changes the advice,
+  since the arch collision that paragraph warns about cannot happen by default
+  on the current pin. Its "Versioning" section called `v0.4.0` "the current
+  tag, and the one every example in this README targets", two releases after
+  both halves stopped being true. Neither is restated now: the current version
+  lives in `CHANGELOG.md`, and the `BUILD` advice names the tag it applies to.
+  Record 0077.
+- **Living docs no longer state another repository's status.** `README.md`,
+  `docs/ACTIONS.md` and `docs/reference/design.md` all pointed at consuming
+  repos' CI state; all three now point at `docs/0000-TRACKER.md`'s [0038] row,
+  which carries it with a date and the method used to check it. `CONTRIBUTING.md`
+  gains the rule. Deliberately not a test: the mechanical proxy fired on three
+  legitimate examples for every real hit, and an allowlist of prose snippets
+  rots faster than the prose. Record 0077.
+- **Every documented `@vX.Y.Z` action pin is now checked against
+  `cibuildmp.__version__`.** Four were stuck at `@v0.4.1` with `v0.4.2`
+  released — the same pin `CLAUDE.md` already names as a repeat offender for
+  having sat on `@v0.3.0` weeks after `v0.4.0` shipped. Record 0077.
+- **`docs/ACTIONS.md`'s input tables verified against the real
+  `.github/actions/*/action.yml`** — all nine actions, every input, nothing
+  fictional. No change needed, recorded because the assumption was the
+  opposite.
+- **A `README.md` paragraph about consuming-repo migration status is deleted,
+  not corrected.** It claimed all three repos were "fully migrated off every"
+  composite action and then, in its own parenthesis, that two were not; named
+  `a7p` as a `unix-mipsel` holdout (never true); paired it with the wrong
+  second repo; and carried the stale pin. It was the fifth copy of that claim,
+  all traceable to one tracker row. Migration status now lives only in the
+  tracker, which is the one place that self-corrects.
+- **`docs/reference/*.md` audited claim by claim against the source**, which
+  found six things no mechanical check can catch. `design.md` still carried the
+  false `a7p unix-mipsel` claim record 0076 corrected in three other files; it
+  stated the per-target precedence chain two different ways, both wrong, in one
+  file; it documented `arch-flags` as a string when it is a list (and an axis —
+  each entry is its own target); it counted usermod's override keys as three
+  when there are four; and its toolchain map gave `x64`/`x86` no `CROSS` prefix,
+  true up to v1.28.0 and false from v1.29.0. `open-questions.md`'s first entry
+  asked how MSYS2/ESP-IDF fit a toolchain-strategy shape record 0050 deleted,
+  and its second cited a workflow that no longer exists. The toolchain map is
+  generated now, since it is a per-tag fact no single hand-written table can
+  state correctly. Record 0077.
+- **`bin/refresh_docs.py` generates the doc tables that are pure functions of
+  the resource files** — README's identifier-shape table and
+  `docs/reference/vendored-images.md`'s port/arch → image-group mapping, each
+  between a `<!-- generated: … -->` marker pair. `tests/test_docs.py` fails the
+  build if either is out of date, so these cannot drift rather than merely being
+  checked for drift. Every identifier example is now picked from a real row at
+  that port's own newest stable tag instead of composed from the format string:
+  a composed example can be well-formed and still name nothing, which is exactly
+  what `design.md` had shipped. The mapping is also exhaustive now (all fifteen
+  usermod ports, not the subset kept up by hand), and a group no published image
+  backs is marked inline. Record 0077.
+  - One more stale number, removed rather than refreshed: README claimed
+    `test-all-platforms.yml` covers "83 real `esp32` identifiers and 74 real
+    `rp2` ones". That was a two-tag slice; the totals are now 442 and 374,
+    because each new MicroPython tag adds a whole board set. The matrix already
+    says "every row", which is the durable statement.
+- **Docs drift now fails the build.** `tests/test_docs.py` checks the living
+  docs (`README.md`, `docs/ACTIONS.md`, `docs/reference/*.md`) against the
+  source they describe: identifiers must exist in `build-platforms.toml`,
+  README's own option table must equal `FAMILIES`' `OPTION_KEYS` in both
+  directions, `CIBMP_*` names must be read by something, repo paths must exist,
+  image groups must be in `pinned_docker_images.toml`, and record links must
+  resolve. It runs in the existing pytest job — no new workflow step.
+  `docs/records/` is deliberately excluded: a record is correct as history even
+  when the state it describes is long gone. Record 0077.
+  - Found on its first run, both fixed here: `docs/reference/design.md` claimed
+    a usermod identifier is `{tag}-{port}`/`{tag}-{port}-{axis}` and gave
+    `v1.29.0-unix-manylinux_2_28_x86_64` and `v1.29.0-webassembly` as examples —
+    neither exists, since `unix`/`windows`/`webassembly` all use a bare
+    `{tag}-{arch}` with no port segment and only board ports carry one; and
+    fifteen record numbers across `docs/ACTIONS.md`, `docs/reference/design.md`,
+    `CHANGELOG.md` and `CLAUDE.md` were cited with no link definition, rendering
+    as literal `[0043]`.
+
+- **`README.md` now documents how to actually configure the thing**: a
+  `Configuration` section covering where the config file is looked for and in
+  what order, the flat key/`[override]`/`[publish]` shape, a table of all
+  fourteen option keys with defaults and which family reads each, the full
+  `CIBMP_*` environment surface (option forms, the per-platform
+  `CIBMP_BUILD_<PLATFORM>` form, and the machinery variables that have no
+  config-file counterpart), and — the part nothing stated anywhere before —
+  the two distinct precedence chains. Invocation-wide options resolve
+  `default → file → env → CLI`; per-target options resolve
+  `default → file → matching [override] → env`, so an environment variable
+  beats an `[override]` while a CLI flag beats an environment variable. Every
+  claim in the section was checked by running it, not read off the source:
+  that is how the `CIBMP_BUILD_<PLATFORM>` behaviour got documented correctly
+  — it does not replace the global selection, it scopes one platform's own
+  alongside it.
+- Every record number cited in `README.md` is now a working link. They were
+  bare bracketed text with no reference definition, rendering as a literal
+  `[0043]`.
+
+- **An unrecognised scalar key at the top level of `cibuildmp.toml` is now an
+  error**, with a close-match suggestion — `buidl = "..."` answers "Perhaps you
+  meant `build`?". Previously only unknown *tables* were caught; an unknown
+  scalar key (`micropython =`, retired back in record 0052, or any typo) was
+  read as simply absent, its default silently applying, and the build succeeded
+  having ignored the line you wrote. Every family module now declares its own
+  `OPTION_KEYS` and the CLI unions them across `FAMILIES`, so no key list lives
+  in `cli.py`. `[[name]]` array-of-tables syntax is now recognised as a table by
+  the sibling table check too, rather than falling through to this one. Record
+  0075.
+
+### Fixed
+
+- **Docs: the reason given for keeping the legacy composite actions named the
+  wrong repository.** Record 0073's rewrite of `README.md`/`docs/ACTIONS.md`
+  said `a7p`'s own `unix-mipsel` cell was the one remaining dependency on
+  `.github/actions/*`, citing record 0067. `a7p` uses no composite action at
+  all, 0067 is about something else entirely, and the claim was already untrue
+  when written. The real `build-usermod-unix` holdouts are `micropython-bclibc`
+  and `micropython-wasm3`, both of which also use `fetch-micropython` far more
+  widely than the mipsel story suggested. No code change. Record 0076.
+
+### Removed
+
+- **`[usermod]`, the shared-defaults table for every usermod port at once.** No real
+  config in this project's own examples ever actually wrote it (checked directly, not
+  assumed) — the family-tier cascade layer it alone populated is deleted from
+  `cibuildmp.options.Options` entirely, not just left empty. `user-c-modules`/
+  `manifest`/`extra-make-args` are plain top-level keys now; narrow one port at a time
+  through `[override."<glob>"]` instead. A stray `[usermod]` table is now an ordinary
+  "unknown table(s) at the top level" error, the same as any other unrecognised name.
+  Record 0074.
+- **The dedicated "no longer exists, move X here instead" error message for
+  `[natmod]`/`[unix]`/`[windows]`/`[qemu]`/`[webassembly]`/`[esp32]`.** These six tables
+  are still rejected — as ordinary unknown top-level tables — but no longer explain what
+  replaced them individually; `build`/`skip`/`[override."<glob>"]` has been the only real
+  mechanism since record 0052, and all three consuming repos have long since migrated
+  onto it. Record 0074.
+
 ## [0.4.2] - 2026-08-31
 
 ### Added
@@ -711,3 +1140,12 @@ than restarting (see the 0.3.0a1 entry). -->
 [0.3.0a1]: https://github.com/ballistics-lab/cibuildmp/compare/v0.2.0...v0.3.0a1
 [0.2.0]: https://github.com/ballistics-lab/cibuildmp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ballistics-lab/cibuildmp/releases/tag/v0.1.0
+
+[0022]: docs/records/0022-zephyr-third-selector-axis.md
+[0032]: docs/records/0032-unix-docker-default-and-webassembly-wiring.md
+[0038]: docs/records/0038-m5-adopt-in-three-repos.md
+[0043]: docs/records/0043-unix-adopts-cibuildwheel-native-image-model.md
+[0052]: docs/records/0052-config-is-a-tree-not-a-selector-matrix.md
+[0054]: docs/records/0054-usermod-example-from-upstream-usercmodule.md
+[0066]: docs/records/0066-extra-cmake-args.md
+[0069]: docs/records/0069-upstream-usercmodule-narrow-ci-slice.md

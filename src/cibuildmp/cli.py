@@ -6,10 +6,15 @@ through the same `cibuildmp` command), and the coordinator (`_run()`) that
 resolves both families on every invocation, merges `--print-build-
 identifiers`, makes the one joint "nothing at all was selected" decision,
 and dispatches whichever families ended up with a nonzero target list.
-This module never names `natmod`/`usermod` anywhere below -- only
-`platforms.FAMILIES` -- which is the actual requirement a future third
-family (zephyr, [0022]; any of upstream's own ~20 real ports) needs this
-dispatch to satisfy, since none of it should have to change to add one.
+No *dispatch* in this module names `natmod`/`usermod` -- it iterates
+`platforms.FAMILIES` -- which is the requirement a future third family
+(zephyr, [0022]; any of upstream's own ~20 real ports) needs to satisfy:
+adding one should touch no logic here. The imports are a different
+matter and are not family-agnostic: `read_config`/`ConfigError` live in
+`platforms/natmod/options.py` and are imported from there by this module
+and by `usermod/options.py` alike, because natmod's options module is
+the shared base every platform imports from. A third family would import
+them the same way; it would not need this file's own logic changed.
 
 There is no more platform *activation* concept at all (record 0052's own
 live-caught retraction): every family is always in scope, on every
@@ -38,6 +43,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
+from .options import check_known_keys, known_option_names
 from .platforms import FAMILIES, PlatformModule
 from .platforms.natmod.options import ConfigError, read_config
 from .sources import cache_root
@@ -49,7 +55,8 @@ def build_parser() -> argparse.ArgumentParser:
         description="Build MicroPython native C extensions across every target "
         "a module supports, from one declarative config.",
         epilog="Most options are supplied via cibuildmp.toml or CIBMP_* environment "
-        "variables. See docs/0000-TRACKER.md for the design and what is implemented.",
+        "variables. See the README for the config schema, every option key and "
+        "the identifier list.",
     )
     parser.add_argument(
         "package_dir",
@@ -136,49 +143,86 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-# The two top-level tables every platform used to gate activation with
-# (before that, carry a per-port axis) -- neither concept exists any more,
-# so a config still writing one of these six gets a specific error naming
-# the real replacement, the same courtesy every other retired config
-# surface in this project gets (record 0048's own "a misplaced/stale key
-# must never silently do nothing"). `[usermod]`/`[publish]`/`[override]`
-# are the only tables left with any meaning at all -- shared defaults for
-# every usermod port, natmod's own extra-files list, and the shared
-# per-target override list, respectively.
-_RETIRED_PLATFORM_TABLES: frozenset[str] = frozenset(
-    {"natmod", "unix", "windows", "qemu", "webassembly", "esp32"}
-)
-_KNOWN_TABLES: frozenset[str] = frozenset({"usermod", "publish", "override"})
+# `[natmod]`/`[unix]`/`[windows]`/`[qemu]`/`[webassembly]`/`[esp32]`/
+# `[usermod]` all used to be real, meaningful top-level tables (activation
+# gates, then per-port axes, then -- `[usermod]` alone -- shared defaults)
+# across records 0048-0052/0074. None of that history gets a dedicated
+# migration message any more: every one of them is just an unrecognised
+# top-level table today, the same as a typo like `[stm32]`. `[publish]`/
+# `[override]` are the only tables left with any meaning at all --
+# natmod's own extra-files list, and the shared per-target override list,
+# respectively.
+_KNOWN_TABLES: frozenset[str] = frozenset({"publish", "override"})
+
+
+def _is_table(value: Any) -> bool:
+    """Whether a top-level value is TOML *table* syntax rather than a
+    scalar option -- what decides which of the two validators below owns
+    a key.
+
+    A dict is `[name]`; a non-empty list of dicts is `[[name]]`, an array
+    of tables. Neither of this project's own two real tables uses that
+    second form -- `[override]` is keyed directly by its own glob
+    (`[override."<glob>"]`, deliberately unlike cibuildwheel's own
+    `[[tool.cibuildwheel.overrides]]`), so both parse to plain dicts --
+    but a `dict`-only test would send a stray `[[stm32]]` to the scalar
+    keyset check instead of the table check, reporting "unknown key"
+    for something that is a table. `and value` matters: an empty list is
+    `extra-make-args = []`, a real scalar option, and an array of tables
+    is never empty.
+    """
+    if isinstance(value, dict):
+        return True
+    return (
+        isinstance(value, list)
+        and bool(value)
+        and all(isinstance(item, dict) for item in value)
+    )
 
 
 def _validate_top_level_tables(raw: dict) -> None:
-    """A top-level table whose name is neither one of the three still-
-    meaningful ones nor one of the six retired platform names is almost
-    certainly a typo (`[stm32]` for a port this project has no build
-    driver for yet, `[usermdo]` for `[usermod]`)."""
-    retired = sorted(_RETIRED_PLATFORM_TABLES & raw.keys())
-    if retired:
-        raise ConfigError(
-            f"[{retired[0]}] no longer exists -- every platform is always in "
-            "scope now, selected purely by build/skip glob-matching its own "
-            "real identifiers (see the README for the full identifier list). "
-            "Move any module-dir/user-c-modules/manifest/extra-make-args/"
-            "extra-cmake-args/make-target/pre-build-command/arch-flags value "
-            "to the top level "
-            "(or [usermod] for a usermod-wide default), and narrow with "
-            'build/skip (e.g. build = "*-x64") or [override."<glob>"] '
-            "instead."
-        )
+    """A top-level table whose name is not one of the two still-meaningful
+    ones is almost certainly a typo (`[stm32]` for a port this project has
+    no build driver for yet, `[overide]` for `[override]`) or a config
+    written against an old, retired version of this schema -- either way,
+    naming it is enough; there is no per-name migration story to tell."""
     unknown = sorted(
         key
         for key, value in raw.items()
-        if isinstance(value, dict) and key not in _KNOWN_TABLES
+        if _is_table(value) and key not in _KNOWN_TABLES
     )
     if unknown:
         raise ConfigError(
             f"unknown table(s) at the top level: "
             f"{', '.join(f'[{k}]' for k in unknown)}."
         )
+
+
+def _validate_top_level_keys(raw: dict) -> None:
+    """The scalar counterpart of `_validate_top_level_tables()` above, and
+    the gap record 0074 found while checking a claim about it: neither
+    family's own `load()` ever validated the top-level scalar keyset at
+    all, so `micropyton = "v1.29.0"` (or any other key no family reads)
+    was silently absent rather than flagged -- the config looked accepted
+    and the option simply never applied.
+
+    `known_option_names()`/`check_known_keys()` (`options.py`) already
+    existed for exactly this and were dead code until this call site;
+    `check_known_keys()` brings the same `difflib` close-match suggestion
+    cibuildwheel's own `_validate_global_option()` gives.
+
+    Unioned from `FAMILIES` rather than a list written out here, for the
+    same reason `_resolve_all()` iterates it: `cli.py` does not know the
+    name `natmod` or `usermod`, and a third family must not need an edit
+    in this file to have its own keys accepted.
+
+    Table-valued keys are skipped, not passed through: `[publish]` and
+    `[override]` are real config that no family's own `OPTION_KEYS`
+    contains, and `_validate_top_level_tables()` above is what judges
+    those."""
+    known = known_option_names({f.__name__: f.OPTION_KEYS for f in FAMILIES})
+    scalars = {k: v for k, v in raw.items() if not _is_table(v)}
+    check_known_keys(scalars, known, where="cibuildmp.toml", error=ConfigError)
 
 
 def _resolve_all(
@@ -363,8 +407,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         preread = read_config(args.package_dir, args.config_file)
         _validate_top_level_tables(preread[1])
-        for family in FAMILIES:
-            family.validate_family_table(preread[1], error=ConfigError)
+        _validate_top_level_keys(preread[1])
     except ConfigError as exc:
         if args.debug_traceback:
             raise
