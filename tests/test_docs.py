@@ -38,6 +38,7 @@ REPO = Path(__file__).resolve().parent.parent
 # The living docs: kept current with what is true today, by hand.
 LIVING_DOCS = [
     REPO / "README.md",
+    REPO / "CONTRIBUTING.md",
     REPO / "docs" / "ACTIONS.md",
     *sorted((REPO / "docs" / "reference").glob("*.md")),
 ]
@@ -348,6 +349,12 @@ def test_repo_paths_in_living_docs_exist(doc: Path) -> None:
     natmod toolchain resolver it kept describing."""
     missing = []
     for span in _code_spans(_text(doc)):
+        # The whole span, not the candidate: `build_<port>.py` and
+        # `NNNN-<slug>.md` truncate to a real-looking prefix before the
+        # placeholder character is reached. Same fix the identifier check
+        # already needed, for the same reason.
+        if PLACEHOLDER.search(span):
+            continue
         for candidate in REPO_PATH.findall(span):
             candidate = candidate.rstrip(".,;:)")
             if PLACEHOLDER.search(candidate) or GLOB.search(candidate):

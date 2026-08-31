@@ -87,6 +87,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The three things the second agent said it still would not know.**
+  `CONTRIBUTING.md` now gives the exact one-line local check for each of the six
+  usermod ports (`cibuildmp examples/template --build "<identifier>"` — one real
+  container, the same code path CI runs), says that `bin/plan_test_matrix.py`
+  prints what a wide glob would cost before you dispatch it, and explains that
+  local images showing `<none>` for a tag is the digest pinning working, not a
+  problem. `docs/reference/vendored-images.md` now has the esp32 host/container
+  split as a table — only the `git clone` is on the host; the tool install,
+  Python env, export and `idf.py` all run in `esp_idf_base`, guarded by a
+  `.installed` marker so the download is paid once per (version, target).
+- **`CONTRIBUTING.md` is a living doc now**, so the drift guards cover it:
+  identifiers, `CIBMP_*` names, repo paths, record links and the action pin.
+  Adding it surfaced a truncation bug in the path check — `build_<port>.py`
+  matched as far as `build_` and was reported missing — the same bug the
+  identifier check had already been fixed for.
 - **`CONTRIBUTING.md` now says that a green local test run proves nothing about
   a build.** All 452 tests pass without Docker in seconds because every build
   driver is mocked; a broken `build_esp32()` stays green locally, on push and on

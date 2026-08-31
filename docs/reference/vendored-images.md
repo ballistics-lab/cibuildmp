@@ -114,9 +114,24 @@ one is 106 MB against the other's 565 MB — merging them would make every
 `esp8266` build pull 6.3x what it needs.
 
 **5. `esp_idf_base` — not a toolchain image.** ESP-IDF is installed into it
-*at build time* by `usermod/espidf.py`, not baked in, since this port's own
-config table carries eight distinct `idf_version`s across its rows. `esp32`
-names it directly (`image = "esp_idf_base"`).
+*at build time*, not baked in, since this port's own config table carries
+eight distinct `idf_version`s across its rows. `esp32` names it directly
+(`image = "esp_idf_base"`).
+
+The host/container split for this port, exactly:
+
+| step | where | what |
+| --- | --- | --- |
+| `git clone` ESP-IDF + submodules | **host** | `espidf.py`'s `fetch_esp_idf()`, into `<cache>/esp-idf/<version>` — source, not binaries, the same rule `mpy_dir` follows |
+| `idf_tools.py install --targets=<target>` | container | downloads the compilers for that MCU |
+| `idf_tools.py install-python-env` | container | ESP-IDF's own venv |
+| `idf_tools.py export` + `idf.py` | container | the build itself |
+
+The three container steps are guarded by a `.installed` marker inside the
+tools directory (`build_esp32.py`'s own script), which lives on the host
+through the mount — so the tool download is paid once per
+(`idf_version`, `idf_target`) and reused by every later build, including
+ones in a fresh container.
 
 ## Full port/arch → group mapping
 

@@ -126,9 +126,34 @@ What actually compiles something:
 | `test-all-platforms.yml` | every identifier, bucketed | weekly, or manual dispatch |
 
 So: if you touch a driver, run it for real before believing the tests.
-`cibuildmp examples/template --build "<identifier>"` on a machine with
-Docker is the shortest honest check, and `workflow_dispatch` on
-`test-all-platforms.yml` is the thorough one.
+
+```console
+$ cibuildmp examples/template --build "v1.29.0-manylinux_2_28_x86_64"   # unix
+$ cibuildmp examples/template --build "v1.29.0-qemu-MPS2_AN385"         # qemu
+$ cibuildmp examples/template --build "v1.29.0-rp2-RPI_PICO"            # rp2
+$ cibuildmp examples/template --build "v1.29.0-esp32-ESP32_GENERIC"     # esp32
+$ cibuildmp examples/template --build "v1.29.0-win_amd64"               # windows
+$ cibuildmp examples/template --build "v1.29.0-wasm32"                  # webassembly
+```
+
+That is the whole local check — one identifier, one real container, the
+same code path CI runs. `examples/usercmodule` builds MicroPython's own
+example modules the same way, and is the better fixture if your change
+touches how a module is discovered rather than how a port is built.
+
+`bin/plan_test_matrix.py <dir> --build "<glob>"` prints the buckets CI
+would use, which is how you find out what a wide glob is about to cost
+before dispatching it. `workflow_dispatch` on `test-all-platforms.yml` is
+the thorough check, and needs push rights; without them, open a PR and say
+in it which identifiers you could not run — a reviewer with rights can
+dispatch it.
+
+**Local images look untagged, and that is correct.** Every pin in
+`resources/pinned_docker_images.toml` is a `@sha256:` digest, so
+`docker pull` stores the image with no tag and `docker images` shows
+`<none>`. That is the guarantee, not a problem: a digest reference cannot
+resolve to anything but the pinned bytes. `docker images --digests` prints
+what you have, to compare against the pin file.
 
 ## Adding a new MicroPython tag
 
