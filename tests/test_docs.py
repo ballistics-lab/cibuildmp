@@ -150,6 +150,14 @@ FOREIGN_PATHS = {
     ".github/workflows/ports_windows.yml",  # MicroPython's own workflow
 }
 
+# Build outputs. Naming one is legitimate -- `action.yml` documents where
+# collected files land -- but they exist only after a build, so requiring
+# them turns this check into "did someone build here recently". Caught by
+# CI rather than locally, because a development tree has them and a fresh
+# checkout does not: the same class of mistake as running a subset of the
+# checks CI runs.
+OUTPUT_DIRS = ("mpyhouse", "build", ".obj", "dist", "mpy-import")
+
 # `resources/x.toml` in the docs means the packaged resource, whose real
 # path is `src/cibuildmp/resources/x.toml`. Both roots are tried.
 PATH_ROOTS = (REPO, REPO / "src" / "cibuildmp")
@@ -513,6 +521,8 @@ def test_source_paths_exist(path: Path) -> None:
             continue
         # `docs/records/0072` without the slug is the normal way to cite one.
         if _record_prefix(candidate):
+            continue
+        if any(part in OUTPUT_DIRS for part in candidate.split("/")):
             continue
         # A resource named without its extension in prose is still a real
         # reference, not a missing file.

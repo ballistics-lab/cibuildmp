@@ -78,6 +78,12 @@ sibling containers of its own (Docker-in-Docker was ruled out); `uv tool
 install cibuildmp`/`pip install cibuildmp` directly is the one supported
 way to run it outside CI.
 
+**A container build looks exactly like a host build in the log.** Every
+path is bind-mounted at its identical host path, so `make` prints the same
+directory names it would locally, and a digest-pinned image shows as
+`<none>` in `docker images`. Nothing has escaped the container; there is
+just no visible difference to escape into.
+
 A non-native target (anything other than your own machine's architecture)
 also needs an emulator registered: `docker/setup-qemu-action@v4` on CI, or
 once per machine locally, `docker run --privileged --rm tonistiigi/binfmt
@@ -109,6 +115,56 @@ config file rather than replacing it:
 Anything without an input has an environment form instead — see
 [Configuration](#configuration).
 
+**An empty `CIBMP_*` environment variable is a value, not an absence.** Only
+an *unset* variable is skipped; `CIBMP_VERSION=""` overrides a
+`version = "1.0.0"` in your config with the empty string, which silently
+disables `package.json` and `[publish] extra-files`. This matters on Actions
+specifically, because the usual conditional-env idiom sets the variable
+either way:
+
+```yaml
+env:
+  CIBMP_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}   # WRONG
+```
+
+Write the variable only when you mean it:
+
+```yaml
+- if: startsWith(github.ref, 'refs/tags/v')
+  run: echo "CIBMP_VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
+```
+
+### A complete workflow
+
+Every natmod arch cross-compiles inside a `linux/amd64` container, so this
+needs **no matrix and no `docker/setup-qemu-action`** — one job builds all
+ten:
+
+```yaml
+name: build
+on: [push, pull_request]
+
+jobs:
+  natmod:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ballistics-lab/cibuildmp@v0.4.2
+        with:
+          build: "mpy6.3-v1.29.0-*"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mpy
+          path: mpyhouse/
+```
+
+usermod is the case that *does* need a matrix, because some of its
+identifiers are native to a non-amd64 runner (`*_aarch64`, `*_armv7l` →
+`ubuntu-24.04-arm`) and the rest are emulated — add
+`docker/setup-qemu-action` to any job building an emulated cell. See
+[`.github/workflows/build-examples.yml`](.github/workflows/build-examples.yml)
+for a worked multi-runner version.
+
 See [`examples/template`](examples/template) for a minimal natmod module
 and its `cibuildmp.toml`, and [`examples/wasm2mpy`](examples/wasm2mpy) for
 one whose native source is WebAssembly, compiled through `wasm2c` — the
@@ -139,8 +195,15 @@ mp_obj_t mpy_init(mp_obj_fun_bc_t *self, size_t n_args, size_t n_kw, mp_obj_t *a
 }
 ```
 
+`py/dynruntime.h` in the pinned checkout is the whole API a natmod may
+use — `mp_obj_get_int`, `mp_obj_new_int`, `mp_get_buffer_raise` and the
+rest. Read it when you need something this example does not show.
+
 **2. `natmod/Makefile`** — `MPY_DIR` and `ARCH` arrive on the command line;
-don't hardcode them:
+don't hardcode them. **`BUILD` and the `dist` output must be different
+directories**: `cibuildmp` globs `build/<arch>*/*.mpy` for the finished
+file, so leaving make's own intermediates there gives it two `.mpy` files
+and the `ambiguous output` error below:
 
 ```make
 MOD = mymod
@@ -206,6 +269,16 @@ The filename carries its identifier so several arches can sit side by side;
 rename it to plain `mymod.mpy` on the device, because `import mymod` looks
 for exactly that name.
 
+**Ask the device which arch it wants** rather than guessing from the board:
+
+```python
+>>> import sys; print(sys.implementation._mpy >> 10)
+```
+
+That number is the `MP_NATIVE_ARCH_*` index — 1 `x86`, 2 `x64`, 4 `armv6m`,
+5 `armv7m`, 7 `armv7emsp`, 8 `armv7emdp`, 9 `xtensa`, 10 `xtensawin`,
+11 `rv32imc`, 12 `rv64imc`.
+
 **For `mip install`**, set `version` in your config. `cibuildmp` then writes
 a `package.json` beside each `.mpy` naming the ABI and arch it is
 compatible with, which is what lets one release serve every device:
@@ -255,6 +328,15 @@ Two more example trees exist and are built by CI on every push:
 upstream examples, built through `cibuildmp` unmodified — proof the tool
 works on modules it did not shape, and the closest thing here to a
 compatibility suite.
+
+The Makefile above is the **minimum for one arch at a time**.
+[`examples/template`](examples/template)'s own differs deliberately and is
+what a full matrix needs: `BUILD` folds in `$(ARCH_FLAGS)` (so two
+`rv32imc` variants do not share objects), carries an extra directory level
+(so a `../src/` source stays arch-scoped), and `dist` deletes `$(MOD).mpy`
+before rebuilding (so a second run in the same tree cannot collect the
+previous arch's file). Each of those is a real silent-wrong-binary bug
+its comments record.
 
 [`examples/template`](examples/template) is the same module with everything
 a real project ends up needing: a shared `src/` core compiled by both the

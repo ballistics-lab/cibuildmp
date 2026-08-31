@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **CI caught a false positive in the new path guard that a development tree
+  hides.** `action.yml` names `examples/template/mpyhouse/` — a real, correct
+  reference to where output lands, but a build output that exists only after a
+  build. It passed locally and failed on a clean checkout. Build-output
+  directories are excluded now, and the fix was verified by deleting them
+  locally first.
+
+- **A fifth agent was given a task rather than a survey** — "set up cibuildmp
+  for my module, build it, put it on CI, tell me how to install it" — which
+  surfaced a different class of gap than four read-throughs had:
+  - **An empty `CIBMP_*` environment variable is a value, not an absence**, and
+    the standard Actions conditional-env idiom
+    (`${{ cond && x || '' }}`) sets one either way. `CIBMP_VERSION=""` silently
+    overrides a configured `version`, so every non-tag build quietly loses its
+    `package.json` and `[publish] extra-files` with no error. Verified directly:
+    with the variable unset the option resolves to `1.0.0`, with it empty to
+    `''`. Now documented in bold, with the spelling that actually works.
+  - **There was no complete CI workflow anywhere** — a four-line `uses:` fragment
+    in Quick start, and a legacy-actions page that opens by telling you not to
+    read it. For a CI tool. README now carries a full workflow, and says outright
+    that natmod needs no matrix and no `setup-qemu-action` because every natmod
+    image is `linux/amd64` (checked with `platform_for()`, not assumed).
+  - The README Makefile set `BUILD = .obj/$(ARCH)` one line above a comment
+    saying output goes to `build/<arch>*/`, with nothing saying the two must
+    differ — and that collision is the `ambiguous output` error three sections
+    away. Said at the point of use now, along with what
+    `examples/template`'s Makefile adds and why.
+  - `py/dynruntime.h` is named as the API surface; `sys.implementation._mpy >> 10`
+    is given as the way to ask a device which `.mpy` it wants (the docs handed
+    you ten files and never said how to choose); and a container build is
+    explained as looking identical to a host build, because identical-path bind
+    mounts leave nothing visibly different.
 - **A fourth uncontexted agent read the repo, and went for the guard itself.**
   Its sharpest point: `REMOVED_NAMES` in `tests/test_docs.py` is hand-maintained,
   so that check is only as good as someone remembering to add an entry — and it
