@@ -766,3 +766,46 @@ def test_build_one_does_not_copy_a_non_unix_lib_directory(tmp_path, monkeypatch)
     result = build_one(options, target, mpy_dir)
 
     assert not (result.output.parent / "lib").exists()
+
+
+def test_build_one_collects_vendored_libs_without_the_port_object_tree(
+    tmp_path, monkeypatch
+):
+    # Record 0079, caught on a downloaded CI artifact: `ports/unix/
+    # build-<identifier>/lib/` is the port's OWN object directory
+    # (`mbedtls/`, `berkeley-db-1.xx/`, `littlefs/`, `oofatfs/`), and
+    # `repair_unix_binary()` drops its vendored shared object straight
+    # into it. Record 0070's fix copied the whole directory, so a real
+    # `manylinux_2_28_x86_64` artifact shipped 2.0M of `lib/` for 40K of
+    # actual dependency -- 94 `.o` plus 94 `.P` files along for the ride.
+    # What repair vendors is always a plain file directly in `lib/`.
+    package_dir = tmp_path / "pkg"
+    make_module_dir(package_dir)
+    write_config(package_dir, "")
+    options = UsermodOptions.load(package_dir)
+    options.output_dir = tmp_path / "mpyhouse"
+
+    mpy_dir = tmp_path / "mpy"
+    target = UsermodTarget(port="unix", arch="manylinux_2_28_x86_64")
+
+    def fake_run(cmd, **kwargs):
+        build_dir = mpy_dir / "ports" / "unix" / "build-unix-manylinux_2_28_x86_64"
+        build_dir.mkdir(parents=True, exist_ok=True)
+        (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
+        lib_dir = build_dir / "lib"
+        (lib_dir / "mbedtls").mkdir(parents=True)
+        (lib_dir / "mbedtls" / "aes.o").write_bytes(b"object-file")
+        (lib_dir / "mbedtls" / "aes.P").write_bytes(b"depfile")
+        (lib_dir / "libffi.so.6").write_bytes(b"\x7fELF-stub-shared-object")
+
+    monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
+    (mpy_dir / "ports" / "unix").mkdir(parents=True)
+
+    result = build_one(options, target, mpy_dir)
+
+    collected_lib = result.output.parent / "lib"
+    # The vendored .so lands where `$ORIGIN/lib` will look for it...
+    assert (collected_lib / "libffi.so.6").is_file()
+    # ...and the port's own intermediates do not come with it.
+    assert not (collected_lib / "mbedtls").exists()
+    assert [p.name for p in collected_lib.iterdir()] == ["libffi.so.6"]

@@ -40,6 +40,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `webassembly_companions()`, `esp32_companions()`), which `build_one()` copies
   beside the primary under their own names -- both are references by exact name
   from inside the primary, so only the primary is safely renameable. Record 0079.
+- **`unix` artifacts shipped 2.0M of the port's own object files.**
+  `ports/unix/build-<identifier>/lib/` is where the port builds its bundled
+  libraries (`mbedtls/`, `berkeley-db-1.xx/`, `littlefs/`, `oofatfs/`), and
+  `repair_unix_binary()` vendors its shared object into that same directory --
+  so record 0070's "copy the `lib/` beside the binary" copied 94 `.o` and 94
+  `.P` files along with the 40K `libffi.so.6` that is the actual dependency.
+  Caught by downloading a real CI artifact. Only the vendored shared objects
+  are collected now, still under `lib/` so the binary's own `$ORIGIN/lib`
+  rpath resolves: a real `manylinux_2_28_x86_64` artifact went from 2.7M to
+  764K and still runs from where it is collected. Record 0079.
 - **`qemu` builds collected 240K of build scratch.** Record 0070's fix copied any
   `lib/` sitting beside the produced binary, for every port; `ports/qemu`'s own
   `lib/` is `libm/`'s object files, so 54 `.o`/`.P` intermediates went into a real

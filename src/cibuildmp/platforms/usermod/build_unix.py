@@ -895,18 +895,28 @@ def build_unix(
 
 
 def unix_companions(produced: Path) -> list[Path]:
-    """`repair_unix_binary()`'s own vendored `lib/`, when it made one.
+    """The shared objects `repair_unix_binary()` vendored, and only those.
 
-    Record 0070 introduced this copy inside `orchestrate.build_one()`
-    itself, which looked for `produced.parent / "lib"` for *every* port.
-    Only `unix` has a `lib/` that means "shared objects this binary needs
-    at runtime". `qemu`'s build directory has one too, and it is
-    `libm/`'s own object files -- a real collected
-    `mpyhouse/v1.28.0-qemu-MPS2_AN385/lib/` on 2026-08-31 held 54
-    `.o`/`.P` intermediates, 240K of build scratch, shipped to a release
-    by a consumer that (correctly) uploads the whole identifier
-    directory. Which sibling of `produced` is part of the artifact is a
-    fact about the port, so the port answers it. Record 0079.
+    `ports/unix/build-<identifier>/lib/` is **the port's own object
+    directory** -- `mbedtls/`, `berkeley-db-1.xx/`, `littlefs/`,
+    `oofatfs/`, each full of `.o`/`.P` intermediates -- and
+    `repair_unix_binary()` drops its `cp -L "$src" lib/"$lib"` output
+    straight into it. So "the `lib/` beside the binary" is two unrelated
+    things sharing a name, and record 0070's fix (copy the whole
+    directory) shipped both: a real collected `manylinux_2_28_x86_64`
+    artifact carried 2.0M of `lib/`, of which 40K was the `libffi.so.6`
+    the binary actually needs and 94 `.o` + 94 `.P` files were not.
+    Measured on a downloaded CI artifact, not estimated.
+
+    The two are cleanly separable, from `repair_unix_binary()`'s own
+    shell: what it vendors is always a plain *file* directly in `lib/`,
+    named after a `DT_NEEDED` entry, while every port intermediate lives
+    one directory deeper. Returning the files preserves the
+    `$ORIGIN/lib` layout the rpath needs -- `build_one()` copies each
+    companion to its own path relative to the binary -- without carrying
+    the object tree along with it. Record 0079.
     """
     lib_dir = produced.parent / "lib"
-    return [lib_dir] if lib_dir.is_dir() else []
+    if not lib_dir.is_dir():
+        return []
+    return sorted(p for p in lib_dir.iterdir() if p.is_file() and ".so" in p.name)

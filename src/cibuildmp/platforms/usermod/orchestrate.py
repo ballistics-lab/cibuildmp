@@ -396,7 +396,13 @@ def build_one(
     # `micropython.wasm` are references by exact name from inside the
     # primary. Only the primary is safely renameable.
     for companion in _COMPANION_FN.get(target.port, _no_companions)(produced):
-        target_path = dest.parent / companion.name
+        # Placed by its path *relative to the primary*, not by basename:
+        # `unix`'s vendored shared objects have to land back under
+        # `lib/` for the binary's own `$ORIGIN/lib` rpath to find them,
+        # while `webassembly`/`esp32`'s companions sit directly beside
+        # their primary and are unaffected by the same rule.
+        target_path = dest.parent / companion.relative_to(produced.parent)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
         if companion.is_dir():
             shutil.copytree(companion, target_path, dirs_exist_ok=True)
         else:

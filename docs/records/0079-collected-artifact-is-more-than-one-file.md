@@ -106,6 +106,32 @@ argument that the contract, not the consumer, was wrong.
   rows at the same time, but nothing here changes them, and their current form
   is correct as it stands.
 
+**Addendum, 2026-08-31 — `unix`'s own `lib/` is two things sharing a name.**
+
+Caught by downloading a real CI artifact from the first green run of this record's
+own change, rather than by reading the source: `a7p-usermod-unix-x64` was 2.7M, of
+which 2.0M was `lib/`. Only 40K of that (`libffi.so.6`) is a runtime dependency.
+The rest — 94 `.o` and 94 `.P` files under `mbedtls/`, `berkeley-db-1.xx/`,
+`littlefs/`, `oofatfs/`, `mbedtls_errors/` — is the unix port's own object
+directory, because `ports/unix/build-<identifier>/lib/` *is* that directory and
+`repair_unix_binary()` drops its vendored shared object into it.
+
+So this record's first pass fixed `qemu`'s version of the problem and reproduced
+`unix`'s, having concluded that "only `unix` has a `lib/` that means shared
+objects" — true of the *name*, false of the directory. [0070] shipped those two
+megabytes per unix artifact from the day it landed.
+
+`repair_unix_binary()`'s own shell separates the two cleanly: `cp -L "$src"
+lib/"$lib"` puts a plain file directly in `lib/`, while every port intermediate
+lives a directory deeper. `unix_companions()` now returns those files only, and
+`build_one()` places each companion by its path *relative to the primary* so they
+land back under `lib/` where `$ORIGIN/lib` will find them. Verified by rebuilding:
+764K collected, and the binary still runs from the collected directory.
+
+The general lesson is the one this record already argues, sharper: the check that
+found this was downloading the artifact and looking inside it. Every green run,
+including this record's own, had said nothing about it.
+
 [0054]: 0054-usermod-example-from-upstream-usercmodule.md
 [0069]: 0069-upstream-usercmodule-narrow-ci-slice.md
 [0070]: 0070-unix-collected-binary-missing-repaired-lib-sidecar.md
