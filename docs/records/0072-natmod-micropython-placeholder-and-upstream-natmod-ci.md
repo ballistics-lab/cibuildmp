@@ -1,6 +1,6 @@
 # 0072 — a `{micropython}` placeholder for natmod, and a real `examples/natmod` slice
 
-- Status: Implemented (one module, two arches -- not the full eleven-module survey [0055] scoped)
+- Status: Implemented (all eleven upstream modules -- see this record's own addendum)
 - Related: [0054], [0055], [0069], [0071]
 
 ## What this closes, and what it deliberately does not
@@ -115,6 +115,64 @@ runner regardless of which arch's cross-compiler it carries.
   already covers the within-invocation case entirely); left for whoever hits the
   cross-invocation gap for real, the same way [0071] left an equivalent natmod gap for
   this record to eventually pick up.
+
+## Addendum, 2026-08-31 (second) — the other ten modules, and both "still open" items close
+
+Widened to all eleven upstream modules the same day, once the `features0` slice above came
+back clean -- [0054]'s own "widen only if it finds something," and it found nothing left
+to fix, only two things this record's own "still open" section had actually already
+over-stated as gaps.
+
+**All eleven build, collect and `verify_output()` clean against a real, released
+checkout**, `x64` for every module (`examples/natmod/cibuildmp.toml`'s own `module-dir`
+default is `features0`; `.github/workflows/test-upstream-natmod.yml`'s new
+`build-upstream-natmod` matrix job overrides `CIBMP_MODULE_DIR` per module -- resolved the
+same way regardless of which config layer supplied it). Verified two ways, both against the
+real `v1.29.0` tarball checkout already cached from the first pass: by hand on the bare
+host (mpy-cross plus each module's own `make ... all`, no cibuildmp code involved) *and*
+through cibuildmp's own real `cli.main()`, with only `dockerrun.run()` swapped for a plain
+`subprocess.run` against the bind-mount-free command list (no Docker daemon in this
+session either time) -- options resolution, the `{micropython}` substitution,
+`pre-build-command`, `run_make`, `collect_output`'s fallback, `verify_output` and the
+output-packaging step are all real, unmocked cibuildmp code in the second pass. `x64`+
+`armv7emsp` together for `features0` (this record's original slice) went through the same
+real-`cli.main()` path too, `gcc-arm-none-eabi` installed for the one session that needed
+it -- both arches' own headers came back correctly encoded (`EM_X86_64`/`EM_ARM`), the
+actual regression case this whole record is about, now confirmed through the real pipeline
+rather than argued from reading `dynruntime.mk` alone.
+
+**`btree`'s own "still open" bullet above was wrong to call it a gap**, not just optimistic:
+`sources.fetch_micropython()` (`sources.py`) tries the release *tarball* first and only
+falls back to a plain `git clone` (the path that genuinely needs `micropython-submodules`)
+when a tag publishes no release asset -- confirmed directly, `lib/berkeley-db-1.xx` is
+fully populated in the real, tarball-fetched `v1.29.0` cache directory this addendum's own
+builds ran against, no submodule config anywhere in `examples/natmod/cibuildmp.toml`.
+`natmod`'s own default target selection (`narrow_to_newest_tag()`) never lands on a
+tarball-less tag on its own either, so this is not a narrow escape -- every real natmod
+identifier this project's own default config can select already gets the vendored copy for
+free. The gap [0055] named is real only for a config that deliberately targets a
+tarball-less preview/branch tag, which stays genuinely unhandled and is worth remembering
+if that ever comes up, but is not what blocked `btree` here.
+
+**The rv32imc arch-flags collision does not need `verify_output()` as its "actual
+backstop" the way this record originally put it -- that undersold the fix already
+shipped.** `pre-build-command`'s `rm -rf *.mpy build build-*` (widened from the original
+`rm -rf features0.mpy build build-*` specifically so it also matches the six
+`$(MOD_BASE)_$(ARCH).mpy`-style filenames `deflate`/`framebuf`/`heapq`/`random`/`re`/
+`btree` all use, confirmed by reading each of their own Makefiles directly -- [0055] only
+named `btree`'s own arch-suffixed filename, not that five more modules share the same
+pattern) deletes the *entire* build tree, not just the top-level `.mpy`, before every
+single target in this fixture's own build. With nothing left on disk for `make` to compare
+mtimes against, no rule in any Makefile -- upstream's `dynruntime.mk`, this project's own
+`dist` convention, any arch, any `arch-flags` variant, on any pinned tag -- can ever see a
+stale prerequisite as up to date, structurally, not probabilistically. `verify_output()`
+stays exactly what it always was: an independent, unrelated check that the linker actually
+encoded what the config asked for, run whether or not this fixture ever touches an
+arch-flags axis at all -- not the thing standing between this fixture and a silently wrong
+artifact. rv32imc arch-flags variants still are not built in this fixture's own CI (no
+module here uses that axis), so the *mechanism* is proven by construction, not by a real
+riscv build; widening to prove it that way, too, is real future work if it is ever worth
+the toolchain cost, not a gap this addendum is leaving unexplained.
 
 [0054]: 0054-usermod-example-from-upstream-usercmodule.md
 [0055]: 0055-natmod-example-from-upstream-natmod.md

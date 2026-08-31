@@ -2,12 +2,18 @@
 # (features0-4, btree, deflate, framebuf, heapq, random, re), not a module
 # this project wrote for itself the way `examples/template/natmod` is.
 #
-# Only `features0` wired up here, deliberately: [0055]'s own survey names it
-# "deliberately minimal ... would prove the contract" ahead of the modules
-# that "drag in real MicroPython internals" -- `btree` even needs a git
-# submodule cibuildmp's own checkout resolution never initialises (see that
-# record's own "Two examples worth calling out before anyone starts").
-# Widen only if this slice finds something, [0054]'s own rule.
+# All eleven wired up: `module-dir` here is `features0`'s own, the default
+# for a bare `cibuildmp examples/natmod` run;
+# `.github/workflows/test-upstream-natmod.yml` overrides `CIBMP_MODULE_DIR`
+# per job for the other ten, verified 2026-08-31 against a real, released
+# checkout (v1.29.0, tarball-fetched, on the bare host -- no Docker in that
+# session) -- every one builds, collects and `verify_output()`s clean.
+# `btree`'s own `lib/berkeley-db-1.xx` needs no `micropython-submodules`
+# entry either, confirmed the same way: `sources.fetch_micropython()`
+# prefers the release tarball, which already vendors every `lib/` submodule
+# -- the git-clone fallback that genuinely needs one only triggers for a tag
+# with no published release asset (a preview/branch build), which is not
+# what `natmod`'s own default target selection ever narrows to.
 #
 # No `build =` here, on purpose, matching `examples/usercmodule/cibuildmp.toml`
 # (record 0069): `.github/workflows/test-upstream-natmod.yml` passes its own
@@ -26,21 +32,31 @@ module-dir = "{micropython}/examples/natmod/features0"
 # `dist` convention -- confirmed against a real checkout, docs/records/0055.
 # `build.collect_output()`'s own fallback (record 0072) is what makes that
 # produce a real, findable `.mpy`: `all` leaves `$(MOD).mpy` sitting
-# directly in module-dir, never under `build/<arch>*/`.
+# directly in module-dir, never under `build/<arch>*/`. Six of the eleven
+# modules (`btree`, `deflate`, `framebuf`, `heapq`, `random`, `re` -- every
+# one that coexists with a same-named built-in) also rename that file to
+# `$(MOD_BASE)_$(ARCH).mpy`, not just `btree` the way [0055] originally
+# named alone -- harmless for the fallback either way, since it globs
+# `*.mpy` rather than assuming a filename.
 make-target = "all"
 
 # `all`'s own build products are not scoped by arch inside module-dir the
 # way this project's own `dist` target is (record 0055's own guard survey):
 # upstream's examples are written to be built once, by hand, one arch at a
-# time. cibuildmp instead builds every selected arch back to back in this
-# same checkout, so a leftover `features0.mpy` -- or, for any pinned tag
-# older than upstream's own `531c80dc0` ("tools/mpy_ld.py: Do not share
-# build directory across architectures"), a leftover unscoped `build/` --
-# from the *previous* arch can read as up to date and ship silently
+# time. cibuildmp instead builds every selected arch (or, for `rv32imc`,
+# every `arch-flags` variant of the same arch -- `BUILD` is scoped by
+# `$(ARCH)` alone even on the newest pinned tag, never by `$(ARCH_FLAGS)`)
+# back to back in this same checkout, so a leftover artifact from the
+# *previous* build could otherwise read as up to date and ship silently
 # unchanged. `build_all()`'s own pre-loop `build/` cleanup (this project's
 # `dist` contract) only runs once per invocation, before the tag is even
 # known, so it cannot reach a `{micropython}`-templated module-dir at all
-# (docs/records/0072) -- clearing both files before *every* single arch's
-# build, here instead, keeps each arch starting from nothing, at the one
-# cost of an always-cold rebuild.
-pre-build-command = "rm -rf features0.mpy build build-*"
+# (docs/records/0072) -- deleting every `.mpy` plus the whole build tree
+# before *every single* build, here instead, removes the possibility
+# structurally rather than just detecting it after the fact: with nothing
+# left for `make` to compare mtimes against, no target -- `dist` or `all`,
+# any arch, any `arch-flags` variant -- can ever see a stale prerequisite as
+# up to date. `verify_output()`'s own arch/arch-flags header check (already
+# part of every real build) stays as a second, independent check on top,
+# not the only thing standing between this and a silently wrong artifact.
+pre-build-command = "rm -rf *.mpy build build-*"
