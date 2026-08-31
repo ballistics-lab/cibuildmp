@@ -9,19 +9,34 @@
 # but wrong for a caller who runs `cibuildmp examples/usercmodule` directly with no
 # `--build` given at all.
 #
-# No `user-c-modules =` either, for every port, CMake and Make alike: the built-in
-# default is already `"."` ([0051]'s ninth addendum), which is exactly right on both
-# sides once each side has its own real entry point pointed at the pinned checkout --
-# `micropython.cmake` (CMake ports, via MICROPY_DIR, see that file's own header comment)
-# and `{cexample,cppexample,subpackage}/micropython.mk` (Make ports, via $(TOP), see
-# `cexample/micropython.mk`'s own header comment) -- rather than through user-c-modules
-# itself. py.mk's own `$(USER_C_MODULES)/*/micropython.mk` glob finds these three
-# directories the same way it would any real multi-module project (a7p's own nested
-# `usermod/a7p/` shape); no vendoring (0054): every one of the six files here only
-# `include`s upstream's own real file, none of them copies its content.
+# The two CMake ports (rp2/esp32) need no `user-c-modules =` at all: the built-in "."
+# default already points at this fixture's own `micropython.cmake`, which resolves the
+# pinned checkout itself via MICROPY_DIR (see that file's own header comment). That file
+# stays real and necessary, not vendoring (0054) -- it exists purely to add the one
+# `include()` line upstream's own aggregator omits (subpackage is not in it, even though
+# py/py.mk's own directory glob already builds it on the Make side with no extra line at
+# all -- confirmed against a real checkout, docs/records/0069). Pointing a CMake port's
+# `user-c-modules` straight at `{micropython}/examples/usercmodule` instead (matching the
+# Make ports below) would silently drop subpackage coverage on rp2/esp32, since that
+# would resolve to upstream's own incomplete aggregator rather than this file.
 #
-# Two real, separate upstream bugs in ports/webassembly/Makefile, both live-caught: it
-# sets CC/LD to `emcc` but never CXX, so py/mkenv.mk's own default
+# The four Make ports have no such gap -- py.mk's own `$(USER_C_MODULES)/*/micropython.mk`
+# glob discovers all three of upstream's own subdirectories on its own, no aggregator file
+# needed -- so `{micropython}` (orchestrate.py's own placeholder, docs/records/0071) can
+# point straight at the pinned checkout's own examples/usercmodule/ directly. No wrapper
+# file of any kind: this is the more direct form of 0054's own "no vendoring" call, not
+# just a lesser version of it.
+[override."*-manylinux_2_28_x86_64"]
+user-c-modules = "{micropython}/examples/usercmodule"
+
+[override."*-win_amd64"]
+user-c-modules = "{micropython}/examples/usercmodule"
+
+[override."*-qemu-*"]
+user-c-modules = "{micropython}/examples/usercmodule"
+
+# Two real, separate upstream bugs in ports/webassembly/Makefile, both live-caught:
+# it sets CC/LD to `emcc` but never CXX, so py/mkenv.mk's own default
 # (CXX = $(CROSS_COMPILE)g++) applies unmodified and a C++ user module's real .cpp
 # compile silently runs through the *host's* system g++ instead of emsdk's own `em++`
 # (confirmed live: the failure's own `cc1plus` and "unrecognized command-line option"
@@ -37,6 +52,7 @@
 # trap): CXX is a plain `=` assignment a command-line origin always wins outright, and
 # nothing ever assigns CXXFLAGS_MOD at all, so neither has anything to replace.
 [override."*-wasm32"]
+user-c-modules = "{micropython}/examples/usercmodule"
 extra-make-args = "CXX=em++ CXXFLAGS_MOD=-Wno-macro-redefined"
 
 # No `manifest =`: none of the three upstream modules freezes any Python, so the
