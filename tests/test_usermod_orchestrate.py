@@ -662,3 +662,150 @@ def test_build_one_skips_lib_copy_when_no_sidecar_exists(tmp_path, monkeypatch):
     result = build_one(options, target, mpy_dir)
 
     assert not (result.output.parent / "lib").exists()
+
+
+def test_build_one_collects_the_wasm_blob_beside_the_mjs(tmp_path, monkeypatch):
+    # Record 0079: `ports/webassembly` builds `micropython.mjs` AND
+    # `micropython.wasm` (its own README says so, and nothing passes
+    # emscripten `-sSINGLE_FILE`). The driver returns the `.mjs`, which
+    # loads the blob by that literal name from its own directory -- so
+    # collecting the `.mjs` alone shipped 217,344 of the 680,703 bytes a
+    # real build produced, and running it aborted with "failed to
+    # asynchronously prepare wasm: ENOENT ... micropython.wasm".
+    package_dir = tmp_path / "pkg"
+    make_module_dir(package_dir)
+    write_config(package_dir, "")
+    options = UsermodOptions.load(package_dir)
+    options.output_dir = tmp_path / "mpyhouse"
+
+    mpy_dir = tmp_path / "mpy"
+    target = UsermodTarget(port="webassembly", arch="wasm32")
+
+    def fake_run(cmd, **kwargs):
+        build_dir = mpy_dir / "ports" / "webassembly" / "build-webassembly-wasm32"
+        build_dir.mkdir(parents=True, exist_ok=True)
+        (build_dir / "micropython.mjs").write_text(
+            "var wasmBinaryFile='micropython.wasm'"
+        )
+        (build_dir / "micropython.wasm").write_bytes(b"\x00asm\x01\x00\x00\x00")
+
+    monkeypatch.setattr(dockerrun, "run", fake_run)
+    (mpy_dir / "ports" / "webassembly").mkdir(parents=True)
+
+    result = build_one(options, target, mpy_dir)
+
+    blob = result.output.parent / "micropython.wasm"
+    assert blob.is_file()
+    assert blob.read_bytes() == b"\x00asm\x01\x00\x00\x00"
+    # Under its own name, not `_dest_name()`-qualified: the `.mjs` looks
+    # for exactly this string.
+    assert not list(result.output.parent.glob("*-wasm32.wasm"))
+
+
+def test_build_one_collects_the_esp32_combined_firmware(tmp_path, monkeypatch):
+    # Record 0079: the driver returns `micropython.bin`, the application
+    # image; `firmware.bin` is the combined bootloader + partition table
+    # + application one that actually flashes (ports/esp32/README.md).
+    # Both real consumers that ship an esp32 artifact upload both files.
+    package_dir = tmp_path / "pkg"
+    make_module_dir(package_dir)
+    write_config(package_dir, "")
+    options = UsermodOptions.load(package_dir)
+    options.output_dir = tmp_path / "mpyhouse"
+
+    mpy_dir = tmp_path / "mpy"
+    target = UsermodTarget(port="esp32", arch="ESP32_GENERIC")
+
+    def fake_run(cmd, **kwargs):
+        build_dir = mpy_dir / "ports" / "esp32" / "build-ESP32_GENERIC"
+        build_dir.mkdir(parents=True, exist_ok=True)
+        (build_dir / "micropython.bin").write_bytes(FAKE_X86_64_ELF)
+        (build_dir / "firmware.bin").write_bytes(b"combined-image")
+
+    monkeypatch.setenv("CIBMP_ESP32_DOCKER_IMAGE", "cibuildmp-esp32:local")
+    monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", fake_run)
+    monkeypatch.setattr(espidf, "fetch_esp_idf", lambda version, **k: tmp_path / "idf")
+    (mpy_dir / "ports" / "esp32").mkdir(parents=True)
+
+    result = build_one(options, target, mpy_dir)
+
+    combined = result.output.parent / "firmware.bin"
+    assert combined.is_file()
+    assert combined.read_bytes() == b"combined-image"
+
+
+def test_build_one_does_not_copy_a_non_unix_lib_directory(tmp_path, monkeypatch):
+    # Record 0079's other half: record 0070's fix copied any `lib/` next
+    # to the produced binary, for every port. `ports/qemu` has one --
+    # `libm/`'s own object files -- so a real collected
+    # `mpyhouse/v1.28.0-qemu-MPS2_AN385/lib/` carried 54 `.o`/`.P`
+    # intermediates (240K of build scratch) out to a release. Only the
+    # port knows which siblings are part of its artifact, and `qemu`
+    # declares none.
+    package_dir = tmp_path / "pkg"
+    make_module_dir(package_dir)
+    write_config(package_dir, "")
+    options = UsermodOptions.load(package_dir)
+    options.output_dir = tmp_path / "mpyhouse"
+
+    mpy_dir = tmp_path / "mpy"
+    target = UsermodTarget(port="qemu", arch="")
+
+    def fake_run(cmd, **kwargs):
+        build_dir = mpy_dir / "ports" / "qemu" / "build-qemu"
+        build_dir.mkdir(parents=True, exist_ok=True)
+        (build_dir / "firmware.elf").write_bytes(FAKE_X86_64_ELF)
+        libm = build_dir / "lib" / "libm"
+        libm.mkdir(parents=True)
+        (libm / "math.o").write_bytes(b"object-file")
+
+    monkeypatch.setattr(dockerrun, "ensure_image", lambda *a, **k: "qemu:test")
+    monkeypatch.setattr(dockerrun, "run", lambda cmd, **k: fake_run(cmd, **k))
+    (mpy_dir / "ports" / "qemu").mkdir(parents=True)
+
+    result = build_one(options, target, mpy_dir)
+
+    assert not (result.output.parent / "lib").exists()
+
+
+def test_build_one_collects_vendored_libs_without_the_port_object_tree(
+    tmp_path, monkeypatch
+):
+    # Record 0079, caught on a downloaded CI artifact: `ports/unix/
+    # build-<identifier>/lib/` is the port's OWN object directory
+    # (`mbedtls/`, `berkeley-db-1.xx/`, `littlefs/`, `oofatfs/`), and
+    # `repair_unix_binary()` drops its vendored shared object straight
+    # into it. Record 0070's fix copied the whole directory, so a real
+    # `manylinux_2_28_x86_64` artifact shipped 2.0M of `lib/` for 40K of
+    # actual dependency -- 94 `.o` plus 94 `.P` files along for the ride.
+    # What repair vendors is always a plain file directly in `lib/`.
+    package_dir = tmp_path / "pkg"
+    make_module_dir(package_dir)
+    write_config(package_dir, "")
+    options = UsermodOptions.load(package_dir)
+    options.output_dir = tmp_path / "mpyhouse"
+
+    mpy_dir = tmp_path / "mpy"
+    target = UsermodTarget(port="unix", arch="manylinux_2_28_x86_64")
+
+    def fake_run(cmd, **kwargs):
+        build_dir = mpy_dir / "ports" / "unix" / "build-unix-manylinux_2_28_x86_64"
+        build_dir.mkdir(parents=True, exist_ok=True)
+        (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
+        lib_dir = build_dir / "lib"
+        (lib_dir / "mbedtls").mkdir(parents=True)
+        (lib_dir / "mbedtls" / "aes.o").write_bytes(b"object-file")
+        (lib_dir / "mbedtls" / "aes.P").write_bytes(b"depfile")
+        (lib_dir / "libffi.so.6").write_bytes(b"\x7fELF-stub-shared-object")
+
+    monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
+    (mpy_dir / "ports" / "unix").mkdir(parents=True)
+
+    result = build_one(options, target, mpy_dir)
+
+    collected_lib = result.output.parent / "lib"
+    # The vendored .so lands where `$ORIGIN/lib` will look for it...
+    assert (collected_lib / "libffi.so.6").is_file()
+    # ...and the port's own intermediates do not come with it.
+    assert not (collected_lib / "mbedtls").exists()
+    assert [p.name for p in collected_lib.iterdir()] == ["libffi.so.6"]

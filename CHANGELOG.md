@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`windows` and `qemu` smoke steps in `test-upstream-usermodule.yml`**, closing
+  two of record 0079's own "not done here" gaps. `build-windows` installs `wine`
+  and runs the collected `win_amd64` `.exe` against `smoke_test.py` unmodified;
+  `build-qemu` installs `qemu-system-arm` and `mpremote`, starts qemu itself
+  against the collected `firmware-<identifier>.elf` (`qemu`'s own build target
+  is `firmware.elf`, not `micropython.elf` like every other port here — the
+  first two real CI attempts pointed at the wrong filename by pattern-matching
+  the other three steps, and failed with a generic "device busy" message that
+  looked like a pty race and then a socket-startup race until `qemu.log` itself
+  was actually read) with its serial port redirected to a local TCP socket, and
+  runs `mpremote ... run` against it over `socket://`. Both paths (a passing
+  script and a deliberately broken one) were verified live against real
+  cross-compiled binaries before being wired into CI — `rp2`'s own `.uf2` still
+  has no smoke test, for the same hardware/emulator reason record 0069 gives.
+  Record 0080.
+
+- **A `webassembly` smoke step in `test-upstream-usermodule.yml`**, running the
+  unmodified `examples/usercmodule/smoke_test.py` under `node` from `mpyhouse/`.
+  That job stopped at `ls` before, on the premise that a `.wasm` does not run on
+  this runner -- `node` is preinstalled there, every consuming repo already runs
+  its own wasm tests through it, and this is the check that would have caught the
+  collection bug above on the day it landed. Record 0079.
+
 - **Record 0078: handing the repo to an uncontexted reader is the docs test the
   suite cannot be.** Five rounds of it produced this session's findings, and the
   movement between rounds is the useful part — false user-facing claims, then
@@ -21,6 +44,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are generated, so the next reader does not rediscover that.
 
 ### Fixed
+
+- **A collected usermod artifact was always exactly one file, and for two ports
+  that is not the whole build.** `webassembly` collected `micropython.mjs`
+  without `micropython.wasm` -- the `.mjs` loads the blob by that literal name,
+  so the collected copy aborted with `failed to asynchronously prepare wasm:
+  ENOENT ... micropython.wasm`, having shipped 217,344 of the 680,703 bytes the
+  build actually produced. `esp32` collected `micropython.bin`, the application
+  image, never the combined `firmware.bin` that is the flashable one. Each port
+  now declares its own companions (`unix_companions()`,
+  `webassembly_companions()`, `esp32_companions()`), which `build_one()` copies
+  beside the primary under their own names -- both are references by exact name
+  from inside the primary, so only the primary is safely renameable. Record 0079.
+- **`unix` artifacts shipped 2.0M of the port's own object files.**
+  `ports/unix/build-<identifier>/lib/` is where the port builds its bundled
+  libraries (`mbedtls/`, `berkeley-db-1.xx/`, `littlefs/`, `oofatfs/`), and
+  `repair_unix_binary()` vendors its shared object into that same directory --
+  so record 0070's "copy the `lib/` beside the binary" copied 94 `.o` and 94
+  `.P` files along with the 40K `libffi.so.6` that is the actual dependency.
+  Caught by downloading a real CI artifact. Only the vendored shared objects
+  are collected now, still under `lib/` so the binary's own `$ORIGIN/lib`
+  rpath resolves: a real `manylinux_2_28_x86_64` artifact went from 2.7M to
+  764K and still runs from where it is collected. Record 0079.
+- **`qemu` builds collected 240K of build scratch.** Record 0070's fix copied any
+  `lib/` sitting beside the produced binary, for every port; `ports/qemu`'s own
+  `lib/` is `libm/`'s object files, so 54 `.o`/`.P` intermediates went into a real
+  collected identifier directory and out to a release from there. Only `unix`
+  declares a `lib/` companion now. Record 0079.
 
 - **CI caught a false positive in the new path guard that a development tree
   hides.** `action.yml` names `examples/template/mpyhouse/` — a real, correct

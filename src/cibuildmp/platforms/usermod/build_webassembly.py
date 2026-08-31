@@ -125,3 +125,30 @@ def build_webassembly(
             f"{produced} is missing"
         )
     return produced
+
+
+def webassembly_companions(produced: Path) -> list[Path]:
+    """`micropython.wasm` -- the larger half of what this port builds.
+
+    `ports/webassembly/README.md` says it plainly: the build produces
+    `micropython.mjs` (the JS runtime) *and* `micropython.wasm`
+    (MicroPython itself). Nothing passes emscripten `-sSINGLE_FILE`, so
+    the `.mjs` carries only the literal string `micropython.wasm`,
+    resolved against whatever directory the `.mjs` is loaded from.
+
+    Collecting the `.mjs` alone shipped an artifact that could not load
+    at all -- record 0070's failure, one port over:
+
+        failed to asynchronously prepare wasm: Error: ENOENT:
+        no such file or directory, open '.../micropython.wasm'
+
+    -- a real `node` run of a real `mpyhouse/v1.28.0-wasm32/` collected
+    by a real local build (2026-08-31): 217,344 bytes collected out of
+    the 680,703 the build actually produced.
+
+    Kept under its own name, never `_dest_name()`-renamed -- the `.mjs`
+    looks for exactly `micropython.wasm`. Renaming the `.mjs` itself is
+    fine; that name is the caller's own entry point.
+    """
+    wasm_blob = produced.parent / "micropython.wasm"
+    return [wasm_blob] if wasm_blob.is_file() else []

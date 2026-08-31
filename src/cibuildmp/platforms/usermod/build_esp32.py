@@ -208,3 +208,21 @@ def build_esp32(
             f"esp32/{opts.board}: build reported success but {firmware} is missing"
         )
     return firmware
+
+
+def esp32_companions(produced: Path) -> list[Path]:
+    """`firmware.bin` -- the combined image, the one that is flashable.
+
+    `produced` is `micropython.bin`, the application image alone.
+    `ports/esp32/README.md`: the build "will produce a combined
+    `firmware.bin` image", combined meaning bootloader + partition table
+    + `micropython.bin`. A real local build has both, and they differ --
+    1,777,392 against 1,715,952 bytes.
+
+    `micropython.bin` stays the primary rather than the two swapping
+    places: the collected name is `<name>-<identifier>.bin`, and moving
+    which file that points at would silently change what an existing
+    consumer already flashes.
+    """
+    combined = produced.parent / "firmware.bin"
+    return [combined] if combined.is_file() else []
