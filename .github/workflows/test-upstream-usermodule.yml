@@ -180,16 +180,25 @@ jobs:
   # already discovered by py.mk's own glob), one representative identifier
   # per port rather than each port's own full arch matrix -- [0054]'s own
   # "widen only if it finds something", not a cost-blind repeat of
-  # build-examples.yml's broader coverage. No smoke test for `windows` or
-  # `qemu`: a .exe needs wine and a qemu ELF needs qemu-system-arm, neither
-  # of which this runner has without a setup step (record 0069's own
-  # reasoning for why rp2 has none either -- its .uf2 needs hardware or a
-  # board emulator).
+  # build-examples.yml's broader coverage.
   #
-  # `webassembly` was on that list too, and should not have been: node is
-  # preinstalled here, and its own smoke step now runs below. Record 0079
-  # is what that omission cost -- a collected artifact missing more than
-  # half its bytes, green in CI for as long as nothing ran it.
+  # All three now run the same smoke_test.py against the collected
+  # artifact (record 0080, closing two of record 0079's own "no smoke
+  # test" gaps): `webassembly` needs only node, already preinstalled;
+  # `windows`'s win_amd64 .exe runs unmodified under `wine`, apt-installed
+  # below -- live-verified against a real cross-compiled micropython.exe
+  # before this was wired in; `qemu`'s MPS2_AN385 firmware.elf has no CLI
+  # to hand a script to (upstream's own port only exposes a REPL over a
+  # serial device), so its step starts `qemu-system-arm` itself against
+  # the collected .elf with `-serial pty`, waits for the pty device name
+  # in its stdout, then runs `mpremote ... run` against that device --
+  # `mpremote`'s raw-REPL protocol propagates a real Python exception as a
+  # non-zero exit, confirmed live with both a passing and a deliberately
+  # failing script.
+  #
+  # rp2's own `firmware.uf2` still has no equivalent (record 0069's own
+  # reasoning still holds for it): it needs real hardware or a
+  # board-specific emulator, neither of which this covers.
   build-windows:
     runs-on: ubuntu-latest
     env:
@@ -205,6 +214,22 @@ jobs:
 
       - name: List built artifacts
         run: ls -laR examples/usercmodule/mpyhouse
+
+      - name: Install wine (to run the cross-compiled win_amd64 .exe)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq wine wine64
+
+      # win_amd64's micropython.exe takes a script path on argv exactly
+      # like the unix binary does -- confirmed live under wine before this
+      # step was added, including that a real exception inside the script
+      # still exits non-zero through it.
+      - name: "Smoke test (windows): run the built .exe against smoke_test.py"
+        run: |
+          set -euo pipefail
+          identifier="${CIBMP_UPSTREAM_TAG}-win_amd64"
+          exe="examples/usercmodule/mpyhouse/${identifier}/micropython-${identifier}.exe"
+          WINEDEBUG=-all wine "$exe" examples/usercmodule/smoke_test.py
 
   # `examples/usercmodule/cibuildmp.toml`'s own `[override."*-wasm32"]`
   # carries this identifier's own `extra-make-args` (CXX=em++ plus the
@@ -268,3 +293,52 @@ jobs:
 
       - name: List built artifacts
         run: ls -laR examples/usercmodule/mpyhouse
+
+      # `docker/setup-qemu-action` above only registers binfmt_misc
+      # handlers for cross-arch *container* builds -- unrelated to
+      # `qemu-system-arm`, the actual Cortex-M3 system emulator this step
+      # needs, which ubuntu-latest does not carry. `mpremote` is the
+      # official MicroPython PC-side tool for exactly this job (talking
+      # the raw-REPL protocol over a serial device); installed from PyPI
+      # rather than reaching into the pinned checkout for tools/pyboard.py,
+      # so this step depends on nothing from that checkout at all.
+      - name: Install qemu-system-arm and mpremote
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-system-arm
+          pip install --break-system-packages --quiet mpremote
+
+      # MPS2_AN385/`mps2-an385` is this job's one board -- the same
+      # `-semihosting -machine ... -serial pty` invocation
+      # `ports/qemu/Makefile`'s own `run` target uses, run directly here
+      # since that Makefile (and the BOARD-to-`-machine` mapping it would
+      # otherwise supply) lives in the pinned checkout this step has no
+      # path to. Live-verified before this was wired in: a real firmware
+      # boots, `mpremote ... run` against the printed pty executes
+      # smoke_test.py and exits 0, and a deliberately-broken script exits
+      # 1 the same way -- so a real regression here fails the job, not
+      # just a build that merely links.
+      - name: "Smoke test (qemu/MPS2_AN385): run the built firmware against smoke_test.py"
+        run: |
+          set -euo pipefail
+          identifier="${CIBMP_UPSTREAM_TAG}-qemu-MPS2_AN385"
+          elf="examples/usercmodule/mpyhouse/${identifier}/micropython-${identifier}.elf"
+
+          qemu-system-arm -semihosting -machine mps2-an385 -nographic \
+            -monitor null -serial pty -kernel "$elf" >qemu.log 2>&1 &
+          qemu_pid=$!
+          trap 'kill "$qemu_pid" 2>/dev/null || true' EXIT
+
+          pty=""
+          for _ in $(seq 1 50); do
+            pty=$(grep -oP '(?<=redirected to )/dev/pts/\d+' qemu.log || true)
+            [ -n "$pty" ] && break
+            sleep 0.2
+          done
+          if [ -z "$pty" ]; then
+            echo "qemu-system-arm never printed a pty device:"
+            cat qemu.log
+            exit 1
+          fi
+
+          timeout 20 mpremote connect "$pty" run examples/usercmodule/smoke_test.py
