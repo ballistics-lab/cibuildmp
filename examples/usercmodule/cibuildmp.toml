@@ -29,7 +29,7 @@
 [override."*-manylinux_2_28_x86_64"]
 user-c-modules = "{micropython}/examples/usercmodule"
 
-[override."*-win_amd64"]
+[override."*-win*"]
 user-c-modules = "{micropython}/examples/usercmodule"
 
 [override."*-qemu-*"]
