@@ -36,6 +36,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cibuildmp examples/usercmodule --build <identifier>` run, CI or local, now resolves
   identically to what a job here does.
 
+### Changed
+
+- **`test-all-platforms.yml` no longer runs on `pull_request`** — the full real matrix
+  (200+ identifiers, bucketed across up to 20 concurrent jobs) took too long to gate every
+  PR's own turnaround time for how rarely its answer actually changes. Now `schedule`
+  (weekly) plus `workflow_dispatch` for an on-demand run; `push`/`pull_request` CI still
+  covers every change through `tests.yml`'s unit suite and `build-examples.yml`'s narrower
+  matrix. The `if: github.actor != 'dependabot[bot]'` guard record 0068 added specifically
+  for the now-gone `pull_request` trigger came out too, moot rather than just redundant.
+
 ### Fixed
 
 - **`docker/windows.Dockerfile` installed only the C mingw-w64 cross-compilers
