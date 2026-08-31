@@ -17,9 +17,11 @@ is the only thing left that decides what actually gets built. Driven by
 `cli.py` so that file does not grow a second, differently-shaped copy of
 the same dispatch logic.
 
-`--toolchain` is natmod-specific and stays that way: toolchain resolution
-always goes through whatever each `build_<port>()` already does
-internally, with no `auto`/`host`/`download` override.
+There is no `--toolchain` flag on either family any more: record 0050
+deleted natmod's host toolchain resolver outright, and every build of
+either family runs in a pulled image whose own contents are the toolchain.
+This paragraph used to say the flag was "natmod-specific and stays that
+way", which outlived the flag itself.
 
 `--archs auto`/`native`/`all` (record 0049) and `--enable`/`GROUPS`
 (record 0051 point 8) are both retracted, live, in the same session that

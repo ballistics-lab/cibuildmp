@@ -125,9 +125,48 @@ def image_group_mapping() -> str:
     return "\n".join(out).rstrip()
 
 
+def toolchain_map() -> str:
+    """`design.md`'s own ARCH -> `CROSS` table, for the newest stable tag.
+
+    Per tag, not global, which is what made the hand-written version wrong:
+    v1.29.0 gave `x64`/`x86` real prefixes (`x86_64-linux-gnu-`,
+    `i686-linux-gnu-`) where v1.28.0 had an empty `CROSS` and a `-m32`, so
+    any single table is only ever true for the tag it was written against.
+    """
+    data = _load("build-platforms.toml")
+    rows = data["natmod"]["identifiers"]
+    tag = _newest_stable_tag(rows)
+    by_prefix: dict[str, list[str]] = {}
+    for row in rows:
+        if row["tag"] != tag:
+            continue
+        # A genuinely absent `cross` is not the same fact as an empty one:
+        # the tag ranges that predate a CROSS line for that branch have no
+        # key at all (see the table's own header comment).
+        prefix = row.get("cross")
+        key = (
+            "*(none)*"
+            if prefix == ""
+            else "*(absent)*"
+            if prefix is None
+            else f"`{prefix}`"
+        )
+        by_prefix.setdefault(key, []).append(row["arch"])
+    lines = [
+        f"For MicroPython **{tag}** — this is a per-tag fact, not a global one:",
+        "",
+        "| ARCH | `CROSS` |",
+        "| --- | --- |",
+    ]
+    for prefix, arches in sorted(by_prefix.items(), key=lambda kv: kv[1]):
+        lines.append(f"| {' '.join(f'`{a}`' for a in sorted(arches))} | {prefix} |")
+    return "\n".join(lines)
+
+
 GENERATED = {
     ("README.md", "identifier-shapes"): identifier_shapes,
     ("docs/reference/vendored-images.md", "image-group-mapping"): image_group_mapping,
+    ("docs/reference/design.md", "toolchain-map"): toolchain_map,
 }
 
 

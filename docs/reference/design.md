@@ -28,11 +28,23 @@ fold `.github/actions/build-natmod` into a thin `cibuildmp --build`
 wrapper (the `pypa/cibuildwheel@v3`-style relationship this paragraph used
 to describe) was proposed and explicitly rejected — see tracker [0038],
 "Rejected". `.github/actions/*` stays a permanent, separate legacy layer,
-not a temporary one being absorbed over time; it survives specifically
-because `a7p`'s own `unix-mipsel` cross-compile still depends on
-`build-usermod-unix` directly, with no native runner to move it off of
-([0067]). Read `docs/ACTIONS.md` only as reference for that kind of
-holdout, not as an alternate way to use `cibuildmp`.
+not a temporary one being absorbed over time. It survives because
+`micropython-bclibc` and `micropython-wasm3` still call it on their own
+default branches — `build-usermod-unix` for `unix-mipsel` in both, plus
+`fetch-micropython` in several jobs unrelated to mipsel. Read
+`docs/ACTIONS.md` only as reference for that kind of holdout, not as an
+alternate way to use `cibuildmp`.
+
+An earlier version of this paragraph named `a7p`'s own `unix-mipsel` as the
+sole holdout, citing [0067]. That was false in every particular — wrong
+repo, wrong record — and [0076] corrected it in `README.md`,
+`docs/ACTIONS.md` and the tracker. **This file was missed in that pass**,
+and stayed wrong for a further day; it is the fourth place the same claim
+had been copied to. Nothing mechanical can catch this class
+(`tests/test_docs.py` checks facts with a machine-readable counterpart, and
+another repository's CI has none), which is exactly why [0076] argues for
+keeping other-repo status claims out of living docs rather than testing
+them.
 
 <!-- migrated verbatim from docs/BACKLOG.md lines 433-476 (Identifier scheme) -->
 
@@ -226,8 +238,9 @@ tier, not a selection mechanism. That tier is gone now, `Options` itself
 no longer has a family layer at all: no real config in this project's own
 examples ever actually wrote `[usermod]`, so the principle that kept it
 alive never had a real caller behind it. `user-c-modules`/`manifest`/
-`extra-make-args` resolve from `default → global → env → CLI` only, the
-same as every other option.
+`extra-make-args` resolve from `default → global → matching [override] →
+environment`, the same as every other per-target option — see the
+precedence note below, which this sentence used to contradict.
 
 
 <!-- migrated verbatim from docs/BACKLOG.md lines 477-518 (Config schema) -->
@@ -273,11 +286,20 @@ version = ""                 # ([0052], A3 extended this to usermod too;
 module-dir = "natmod"         # dir containing the Makefile
 make-target = "dist"
 extra-make-args = []          # shared by name/meaning with usermod's own
-pre-build-command = ""        # run in module-dir after mpy-cross, before make
-                              # (a7p: "make fetch-nanopb")
-arch-flags = ""               # rv32imc only, e.g. "zba,zcmp" (D15) -- part
-                              # of that arch's identifier, so this cannot be
-                              # set per-[override], only here
+pre-build-command = ""        # run in module-dir before make, and *inside
+                              # the same image the build runs in* -- on the
+                              # host until record 0049, which is where it
+                              # stopped making sense (a7p: "make
+                              # fetch-nanopb" is a build step, and running it
+                              # against a different toolset than the compile
+                              # that follows is a different build)
+arch-flags = []               # rv32imc only, e.g. ["zba,zcmp"] (D15). A
+                              # *list*, and an axis rather than a flag: each
+                              # entry resolves to its own target, with the
+                              # packed value in that target's own identifier
+                              # (`...-rv32imc+0x3`). That is why it cannot be
+                              # set per-[override] -- an override is matched
+                              # against an identifier this key helped create
 
 # usermod's own shared-across-every-port keys -- user-c-modules/manifest
 # are usermod-only by name (natmod has no such keys at all), set at the
@@ -304,8 +326,9 @@ extra-make-args = ["MP_BCLIBC_PRECISION=single"]
 `[override]` is shared by every platform now, natmod and every usermod
 port alike — the example above matches natmod's own; a usermod-port
 identifier is matched by the identical glob mechanism, with
-`user-c-modules`/`manifest`/`extra-make-args` as its own three settable
-option keys instead of natmod's four. An override's own keys are
+`user-c-modules`/`manifest`/`extra-make-args`/`extra-cmake-args` as its own
+four settable option keys, against natmod's own four (`module-dir`,
+`make-target`, `extra-make-args`, `pre-build-command`). An override's own keys are
 validated twice: loosely (is this key valid for *any* platform's override
 surface — a typo check) when the config is loaded, and strictly (is this
 key valid for the *specific* platform the matched identifier belongs to)
@@ -317,9 +340,32 @@ Every option is overridable by environment variable, `CIBMP_`-prefixed and
 screaming-snake-cased: `CIBMP_BUILD`, `CIBMP_SKIP`, `CIBMP_OUTPUT_DIR`,
 `CIBMP_EXTRA_MAKE_ARGS`, `CIBMP_NAME`, `CIBMP_VERSION`, `CIBMP_ARCH_FLAGS`,
 … — and `build`/`skip` also by `--build`/`--skip` directly on the CLI, the
-replacement for the old `--only`/`--platform`/`--archs`. Precedence,
-lowest to highest: defaults → config file → `[override]` matching the
-identifier → environment → CLI flags.
+replacement for the old `--only`/`--platform`/`--archs`.
+
+**There are two precedence chains, not one**, because two kinds of option
+resolve at two different times — and they order environment and
+`[override]` oppositely. Invocation-wide options (`build`, `skip`,
+`output-dir`, `name`, `version`, `arch-flags`, `micropython-submodules`)
+resolve once, before any target exists:
+
+```
+default → config file → CIBMP_<KEY> → CLI flag
+```
+
+Per-target options (`module-dir`, `make-target`, `pre-build-command`,
+`extra-make-args`, `user-c-modules`, `manifest`, `extra-cmake-args`)
+resolve once per identifier, after selection:
+
+```
+default → config file → matching [override] entries → CIBMP_<KEY>
+```
+
+So an environment variable beats an `[override]`, while a CLI flag beats an
+environment variable — and only three options have a CLI flag at all
+(`--build`, `--skip`, `--output-dir`, the last natmod-only). The README's
+own Configuration section has the full table and a worked example of the
+per-platform `CIBMP_BUILD_<PLATFORM>` tier, which *adds* one platform's
+selection rather than replacing the global one.
 
 **Where a key goes is part of the schema, and getting it wrong is an
 error** ([0048], generalised into a cascade by [0051]'s own Phase F, then
@@ -384,16 +430,24 @@ vocabulary the tool computes for you.
 
 ## Toolchain map (arch → cross-compiler prefix, from `py/dynruntime.mk`)
 
-Ten arches, five distinct cross-compiler prefixes:
+Generated by `bin/refresh_docs.py` from the real per-tag rows. The
+hand-written version of this table said `x64` and `x86` need no prefix at
+all (`*(none)*`, plus `-m32` for `x86`) — true up to v1.28.0 and false from
+v1.29.0, which gave both a real one. A single table cannot be right for
+every tag, so this one names the tag it is for.
+
+<!-- generated: toolchain-map -- bin/refresh_docs.py, do not edit by hand -->
+For MicroPython **v1.29.0** — this is a per-tag fact, not a global one:
 
 | ARCH | `CROSS` |
 | --- | --- |
-| `x64` | *(none)* |
-| `x86` | *(none)*, `-m32` |
-| `armv6m` `armv7m` `armv7emsp` `armv7emdp` | `arm-none-eabi-` |
+| `armv6m` `armv7emdp` `armv7emsp` `armv7m` | `arm-none-eabi-` |
+| `rv32imc` `rv64imc` | `riscv64-unknown-elf-` |
+| `x64` | `x86_64-linux-gnu-` |
+| `x86` | `i686-linux-gnu-` |
 | `xtensa` | `xtensa-lx106-elf-` |
 | `xtensawin` | `xtensa-esp32-elf-` |
-| `rv32imc` `rv64imc` | `riscv64-unknown-elf-` |
+<!-- /generated: toolchain-map -->
 
 This table only answers "which compiler does this arch need" — it says
 nothing about how that compiler actually reaches a build, and that half
@@ -488,3 +542,4 @@ not a toolchain) are an open question — see
 [0067]: ../records/0067-user-c-modules-flat-shape-autodetect.md
 [0074]: ../records/0074-usermod-family-table-and-retired-table-messages-removed.md
 [0075]: ../records/0075-top-level-scalar-keys-are-validated.md
+[0076]: ../records/0076-the-mipsel-holdout-is-bclibc-and-wasm3-not-a7p.md

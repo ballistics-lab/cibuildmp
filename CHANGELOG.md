@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`docs/reference/*.md` audited claim by claim against the source**, which
+  found six things no mechanical check can catch. `design.md` still carried the
+  false `a7p unix-mipsel` claim record 0076 corrected in three other files; it
+  stated the per-target precedence chain two different ways, both wrong, in one
+  file; it documented `arch-flags` as a string when it is a list (and an axis —
+  each entry is its own target); it counted usermod's override keys as three
+  when there are four; and its toolchain map gave `x64`/`x86` no `CROSS` prefix,
+  true up to v1.28.0 and false from v1.29.0. `open-questions.md`'s first entry
+  asked how MSYS2/ESP-IDF fit a toolchain-strategy shape record 0050 deleted,
+  and its second cited a workflow that no longer exists. The toolchain map is
+  generated now, since it is a per-tag fact no single hand-written table can
+  state correctly. Record 0077.
 - **`bin/refresh_docs.py` generates the doc tables that are pure functions of
   the resource files** — README's identifier-shape table and
   `docs/reference/vendored-images.md`'s port/arch → image-group mapping, each

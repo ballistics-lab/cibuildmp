@@ -106,6 +106,44 @@ because each new MicroPython tag adds a whole board set. The rows are the fact
 and the matrix already says "every row" -- the count was never load-bearing, so
 it is gone rather than pinned to today's value.
 
+## Addendum, same day -- reading the reference docs claim by claim
+
+The mechanical checks are a floor, not a ceiling. Reading
+`docs/reference/*.md` against the source found six more, none of which any
+test could have caught:
+
+- **`design.md`'s Positioning section still carried the false `a7p`
+  `unix-mipsel` claim.** [0076] corrected `README.md`, `docs/ACTIONS.md` and
+  the tracker; this was the fourth copy and was missed, staying wrong a
+  further day. It is the clearest possible case for [0076]'s own proposal
+  that other-repo status claims do not belong in living docs: nothing here
+  can check them, and they get copied.
+- **Two contradictory precedence statements, in one file.** One paragraph
+  said per-target options resolve `default → global → env → CLI`; sixty
+  lines later the same file said `defaults → config → [override] → env →
+  CLI`. Neither is right, and there is no single chain: invocation-wide
+  options resolve `default → file → env → CLI`, per-target options resolve
+  `default → file → matching [override] → env`, and only three options have
+  a CLI flag at all. Verified by running each, not by reading.
+- **`arch-flags` documented as a string** (`arch-flags = ""`). It is a list,
+  and an axis rather than a flag: each entry becomes its own target, with the
+  packed value in that target's identifier.
+- **"three settable option keys" for usermod overrides.** Four:
+  `extra-cmake-args` was missing.
+- **The toolchain map was stale and structurally unfixable by hand.** It gave
+  `x64`/`x86` no `CROSS` prefix, true up to v1.28.0 and false from v1.29.0.
+  Since it is a per-tag fact, any single hand-written table is only true for
+  the tag it was written against — so it is generated now, naming its tag.
+- **`open-questions.md`'s first entry asked how MSYS2 and ESP-IDF fit the
+  `host`/`download`/`docker` toolchain-strategy shape** — a shape [0050]
+  deleted. Its second cites `usermod-dev.yml`, a workflow that no longer
+  exists. Both rewritten rather than deleted, since the underlying questions
+  (a non-Linux host reaching a daemon) are still real.
+
+One source comment went the same way: `usermod/__init__.py` explained that
+`--toolchain` "is natmod-specific and stays that way", outliving the flag
+itself by two records.
+
 [0041]: 0041-docs-restructure.md
 [0050]: 0050-natmod-is-docker-only.md
 [0073]: 0073-composite-actions-are-a-permanent-legacy-fallback.md
