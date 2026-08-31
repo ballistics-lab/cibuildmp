@@ -6,24 +6,42 @@ name: Test upstream usercmodule
 # not one this project wrote for itself); docs/records/0069 is the mechanism
 # actually landed here and explains every choice below in full.
 #
-# Two jobs, one Make port and one CMake port -- [0054]'s own "one Make port
-# and one CMake port is enough to answer the three questions above", not
-# build-examples.yml's much broader examples/template matrix. Each job
-# resolves the pinned MicroPython checkout itself
-# (sources.fetch_micropython(), the same call cibuildmp makes internally)
-# *before* running cibuildmp, so the real checkout path can be threaded into
-# CIBMP_USER_C_MODULES/CIBMP_EXTRA_CMAKE_ARGS -- see 0069 for why this can't
-# just be a `user-c-modules` value in examples/usercmodule/cibuildmp.toml
-# (that path isn't known until the checkout exists, and this project has no
-# `{checkout}`-style template for it yet).
+# Six jobs, one per port cibuildmp drives a usermod build for -- widened
+# from the original narrow unix+rp2 slice ([0054]'s own "one Make port and
+# one CMake port is enough to answer the three questions above") once that
+# slice came back green, per [0054]'s own "widen only if it finds
+# something." Still nowhere near build-examples.yml's much broader
+# examples/template matrix: one representative identifier per port, not
+# each port's own full arch/board matrix.
 #
-# A leaner version of this (pin CIBMP_CACHE_PATH to a fixed, known
-# directory and skip the pre-fetch step entirely) was tried and reverted --
-# it broke the workflow file outright, twice, for a GitHub Actions
-# job-level-`env:` scoping rule this session could not conclusively pin
-# down live. See docs/records/0069 for the full account and the two
-# competing hypotheses, kept for whoever revisits this rather than guessed
-# away. The pre-fetch step below is the version actually confirmed green.
+# No job here sets `CIBMP_USER_C_MODULES`/`CIBMP_EXTRA_MAKE_ARGS`/
+# `CIBMP_EXTRA_CMAKE_ARGS`, and none of them ever resolves the pinned
+# checkout itself. Both used to be true: every job called
+# `sources.fetch_micropython()` directly, in its own pre-fetch step, then
+# exported the real checkout path by hand -- necessary back when this
+# project had no way to name "a path inside whatever checkout cibuildmp
+# itself is about to fetch" from outside cibuildmp, and no way to say "this
+# one identifier needs this one extra flag" from inside a config file
+# meant to be shared by all six. `examples/usercmodule/cibuildmp.toml` now
+# carries all of it -- no `user-c-modules =` at all any more, for any
+# port: the built-in "." default is already right on both sides once
+# each side has its own real entry point (`micropython.cmake` for the two
+# CMake ports, `{cexample,cppexample,subpackage}/micropython.mk` for the
+# four Make ports -- see that toml's own header comment), plus
+# `[override."*-wasm32"]`'s own `extra-make-args` -- so a bare
+# `cibuildmp examples/usercmodule --build <identifier>` run, CI or local,
+# resolves identically to what a job here does. `build` stays out of that
+# file on purpose (see its own header comment): each job below still wants
+# exactly one identifier per push, not this fixture's full six-port sweep,
+# and that is the one thing a shared config file cannot express per-job.
+#
+# An even leaner shape was tried before any of this and reverted: pin
+# `CIBMP_CACHE_PATH` to a fixed, known directory so the checkout's
+# eventual path becomes computable without fetching it at all. That broke
+# the workflow file outright, twice, for a GitHub Actions job-level-`env:`
+# scoping rule this session could not conclusively pin down live -- see
+# docs/records/0069 for the full account, kept for whoever revisits it
+# rather than guessed away.
 #
 # push: (no branches: filter), same reasoning build-examples.yml's own header
 # already documents -- this needs to run on every push to a dev branch too.
@@ -42,51 +60,26 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Single source of truth for both jobs below -- bump here, not in two
-  # places, when this fixture moves to a newer tag.
+  # Single source of truth for every job below -- bump here, not six
+  # times, when this fixture moves to a newer tag.
   CIBMP_UPSTREAM_TAG: v1.29.0
 
 jobs:
   # ── unix: the Make side ─────────────────────────────────────────────
   #
-  # py/py.mk's own `<USER_C_MODULES>/*/micropython.mk` glob finds all three
-  # of upstream's own subdirectories with nothing extra to arrange -- no
-  # wrapper file needed on this side (see examples/usercmodule/
-  # micropython.cmake's own header comment for why the CMake side below
-  # needs one). USER_C_MODULES points straight at the pinned checkout's own
-  # examples/usercmodule/, never copied into this repo (0054: no vendoring).
+  # py/py.mk's own `<USER_C_MODULES>/*/micropython.mk` glob finds
+  # `examples/usercmodule/{cexample,cppexample,subpackage}/micropython.mk`
+  # -- this fixture's own thin wrappers, each `include`ing upstream's real
+  # file via `$(TOP)` (see `cexample/micropython.mk`'s own header comment)
+  # -- with `user-c-modules` at its built-in "." default, no override
+  # needed. Never vendored (0054): the real content still comes from the
+  # pinned checkout, only three one-line `include` shims live in this repo.
   build-unix:
     runs-on: ubuntu-latest
     env:
       CIBMP_VERSION: 0.0.0-ci
     steps:
       - uses: actions/checkout@v7
-
-      # No Docker, no `uv tool install` needed for this step alone --
-      # sources.py is stdlib-only (its own module docstring), so a bare
-      # PYTHONPATH=src invocation against the checkout is enough, the same
-      # pattern test-platforms.yml's own `plan` job already uses for a
-      # different resolution ahead of its own real build. quiet=True is
-      # load-bearing, not decorative: fetch_micropython()'s own progress
-      # prints ("MicroPython v1.29.0: extracting") go to stdout by default,
-      # and this step's own $(...) command substitution captures all of
-      # it -- confirmed live, the hard way, a corrupted multi-line
-      # GITHUB_OUTPUT value GitHub's own file-command parser rejected
-      # outright before either build step here ever ran.
-      - name: Resolve the pinned MicroPython checkout (record 0069)
-        id: mpy
-        run: |
-          set -euo pipefail
-          dir=$(PYTHONPATH=src python3 -c "from cibuildmp.sources import fetch_micropython; print(fetch_micropython('${CIBMP_UPSTREAM_TAG}', quiet=True))")
-          echo "dir=$dir" >> "$GITHUB_OUTPUT"
-
-      # CIBMP_USER_C_MODULES is exported below, job-wide, right after the
-      # step above resolves it -- not set on this step's own `env:` block.
-      # test-platforms.yml's own header comment already found the reason
-      # live: a composite action's inner steps only reliably see env set at
-      # job/workflow level, not on the specific step that calls `uses: ./`.
-      - name: Export CIBMP_USER_C_MODULES for the rest of this job
-        run: echo "CIBMP_USER_C_MODULES=${{ steps.mpy.outputs.dir }}/examples/usercmodule" >> "$GITHUB_ENV"
 
       - name: Build upstream examples/usercmodule (unix, native)
         uses: ./
@@ -123,46 +116,126 @@ jobs:
   # question for one real toolchain: whether cppexample's `-lstdc++` is
   # satisfiable on a bare-metal cross target. Deliberately not skipped --
   # a red leg here is a real finding to record, not a bug in this workflow.
+  #
+  # examples/usercmodule/micropython.cmake resolves the pinned checkout
+  # itself, via MICROPY_DIR -- a CMake variable every CMake port already
+  # sets before it ever include()s a user module (rp2/CMakeLists.txt's own
+  # `get_filename_component(MICROPY_DIR "../.." ABSOLUTE)`, well before its
+  # own `include(${MICROPY_DIR}/py/usermod.cmake)`) -- with `user-c-modules`
+  # at its built-in "." default, same as every other port here now.
   build-rp2:
     runs-on: ubuntu-latest
     permissions:
       contents: read
     env:
       CIBMP_VERSION: 0.0.0-ci
-      # "." -- examples/usercmodule/ itself, which holds this fixture's own
-      # micropython.cmake (not upstream's), same job-level-env reasoning
-      # test-platforms.yml's own header comment already gives: a composite
-      # action's inner steps only reliably see env set at job/workflow
-      # level, not on the specific step that calls `uses: ./`.
-      CIBMP_USER_C_MODULES: "."
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-qemu-action@v4
-
-      - name: Resolve the pinned MicroPython checkout (record 0069)
-        id: mpy
-        run: |
-          set -euo pipefail
-          dir=$(PYTHONPATH=src python3 -c "from cibuildmp.sources import fetch_micropython; print(fetch_micropython('${CIBMP_UPSTREAM_TAG}', quiet=True))")
-          echo "dir=$dir" >> "$GITHUB_OUTPUT"
-
-      # Exported via $GITHUB_ENV, not this step's own `env:` block, and not
-      # a static job-level `env:` either -- the value depends on the
-      # previous step's own output, only known at runtime, and (same
-      # reasoning as build-unix's own step above) a composite action's
-      # inner steps only reliably see env set at job/workflow level, not on
-      # the specific step that calls `uses: ./`. Reaches this fixture's own
-      # micropython.cmake as the plain CMake cache variable
-      # CIBMP_UPSTREAM_USERCMODULE_DIR (build_common.cmake_extra_args_env()
-      # -> CMAKE_ARGS, record 0066's own mechanism, unextended here).
-      - name: Export CIBMP_EXTRA_CMAKE_ARGS for the rest of this job
-        run: echo "CIBMP_EXTRA_CMAKE_ARGS=-DCIBMP_UPSTREAM_USERCMODULE_DIR=${{ steps.mpy.outputs.dir }}/examples/usercmodule" >> "$GITHUB_ENV"
 
       - name: Build upstream examples/usercmodule (rp2)
         uses: ./
         with:
           package-dir: examples/usercmodule
           build: ${{ env.CIBMP_UPSTREAM_TAG }}-rp2-RPI_PICO
+
+      - name: List built artifacts
+        run: ls -laR examples/usercmodule/mpyhouse
+
+  # ── esp32: the second CMake port, and the second bare-metal toolchain ──
+  #
+  # [0054]'s own list of unanswered families after [0069]: esp32 is the
+  # ESP-IDF one -- a cmake-driven port like rp2, but a materially different
+  # toolchain (Xtensa/RISC-V via idf.py, not arm-none-eabi via the Pico
+  # SDK). Fully containerized since [0028] (no host-side ESP-IDF resolver
+  # left).
+  #
+  # Same MICROPY_DIR mechanism as build-rp2 above: MICROPY_DIR is set at
+  # the very top of ports/esp32/main/CMakeLists.txt
+  # (`if(NOT MICROPY_DIR) get_filename_component(...)`), well before it --
+  # via ports/esp32/CMakeLists.txt -- reaches `include(${MICROPY_DIR}/py/
+  # usermod.cmake)`.
+  build-esp32:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      CIBMP_VERSION: 0.0.0-ci
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v4
+
+      - name: Build upstream examples/usercmodule (esp32)
+        uses: ./
+        with:
+          package-dir: examples/usercmodule
+          build: ${{ env.CIBMP_UPSTREAM_TAG }}-esp32-ESP32_GENERIC
+
+      - name: List built artifacts
+        run: ls -laR examples/usercmodule/mpyhouse
+
+  # ── windows, webassembly, qemu: the remaining three Make ports ──────────
+  #
+  # Same mechanism as build-unix above (the same three wrapper files,
+  # already discovered by py.mk's own glob), one representative identifier
+  # per port rather than each port's own full arch matrix -- [0054]'s own
+  # "widen only if it finds something", not a cost-blind repeat of
+  # build-examples.yml's broader coverage. No smoke test for any of the
+  # three: none of their outputs (a .exe, a .wasm, a qemu ELF) runs
+  # directly on this runner the way unix's manylinux binary does (record
+  # 0069's own reasoning for why rp2 has none either).
+  build-windows:
+    runs-on: ubuntu-latest
+    env:
+      CIBMP_VERSION: 0.0.0-ci
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build upstream examples/usercmodule (windows)
+        uses: ./
+        with:
+          package-dir: examples/usercmodule
+          build: ${{ env.CIBMP_UPSTREAM_TAG }}-win_amd64
+
+      - name: List built artifacts
+        run: ls -laR examples/usercmodule/mpyhouse
+
+  # `examples/usercmodule/cibuildmp.toml`'s own `[override."*-wasm32"]`
+  # carries this identifier's own `extra-make-args` (CXX=em++ plus the
+  # CXXFLAGS_MOD fix for two real, separate upstream ports/webassembly/
+  # Makefile bugs -- see that file's own comment for both). Nothing
+  # webassembly-specific is set here any more.
+  build-webassembly:
+    runs-on: ubuntu-latest
+    env:
+      CIBMP_VERSION: 0.0.0-ci
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build upstream examples/usercmodule (webassembly)
+        uses: ./
+        with:
+          package-dir: examples/usercmodule
+          build: ${{ env.CIBMP_UPSTREAM_TAG }}-wasm32
+
+      - name: List built artifacts
+        run: ls -laR examples/usercmodule/mpyhouse
+
+  build-qemu:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      CIBMP_VERSION: 0.0.0-ci
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v4
+
+      - name: Build upstream examples/usercmodule (qemu)
+        uses: ./
+        with:
+          package-dir: examples/usercmodule
+          build: ${{ env.CIBMP_UPSTREAM_TAG }}-qemu-MPS2_AN385
 
       - name: List built artifacts
         run: ls -laR examples/usercmodule/mpyhouse

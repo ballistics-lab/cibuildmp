@@ -99,13 +99,40 @@ discovered halfway through vendoring eleven Makefiles.
   [0054] argues for vendoring on the grounds that a fixture whose content moves with
   the tag under test cannot distinguish upstream drift from a cibuildmp regression;
   the same argument applies here and is stronger, because these Makefiles are exactly
-  the thing under test.
+  the thing under test. **Stale as of [0054]'s own later flip — see this record's own
+  addendum.**
 - Whether all eleven, or a chosen few. `features0`–`features4` are deliberately
   minimal and would prove the contract; `btree`/`deflate`/`framebuf`/`re` drag in real
   MicroPython internals and would prove considerably more.
 
+## Addendum, 2026-08-31 — the vendoring citation above is stale, and a real mechanism now exists for option 2
+
+[0054] later reconsidered and flipped its own vendoring call (its own "Vendoring policy —
+reconsidered, flipped" section): reaching straight into the checkout `sources.
+fetch_micropython()` already resolves is *more* pinned than a hand-vendored copy, not less
+— a vendored tree is a second, independent pin nothing watches, exactly the staleness shape
+[0046] exists to name. The bullet above cites [0054]'s original, superseded position; left
+as written per this project's own append-only convention, corrected here rather than
+edited in place.
+
+That flip, plus [0071] (a `{micropython}` placeholder in `user-c-modules`, substituted with
+the pinned checkout's own real path before any build step runs — landed for usermod's own
+identical fixture, [0069]), directly serves this record's own **option 2**
+("`make-target = "all"` plus a fallback in `collect_output()`", "the option that would let a
+stock module build unmodified"): a natmod equivalent of the same placeholder in `module-dir`
+would let `examples/natmod`-style config point at `{micropython}/examples/natmod/<module>`
+directly, no vendoring, the same way the four Make-port usermod overrides now do. Not
+implemented here — [0071] is deliberately scoped to `usermod/orchestrate.py` alone (natmod's
+own `options.py`/`build.py` are independent modules by design, "natmod must never import
+usermod"), and this record's own three-way choice (shim Makefile / fit-upstream fallback /
+document-and-descope) is still not made. Worth knowing before whoever picks this up reasons
+from the now-stale vendoring citation above.
+
 [0002]: 0002-delegate-compile-own-environment.md
 [0014]: 0014-mip-package-per-identifier.md
 [0015]: 0015-rv32imc-arch-flags-identifier.md
+[0046]: 0046-pin-staleness-checker.md
 [0049]: 0049-no-matrix-generation-archs-vocabulary.md
 [0054]: 0054-usermod-example-from-upstream-usercmodule.md
+[0069]: 0069-upstream-usercmodule-narrow-ci-slice.md
+[0071]: 0071-micropython-placeholder-in-user-c-modules.md

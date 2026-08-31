@@ -106,7 +106,22 @@ def _port_build_options(
     # actual `USER_C_MODULES=` value each port's own build wants --
     # unchanged for Make ports, `/micropython.cmake` appended for CMake
     # ports -- kept under its own name so the two are never conflated.
-    module_root = (package_dir / build_options.user_c_modules).resolve()
+    #
+    # `{micropython}` -- a literal placeholder, substituted here with
+    # `mpy_dir` itself -- lets `user-c-modules` (or a `CIBMP_USER_C_MODULES`
+    # override) name a path *inside the pinned checkout* without a caller
+    # having to resolve that checkout itself first. `mpy_dir` is already a
+    # real, resolved directory by the time this function runs (`build_one()`
+    # receives it already fetched), for every port uniformly -- Make and
+    # CMake alike, since this substitution happens before any per-port
+    # branching below and well before `usermod_mounts()` ever bind-mounts
+    # the result. Record 0069 named this exact gap ("no `{checkout}`-style
+    # template ... this record does not add one") until a real caller
+    # needed it; docs/records/0069's own addendum is that caller.
+    user_c_modules = build_options.user_c_modules.replace(
+        "{micropython}", mpy_dir.as_posix()
+    )
+    module_root = (package_dir / user_c_modules).resolve()
     resolved_user_c_modules = portinfo.resolve_user_c_modules(
         port, module_root.as_posix()
     )

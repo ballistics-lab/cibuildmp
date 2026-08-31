@@ -78,7 +78,7 @@ On CI, use the action instead of installing the CLI yourself — it already
 runs on a bare runner with the runner's own Docker daemon reachable:
 
 ```yaml
-- uses: ballistics-lab/cibuildmp@v0.4.0
+- uses: ballistics-lab/cibuildmp@v0.4.1
   with:
     build: "mpy6.3-* v1.29.0-manylinux_2_28_x86_64"
 ```
@@ -583,7 +583,7 @@ drivers are wired into the CLI too (see [Target support](#target-support)
 above), covering every port with a real driver, not just three. All three
 consuming repos have repinned and are fully migrated off every
 `build-usermod-*`/`fetch-micropython` composite action onto the unified
-CLI/action, `cibuildmp@v0.4.0`, CI green on each repo's current `main` (`a7p`
+CLI/action, `cibuildmp@v0.4.1`, CI green on each repo's current `main` (`a7p`
 and `micropython-wasm3` each keep their own genuine
 cross-compile-with-no-native-host cell, `unix-mipsel`, on the old composite
 action deliberately). See the tracker's own [0038] row for current status
