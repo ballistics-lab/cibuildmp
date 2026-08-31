@@ -1,8 +1,8 @@
 # 0069 — a narrow, real CI slice of [0054]'s upstream `examples/usercmodule` fixture
 
-- Status: In progress (unix + rp2 landed; the other four ports, and the `cppexample`
-  skip question, are deliberately left for later widening)
-- Related: [0054], [0057], [0066], [0067]
+- Status: Implemented — widened to all six ports 2026-08-31, all green; see this
+  record's own closing addendum
+- Related: [0054], [0057], [0066], [0067], [0071]
 
 ## What this actually adds, beyond [0054]'s own scoping
 
@@ -193,9 +193,86 @@ coordination needed between them.
   once globally — this record's own two legs narrow that to "one Make family, one bare-
   metal CMake family," leaving the rest exactly where [0054] left them.
 
+## Addendum, 2026-08-31 — widened to all six ports, all green, both mechanisms replaced
+
+The four remaining ports (`esp32`/`windows`/`webassembly`/`qemu`) are wired in now, one
+identifier each, same narrow-slice discipline this record's own "why two ports" section
+argued for. Every one of [0054]'s three open questions is answered, for real, per
+toolchain family, not assumed from the two already-green legs:
+
+| port | family | `cppexample` (C++) |
+| --- | --- | --- |
+| `unix` | Make, hosted glibc | links, smoke-tested |
+| `rp2` | CMake, bare-metal ARM | links |
+| `esp32` | CMake, Xtensa/RISC-V via ESP-IDF | links |
+| `qemu` | Make, bare-metal ARM | links |
+| `windows` | Make, mingw | links, once fixed (below) |
+| `webassembly` | Make, emscripten | links, once fixed (below) |
+
+**Two real bugs found live, both in images/Makefiles this project owns or can reach, neither
+in this fixture's own files:**
+
+- `docker/windows.Dockerfile` `apt-get install`ed `gcc-mingw-w64-{x86-64,i686}` but never
+  `g++-mingw-w64-{x86-64,i686}` — mingw-w64 fully supports C++, this was a real gap in the
+  image. Fixed, republished (`publish-docker-images.yml`, `only=windows`), repinned in
+  `pinned_docker_images.toml`.
+- `ports/webassembly/Makefile` sets `CC`/`LD` to `emcc` but never `CXX`, so `py/mkenv.mk`'s
+  own default (`CXX = $(CROSS_COMPILE)g++`) applied unmodified and `cppexample.cpp` was
+  silently compiling through the *host's* real `g++` instead of emsdk's own `em++`
+  (confirmed live: the failure's own `cc1plus` and "unrecognized command-line option" for a
+  clang-only flag name are exactly what a host `g++` invocation looks like). Once routed
+  through the right compiler, upstream's own `ports/webassembly/mpconfigport.h`
+  unconditionally `#define _GNU_SOURCE` still conflicted with emcc/clang's own built-in
+  definition in C++ mode, tripping `-Werror -Wmacro-redefined`. Both fixed the same way,
+  through `extra-make-args` (`[override."*-wasm32"]` in
+  `examples/usercmodule/cibuildmp.toml`): `CXX=em++` (a plain reassignment, wins outright
+  over `mkenv.mk`'s own `=`) and `CXXFLAGS_MOD=-Wno-macro-redefined` (`py/mkrules.mk`'s own
+  "Add default C++ compiler flags based on CFLAGS. For use with C++ user modules" hook,
+  which nothing else in the tree ever assigns — no `extra-make-args`-clobbers-the-
+  accumulation risk [0066] found for `CMAKE_ARGS`/`IDFPY_FLAGS`, since neither `CXX` nor
+  `CXXFLAGS_MOD` has any prior assignment to replace).
+
+**[0054]'s own "not decided here" cppexample skip-vs-record question is now answered by the
+evidence, not by a policy call:** `cppexample` stays unskipped everywhere, because it does
+not need skipping anywhere — all six toolchain families link it once their own real bugs
+(both upstream/image-level, neither this fixture's) are fixed. A red leg here was already
+the intended signal ("a real finding to record, not a bug in this workflow"); it just never
+needed to stay red.
+
+**Both this record's own mechanisms are gone, replaced by simpler ones landed after this
+record's own real caller finally existed:**
+
+- The CMake side's `CIBMP_UPSTREAM_USERCMODULE_DIR` cache-variable injection (this record's
+  own "`examples/usercmodule/`, and why it needs its own `micropython.cmake`" section) is
+  retired: `examples/usercmodule/micropython.cmake` now reads `MICROPY_DIR` directly, a
+  variable every CMake port already sets before it `include()`s a user module at all
+  (`ports/rp2/CMakeLists.txt`'s own `get_filename_component(MICROPY_DIR "../.." ABSOLUTE)`;
+  an equivalent guard in `ports/esp32/main/CMakeLists.txt`) — no external `-D` needed.
+- The pre-fetch step this record's own "The mechanism" section built (calling
+  `sources.fetch_micropython()` directly in the workflow, before `cibuildmp` itself runs,
+  specifically because "there is no `{micropython}`-style template … this record does not
+  add one") is retired too: [0071] adds exactly that template.
+  `examples/usercmodule/cibuildmp.toml` now carries one multi-glob override,
+  `[override."*-manylinux* *-win* *-qemu-* *-wasm32"]`, setting
+  `user-c-modules = "{micropython}/examples/usercmodule"` for all four Make ports — no
+  wrapper file of any kind, straight at upstream's own real directory (`py.mk`'s own
+  `<USER_C_MODULES>/*/micropython.mk` glob discovers `cexample`/`cppexample`/`subpackage`
+  with no aggregator needed, unlike the CMake side's own `micropython.cmake`, which stays
+  real and necessary because upstream's own aggregator omits `subpackage` — see that file's
+  own header comment).
+
+Every job in `test-upstream-usermodule.yml` is now `checkout` (`+ setup-qemu-action` where
+needed) `+ build + list-artifacts` — no per-job `env:` beyond `CIBMP_VERSION`, no pre-fetch
+step anywhere. `examples/usercmodule/cibuildmp.toml` is the single source of truth for
+`user-c-modules`/`extra-make-args` on every port: a bare `cibuildmp examples/usercmodule
+--build <identifier>` run, CI or local, now resolves identically to what a job here does —
+config that used to exist only in this workflow's own `env:` blocks was invisible to that
+run, which is exactly backwards for a file whose whole point is being that answer.
+
 [0046]: 0046-pin-staleness-checker.md
 [0054]: 0054-usermod-example-from-upstream-usercmodule.md
 [0057]: 0057-multiple-modules-per-build.md
 [0065]: 0065-bucketed-test-matrix-planning.md
 [0066]: 0066-extra-cmake-args.md
 [0070]: 0070-unix-collected-binary-missing-repaired-lib-sidecar.md
+[0071]: 0071-micropython-placeholder-in-user-c-modules.md

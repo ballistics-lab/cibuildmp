@@ -81,14 +81,26 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
       seven runners already proven by `mp-usermod.yml`, not yet owned by
       cibuildmp
 - [ ] [0053] nine usermod ports have verified rows in `build-platforms.toml` but no real `build_<port>()` driver | `mimxrt`, `samd`, `stm32`, `psoc-edge`, `alif`, `esp8266`, `cc3200`, `renesas-ra`, `nrf` -- flagged by the user as the genuinely larger remaining piece. `rp2` closed 2026-08-29 by [0060]
-- [ ] [0054] an `examples/` usermod fixture on upstream's own `examples/usercmodule` | adds three things `template/`'s own fixture doesn't cover: C++ (`cppexample`, unverified on `windows`/`webassembly`/`qemu`), a separate `qstrdefs*.h`, a dotted package. A narrow real slice (`unix` + `rp2` only) landed via [0069] -- the other four ports, and whether `cppexample` gets skipped where `-lstdc++` fails, are still open
-- [ ] [0069] a real CI slice of [0054], not just its own scoping | `.github/workflows/test-upstream-usermodule.yml` builds upstream's own `examples/usercmodule/` on one Make port (`unix`, plus a real smoke test running the built binary) and one CMake port (`rp2`), resolving the pinned checkout via `sources.fetch_micropython()` in the workflow itself (no vendoring, no new config template). `examples/usercmodule/micropython.cmake` is this repo's own three-line shim adding the `subpackage` include() upstream's own aggregator omits. Confirmed green (run `33330364394`, `cppexample` linking on `rp2` included) before the smoke test itself surfaced [0070]. A leaner pinned-`CIBMP_CACHE_PATH` shape was tried and reverted -- broke the workflow file outright twice, cause not conclusively pinned down, see the record's own addendum. `esp32`/`windows`/`webassembly`/`qemu` and the `cppexample` skip question left to widen later
-- [ ] [0070] collected `unix` binary shipped without its own repaired `lib/` sidecar | `repair_unix_binary()` vendors `libffi.so.6` beside the binary with an `$ORIGIN/lib` rpath; `orchestrate.py`'s `build_one()` only ever copied the binary itself into `mpyhouse/`, silently breaking that portability contract -- invisible until [0069]'s own smoke test became the first thing anywhere in this project to actually execute a collected `unix` artifact. Fixed (`build_one()` now copies the `lib/` sidecar too) and unit-tested (422/422 passing); not yet re-confirmed against a real container build
-- [ ] [0055] an `examples/` natmod fixture on upstream's own `examples/natmod` | real finding: **upstream's own natmod modules don't satisfy cibuildmp's contract** (`dist` + `build/<arch>*/` is a downstream convention, not upstream's). Shim it, teach `collect_output()` a fallback, or narrow the contract on purpose -- undecided
+- [ ] [0055] an `examples/` natmod fixture on upstream's own `examples/natmod` | real finding: **upstream's own natmod modules don't satisfy cibuildmp's contract** (`dist` + `build/<arch>*/` is a downstream convention, not upstream's). Shim it, teach `collect_output()` a fallback, or narrow the contract on purpose -- undecided. Own "vendor or build from checkout" item cited [0054]'s now-flipped stance; see its own addendum
 - [ ] [0056] build upstream MicroPython through the usermod path with no user C module | driver mechanics settled; open question is only how absence is expressed -- an explicit `no-user-c-modules = true` flag (A) vs. dropping `user-c-modules`'s `"."` default so unset means none (B). Exactly one existing config (`examples/template`) depends on that default either way
-- [ ] [0057] more than one module per build | **decided, documentation not mechanism**: natmod is one config per module (already demonstrated); usermod stays one `user-c-modules` path, N modules live in the consumer's own layout (subdirectories on Make ports, an aggregating `.cmake` on CMake ports) -- no list, since the aggregator is the consumer's own file. Left: writing this down where a user finds it, and [0054]'s fixture to actually test both forms, neither run here yet
+- [ ] [0057] more than one module per build | **decided, documentation not mechanism**: natmod is one config per module (already demonstrated); usermod stays one `user-c-modules` path, N modules live in the consumer's own layout (subdirectories on Make ports, an aggregating `.cmake` on CMake ports) -- no list, since the aggregator is the consumer's own file. Both forms now tested live by [0054]/[0069]; writing it down for users still left
 ### Implemented
 
+- [x] [0071] `{micropython}` placeholder in `user-c-modules` | `orchestrate.py`
+      substitutes it with the already-fetched checkout before any Docker/mount step,
+      uniformly for every port. Closes the gap [0069] named and left open
+- [x] [0070] collected `unix` binary shipped without its own repaired `lib/` sidecar |
+      `build_one()` now copies the `lib/` sidecar alongside the binary; re-confirmed
+      against a real container build via [0069]'s own smoke test, green repeatedly
+- [x] [0069] a real CI slice of [0054] | widened from `unix`+`rp2` to all six ports
+      2026-08-31, all green. Two real bugs found and fixed: `windows`'s image missing
+      `g++-mingw-w64`, `webassembly`'s Makefile missing `CXX=em++` plus a
+      `_GNU_SOURCE`/`CXXFLAGS_MOD` fix. Own mechanism (checkout pre-fetch,
+      `CIBMP_UPSTREAM_USERCMODULE_DIR`) retired for `MICROPY_DIR` (CMake) and [0071]'s
+      `{micropython}` (Make); config lives entirely in `cibuildmp.toml` now
+- [x] [0054] an `examples/` usermod fixture on upstream's own `examples/usercmodule` |
+      both open questions answered by [0069]'s widening: `cppexample` links on every
+      port once its own real bug is fixed, none needed skipping
 - [x] [0038] M5 -- adopt cibuildmp in the three consuming repos | all three
       (`micropython-bclibc` #18, `micropython-wasm3` #6, `a7p` #86) merged to
       `main`, CI fully green on the current head (31/32/29 checks), all
@@ -321,3 +333,4 @@ record is added.
 [0068]: records/0068-docker-dependabot-grouping-and-mipsel-ubuntu-26-04.md
 [0069]: records/0069-upstream-usercmodule-narrow-ci-slice.md
 [0070]: records/0070-unix-collected-binary-missing-repaired-lib-sidecar.md
+[0071]: records/0071-micropython-placeholder-in-user-c-modules.md

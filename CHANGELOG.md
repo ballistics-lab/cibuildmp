@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`{micropython}` — a placeholder in `user-c-modules` for a path inside the pinned
+  MicroPython checkout**, substituted with the real, already-fetched `mpy_dir` before any
+  Docker/mount step, uniformly for every usermod port. Closes the gap [0069] named and
+  deliberately left open ("no `{checkout}`-style template today"). Record 0071.
+- **The `[0054]`/`[0069]` upstream-`examples/usercmodule` fixture now covers all six usermod
+  ports**, not just `unix`/`rp2`: `esp32`, `windows`, `webassembly` and `qemu` all build
+  `cppexample`/`cexample`/`subpackage` in CI now too. `examples/usercmodule/cibuildmp.toml`
+  carries the whole thing — a `[override."*-manylinux* *-win* *-qemu-* *-wasm32"]` pointing
+  the four Make ports' `user-c-modules` straight at `{micropython}/examples/usercmodule`
+  (no vendoring, no wrapper file), the two CMake ports (`rp2`/`esp32`) reading `MICROPY_DIR`
+  directly inside `examples/usercmodule/micropython.cmake`. No job in
+  `test-upstream-usermodule.yml` resolves the checkout itself or sets
+  `CIBMP_USER_C_MODULES`/`CIBMP_EXTRA_MAKE_ARGS`/`CIBMP_EXTRA_CMAKE_ARGS` any more — a bare
+  `cibuildmp examples/usercmodule --build <identifier>` run, CI or local, now resolves
+  identically to what a job here does.
+
+### Fixed
+
+- **`docker/windows.Dockerfile` installed only the C mingw-w64 cross-compilers
+  (`gcc-mingw-w64-*`), never the C++ ones (`g++-mingw-w64-*`)** — mingw-w64 fully supports
+  C++, this was a real gap in the image, not a port limitation. A C++ user module on
+  `windows` failed with "cannot execute `cc1plus`" (the C++ compiler backend didn't exist
+  at all) until this fixed it; republished, repinned in `pinned_docker_images.toml`.
+- **`ports/webassembly/Makefile` never overrides `CXX` from its own default (`g++`, the
+  host's real compiler), only `CC`/`LD` (to `emcc`)** — a C++ user module's real `.cpp`
+  compile was silently running through the wrong compiler entirely (confirmed live: the
+  failure's own `cc1plus` and "unrecognized command-line option" for a clang-only flag name
+  are exactly what a host `g++` invocation looks like, not `emcc`'s). Worked around through
+  `extra-make-args` (`CXX=em++`, emsdk's own C++ driver, already baked into the image) —
+  an upstream Makefile bug this project can reach without vendoring upstream's own file.
+- **Upstream's own `ports/webassembly/mpconfigport.h` unconditionally `#define _GNU_SOURCE`,
+  conflicting with emcc/clang's own built-in definition in C++ mode** (`-std=c++11`),
+  tripping `-Werror -Wmacro-redefined` once the `CXX` fix above let the right compiler run
+  at all. Reached through `py/mkrules.mk`'s own `CXXFLAGS_MOD` hook ("Add default C++
+  compiler flags based on CFLAGS. For use with C++ user modules" — that comment's own
+  words), via `extra-make-args`, with nothing to clobber (unlike [0066]'s own
+  `CMAKE_ARGS`/`IDFPY_FLAGS` trap): nothing in the tree ever assigns `CXXFLAGS_MOD` first.
+
 ## [0.4.1] - 2026-08-30
 
 ### Added

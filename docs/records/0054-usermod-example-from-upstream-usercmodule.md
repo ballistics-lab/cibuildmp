@@ -1,8 +1,8 @@
 # 0054 — an `examples/` usermod fixture built on upstream's own `examples/usercmodule`
 
-- Status: In progress (a narrow real slice landed via [0069] — `unix`/`rp2` only; the
-  scoping and open questions below are otherwise unchanged)
-- Related: [0016], [0021], [0023], [0033], [0046], [0053], [0069]
+- Status: Implemented — all six ports green via [0069]'s own widening, both open
+  questions below answered; see this record's own closing addendum
+- Related: [0016], [0021], [0023], [0033], [0046], [0053], [0069], [0071]
 
 ## Why a second usermod example at all
 
@@ -123,6 +123,28 @@ as the original, unedited text above per this project's own append-only conventi
 records — this addendum is the correction, not a silent fix — but anyone citing that line
 for the Makefile variable name itself should use `LIBS_USERMOD`.
 
+## Addendum, 2026-08-31 — both "Not decided here" questions answered, all six ports green
+
+[0069]'s own widening (`esp32`/`windows`/`webassembly`/`qemu` joined `unix`/`rp2`) answers
+this record's own remaining open questions:
+
+- **`cppexample`/`-lstdc++` question, and the skip-vs-record call** — every one of the six
+  toolchain families links C++ once its own real bug is fixed (windows' image, webassembly's
+  Makefile — see [0069]'s own addendum for both). `cppexample` is not skipped anywhere;
+  nothing here ever needed skipping, only fixing.
+- **Whether this replaces `template/`'s usermod side** — still not decided, and still not
+  forced: nothing about widening to six ports argued either way, and both fixtures keep
+  proving different things (`template/` the shared-core layout cibuildmp documents to
+  consumers, this one upstream's own contract).
+
+The two mechanisms this record's own text still describes as current —
+"`user-c-modules`/`build =`" left unset here "on purpose" because "both are set per-invocation
+by [the workflow]", and the CMake side's `-DCIBMP_UPSTREAM_USERCMODULE_DIR=…` injection named
+in [0069]'s own original text — are both gone. [0071]'s own `{micropython}` placeholder and
+the CMake side's own `MICROPY_DIR` read replace them; `examples/usercmodule/cibuildmp.toml`
+itself now carries `user-c-modules` (as overrides, per port family) directly. See [0069]'s
+own closing addendum for the full mechanism and [0071] for the placeholder itself.
+
 [0016]: 0016-usermod-user-c-modules-dir-vs-cmake.md
 [0021]: 0021-usermod-execution-central-value.md
 [0023]: 0023-usermod-identifier-scheme-config-output.md
@@ -131,3 +153,4 @@ for the Makefile variable name itself should use `LIBS_USERMOD`.
 [0053]: 0053-usermod-ports-without-a-build-driver.md
 [0057]: 0057-multiple-modules-per-build.md
 [0069]: 0069-upstream-usercmodule-narrow-ci-slice.md
+[0071]: 0071-micropython-placeholder-in-user-c-modules.md
