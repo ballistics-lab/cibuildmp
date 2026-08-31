@@ -470,7 +470,10 @@ locally as on a runner, with the same config.
 
 **Superseded from what this section originally described, as of
 [0030]/[0033]/[0050]:** every build — natmod and every usermod port alike —
-is Docker-only now, with no bare-host path left for either family. This
+is Docker-only now, with one exception: `qemu` still builds `mpy-cross` on
+the host before its container starts (`_HOST_MPY_CROSS_PORTS`,
+`usermod/orchestrate.py`), so that port alone needs a host C compiler.
+Nothing else in either family does. This
 section used to carry a per-arch table ("`x64` works with the host gcc,
 nothing to install", tarballs downloaded into `~/.cache/cibuildmp/` for the
 rest) describing natmod's own host toolchain resolver; [0050] deleted that

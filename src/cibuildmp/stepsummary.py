@@ -24,7 +24,7 @@ deliberate departures, both argued in the addendum and kept here:
   does not clear that bar.
 
 A standalone module, not folded into either `cli.py` -- `cli.py` already
-imports `usermod.cli` for dispatch, so a shared helper living in either
+imports `platforms/usermod/__init__.py` for dispatch, so a shared helper living in either
 one would make the other import it back, a circular import. Both
 `BuildResult` (natmod, `build.py`) and `UsermodBuildResult` (usermod,
 `orchestrate.py`) already expose the same four fields this needs

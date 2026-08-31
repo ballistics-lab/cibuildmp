@@ -7,7 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Three user-facing claims that were provably false**, found by handing the
+  repository to an agent with no context and asking it to explain the project:
+  - `README.md`, `docs/reference/design.md` and `docs/reference/vendored-images.md`
+    all said there is no bare-host build path for any target. A `qemu` usermod
+    build compiles `mpy-cross` on the host first (`_HOST_MPY_CROSS_PORTS`), so
+    that one port needs a host C compiler — which is why `action.yml` installs
+    `build-essential`. All three corrected.
+  - README's "When a build fails" listed a `checksum mismatch` error the tool
+    cannot emit: `sources.verify_sha256()` has no callers, and the real check is
+    `sha256sum -c` inside the Dockerfiles at image-build time. Entry removed.
+  - `UnknownTagError` told the user to "pass `mpy-abi` explicitly", a key the
+    config rejects outright, and to run `bin/refresh_natmod_archs.py <tag>`,
+    which takes no arguments. `CONTRIBUTING.md` repeated the second one.
+- **Two error messages pointed at `dockerrun.PORT_IMAGES`**, a dict moved into
+  `resources/pinned_docker_images.toml` by record 0043. `build_windows.py` and
+  `build_webassembly.py` now name the real file.
+- **Stale pointers in live files**: `build-platforms.toml` said five wired ports
+  and ten driverless (six and nine), `README.md` named a `natmod_dir` option that
+  is `module-dir`, `action.yml` and `pyproject.toml` pointed at files deleted by
+  records 0050/0058, and `stepsummary.py` named a `usermod.cli` module that does
+  not exist.
+
 ### Added
+
+- **Behaviour the docs never mentioned and a user hits on the first run**:
+  `version` gates not just `package.json` but `[publish] extra-files` too (both
+  are silently skipped without it); `CIBMP_TIMEOUT` is usermod-only; a `unix`
+  build produces a binary *plus* an `$ORIGIN/lib` sidecar that must be shipped
+  with it; `--clean-cache` exists and the first run costs gigabytes. Also names
+  `[publish] extra-files` and `inherit` as the two keys that live in tables
+  rather than the "Every key" list.
 
 - **The tracker is one line per record, and a test keeps it that way.** Every row
   under "In progress / Proposed" and "Implemented" is now its record's own `# `

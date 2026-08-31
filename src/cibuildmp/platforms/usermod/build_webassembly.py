@@ -87,7 +87,7 @@ def build_webassembly(
             "and usermod builds are Docker-only -- set "
             "CIBMP_WEBASSEMBLY_DOCKER_IMAGE, or wait for "
             "publish-docker-images.yml to publish one and register it in "
-            "dockerrun.PORT_IMAGES"
+            "resources/pinned_docker_images.toml"
         )
 
     command = webassembly_make_command(

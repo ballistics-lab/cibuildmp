@@ -298,7 +298,7 @@ def build_windows(
             f"arch and usermod builds are Docker-only -- set "
             f"CIBMP_WINDOWS_{opts.arch.upper()}_DOCKER_IMAGE, or "
             f"wait for publish-docker-images.yml to publish one and "
-            f"register it in dockerrun.PORT_IMAGES"
+            f"register it in resources/pinned_docker_images.toml"
         )
 
     command = windows_make_command(

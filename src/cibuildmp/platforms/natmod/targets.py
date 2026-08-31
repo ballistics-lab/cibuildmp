@@ -112,8 +112,8 @@ def abi_for_tag(tag: str, override: str | None = None) -> str:
     except KeyError:
         raise UnknownTagError(
             f"MicroPython tag {tag!r} is not in resources/build-platforms.toml "
-            f"-- run bin/refresh_natmod_archs.py {tag} and merge the result, "
-            f"or pass mpy-abi explicitly to override the lookup."
+            f"-- run bin/refresh_natmod_archs.py (it walks every tag and takes "
+            f"no arguments) and merge the rows for {tag} into that file."
         ) from None
 
 

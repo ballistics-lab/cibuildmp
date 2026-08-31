@@ -164,7 +164,8 @@ runs:
       # `Architectures: amd64,i386` into sources pointing at
       # ports.ubuntu.com guarantees a 404 for indices that do not exist
       # there. All of it is the image's problem now, where the host is
-      # amd64 by construction -- see docker/natmod.Dockerfile.
+      # amd64 by construction -- see docker/natmod_host.Dockerfile (one of
+      # the six toolchain-group images natmod.Dockerfile split into, 0058).
       shell: bash
       run: |
         set -eu

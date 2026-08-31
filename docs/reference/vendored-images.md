@@ -4,8 +4,11 @@ Living reference for how cibuildmp resolves a container image for a build.
 This is not a decision history — [0043], [0044], [0050] and [0058] are, and
 this file cross-links back to them for *why*; keep this file itself current
 with *what is true today*. Every build cibuildmp runs — natmod, every usermod
-port, `qemu` — runs inside one of these; there is no bare-host build path left
-at all ([0030], [0033], [0050]).
+port, `qemu` — runs inside one of these ([0030], [0033], [0050]). The one
+thing that still runs on the host is `qemu`'s own `mpy-cross`, built before
+its container starts (`_HOST_MPY_CROSS_PORTS`, `usermod/orchestrate.py`);
+that port alone needs a host C compiler, and nothing else in either family
+does.
 
 ## Two tables, two different questions
 

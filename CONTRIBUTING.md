@@ -113,7 +113,7 @@ The most common change here, and entirely a data edit -- no build driver
 changes when upstream cuts a release.
 
 ```console
-$ bin/refresh_natmod_archs.py v1.30.0 > /tmp/natmod.toml
+$ bin/refresh_natmod_archs.py > /tmp/natmod.toml       # takes no arguments
 $ bin/refresh_usermod_boards.py esp32 v1.30.0 > /tmp/esp32.toml   # per board.json port
 ```
 

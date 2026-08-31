@@ -189,6 +189,12 @@ name = "mymod"
 version = "1.0.0"
 ```
 
+**A `usermod` build is not one file.** `unix` in particular produces the
+binary *plus* a `lib/` directory beside it: `cibuildmp` copies every
+non-baseline shared library the binary needs into it and sets an
+`$ORIGIN/lib` rpath, so the binary runs outside the container it was built
+in. Upload or copy the whole identifier directory, not just the file in it.
+
 Publishing that directory — a GitHub Release, or anywhere else — stays your
 own CI step. `cibuildmp` assembles the tree and stops there, the same line
 cibuildwheel draws at `wheelhouse/`.
@@ -385,6 +391,15 @@ onto each other rather than the first winning.
 | `manifest`               | usermod | `""`                   |                                ✓                                 |
 | `extra-cmake-args`       | usermod | `[]`                   |                                ✓                                 |
 
+Two more keys live in tables rather than at the top level, so they are not
+in the list above: `[publish] extra-files` (natmod — files copied beside
+every built `.mpy`) and `inherit` inside an `[override]` entry.
+
+**`version` gates more than the version string.** With `version` unset,
+`cibuildmp` writes no `package.json` *and copies no `[publish] extra-files`*
+— the identifier directory holds the built artifact alone. Set `name` and
+`version` as soon as you want either.
+
 Every key is valid at the top level whatever family reads it — the global
 layer is just every platform's own default, so a natmod-only key in a
 usermod-only project is accepted and ignored, not rejected. A key **no**
@@ -437,7 +452,7 @@ and has no config-file counterpart at all:
 | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `CIBMP_CACHE_PATH`                      | Where MicroPython checkouts and mpy-cross builds are cached. Defaults to `$XDG_CACHE_HOME/cibuildmp`, or `~/.cache/cibuildmp`. Pin it in CI when a later step needs the checkout by path — `<CIBMP_CACHE_PATH>/micropython/<tag>` |
 | `CIBMP_REPORT_PATH`                     | Where the JSON build report is written                                                                                                                                                                                            |
-| `CIBMP_TIMEOUT`                         | Seconds before a build container is killed (`docker kill`, not just the CLI). No limit by default                                                                                                                                 |
+| `CIBMP_TIMEOUT`                         | Seconds before a build container is killed (`docker kill`, not just the CLI). No limit by default. **usermod only** -- natmod's own container call does not consult it |
 | `CIBMP_<PORT>_<TARGET>_TIMEOUT`         | The same, for one container — `CIBMP_UNIX_MANYLINUX_2_28_X86_64_TIMEOUT`                                                                                                                                                          |
 | `CIBMP_<PORT>_<TARGET>_DOCKER_IMAGE`    | Run this (port, target) in a different image — a locally built one, or a fork's. Wins over the pinned default. Omit the `<TARGET>` segment for a port with no per-build image axis (`CIBMP_WEBASSEMBLY_DOCKER_IMAGE`)             |
 | `CIBMP_<PORT>_<TARGET>_DOCKER_PLATFORM` | Same shape, for the container's `--platform`                                                                                                                                                                                      |
@@ -546,7 +561,11 @@ removed in v0.4.0. Everything lives at the top level now, narrowed with
 
 ### `docker run against image '…' was requested but the docker CLI itself is not on PATH`
 
-`cibuildmp` builds everything in containers — there is no bare-host path
+`cibuildmp` builds in containers, with **one exception**: a `qemu` usermod
+build compiles `mpy-cross` on the host first (`_HOST_MPY_CROSS_PORTS` in
+`usermod/orchestrate.py`), so that one port needs a working host C
+compiler as well as Docker. Everything else — natmod included — has no
+bare-host path
 for any target. Install Docker and make sure `docker info` works as the
 user running the build.
 
@@ -604,17 +623,20 @@ directly — `CIBMP_UNIX_MANYLINUX_2_28_X86_64_DOCKER_IMAGE=my-image:local`
 and the equivalent for other ports. Otherwise this is a bug here: please
 open an issue.
 
-### `checksum mismatch for …: expected …, got …`
-
-A pinned download no longer matches its recorded sha256 — upstream
-replaced the file. This is a pin to update in a reviewed PR, not something
-to work around; `bin/update_toolchains.py` reports which pins are behind.
-
 ### `config file not found: …`
 
 `--config-file` was given a path that does not exist. Without that flag,
 `cibuildmp` looks for `<package-dir>/cibuildmp.toml`, then
 `[tool.cibuildmp]` in `<package-dir>/pyproject.toml`.
+
+### Disk, and clearing it
+
+The first run downloads a MicroPython release tarball, builds `mpy-cross`,
+and pulls a toolchain image — so it is minutes and gigabytes, not the
+sub-second rebuilds shown above. A cache with a few tags and an ESP-IDF in
+it runs to several GB. `cibuildmp --clean-cache` deletes the lot
+(`$XDG_CACHE_HOME/cibuildmp`, or wherever `CIBMP_CACHE_PATH` points);
+Docker images are Docker's own to prune.
 
 ### Still stuck
 
@@ -973,7 +995,7 @@ usermod/
   manifest.py
 ```
 
-`build-natmod` only assumes `natmod/Makefile` (or whatever `natmod_dir`
+`cibuildmp` only assumes `natmod/Makefile` (or whatever `module-dir`
 points at) accepts `ARCH=` and `MPY_DIR=` and has a `dist` target that
 drops the built `.mpy` under `build/<arch>*/`. Nothing here assumes a
 specific module name, precision scheme, or test framework — those stay in
