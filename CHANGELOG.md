@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Docs drift now fails the build.** `tests/test_docs.py` checks the living
+  docs (`README.md`, `docs/ACTIONS.md`, `docs/reference/*.md`) against the
+  source they describe: identifiers must exist in `build-platforms.toml`,
+  README's own option table must equal `FAMILIES`' `OPTION_KEYS` in both
+  directions, `CIBMP_*` names must be read by something, repo paths must exist,
+  image groups must be in `pinned_docker_images.toml`, and record links must
+  resolve. It runs in the existing pytest job — no new workflow step.
+  `docs/records/` is deliberately excluded: a record is correct as history even
+  when the state it describes is long gone. Record 0077.
+  - Found on its first run, both fixed here: `docs/reference/design.md` claimed
+    a usermod identifier is `{tag}-{port}`/`{tag}-{port}-{axis}` and gave
+    `v1.29.0-unix-manylinux_2_28_x86_64` and `v1.29.0-webassembly` as examples —
+    neither exists, since `unix`/`windows`/`webassembly` all use a bare
+    `{tag}-{arch}` with no port segment and only board ports carry one; and
+    fifteen record numbers across `docs/ACTIONS.md`, `docs/reference/design.md`,
+    `CHANGELOG.md` and `CLAUDE.md` were cited with no link definition, rendering
+    as literal `[0043]`.
+
 - **`README.md` now documents how to actually configure the thing**: a
   `Configuration` section covering where the config file is looked for and in
   what order, the flat key/`[override]`/`[publish]` shape, a table of all
@@ -771,3 +789,11 @@ than restarting (see the 0.3.0a1 entry). -->
 [0.3.0a1]: https://github.com/ballistics-lab/cibuildmp/compare/v0.2.0...v0.3.0a1
 [0.2.0]: https://github.com/ballistics-lab/cibuildmp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ballistics-lab/cibuildmp/releases/tag/v0.1.0
+
+[0022]: docs/records/0022-zephyr-third-selector-axis.md
+[0032]: docs/records/0032-unix-docker-default-and-webassembly-wiring.md
+[0038]: docs/records/0038-m5-adopt-in-three-repos.md
+[0043]: docs/records/0043-unix-adopts-cibuildwheel-native-image-model.md
+[0054]: docs/records/0054-usermod-example-from-upstream-usercmodule.md
+[0066]: docs/records/0066-extra-cmake-args.md
+[0069]: docs/records/0069-upstream-usercmodule-narrow-ci-slice.md

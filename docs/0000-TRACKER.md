@@ -86,6 +86,20 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### Implemented
 
+- [x] [0077] docs drift is a failing test, not a discipline problem |
+      `tests/test_docs.py` in the existing pytest job: identifiers, README's own
+      option table (both directions, against `OPTION_KEYS`), the `[override]`
+      column, `CIBMP_*` names, repo paths, image groups and record links, over
+      the living docs only -- `docs/records/` is deliberately excluded, since a
+      record is correct *as history* even when the state it describes is gone.
+      Written after [0073] shipped fresh drift inside a change whose whole
+      purpose was fixing drift, which is the argument that a rule asking people
+      to re-check by hand does not scale. First run found two real things and,
+      once the extractors were tightened, zero false positives: `design.md`
+      claiming usermod identifiers carry a port segment
+      (`v1.29.0-unix-manylinux_2_28_x86_64` -- `unix`/`windows`/`webassembly`
+      all use a bare `{tag}-{arch}`), and fifteen undefined record links across
+      four files
 - [x] [0076] the `unix-mipsel` composite-action holdout is `micropython-bclibc`
       and `micropython-wasm3`, not `a7p` | [0073] took the claim from this
       tracker's own [0038] row and propagated it into `README.md` and
@@ -392,3 +406,4 @@ record is added.
 [0074]: records/0074-usermod-family-table-and-retired-table-messages-removed.md
 [0075]: records/0075-top-level-scalar-keys-are-validated.md
 [0076]: records/0076-the-mipsel-holdout-is-bclibc-and-wasm3-not-a7p.md
+[0077]: records/0077-docs-drift-is-a-failing-test-not-a-discipline-problem.md

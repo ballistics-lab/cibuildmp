@@ -112,12 +112,19 @@ an exact-arch pattern with no trailing `*` (`skip = "*-rv32imc"`) will not
 match a `+0x..`-suffixed variant; `*-rv32imc*` does.
 
 **What is actually true today**, since this is a living document rather than
-a decision record: a usermod identifier is `{tag}-{port}` or
-`{tag}-{port}-{axis value}` ([0023], leading tag added by [0051]) — the
-MicroPython release always leads, the same slot natmod's own `mpy6.3-`
-occupies, so both modes read left to right the same way:
-`v1.29.0-unix-manylinux_2_28_x86_64`, `v1.29.0-webassembly`,
-`v1.29.0-esp32-ESP32_GENERIC`, `v1.29.0-qemu`. `micropython` is a real list
+a decision record: the MicroPython release always leads, the same slot
+natmod's own `mpy6.3-` occupies, so both modes read left to right the same
+way ([0023], leading tag added by [0051]). What follows it is **not** a
+uniform `{port}` segment — each port's own `identifier_format` in
+`resources/build-platforms.toml` decides, and there are two real shapes:
+
+- `{tag}-{arch}` for `unix`, `windows` and `webassembly`, with **no port
+  segment at all** — `v1.29.0-manylinux_2_28_x86_64`, `v1.29.0-win_amd64`,
+  `v1.29.0-wasm32`. Each of those arch values is already unique to its own
+  port, so a segment naming the port would only restate it.
+- `{tag}-{port}-{board}` for every board port, where the board name alone
+  is not — `v1.29.0-esp32-ESP32_GENERIC`, `v1.29.0-qemu-MPS2_AN385`,
+  `v1.29.0-rp2-RPI_PICO`. `micropython` is a real list
 ([0051] closed the truncation-to-first-entry this used to have), so more
 than one release can be selected in one invocation without one overwriting
 another's output — the tag makes every build's output directory and filename
@@ -222,11 +229,6 @@ alive never had a real caller behind it. `user-c-modules`/`manifest`/
 `extra-make-args` resolve from `default → global → env → CLI` only, the
 same as every other option.
 
-[0022]: ../records/0022-zephyr-third-selector-axis.md
-[0043]: ../records/0043-unix-adopts-cibuildwheel-native-image-model.md
-[0044]: ../records/0044-unix-native-images-landed.md
-[0051]: ../records/0051-usermod-identifiers-have-no-version-axis.md
-[0052]: ../records/0052-config-is-a-tree-not-a-selector-matrix.md
 
 <!-- migrated verbatim from docs/BACKLOG.md lines 477-518 (Config schema) -->
 
@@ -344,9 +346,6 @@ Until [0075] this was the one real hole left in the [0048] story: an
 unrecognised scalar key was read as simply absent, its default silently
 applying, which is [0048]'s own original bug wearing different clothes.
 
-[0048]: ../records/0048-build-skip-live-in-opposite-tables.md
-[0074]: ../records/0074-usermod-family-table-and-retired-table-messages-removed.md
-[0075]: ../records/0075-top-level-scalar-keys-are-validated.md
 
 Usermod's own real identifier space is documented in [0023] rather than
 transcribed here — it is a genuinely different shape from natmod's
@@ -473,9 +472,19 @@ not a toolchain) are an open question — see
 [0013]: ../records/0013-micropython-list-dedup-by-abi.md
 [0014]: ../records/0014-mip-package-per-identifier.md
 [0015]: ../records/0015-rv32imc-arch-flags-identifier.md
+[0022]: ../records/0022-zephyr-third-selector-axis.md
 [0023]: ../records/0023-usermod-identifier-scheme-config-output.md
 [0030]: ../records/0030-container-approach-natmod-and-docker-vs-qemu.md
 [0033]: ../records/0033-cibuildmp-never-builds-docker-image-itself.md
 [0036]: ../records/0036-m2-toolchain-resolver.md
+[0038]: ../records/0038-m5-adopt-in-three-repos.md
+[0043]: ../records/0043-unix-adopts-cibuildwheel-native-image-model.md
+[0044]: ../records/0044-unix-native-images-landed.md
+[0048]: ../records/0048-build-skip-live-in-opposite-tables.md
 [0050]: ../records/0050-natmod-is-docker-only.md
+[0051]: ../records/0051-usermod-identifiers-have-no-version-axis.md
+[0052]: ../records/0052-config-is-a-tree-not-a-selector-matrix.md
 [0058]: ../records/0058-image-groups-are-toolchains-not-ports.md
+[0067]: ../records/0067-user-c-modules-flat-shape-autodetect.md
+[0074]: ../records/0074-usermod-family-table-and-retired-table-messages-removed.md
+[0075]: ../records/0075-top-level-scalar-keys-are-validated.md

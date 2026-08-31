@@ -133,3 +133,6 @@ From there, drill down rather than infer:
 [0049]: docs/records/0049-no-matrix-generation-archs-vocabulary.md
 [0050]: docs/records/0050-natmod-is-docker-only.md
 [0051]: docs/records/0051-usermod-identifiers-have-no-version-axis.md
+[0058]: docs/records/0058-image-groups-are-toolchains-not-ports.md
+[0060]: docs/records/0060-rp2-build-driver.md
+[0068]: docs/records/0068-docker-dependabot-grouping-and-mipsel-ubuntu-26-04.md

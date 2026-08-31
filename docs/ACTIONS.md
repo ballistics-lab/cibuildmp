@@ -326,3 +326,7 @@ leg, identical across every consuming repo.
 Artifact upload is left to the caller on purpose -- artifact names and the
 exact glob under `natmod/build/` differ per repo/module and aren't part of
 the shared contract.
+
+[0038]: records/0038-m5-adopt-in-three-repos.md
+[0043]: records/0043-unix-adopts-cibuildwheel-native-image-model.md
+[0076]: records/0076-the-mipsel-holdout-is-bclibc-and-wasm3-not-a7p.md
