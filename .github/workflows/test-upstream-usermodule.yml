@@ -360,5 +360,13 @@ jobs:
               sleep 0.5
               continue
             fi
+            echo "--- giving up: qemu.log ---"
+            cat qemu.log || true
+            echo "--- giving up: is qemu still running? ---"
+            ps -p "$qemu_pid" -f || echo "qemu_pid $qemu_pid is not running"
+            echo "--- giving up: raw TCP connect check ---"
+            timeout 2 bash -c "echo > /dev/tcp/127.0.0.1/${port}" \
+              && echo "raw TCP connect to 127.0.0.1:${port} succeeded (so the socket itself is fine -- the failure is in mpremote/pyserial, not qemu)" \
+              || echo "raw TCP connect to 127.0.0.1:${port} also failed (so qemu never actually opened this port)"
             exit 1
           done
