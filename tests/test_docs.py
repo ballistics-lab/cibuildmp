@@ -247,6 +247,11 @@ def test_identifiers_in_living_docs_are_real(doc: Path) -> None:
             # natmod appends `+0x<flags>` at runtime when arch-flags is
             # set (targets.py) -- a real identifier, but not a table row.
             token = re.sub(r"\+0x[0-9a-f]+$", "", token)
+            # Collected artifacts are named `{name}-{version}-{identifier}`
+            # plus an extension, so a filename in the docs carries a real
+            # identifier with a suffix glued on -- strip it rather than
+            # report `...-x64.mpy` as an identifier that does not exist.
+            token = re.sub(r"\.(mpy|exe|elf|uf2|bin|mjs|wasm|json)$", "", token)
             if GLOB.search(token):
                 if not any(
                     re.fullmatch(re.escape(token).replace(r"\*", ".*"), real)

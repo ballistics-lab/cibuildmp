@@ -91,6 +91,117 @@ every flag, and [Configuration](#configuration) below covers the config
 file, every option key, the `CIBMP_*` environment forms and the order they
 all resolve in.
 
+## Your first module
+
+Empty directory to a working `.mpy`, in three files. Every command and every
+output below is from a real run, not an illustration.
+
+**1. `natmod/mymod.c`** — the module itself:
+
+```c
+#include "py/dynruntime.h"
+
+static mp_obj_t add(mp_obj_t a_obj, mp_obj_t b_obj) {
+    return mp_obj_new_int(mp_obj_get_int(a_obj) + mp_obj_get_int(b_obj));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(add_obj, add);
+
+mp_obj_t mpy_init(mp_obj_fun_bc_t *self, size_t n_args, size_t n_kw, mp_obj_t *args) {
+    MP_DYNRUNTIME_INIT_ENTRY
+    mp_store_global(MP_QSTR_add, MP_OBJ_FROM_PTR(&add_obj));
+    MP_DYNRUNTIME_INIT_EXIT
+}
+```
+
+**2. `natmod/Makefile`** — `MPY_DIR` and `ARCH` arrive on the command line;
+don't hardcode them:
+
+```make
+MOD = mymod
+SRC = mymod.c
+
+# Keep make's own object files out of build/, and scope them per arch.
+BUILD = .obj/$(ARCH)
+
+include $(MPY_DIR)/py/dynruntime.mk
+
+# cibuildmp looks for the finished .mpy in build/<arch>*/
+dist:
+	rm -f $(MOD).mpy
+	$(MAKE) all
+	mkdir -p build/$(ARCH)
+	cp $(MOD).mpy build/$(ARCH)/
+```
+
+**3. `cibuildmp.toml`** — what to build. Start with one target:
+
+```toml
+build = "mpy6.3-v1.29.0-x64"
+```
+
+Then run it:
+
+```console
+$ cibuildmp
+cibuildmp: 1 target(s) against MicroPython v1.29.0
+  [1/1] mpy6.3-v1.29.0-x64        make -C natmod ARCH=x64 dist
+...
+cibuildmp: 1 target(s) built in 0.7s
+  mpy6.3-v1.29.0-x64: mymod-mpy6.3-v1.29.0-x64.mpy (210 bytes)
+```
+
+The result is in `mpyhouse/mpy6.3-v1.29.0-x64/`. That is the whole loop —
+the same command, with a wider `build`, is what CI runs.
+
+### Widening it
+
+Change one line to build every arch instead of one:
+
+```toml
+build = "mpy6.3-v1.29.0-*"
+```
+
+`cibuildmp --print-build-identifiers` lists exactly what a glob selects
+before you build it, and `--dry-run` shows the `make` command line each
+target will get. Neither builds anything, so both are safe to run
+repeatedly while you get the glob right.
+
+### Using what you built
+
+The `.mpy` is a normal MicroPython native module. On a board:
+
+```console
+$ mpremote cp mpyhouse/mpy6.3-v1.29.0-armv6m/mymod-*.mpy :mymod.mpy
+$ mpremote exec "import mymod; print(mymod.add(2, 3))"
+5
+```
+
+The filename carries its identifier so several arches can sit side by side;
+rename it to plain `mymod.mpy` on the device, because `import mymod` looks
+for exactly that name.
+
+**For `mip install`**, set `version` in your config. `cibuildmp` then writes
+a `package.json` beside each `.mpy` naming the ABI and arch it is
+compatible with, which is what lets one release serve every device:
+
+```toml
+name = "mymod"
+version = "1.0.0"
+```
+
+Publishing that directory — a GitHub Release, or anywhere else — stays your
+own CI step. `cibuildmp` assembles the tree and stops there, the same line
+cibuildwheel draws at `wheelhouse/`.
+
+### When you outgrow three files
+
+[`examples/template`](examples/template) is the same module with everything
+a real project ends up needing: a shared `src/` core compiled by both the
+natmod and the usermod path, a `usermod/` half, and a `Makefile` whose
+comments record three separate ways a shared `BUILD` directory silently
+produces the *wrong* arch's binary. Read it when your own build starts
+doing something strange, not before.
+
 ## Identifiers and selectors
 
 Every buildable thing — one natmod arch, one usermod port/board/arch cell —

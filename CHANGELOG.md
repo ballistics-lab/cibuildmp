@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A "Your first module" walkthrough in `README.md`** — empty directory to a
+  working `.mpy` in three files, then how to widen it, then what to do with the
+  result (`mpremote cp` onto a board, or set `version` to get the `package.json`
+  that `mip install` needs). The three files were actually built while writing
+  it: a real `cibuildmp` run producing a 210-byte `mymod-mpy6.3-v1.29.0-x64.mpy`
+  whose header reads back as arch code 2, x64. Quick start showed the command
+  and never the module it needs.
+- **Contributor guides in `CONTRIBUTING.md`** for the three real changes someone
+  makes here: adding a MicroPython tag (a data edit — the refresh scripts walk
+  the tag's own source, which is why v1.29.0's new `x64`/`x86` cross prefixes
+  were picked up rather than assumed from v1.28.0), wiring a usermod port driver
+  (four edits, two of them one-line registrations), and adding a natmod arch —
+  which you do not, because the arch table reports what upstream has.
 - **A "When a build fails" section in `README.md`.** Twelve real error messages
   the tool actually prints — `no targets selected`, `unknown key`, the missing
   Docker CLI, the missing binfmt handler, `ambiguous output`, the arch-code

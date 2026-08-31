@@ -107,6 +107,60 @@ document points at that row. Naming a consuming repo is fine when it is an
 *example* ("a7p passes `pre_build_command: make fetch-nanopb`"); asserting
 its current state is not.
 
+## Adding a new MicroPython tag
+
+The most common change here, and entirely a data edit -- no build driver
+changes when upstream cuts a release.
+
+```console
+$ bin/refresh_natmod_archs.py v1.30.0 > /tmp/natmod.toml
+$ bin/refresh_usermod_boards.py esp32 v1.30.0 > /tmp/esp32.toml   # per board.json port
+```
+
+Both walk that tag's own real source -- `py/persistentcode.h` and
+`py/dynruntime.mk` for natmod's arches, each port's own
+`ports/<port>/boards/*/board.json` for the board ports -- and print rows,
+including the `[tags]` entry with the tag's sha and date. Nothing is
+extrapolated from the tag before it, which matters: v1.29.0 gave `x64` and
+`x86` real cross-compiler prefixes where v1.28.0 had none, and a table
+built by assuming the previous tag's values would have been wrong for both.
+
+Paste the rows into `src/cibuildmp/resources/build-platforms.toml`, then:
+
+```console
+$ bin/refresh_docs.py     # regenerates the doc tables that read from it
+$ uv run pytest -q
+```
+
+## Adding a new usermod port
+
+Nine ports have verified rows and no build driver ([0053]). Wiring one up is
+four edits, and the first one is the same data edit as above:
+
+1. **Rows** in `build-platforms.toml` under `[usermod.<port>]`, with an
+   `identifier_format` and an `image`/`images` entry naming the toolchain
+   image group its builds run in.
+2. **`src/cibuildmp/platforms/usermod/build_<port>.py`** -- one
+   `build_<port>()` doing that port's own real build, with
+   `build_common.py` for what it shares with the others.
+3. **Register it twice**: `orchestrate.py`'s `_BUILD_FN` table and
+   `targets.py`'s `KNOWN_PORTS`. Both are plain data; nothing dispatches on
+   a port name anywhere else.
+4. **An image**, if no existing group already holds that toolchain --
+   `docker/<group>.Dockerfile`, published and pinned in
+   `pinned_docker_images.toml`. Groups are keyed by *toolchain*, not by
+   port, so a new ARM port usually needs no new image at all ([0058]).
+
+Then `bin/refresh_docs.py` picks the port up in the docs on its own.
+
+## Adding a natmod arch
+
+You don't. `bin/refresh_natmod_archs.py` reports whatever
+`py/dynruntime.mk` accepts at each tag; an arch exists here when upstream
+has it and not before. If a real arch is missing from the table, that is a
+bug in the refresh script or a tag nobody has walked yet -- not a list to
+append to by hand.
+
 ## Where things actually stand
 
 Don't trust this file's (or `README.md`'s) memory of what's implemented —
@@ -115,5 +169,7 @@ both go stale between sessions and neither self-corrects.
 progress / Proposed" split is the only status claim worth acting on.
 
 [0038]: docs/records/0038-m5-adopt-in-three-repos.md
+[0053]: docs/records/0053-usermod-ports-without-a-build-driver.md
+[0058]: docs/records/0058-image-groups-are-toolchains-not-ports.md
 [0076]: docs/records/0076-the-mipsel-holdout-is-bclibc-and-wasm3-not-a7p.md
 [0077]: docs/records/0077-docs-drift-is-a-failing-test-not-a-discipline-problem.md
