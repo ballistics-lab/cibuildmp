@@ -6,10 +6,15 @@ through the same `cibuildmp` command), and the coordinator (`_run()`) that
 resolves both families on every invocation, merges `--print-build-
 identifiers`, makes the one joint "nothing at all was selected" decision,
 and dispatches whichever families ended up with a nonzero target list.
-This module never names `natmod`/`usermod` anywhere below -- only
-`platforms.FAMILIES` -- which is the actual requirement a future third
-family (zephyr, [0022]; any of upstream's own ~20 real ports) needs this
-dispatch to satisfy, since none of it should have to change to add one.
+No *dispatch* in this module names `natmod`/`usermod` -- it iterates
+`platforms.FAMILIES` -- which is the requirement a future third family
+(zephyr, [0022]; any of upstream's own ~20 real ports) needs to satisfy:
+adding one should touch no logic here. The imports are a different
+matter and are not family-agnostic: `read_config`/`ConfigError` live in
+`platforms/natmod/options.py` and are imported from there by this module
+and by `usermod/options.py` alike, because natmod's options module is
+the shared base every platform imports from. A third family would import
+them the same way; it would not need this file's own logic changed.
 
 There is no more platform *activation* concept at all (record 0052's own
 live-caught retraction): every family is always in scope, on every

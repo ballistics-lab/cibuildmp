@@ -115,6 +115,13 @@ IDENTIFIER_SHAPED = re.compile(
     r"(?:mpy[\d.]+-)?v\d+\.\d+(?:\.\d+)?(?:-preview)?(?:-[A-Za-z0-9_.+*?]+)+"
 )
 
+# The tagless natmod form `mpy6.3-x64`, which stopped existing at [0051]
+# when the MicroPython tag moved into every identifier. Matched separately
+# because IDENTIFIER_SHAPED anchors on that tag, so an identifier with the
+# tag *dropped* is not identifier-shaped at all -- exactly the regression
+# this suite exists for, and it survived in README for weeks.
+TAGLESS_NATMOD = re.compile(r"\bmpy\d+\.\d+-(?!v\d)[A-Za-z0-9_]+\b")
+
 ENV_VAR = re.compile(r"CIBMP_[A-Z0-9_]+")
 
 # A path is only worth checking when it looks like one this repo owns.
@@ -261,6 +268,8 @@ def test_identifiers_in_living_docs_are_real(doc: Path) -> None:
                 continue
             if token not in IDENTIFIERS:
                 unknown.append(token)
+        for token in TAGLESS_NATMOD.findall(span):
+            unknown.append(f"{token} (tagless natmod form, retired by [0051])")
     assert not unknown, (
         f"{doc.relative_to(REPO)} names identifiers that "
         f"resources/build-platforms.toml does not have: {sorted(set(unknown))}"
@@ -489,7 +498,9 @@ def test_tracker_rows_are_their_records_own_titles() -> None:
             continue
         if section not in {"In progress / Proposed", "Implemented"}:
             continue
-        match = re.match(r"^- \[[ x]\] ((?:\[\d{4}\])(?:/\[\d{4}\])*)\s*(.*)$", line)
+        # `\s*` first: an indented row is still a row, and one had escaped
+        # this check by being nested two spaces in.
+        match = re.match(r"^\s*- \[[ x]\] ((?:\[\d{4}\])(?:/\[\d{4}\])*)\s*(.*)$", line)
         if not match:
             continue
         refs, text = match.groups()

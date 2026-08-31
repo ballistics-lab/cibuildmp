@@ -39,7 +39,11 @@ inputs:
     required: false
     default: ""
   extras:
-    description: "Comma-separated list of cibuildmp extras to install"
+    description: >
+      Comma-separated list of cibuildmp extras to install. **There are none
+      today** -- pyproject.toml declares no [project.optional-dependencies]
+      at all, so any non-empty value makes the `uv tool install` step fail.
+      Kept as the input's own shape for when one exists; leave it empty.
     required: false
     default: ""
   keep-going:
@@ -133,9 +137,11 @@ runs:
     # mpy-cross now builds inside the natmod image (natmod/build.py's
     # `build_mpy_cross()`), closing [0050]'s "still builds mpy-cross on
     # the host" item -- but `build-essential` still stays, because
-    # usermod's `qemu`/`esp32` ports build *their* mpy-cross on the host
-    # too (`_HOST_MPY_CROSS_PORTS`, usermod/orchestrate.py) and were never
-    # part of this item. Closing that pair the same way `unix`/`windows`/
+    # usermod's `qemu` port builds *its* mpy-cross on the host too
+    # (`_HOST_MPY_CROSS_PORTS`, usermod/orchestrate.py) and was never
+    # part of this item. (`esp32` was in that set once and is not now --
+    # this comment named both until 0077's own audit.) Closing it the same
+    # way `unix`/`windows`/
     # `webassembly` already were in [0044] is what would let this step go.
     - name: Install cibuildmp's own apt prerequisites
       # Slimmed live, D33: every package this used to install beyond

@@ -8,7 +8,8 @@
 # no natmod/ directory. The values below are drawn from micropython-bclibc,
 # the most demanding of the three consuming repos.
 #
-# See docs/BACKLOG.md for the decisions behind this schema (D1-D8) and for
+# See docs/0000-TRACKER.md and docs/records/ for the decisions behind this
+# schema (docs/BACKLOG.md has been a redirect stub since 0041) and for
 # what is and is not implemented yet.
 #
 # Location: cibuildmp.toml at the repo root. If the project also has a

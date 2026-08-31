@@ -47,7 +47,9 @@
 #   pypa base    quay.io/pypa/manylinux_2_28_x86_64
 #   cibuildmp    ghcr.io/ballistics-lab/manylinux_2_28_x86_64
 #   Dockerfile   docker/manylinux_2_28_x86_64.Dockerfile
-#   identifier   unix-manylinux_2_28_x86_64
+#   identifier   v1.29.0-manylinux_2_28_x86_64   (no `unix-` segment --
+#                                                 unix/windows/webassembly
+#                                                 identifiers are {tag}-{arch})
 #
 # `<floor>_<arch>` is a real PEP 600 / PEP 656 platform tag, which is the
 # whole point: record 0031 recorded that "manylinux" here used to mean

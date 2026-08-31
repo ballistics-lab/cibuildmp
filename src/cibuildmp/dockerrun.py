@@ -1,10 +1,11 @@
-"""Sibling-container execution for usermod port builds -- D26's own
-design, Docker-only for every port (D30). `unix`, `webassembly` and
-`windows` (D42) are wired to `ensure_image()` today, reachable through
-the real CLI/action.yml; `esp32` has no image at all yet (D28), and
-`qemu` is the remaining gap D32 left open. The rule they are waiting on
-is D26's own: one port, proven live against a real container, before the
-next.
+"""Sibling-container execution for every build -- D26's own design,
+Docker-only (D30). All six wired usermod ports and every natmod arch
+resolve an image through `image_for()` and run here; the one thing left
+on the host is `qemu`'s own `mpy-cross`
+(`_HOST_MPY_CROSS_PORTS`, `usermod/orchestrate.py`). This docstring
+tracked the ports one at a time while they were being wired and said
+`esp32` had no image and `qemu` was an open gap long after [0028] and
+[0058] closed both.
 
 The design this exists to prove out: `cibuildmp` itself stays on the bare
 host (no Docker-in-Docker) and launches an ordinary sibling `docker run`

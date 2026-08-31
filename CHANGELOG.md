@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A second uncontexted agent read the repo; these are its findings.** It
+  confirmed the previous round (every quoted error message reproduced verbatim,
+  the `CIBMP_BUILD_UNIX` example produced exactly the documented two lines), and
+  found a sharper set:
+  - `README.md` still showed `mpyhouse/mpy6.3-x64/` — the tagless identifier form
+    retired by record 0051. **The drift guard could not see it**: `IDENTIFIER_SHAPED`
+    anchors on the `v<tag>` segment, so an identifier with the tag *dropped* is
+    not identifier-shaped at all — exactly the regression the guard exists for.
+    Both fixed; the guard now matches the tagless form explicitly.
+  - One tracker row escaped the "a row is its record's title" test by being
+    indented two spaces. Row and test both fixed.
+  - `--dry-run` prints a `{micropython}` placeholder literally, while README
+    claimed it shows "exactly what would be built". Documented as expected output.
+  - The root action's seven inputs were documented in no markdown at all — only
+    `action.yml` itself. README now has the table.
+  - The `extras` input can only ever fail: `pyproject.toml` declares no
+    `[project.optional-dependencies]`. Said so in the input's own description.
+  - `action.yml` said `qemu`/`esp32` build `mpy-cross` on the host; only `qemu`
+    does.
+  - `dockerrun.py`'s module docstring still said `esp32` had no image and `qemu`
+    was an open gap, long after records 0028 and 0058 closed both.
+  - `cli.py`'s docstring claimed the module "never names `natmod`/`usermod`",
+    while importing `read_config`/`ConfigError` from `platforms/natmod/options.py`
+    on line 43. Reworded to what is actually true: the *dispatch* is
+    family-agnostic, the imports are not.
+  - `pinned_docker_images.toml`'s header taught `unix-manylinux_2_28_x86_64`, an
+    identifier shape README explicitly warns against.
+  - Record 0031's Status line said "musllinux half not started" after record 0044
+    built it; the tracker's Conventions section cited that and `0022`'s "unstarted
+    `rp2` driver" (shipped in 0060) as live examples — the exact claim `CLAUDE.md`
+    records being repeated downstream as fact. The bullet no longer carries
+    examples.
+  - `cibuildmp.toml` pointed at `docs/BACKLOG.md`, a redirect stub since 0041.
 - **`bin/publish_images.py` was broken and nothing noticed** — it still read
   `pinned_docker_images.toml`'s pre-0058 `[image.<arch>]` shape, so every
   invocation raised `KeyError: 'image'`. No workflow calls it (it exists for

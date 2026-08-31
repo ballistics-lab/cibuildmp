@@ -20,11 +20,13 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
   `Implemented` / `Implemented (done)` for a build phase that shipped, `In progress` where
   real work remains, `Proposed` for a record that scopes work and names what is in the way
   without deciding it (`0054`-`0057`), `Not scheduled` for explicitly deferred work.
-- **A record whose code landed is not automatically fully closed.** Several records
-  document a decision that shipped but still carry their own "still open" / "not started"
-  items inside (`0038`'s two open M5 checkboxes, `0022`'s unstarted `rp2` build driver,
-  `0031`'s unbuilt musllinux half). Those rows stay in "In progress / Proposed" below, with
-  the open items summarized in the row's own note — read the record for the detail.
+- **A record whose code landed is not automatically fully closed.** Some records
+  document a decision that shipped and still carry their own "still open" items
+  inside. The checkbox says whether the record is closed; what is left inside it
+  is in the record, not here. **Do not put examples in this bullet** — it used to
+  name `0022`'s "unstarted `rp2` build driver" and `0031`'s "unbuilt musllinux
+  half", both of which had shipped ([0060], [0044]), and `CLAUDE.md` records the
+  first of those being repeated downstream as fact.
 - **Supersession is noted, not deleted.** `0018`'s MSYS2 approach was superseded by a
   Linux cross-compile approach *within the same record* (kept as dated addenda); `0028`'s
   local-Docker-build mechanism was later superseded by `0033`'s pull-only design — `0028`
@@ -77,7 +79,7 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 - [x] [0061] usermod build drivers split per port, cibuildwheel-style
 - [x] [0060] rp2 build driver, live-verified
 - [x] [0028] Full migration plan: container-per-port for usermod
-  - [x] [0058] The image axis was shifted from ports to toolchains with the landing of the resolver cutover, deleting redundant Dockerfiles, pinning all seven toolchain images plus esp_idf_base, and verifying QEMU boards end-to-end while carrying over remaining toolchain pin cleanups.
+- [x] [0058] the image axis is the toolchain, not the port
 - [x] [0059] GHCR's "untagged version" cleanup deletes referenced multi-arch/attestation children
 - [x] [0051] one selector for both modes, and an identifier that names what a build is compatible with
 - [x] [0052] cibuildmp's config space is a tree, not a selector matrix; the divergence from cibuildwheel is deliberate

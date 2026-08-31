@@ -49,7 +49,7 @@ An unconfigured `build` matches nothing at all, from any platform — see
 [Identifiers and selectors](#identifiers-and-selectors) below for the full
 identifier list and glob syntax. Drop `--dry-run` and it builds for real:
 each target lands in its own `output-dir/<identifier>/` directory
-(`mpyhouse/mpy6.3-x64/`, …), with a `package.json` mip can install from
+(`mpyhouse/mpy6.3-v1.29.0-x64/`, …), with a `package.json` mip can install from
 once `version` is set.
 
 **`cibuildmp` needs a reachable Docker daemon on whatever host runs it —
@@ -85,6 +85,22 @@ runs on a bare runner with the runner's own Docker daemon reachable:
   with:
     build: "mpy6.3-* v1.29.0-manylinux_2_28_x86_64"
 ```
+
+The action takes seven inputs, all optional — every one overrides the
+config file rather than replacing it:
+
+| Input | Default | What it does |
+| --- | --- | --- |
+| `package-dir` | `.` | Directory holding the module and its config |
+| `config-file` | — | Config to use instead of `<package-dir>/cibuildmp.toml` |
+| `build` | — | Override the config's own `build` selector |
+| `skip` | — | Override the config's own `skip` selector |
+| `output-dir` | `mpyhouse` | Where to collect output. **natmod only** — usermod reads it from the config or `CIBMP_OUTPUT_DIR` |
+| `keep-going` | — | Any non-empty value: build every selected target even after one fails |
+| `extras` | — | **Leave empty.** There are no extras today; a non-empty value fails the install |
+
+Anything without an input has an environment form instead — see
+[Configuration](#configuration).
 
 See [`examples/template`](examples/template) for a minimal natmod module
 and its `cibuildmp.toml`, and [`examples/wasm2mpy`](examples/wasm2mpy) for
@@ -656,8 +672,12 @@ Docker images are Docker's own to prune.
 
 ### Still stuck
 
-`--dry-run` prints exactly what would be built and with which `make`
-command line, without building. `--debug-traceback` turns a one-line error
+`--dry-run` prints what would be built and with which `make`
+command line, without building. It prints a `{micropython}` placeholder
+literally rather than resolved — the checkout it would point at is not
+fetched during a dry run, so `make -C {micropython}/examples/natmod/btree`
+in that output is correct, not a broken config. `--debug-traceback` turns a
+one-line error
 into a full traceback. Both are the fastest way to turn "it failed" into a
 specific question.
 
