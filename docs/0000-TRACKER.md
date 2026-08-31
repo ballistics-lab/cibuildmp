@@ -33,312 +33,105 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 - **`reference/`** — living, unnumbered design docs and open questions. Not a decision
   history; kept current with what is true today, cross-linking back to the records that
   explain *why*.
-- **A row's own note is a sentence or two, not an essay.** Found live, three times
-  now: a premise-table cell, a closed-item row, and an epic's own summary row each
-  grew past 1700 characters across repeated same-session edits before being trimmed
-  back down. When a new fact needs recording, prefer editing the row's existing note
-  down to fit the new fact over just appending another clause — the row should read
-  the same length after ten edits as after one.
+- **A row is its record's own title, verbatim — not an essay, not a summary.**
+  The checkbox carries the status; everything else, including how the work
+  went and what is still open inside it, lives in the record. A row that
+  needs a sentence to explain itself is a record whose title needs fixing.
+  Rows had grown past 1700 characters and then gone stale independently of
+  the records they summarised, which is why this is now a rule and why
+  `tests/test_docs.py` checks every row against its record's own `# ` line.
+  *(Exception: **Rejected** rows name the rejected proposal, since several
+  are different proposals inside one record — `[0052]` appears twice.)*
 
 ## Ideas
 
 ### In progress / Proposed
 
-- [ ] [0047] run output should look exactly like cibuildwheel's |
-      `stepsummary.py` half shipped (HTML job-summary table, right-aligned
-      footer). Terminal log folding, colour/symbols, and
-      `::error::`/`::warning::`/`::notice::` annotations still not started;
-      design corrected 2026-08-28 against a real installed cibuildwheel
-      4.1.0 (folds are per *step*, not per identifier)
-- [ ] [0046] nothing notices when a pin goes stale, except container images |
-      **mostly closed 2026-08-31**: `bin/update_toolchains.py` covers all six
-      compiler-tarball pins (four GitHub releases, emsdk via its own
-      `emscripten-releases-tags.json`, xtensa-lx106 reported as unversioned with
-      `--slow` to re-hash), and `.github/workflows/pin-staleness.yml` runs it
-      weekly alongside `update_docker.py --check`, which until then had been
-      written for exactly that and had no caller. Found real drift on its first
-      run: llvm-mingw two months behind (`20260616` -> `20260826`). The record's
-      own inventory table pointed at `resources/natmod.toml` for pins that live
-      in `docker/*.Dockerfile` `ARG`s now -- corrected in its addendum. Still
-      open: results go only to the job log ([0029]'s `stepsummary.py` unreused),
-      and whether consumers' own `micropython` pins are in scope |
-      no longer hypothetical -- [0068]'s `mipsel`/`ubuntu:26.04` incident is a
-      real pin going stale with nothing scheduled to have caught it first.
-      `bin/update_docker.py` covers both image tables but runs on no schedule
-      (confirmed via [0068]'s own audit); emsdk is the cheapest thing left
-      unaddressed (its own `emscripten-releases-tags.json` maps version to
-      build hash), `xtensa-lx106` the hardest (no version at all). The four
-      toolchain tarballs `docker/natmod.Dockerfile` ([0050]) moved in are a
-      fifth thing nothing watches
-- [ ] [0068] docker Dependabot grouping fixed, and what the first grouped bump
-      exposed | the `docker` group matches `github-actions`'s one-PR shape, and
-      `ubuntu` is now excluded from it so a base-OS major bump can never again
-      share a PR with routine pypa digest bumps (2026-08-30, closing PR #16's
-      own failure mode). Also fixed alongside: `publish.yml`'s `deploy` job no
-      longer runs on `pull_request` (did nothing there, could still flake red),
-      `test-all-platforms.yml` skips its full matrix for a `dependabot[bot]`
-      actor. PR #16 resolved: auto-closed once the group split landed,
-      recreated as #18 (14 pypa-only updates) which merged; `ubuntu` itself
-      not yet re-proposed standalone, `main` still on `24.04`. `manylinux_2_39_mipsel`'s
-      toolchain move decided (2026-08-30 second addendum): a pinned Bootlin
-      tarball, glibc 2.41, renamed to `manylinux_2_41_mipsel`, delisted from
-      published images entirely (user builds the Dockerfile themselves,
-      reaches it via the existing `CIBMP_*_DOCKER_IMAGE` override) -- decided
-      only, none of it landed in code yet
-- [ ] [0022] zephyr as a third usermod selector axis (epic) | phase outline
-      M6-M9b mostly landed; `rp2`'s own build driver closed 2026-08-29 by
-      [0060], live-verified. Zephyr itself still not started
-- [ ] [0040] usermod test-runner axis | not scheduled ([0006] holds); four of
-      seven runners already proven by `mp-usermod.yml`, not yet owned by
-      cibuildmp
-- [ ] [0053] nine usermod ports have verified rows in `build-platforms.toml` but no real `build_<port>()` driver | `mimxrt`, `samd`, `stm32`, `psoc-edge`, `alif`, `esp8266`, `cc3200`, `renesas-ra`, `nrf` -- flagged by the user as the genuinely larger remaining piece. `rp2` closed 2026-08-29 by [0060]
-- [ ] [0056] build upstream MicroPython through the usermod path with no user C module | driver mechanics settled; open question is only how absence is expressed -- an explicit `no-user-c-modules = true` flag (A) vs. dropping `user-c-modules`'s `"."` default so unset means none (B). Exactly one existing config (`examples/template`) depends on that default either way
-- [ ] [0057] more than one module per build | **decided, documentation not mechanism**: natmod is one config per module (already demonstrated); usermod stays one `user-c-modules` path, N modules live in the consumer's own layout (subdirectories on Make ports, an aggregating `.cmake` on CMake ports) -- no list, since the aggregator is the consumer's own file. Both forms now tested live by [0054]/[0069]; writing it down for users still left
+- [ ] [0047] the run output works, but it is not cibuildwheel's
+- [ ] [0046] nothing notices when a pin goes stale, except container images
+- [ ] [0068] docker Dependabot grouping, and what the first grouped bump exposed
+- [ ] [0022] zephyr is a third selector axis, not a board-based port that just needs its boards added
+- [ ] [0040] usermod's own test-runner axis, deferred
+- [ ] [0053] usermod ports with verified facts but no build driver
+- [ ] [0056] building upstream MicroPython through the usermod path with no user C module at all
+- [ ] [0057] more than one module per build, in both modes
 
 ### Implemented
 
-- [x] [0077] docs drift is a failing test, not a discipline problem |
-      `tests/test_docs.py` in the existing pytest job: identifiers, README's own
-      option table (both directions, against `OPTION_KEYS`), the `[override]`
-      column, `CIBMP_*` names, repo paths, image groups and record links, over
-      the living docs only -- `docs/records/` is deliberately excluded, since a
-      record is correct *as history* even when the state it describes is gone.
-      Written after [0073] shipped fresh drift inside a change whose whole
-      purpose was fixing drift, which is the argument that a rule asking people
-      to re-check by hand does not scale. First run found two real things and,
-      once the extractors were tightened, zero false positives: `design.md`
-      claiming usermod identifiers carry a port segment
-      (`v1.29.0-unix-manylinux_2_28_x86_64` -- `unix`/`windows`/`webassembly`
-      all use a bare `{tag}-{arch}`), and fifteen undefined record links across
-      four files. Addendum the same day: `bin/refresh_docs.py` generates the two
-      tables that are pure functions of the resource files (README's identifier
-      shapes, `vendored-images.md`'s group mapping), so those cannot drift at
-      all rather than being checked for it -- and README's "83 esp32 / 74 rp2"
-      count, a two-tag slice now off by five times, is deleted rather than
-      refreshed
-- [x] [0076] the `unix-mipsel` composite-action holdout is `micropython-bclibc`
-      and `micropython-wasm3`, not `a7p` | [0073] took the claim from this
-      tracker's own [0038] row and propagated it into `README.md` and
-      `docs/ACTIONS.md` -- the drift [0073] exists to fix, reproduced inside the
-      fix. Checked against all three repos' real workflows: `a7p` calls no
-      composite action at all (its last two `clone-micropython` uses went the
-      same session), the other two both keep `build-usermod-unix` for mipsel and
-      call `fetch-micropython` in eight jobs between them. The cited record
-      ([0067], `resolve_user_c_modules()` autodetect) never mentioned mipsel
-- [x] [0075] an unrecognised top-level *scalar* key is an error, not a silent
-      default | the gap [0074] found while checking a `design.md` claim and left
-      open: `check_known_keys()`/`known_option_names()` had been dead code since
-      [0051]'s Phase E, so `micropython = "v1.29.0"` (a real key [0052] retired)
-      was read as absent, its default applying, with no complaint -- [0048]'s own
-      original bug one level up. `cli.py` gains `_validate_top_level_keys()`,
-      unioning each family module's own new `OPTION_KEYS` over `FAMILIES` (no key
-      list in `cli.py`, so a third family needs no edit there), plus `difflib`
-      suggestions the helper already had and nothing exercised. Found running it,
-      not in review: the check first raised the wrong `ConfigError` class and
-      printed a traceback, and `_validate_top_level_tables()`'s `dict`-only test
-      never saw `[[name]]` at all
-- [x] [0074] `[usermod]` removed outright, and the six other retired tables lose
-      their dedicated migration message | checked directly: no real config in this
-      project's own examples ever wrote `[usermod]`, so the family-tier cascade
-      layer it alone populated ([0051]'s ninth addendum) is deleted from
-      `cibuildmp.options.Options` entirely, not just emptied. `[natmod]`/`[unix]`/
-      `[windows]`/`[qemu]`/`[webassembly]`/`[esp32]`/`[usermod]` are now all plain
-      "unknown table" errors, same as any typo -- their real, historically-used
-      migration messages ([0048]/[0052]) are no longer needed now that all three
-      consuming repos have fully migrated ([0038]). `design.md`'s config-schema
-      section also had it wrong that a stray scalar key (e.g. `micropython =`) is
-      validated at all -- it never was; corrected in the doc, not closed in code
-- [x] [0073] `design.md`'s "Positioning" section still described the rejected
-      `build-natmod`-as-wrapper plan as live | fixed alongside README's own
-      "Composite actions" section and `docs/ACTIONS.md`'s intro -- all three now
-      say plainly that `.github/actions/*` doesn't call `cibuildmp` at all and
-      isn't a second usage path. The *example* it attached to that -- `a7p`'s
-      own `unix-mipsel` holdout ([0067]) -- was false in every particular and
-      is corrected by [0076]; the argument itself stands
-- [x] [0055]/[0072] all eleven upstream `examples/natmod/*` modules build through
-      cibuildmp's real natmod path | `{micropython}` placeholder in `module-dir` (the
-      natmod mirror of [0071]) plus a `collect_output()` fallback for `py/dynruntime.mk`'s
-      own `all` target close [0055]'s own option 2, for every module, not just
-      `features0` -- `test-upstream-natmod.yml` covers all eleven, plus a dedicated
-      multi-arch job proving the exact collision scenario [0055]'s guard survey named.
-      Two things that survey called blockers (`btree`'s submodule, rv32imc arch-flags)
-      turned out not to be real gaps -- see [0072]'s own addendum
-- [x] [0071] `{micropython}` placeholder in `user-c-modules` | `orchestrate.py`
-      substitutes it with the already-fetched checkout before any Docker/mount step,
-      uniformly for every port. Closes the gap [0069] named and left open
-- [x] [0070] collected `unix` binary shipped without its own repaired `lib/` sidecar |
-      `build_one()` now copies the `lib/` sidecar alongside the binary; re-confirmed
-      against a real container build via [0069]'s own smoke test, green repeatedly
-- [x] [0069] a real CI slice of [0054] | widened from `unix`+`rp2` to all six ports
-      2026-08-31, all green. Two real bugs found and fixed: `windows`'s image missing
-      `g++-mingw-w64`, `webassembly`'s Makefile missing `CXX=em++` plus a
-      `_GNU_SOURCE`/`CXXFLAGS_MOD` fix. Own mechanism (checkout pre-fetch,
-      `CIBMP_UPSTREAM_USERCMODULE_DIR`) retired for `MICROPY_DIR` (CMake) and [0071]'s
-      `{micropython}` (Make); config lives entirely in `cibuildmp.toml` now
-- [x] [0054] an `examples/` usermod fixture on upstream's own `examples/usercmodule` |
-      both open questions answered by [0069]'s widening: `cppexample` links on every
-      port once its own real bug is fixed, none needed skipping
-- [x] [0038] M5 -- adopt cibuildmp in the three consuming repos | all three
-      (`micropython-bclibc` #18, `micropython-wasm3` #6, `a7p` #86) merged to
-      `main`, CI fully green on the current head (31/32/29 checks), all
-      pinned to `cibuildmp@v0.4.0`. **Corrected 2026-08-31 ([0076]):** this
-      row used to say `a7p`'s own `unix-mipsel` cell stays on the old
-      composite action deliberately ([0067]) -- wrong repo and wrong record,
-      and already wrong when written (`a7p#86`, the PR this row cites, is
-      what moved that cell onto `v1.29.0-manylinux_2_39_mipsel`). The real
-      `build-usermod-unix` holdouts are `micropython-bclibc` and
-      `micropython-wasm3`; `a7p` uses no composite action at all.
-      **Composite-action status, checked 2026-08-31 against each repo's own
-      default branch** (this row is the only place that states it -- README,
-      `docs/ACTIONS.md` and `docs/reference/design.md` all point here now,
-      [0077]): `a7p` zero; `micropython-bclibc` four (`fetch-micropython`
-      x3, `build-usermod-unix` for mipsel); `micropython-wasm3` six
-      (`fetch-micropython` x5, `build-usermod-unix` for mipsel). Migrations
-      for both are written and pushed to a `bump-cibuildmp` branch in each,
-      unmerged and not yet exercised by their own CI. Two real
-      bugs surfaced
-      and closed along the way, [0066]/[0067]. Confirmed live 2026-08-30 --
-      the `build-natmod` wrapper item once tracked alongside this is now its
-      own row under Rejected, not a blocker on this one
-- [x] [0067] `resolve_user_c_modules()` auto-detects the flat make-module
-      shape | live-caught migrating `micropython-wasm3` (M5, [0038]): `py/
-      py.mk` globs `<USER_C_MODULES>/*/micropython.mk` for make ports, one
-      directory level *above* the module itself, so a flat single-module
-      `usermod/` (a `micropython.mk` directly inside it -- the shape a new
-      single-module project reaches for first) silently matched nothing and
-      built zero user modules, no error anywhere. Now detects a
-      `micropython.mk` directly inside `module_dir` and resolves to its own
-      parent for make ports only; the existing multi-module shape (`a7p`'s
-      own nested `usermod/a7p/`) and every cmake-port resolution are
-      unaffected, confirmed live against both real repos' own directories
-      before pushing
-- [x] [0066] `extra-cmake-args`, the cmake-side `extra-make-args` | surfaced
-      migrating `micropython-wasm3`'s `rp2` usermod build. Not solvable by
-      reusing `extra-make-args` as a raw command-line token: `rp2`/`esp32`'s
-      own Makefiles accumulate their cmake arguments with a plain `+=` and
-      GNU Make's own precedence means a command-line assignment of the same
-      name *replaces* that accumulation rather than adding to it, verified
-      live twice. Delivered as a container environment variable instead
-      (`CMAKE_ARGS` for `rp2`, `IDFPY_FLAGS` for `esp32`, ESP-IDF's own name
-      for the idea), which sits one precedence tier below a makefile's own
-      assignment so its `+=` still appends onto it correctly
-- [x] [0065] bucketed test-matrix planning | replaces [0062]'s per-port
-      `workflow_call` fan-out (which fixed a matrix-*size* ceiling that
-      was never the real bottleneck) with `bin/plan_test_matrix.py`:
-      resolves the real ordered identifier list and bin-packs it into
-      at most 20 buckets, balanced by a real-run-seeded time estimate,
-      split by runner class first (unix `aarch64`/`armv7l` on
-      `ubuntu-24.04-arm`, everything else `ubuntu-latest`). Each bucket
-      runs with `--keep-going` ([0063]) and uploads a JSON report;
-      `aggregate-results` renders the summary from those reports, in the
-      plan's own identifier order rather than upload order or a sort.
-      `test-platforms.yml` is now a thin single-job building block
-      (still directly dispatchable); `action.yml` grew a `keep-going`
-      input so it can reach `--keep-going` through the real composite
-      action rather than a bypass
-- [x] [0063] `--keep-going` and a JSON build report | added for
-      `test-platforms.yml`-style coverage sweeps: off by default (every
-      existing caller's fail-fast behaviour is unchanged), on it lets
-      `build_all()`/`orchestrate.build()` survive a target's own failure
-      (and a tag group's own fetch failure) and keep attempting the rest.
-      A JSON report -- one file per invocation, `{identifier, duration,
-      error, output_dir, size, files}` per target -- is written
-      unconditionally, `--keep-going` or not, under `cache_root() /
-      "reports"` (`CIBMP_REPORT_PATH` to redirect). Checked live against a
-      real cibuildwheel 4.2.0 install first: upstream's own `build()` is
-      fail-fast unconditionally too, with no keep-going concept at all --
-      this is a genuine cibuildmp-only divergence. `test-platforms.yml`
-      itself does not use any of this yet -- batching identifiers per
-      image group and wiring `--keep-going` in is separate follow-up work
-- [x] [0062] `test-platforms.yml` split into a per-port orchestrator | landed
-      2026-08-29, closing the real (not hypothetical) 211/256 amd64-matrix
-      headroom [0060]'s own 74 rp2 identifiers exposed, with nine more usermod
-      ports ([0053]) and zephyr ([0022]) still queued. `test-platforms.yml`
-      itself became a reusable `workflow_call` (kept its own `workflow_dispatch`
-      too, for single-target-set debugging); new `test-all-platforms.yml`
-      orchestrates one call per port, each with its own independent 256 cap.
-      Per-port `build` globs verified to union back to exactly the prior
-      single-glob selection (231 identifiers, checked directly, not assumed).
-      Live-caught mid-design: an omitted `--skip` is not an empty one --
-      `examples/template`'s own config-level skip silently re-applied and
-      dropped twelve emulated unix cells until every call started passing
-      `skip` explicitly
-- [x] [0061] usermod build drivers split per port, cibuildwheel-style | `usermod/build.py`
-      (1628 lines, seven ports' worth) split into `build_common.py` + one `build_<port>.py`
-      each, mirroring cibuildwheel's own `linux.py`/`macos.py`/`windows.py`/`pyodide.py` +
-      `util.py` shape -- read directly before choosing it, not recalled. No behavior change;
-      `tests/test_usermod_build.py` split the same way, 371 tests passing before and after
-- [x] [0060] `rp2` build driver, live-verified | closes [0022]'s own last unstarted item
-      ("no Pico SDK resolver, no live verification") and removes `rp2` from [0053]'s list.
-      Config/image side was already done; only `build_rp2()` was missing, modeled on
-      `build_esp32()`. Live-caught: the port's own `make ... submodules` target cannot run
-      against a real release-tarball checkout at all ("fatal: not a git repository") --
-      MicroPython's tarball already vendors every `lib/` submodule, so `build_rp2()` runs no
-      provisioning step at all; `RP2_SUBMODULES` is threaded into
-      `sources.fetch_micropython()` instead, reached only on its clone path (a preview tag
-      with no tarball), reusing the exact mechanism natmod's own `micropython-submodules`
-      already proved. Live-verified: a real `examples/template` build against
-      `v1.29.0-rp2-RPI_PICO` producing a genuine 681984-byte `firmware.uf2` with the
-      fixture's own C module linked in
-- [x] [0028] Completed the migration of all ports into isolated containers: moved esp32 into esp_idf_base, fixed manifest mounts and ESP-IDF clone performance, and ensured target-specific IDF versions and targets are correctly passed for Xtensa and RISC-V.
+- [x] [0077] docs drift is a failing test, not a discipline problem
+- [x] [0076] the `unix-mipsel` holdout is `micropython-bclibc` and `micropython-wasm3`, not `a7p`
+- [x] [0075] an unrecognised top-level scalar key is an error, not a silent default
+- [x] [0074] `[usermod]` removed outright; the six other retired tables lose their dedicated migration message too
+- [x] [0073] the legacy composite actions are a permanent fallback, not a usage path being absorbed
+- [x] [0055]/[0072] a `{micropython}` placeholder for natmod, and a real `examples/natmod` slice
+- [x] [0071] `{micropython}` — a placeholder in `user-c-modules` for a path inside the pinned checkout
+- [x] [0070] the collected `unix` binary shipped without its own repaired `lib/` sidecar
+- [x] [0069] a narrow, real CI slice of [0054]'s upstream `examples/usercmodule` fixture
+- [x] [0054] an `examples/` usermod fixture built on upstream's own `examples/usercmodule`
+- [x] [0038] M5 — adopt in the three repos
+- [x] [0067] `resolve_user_c_modules()` auto-detects the flat make-module shape
+- [x] [0066] `extra-cmake-args` — the cmake-side `extra-make-args`
+- [x] [0065] bucketed test-matrix planning: ≤20 concurrent jobs, ordered by plan
+- [x] [0063] `--keep-going` and a JSON build report, for coverage sweeps
+- [x] [0062] test-platforms split into a per-port orchestrator
+- [x] [0061] usermod build drivers split per port, cibuildwheel-style
+- [x] [0060] rp2 build driver, live-verified
+- [x] [0028] Full migration plan: container-per-port for usermod
   - [x] [0058] The image axis was shifted from ports to toolchains with the landing of the resolver cutover, deleting redundant Dockerfiles, pinning all seven toolchain images plus esp_idf_base, and verifying QEMU boards end-to-end while carrying over remaining toolchain pin cleanups.
-- [x] [0059] GHCR's "untagged version" cleanup deletes referenced multi-arch/attestation children | a registry-side cleanup that deletes anything without its own tag can delete a live OCI-index child manifest, since only the parent index is ever tagged. Hit seven of fifteen images once; 2026-08-30 addendum makes the fix real rather than just a rule to remember -- `publish-docker-images.yml` now retags the digest still pinned before `:latest` moves off it (`imagetools create --tag ...:pre-<digest prefix>`), so a cleanup run in the gap has nothing untagged to find
-- [x] [0051] one selector for both modes, and an identifier that names what a build is compatible with (epic, points 1-8, phased E-I) | landed 2026-08-26: both modes' version axes are real lists, `select()`/`matches()` unified in `cibuildmp/selector.py`, config flattened to sibling per-platform tables reached via a `PLATFORM_FAMILY` registry, one shared `[[overrides]]` with `inherit`. Nine addenda; superseded by [0052]'s own later retraction of the table/registry layer itself -- see that record. The one piece that outlived even that retraction, the `[usermod]` family table (ninth addendum), is itself now gone too -- [0074], 2026-08-31
-- [x] [0052] config is build/skip glob + `[override]` only -- no per-platform tables, `--platform`/`--only`/`--archs auto`/`--enable` | Track A (natmod identifier grammar, `{name}-{version}-` filenames, per-tag arch availability) and the table/`[[overrides]]`-retraction addenda all landed 2026-08-27/28; Track B (a tree config mechanism) rejected, see Rejected below; A6 closed the same way
-- [x] [0048] `build`/`skip` are top-level in both modes, and a misplaced or misspelt key in a mode table is an error | fixed 2026-08-26; the audit it asked for also found `CIBMP_MICROPYTHON`/`CIBMP_OUTPUT_DIR` silently ignored in usermod mode, and `UsermodConfigError` never caught by the CLI -- both fixed alongside
-- [x] [0031] the musllinux column | four of seven cells green, required, and in the default axis -- every musl cell with a runner it is native to. The mechanism is proven end to end and the column is no longer a separate story: its three remaining cells are `ppc64le`/`s390x`/`riscv64`, answered 2026-08-28 by [0044]'s own descope addendum and never a musl question at all
-- [x] [0045] `--only` is a filter, not a forced identifier; `--archs auto`/`native`/`all` | both halves done -- `--only` resolves against every identifier that exists, and the vocabulary landed with [0049], which is also where the caution about `--print-build-identifiers` and host-dependence was resolved
-- [x] [0042] `windows` wired, verified and required | three arches green three runs running, `verify_windows_output()` reads the COFF machine so a leg asserts something about its output, and the port joined `examples/template`'s own `ports` -- the full lifecycle (`--only` legs allowed to fail -> required -> default axis) that musllinux walked first
-- [x] [0050] natmod builds in a container; the bare-host path and its toolchain resolver are deleted | closes [0049]'s own "still open" and, by force, [0032]. Own "still open" (image layering, host mpy-cross, publish/CI, GHCR cleanup) fully closed by five same-topic addenda through 2026-08-28 -- read the record for detail, not this row
-- [x] [0049] cibuildmp generates no matrix and chooses no host; `--archs auto`/`native`/`all` does the work instead | `--print-build-matrix`, both `default_runner`s, natmod's `runs-on` key and the `cibuildmp-matrix` action deleted -- cibuildwheel has no equivalent of any of them. Closes [0045]'s open half and [0044]'s "no per-target `runs-on` override", the latter by deletion. Its own "still open" names natmod's bare-host builds, now the top row above
-- [x] [0032] `qemu` wired to `ensure_image()`, and actually built | wired by [0050] (`toolchains.resolve()` kept working until that record deleted it, forcing the move) but unexercised for weeks after; `build-examples.yml` gained its own dedicated `v1.29.0-qemu-MPS2_AN385` leg 2026-08-28, confirmed live across two independent runs (33156958747, 33157279355), see [0032]'s own addendum
-- [x] [0044] Descoping six emulated architecture/libc cells (`ppc64le`, `s390x`, `riscv64`) from CI while keeping them fully maintained in the matrix closes the final open question for [0043] and resolves the remaining cells from [0031].
-- [x] [0043] `unix` adopts cibuildwheel's model in full: native per-target images, PEP 600/656, full arch x libc matrix (epic) | the *decision* shipped -- implemented by [0044], whose own row now sits directly above, closed. Kept here as the design argument, which is still where the reasoning lives
-- [x] [0042] `windows` wired to `ensure_image()`; `emsdk.py`/`llvmmingw.py` deleted | all three arches verified live, including an anonymous pull of the published digest; that image was pushed by hand rather than by `publish-docker-images.yml` — see the record. **Still open above:** none of it was ever re-run by CI, which is what the row in "In progress" is about
-- [x] [0041] documentation restructure — this scheme | supersedes the monolithic `docs/BACKLOG.md`
-- [x] [0033] cibuildmp never builds a Docker image itself, only pulls a published one | separate `docker/` + `publish-docker-images.yml`; `ensure_image()`'s local-build fallback removed
-- [x] [0030] extending the container approach to natmod; "Docker or QEMU" answered (both, different jobs) | Docker required for usermod, preferred (not required) for natmod
-- [x] [0029] real GitHub Actions job summary (`stepsummary.py`) | implemented and tested; not yet independently confirmed on a live Actions Summary tab
-- [x] [0027] `orchestrate.py` output-dir join and exec-bit copy fixes | two real bugs, both regression-tested
-- [x] [0026] one Docker image per port, sibling containers not Docker-in-Docker | amended by [0031] to one image per (port, arch, libc) for unix
-- [x] [0025] both Dockerfiles bake in every unix cross toolchain | six real apt/gcc bugs found and fixed via real CI builds
-- [x] [0024] `unix/armhf` and `unix/mipsel` real, verified-live cross-compiles | closed M8's own acknowledged gap (`libltdl-dev`)
-- [x] [0023] usermod's own identifier scheme, config shape, and output convention | deliberately different from natmod's, each difference argued
-- [x] [0021] execution (not just linking) is central to usermod's value | does not overturn [0006] for natmod
-- [x] [0020] usermod runner selection is structural (revisits [0009]) | `windows` and `unix`/aarch64/armhf/mipsel later stopped needing a special runner
-- [x] [0019] ESP-IDF provisioning + caching | `usermod/espidf.py`, `docker` strategy chosen over host caching
-- [x] [0018] Windows provisioning — MSYS2, then fully superseded by Linux-hosted cross-compiles | no Windows runner needed for any arch
-- [x] [0017] combined `FROZEN_MANIFEST` generation off a per-port/per-variant database | `usermod/manifests.py`, corrected twice against a real consumer workflow
-- [x] [0016] `USER_C_MODULES`: directory on Make ports, `.cmake` entry point on CMake ports | `resources/usermod.toml` + `usermod/portinfo.py`
-- [x] [0015] `rv32imc`'s `ARCH_FLAGS=` is part of the identifier | fixed a latent header-decode masking bug in the process
-- [x] [0014] cibuildmp writes one self-contained mip package per identifier | no separate `publish` command; plain two-element `urls` schema
-- [x] [0013] `micropython` accepts a list, deduped by ABI not by tag | verified live against a real second ABI; corrected 2026-08-26 -- the "byte-for-byte identical" reason for dropping same-ABI tags was itself never tested and turned out false (verified live: it is not), the dedup decision stays right for a different, now actually-verified reason (functional interchangeability). See the record's own addendum and [0052]
-- [x] [0012] `pyelftools`/`ar` are cibuildmp's own dependencies | resolved via `PYTHON=<sys.executable>` on the `make` command line
-- [x] [0011] one repository — cibuildmp absorbed `micropython-native-ci` | `v0.3.0` continues `v0.2.0`'s version line
-- [x] [0010] pinned data lives in `resources/`, not in Python | `resources/natmod.toml`, cross-checked at import; the one table that had escaped this rule (`dockerrun.PORT_IMAGES`) moved out in [0044], into `pinned_pypa_images.toml` + `pinned_docker_images.toml`
-- [x] [0009] one job looping over targets is the default; fan-out is opt-in | revisited for usermod by [0020]
-- [x] [0008] distribution of the tool itself deferred | both actions install from their own checkout, as designed; reserving the PyPI name is a named nice-to-have, not committed work
-- [x] [0007] usermod vendors mpbuild's board database, not a dependency | `usermod/boards.py`, MIT header + provenance kept
-- [x] [0006] no test runners in phase 1 (natmod) | usermod's own [0021] narrows this, doesn't overturn it
-- [x] [0005] one identifier namespace, one override mechanism | `[[overrides]]` collapses three shapes into one
-- [x] [0004] config lives in `cibuildmp.toml` at the repo root | `pyproject.toml [tool.cibuildmp]` accepted as a fallback
-- [x] [0003] toolchain resolution is per-target, chosen by the tool | `host` → `download`, docker as an escape hatch
-- [x] [0002] delegate the compile, own the environment | invokes the project's own `natmod/Makefile`
-- [x] [0001] natmod first — the wheel-shaped half | usermod gets a different pipeline, later
-- [x] [0039] usermod: existing composite-action layer, two selector axes | context for [0016]-[0033]
-- [x] [0037] M3 — the build itself, plus publish folded in (former "M4") | `build.py`, `verify_output()`, `package_target()`
-- [x] [0036] M2 — toolchain resolver | `toolchains.py`, prefix reconciliation, picolibc, `x86` multilib probe
-- [x] [0035] M1 — MicroPython + mpy-cross provisioning | `sources.py`, cache under `~/.cache/cibuildmp/`
-- [x] [0034] M0 — skeleton | CLI, config loader, identifier generation, `--print-build-identifiers`
+- [x] [0059] GHCR's "untagged version" cleanup deletes referenced multi-arch/attestation children
+- [x] [0051] one selector for both modes, and an identifier that names what a build is compatible with
+- [x] [0052] cibuildmp's config space is a tree, not a selector matrix; the divergence from cibuildwheel is deliberate
+- [x] [0048] `build`/`skip` live in opposite tables in the two modes, and a misplaced one is silent
+- [x] [0031] unix usermod builds are glibc-only; there is no musllinux-equivalent, and identifiers carry no libc axis
+- [x] [0045] `--only` is a filter, not a forced identifier: selector parity with cibuildwheel
+- [x] [0042] `windows` wired to Docker; the last two host-side toolchain resolvers deleted
+- [x] [0050] natmod builds in a container; the bare-host path and its toolchain resolver are deleted
+- [x] [0049] cibuildmp generates no matrix and chooses no host; `--archs auto` does the work instead
+- [x] [0032] Closing D28's own gap: unix usermod now defaults to Docker via ensure_image()
+- [x] [0044] landing [0043]: pypa-based native images, the full arch × libc matrix, and the two things it broke
+- [x] [0043] `unix` adopts cibuildwheel's model in full: native per-target images, PEP 600/656
+- [x] [0042] `windows` wired to Docker; the last two host-side toolchain resolvers deleted
+- [x] [0041] Documentation restructure — numbered records
+- [x] [0033] cibuildmp never builds a Docker image itself; it only resolves a reference and pulls it
+- [x] [0030] Extending the container approach to natmod too, and "Docker or QEMU" answered directly
+- [x] [0029] A real GitHub Actions job summary, like cibuildwheel's
+- [x] [0027] The sixth Dockerfile fix got real CI past every unix arch, surfacing two genuine orchestrate.py bugs
+- [x] [0026] usermod moves to one Docker image per port, not one combined image
+- [x] [0025] Both Dockerfiles now bake in every unix cross toolchain — six real apt/gcc bugs
+- [x] [0024] unix/armhf and unix/mipsel are real, verified-live cross-compiles
+- [x] [0023] usermod's own identifier scheme, config shape, and output convention are each genuinely different from natmod's
+- [x] [0021] Execution, not just linking, is central to usermod's value
+- [x] [0020] Usermod runner selection is structural (revisits D9)
+- [x] [0019] ESP-IDF provisioning is the heaviest, least locally-reproducible step of any target here
+- [x] [0018] Windows provisioning is a fourth story, not a variant of download/docker/host
+- [x] [0017] Combining FROZEN_MANIFEST with the port's own default manifest is real, per-port, and explicitly not solved by the action layer
+- [x] [0016] USER_C_MODULES is a directory on Make-driven ports, a single .cmake file on CMake-driven ones
+- [x] [0015] rv32imc's ARCH_FLAGS= is part of the identifier, not an invisible extra-make-args string
+- [x] [0014] cibuildmp itself writes one self-contained mip package per identifier as part of the normal build
+- [x] [0013] micropython accepts a list, deduped by ABI, not by tag
+- [x] [0012] pyelftools and ar are cibuildmp's own dependencies, not something it installs at build time
+- [x] [0011] One repository: cibuildmp absorbed micropython-native-ci
+- [x] [0010] Pinned data lives in resources/, not in Python
+- [x] [0009] One job looping over targets is the default; fan-out is opt-in
+- [x] [0008] Distribution of the tool itself is deferred
+- [x] [0007] usermod vendors mpbuild's board database, not depends on the package
+- [x] [0006] No test runners in phase 1
+- [x] [0005] One identifier namespace, one override mechanism
+- [x] [0004] Config lives in cibuildmp.toml at the repo root
+- [x] [0003] Toolchain resolution is per-target, chosen by the tool (variant C)
+- [x] [0002] Delegate the compile, own the environment
+- [x] [0001] natmod first, and natmod is the wheel-shaped half
+- [x] [0039] usermod: existing composite-action layer, and the two selector axes
+- [x] [0037] M3 — the build itself
+- [x] [0036] M2 — toolchain resolver
+- [x] [0035] M1 — MicroPython + mpy-cross provisioning
+- [x] [0034] M0 — skeleton
 
 ### Rejected
 
-- [x] [0038] reduce `.github/actions/build-natmod` to a wrapper over
-      `cibuildmp --build "<glob>"` | rejected by explicit user call, 2026-08-30
-      -- the action stays as its own bare-host natmod toolchain
-      implementation, not folded into cibuildmp
-- [x] [0052] Track B: a tree-addressed config mechanism | designed in detail, then reverted the same record for the build/skip-glob-only model that shipped instead -- [0051]'s own row above
-- [x] [0052] defaults folded into `[override."*"]` as a built-in entry | rejected by explicit user call -- "defaults як `[override."*"]` - зайве"; `default=` stays its own `Options.get()` parameter
+- [x] [0038] `build-natmod` reduced to a thin `cibuildmp --build` wrapper
+- [x] [0052] Track B: a tree-addressed config mechanism
+- [x] [0052] defaults folded into `[override."*"]` as a built-in entry
 
 ## Reference (living, unnumbered)
 

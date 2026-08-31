@@ -431,6 +431,47 @@ def test_generated_doc_blocks_are_current() -> None:
     )
 
 
+def test_tracker_rows_are_their_records_own_titles() -> None:
+    """Every tracker row under "In progress / Proposed" and "Implemented"
+    must be its record's own `# ` title, verbatim.
+
+    The tracker's own convention, and previously enforced by nothing: rows
+    had grown into paragraph-long summaries that then went stale
+    independently of the record they summarised -- one row was over 1700
+    characters and contradicted its own record's status line. A row that
+    is the title cannot say anything the record does not.
+
+    "Rejected" is exempt by that convention: those rows name a rejected
+    *proposal*, and several proposals can live in one record (`[0052]`
+    appears twice), so a title would not distinguish them.
+    """
+    titles = {}
+    for record in (REPO / "docs" / "records").glob("*.md"):
+        first = _text(record).splitlines()[0]
+        match = re.match(r"^#\s*(\d{4})\s*[—.–-]*\s*(.+?)\s*$", first)
+        assert match, f"{record.name}: first line is not a `# NNNN — title` heading"
+        titles[match.group(1)] = match.group(2).lstrip("—.–- ").strip()
+
+    wrong = []
+    section = None
+    for line in _text(REPO / "docs" / "0000-TRACKER.md").splitlines():
+        if line.startswith("### "):
+            section = line[4:].strip()
+            continue
+        if section not in {"In progress / Proposed", "Implemented"}:
+            continue
+        match = re.match(r"^- \[[ x]\] ((?:\[\d{4}\])(?:/\[\d{4}\])*)\s*(.*)$", line)
+        if not match:
+            continue
+        refs, text = match.groups()
+        expected = titles[re.findall(r"\d{4}", refs)[-1]]
+        if text != expected:
+            wrong.append(f"{refs}\n     row: {text}\n   title: {expected}")
+    assert not wrong, (
+        "tracker rows that are not their record's own title:\n  " + "\n  ".join(wrong)
+    )
+
+
 @pytest.mark.parametrize("doc", ALL_DOCS, ids=lambda p: p.name)
 def test_record_links_resolve(doc: Path) -> None:
     """Every `[NNNN]` is defined, and every definition points at a file

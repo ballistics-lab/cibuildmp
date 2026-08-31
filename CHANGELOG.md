@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The tracker is one line per record, and a test keeps it that way.** Every row
+  under "In progress / Proposed" and "Implemented" is now its record's own `# `
+  title, verbatim — 75 rows, down from paragraph-long summaries that had grown
+  past 1700 characters and then gone stale independently of the record they
+  summarised. `tests/test_docs.py` compares each row against its record's
+  heading, so the two cannot drift. "Rejected" rows are exempt and name the
+  rejected proposal, since one record can hold several (`[0052]` holds two).
+  `docs/records/0040`'s own title was "Later — tests", which says nothing in a
+  row, so the record was retitled rather than the row padded — which is the rule
+  working as intended. The file went from 433 lines to 226.
 - **A "Your first module" walkthrough in `README.md`** — empty directory to a
   working `.mpy` in three files, then how to widen it, then what to do with the
   result (`mpremote cp` onto a board, or set `version` to get the `package.json`
