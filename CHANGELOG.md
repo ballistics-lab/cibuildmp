@@ -13,6 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   schema and CLI can still change between releases without a deprecation cycle;
   this repo has no `1.0.0` yet and no stability guarantee to imply otherwise.
 
+- **A `.gitignore` (`*`), dropped into `output-dir` the first time anything
+  writes into it, both platforms.** A fresh `mpyhouse/` cibuildmp itself
+  creates should not need a matching entry hand-added to the caller's own
+  top-level `.gitignore` — verified live against a real `a7p` build (an
+  existing `output-dir` that had never had one gained `mpyhouse/.gitignore`
+  on the next build). Checked by existence, not written unconditionally:
+  never overwrites one already there, in case a caller wants something else
+  (e.g. a real `!keep-this` exception).
+
 ### Fixed
 
 - **`README.md`/`docs/ACTIONS.md` still pinned `@v0.4.2`** after `v0.5.0`

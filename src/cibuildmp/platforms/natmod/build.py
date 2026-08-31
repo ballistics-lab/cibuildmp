@@ -506,6 +506,21 @@ def build_target(
     produced = collect_output(build_options, module_root)
     verify_output(build_options, produced)
 
+    # A `.gitignore` (`*`), dropped the first time anything writes into
+    # output_dir -- a fresh `mpyhouse/` cibuildmp itself creates should not
+    # need a matching entry hand-added to the caller's own top-level
+    # .gitignore. Checked by existence, not written unconditionally: never
+    # overwrites one already there, in case a caller wants something else
+    # (e.g. a real `!keep-this` exception). usermod's own build path
+    # (orchestrate.py) carries the identical few lines rather than a shared
+    # import -- natmod is the base every platform module imports from,
+    # never the reverse (natmod/options.py's own comment), and this is too
+    # small to justify a new shared module just to avoid that direction.
+    output_dir.mkdir(parents=True, exist_ok=True)
+    gitignore = output_dir / ".gitignore"
+    if not gitignore.exists():
+        gitignore.write_text("*\n")
+
     identifier_dir = output_dir / build_options.identifier
     identifier_dir.mkdir(parents=True, exist_ok=True)
     dest = identifier_dir / output_name(

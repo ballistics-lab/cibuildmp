@@ -83,6 +83,29 @@ def test_build_one_unix_writes_into_output_dir_identifier(tmp_path, monkeypatch)
     assert result.output.read_bytes() == FAKE_X86_64_ELF
 
 
+def test_build_one_writes_a_gitignore_into_output_dir(tmp_path, monkeypatch):
+    package_dir = tmp_path / "pkg"
+    make_module_dir(package_dir)
+    write_config(package_dir, "")
+    options = UsermodOptions.load(package_dir)
+    options.output_dir = tmp_path / "mpyhouse"
+
+    mpy_dir = tmp_path / "mpy"
+    target = UsermodTarget(port="unix", arch="manylinux_2_28_x86_64")
+
+    def fake_run(cmd, **kwargs):
+        build_dir = mpy_dir / "ports" / "unix" / "build-unix-manylinux_2_28_x86_64"
+        build_dir.mkdir(parents=True, exist_ok=True)
+        (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
+
+    monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
+    (mpy_dir / "ports" / "unix").mkdir(parents=True)
+
+    build_one(options, target, mpy_dir)
+
+    assert (options.output_dir / ".gitignore").read_text() == "*\n"
+
+
 def test_build_one_substitutes_micropython_placeholder_in_user_c_modules(
     tmp_path, monkeypatch
 ):

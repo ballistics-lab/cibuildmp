@@ -66,6 +66,7 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### Implemented
 
+- [x] [0081] `output-dir` gets its own `.gitignore` the first time cibuildmp writes into it
 - [x] [0080] `windows` and `qemu` get real smoke tests, live-verified before being wired in
 - [x] [0079] a collected artifact is not always one file, and only the port knows
 - [x] [0078] handing the repo to an uncontexted reader is the docs test the suite cannot be
@@ -242,3 +243,4 @@ record is added.
 [0078]: records/0078-uncontexted-agent-audit-as-a-docs-test.md
 [0079]: records/0079-collected-artifact-is-more-than-one-file.md
 [0080]: records/0080-windows-and-qemu-usermod-smoke-tests.md
+[0081]: records/0081-output-dir-gitignore.md

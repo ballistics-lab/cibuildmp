@@ -352,7 +352,18 @@ def build_one(
     # instead of <package_dir>/mpyhouse -- invisible in every earlier
     # verification in this session, which always ran with cwd ==
     # package_dir.
-    identifier_dir = options.package_dir / options.output_dir / target.identifier
+    output_dir = options.package_dir / options.output_dir
+
+    # A `.gitignore` (`*`), dropped the first time anything writes into
+    # output_dir -- see natmod/build.py's own identical few lines (build.py
+    # gets the fuller comment; not shared via import, natmod is the base
+    # every platform module imports from, never the reverse).
+    output_dir.mkdir(parents=True, exist_ok=True)
+    gitignore = output_dir / ".gitignore"
+    if not gitignore.exists():
+        gitignore.write_text("*\n")
+
+    identifier_dir = output_dir / target.identifier
     identifier_dir.mkdir(parents=True, exist_ok=True)
     dest = identifier_dir / _dest_name(
         produced, target.identifier, name=options.name, version=options.version

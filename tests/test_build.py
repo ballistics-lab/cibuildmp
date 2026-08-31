@@ -381,6 +381,36 @@ def test_build_target_writes_into_its_own_identifier_directory(tmp_path, monkeyp
     assert result.size > 0
 
 
+def test_build_target_writes_a_gitignore_into_output_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr(build, "run_make", _stub_make(tmp_path))
+
+    build_target(
+        build_options(),
+        tmp_path / "mpy",
+        tmp_path / "natmod",
+        tmp_path / "out",
+        package_dir=tmp_path,
+    )
+    assert (tmp_path / "out" / ".gitignore").read_text() == "*\n"
+
+
+def test_build_target_does_not_overwrite_an_existing_gitignore(tmp_path, monkeypatch):
+    monkeypatch.setattr(build, "run_make", _stub_make(tmp_path))
+
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / ".gitignore").write_text("!keep-this\n")
+
+    build_target(
+        build_options(),
+        tmp_path / "mpy",
+        tmp_path / "natmod",
+        out,
+        package_dir=tmp_path,
+    )
+    assert (out / ".gitignore").read_text() == "!keep-this\n"
+
+
 def test_build_target_skips_package_json_without_a_version(tmp_path, monkeypatch):
     monkeypatch.setattr(build, "run_make", _stub_make(tmp_path))
 
