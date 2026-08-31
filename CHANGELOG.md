@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Living docs no longer state another repository's status.** `README.md`,
+  `docs/ACTIONS.md` and `docs/reference/design.md` all pointed at consuming
+  repos' CI state; all three now point at `docs/0000-TRACKER.md`'s [0038] row,
+  which carries it with a date and the method used to check it. `CONTRIBUTING.md`
+  gains the rule. Deliberately not a test: the mechanical proxy fired on three
+  legitimate examples for every real hit, and an allowlist of prose snippets
+  rots faster than the prose. Record 0077.
 - **Every documented `@vX.Y.Z` action pin is now checked against
   `cibuildmp.__version__`.** Four were stuck at `@v0.4.1` with `v0.4.2`
   released — the same pin `CLAUDE.md` already names as a repeat offender for

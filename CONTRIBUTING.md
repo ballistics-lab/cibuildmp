@@ -79,9 +79,41 @@ caused for a consuming repo — grep the narrative docs for the thing you
 just changed before you open the PR, not after someone reads the stale
 paragraph at face value.
 
+`tests/test_docs.py` now enforces the checkable half of this, so drift in
+an identifier, an option key, a `CIBMP_*` name, a repo path, an image
+group, a record link or the `@vX.Y.Z` action pin fails the build rather
+than waiting to be read. `bin/refresh_docs.py` goes further for the tables
+that are pure functions of the resource files — identifier shapes, the
+image-group mapping, the toolchain map are generated, not written. Run it
+after any change to `resources/build-platforms.toml` or
+`resources/pinned_docker_images.toml`; the test tells you if you forgot.
+
+### Never state another repository's status in a living document
+
+This is a rule rather than a test because it is the one class nothing here
+can check: no grep in this repo can tell you what `micropython-bclibc`'s CI
+does today. It is also, empirically, the class that actually bites — one
+tracker row claiming `a7p` kept `unix-mipsel` on a composite action was
+false when written, and was copied into `README.md`, `docs/ACTIONS.md`,
+`docs/reference/design.md` and a second `README.md` paragraph before anyone
+checked the workflow file. Five places, one wrong sentence, and one of the
+copies was made *by a change whose purpose was fixing drift* ([0076],
+[0077]).
+
+So: which consuming repo has migrated onto what, which one still calls a
+composite action, which one is pinned to which version — all of that lives
+in `docs/0000-TRACKER.md`'s [0038] row, dated, and nowhere else. A living
+document points at that row. Naming a consuming repo is fine when it is an
+*example* ("a7p passes `pre_build_command: make fetch-nanopb`"); asserting
+its current state is not.
+
 ## Where things actually stand
 
 Don't trust this file's (or `README.md`'s) memory of what's implemented —
 both go stale between sessions and neither self-corrects.
 [`docs/0000-TRACKER.md`](docs/0000-TRACKER.md)'s own "Implemented" vs. "In
 progress / Proposed" split is the only status claim worth acting on.
+
+[0038]: docs/records/0038-m5-adopt-in-three-repos.md
+[0076]: docs/records/0076-the-mipsel-holdout-is-bclibc-and-wasm3-not-a7p.md
+[0077]: docs/records/0077-docs-drift-is-a-failing-test-not-a-discipline-problem.md

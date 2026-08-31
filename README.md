@@ -396,6 +396,7 @@ naming a scalar option in `inherit` is a config error, not a silent no-op.
 [0074]: docs/records/0074-usermod-family-table-and-retired-table-messages-removed.md
 [0075]: docs/records/0075-top-level-scalar-keys-are-validated.md
 [0076]: docs/records/0076-the-mipsel-holdout-is-bclibc-and-wasm3-not-a7p.md
+[0077]: docs/records/0077-docs-drift-is-a-failing-test-not-a-discipline-problem.md
 
 ## Target support
 
@@ -789,18 +790,11 @@ toolchain-group images rather than a host-side toolchain resolver (that
 resolver, and its own `--toolchain` flag, are deleted) — verified on real CI
 in all three consuming repos, not just `--dry-run`. Usermod's own build
 drivers are wired into the CLI too (see [Target support](#target-support)
-above), covering every port with a real driver, not just three. How far each consuming repo has migrated onto the unified
-CLI/action is **not stated here** — see the tracker's own [0038] row, and
-[0076] for why. This paragraph used to answer it, and was wrong in four
-ways at once: it claimed all three repos were "fully migrated off every"
-composite action and then, in its own parenthesis, that two of them were
-not; it named `a7p` as a `unix-mipsel` holdout, which was never true; it
-paired `a7p` with `micropython-wasm3` when the two real holdouts are
-`micropython-bclibc` and `micropython-wasm3`; and it pinned a version two
-releases old. It even warned the reader not to trust it — and was believed
-anyway, four more times, in four other files. A status claim about another
-repository is the one kind nothing here can check, so it does not belong in
-a living document at all. The container/image model itself —
+above), covering every port with a real driver, not just three. How far each consuming repo has migrated onto the
+unified CLI/action is **not stated here** — that is a claim about another
+repository's CI, which nothing in this repo can verify. The tracker's own
+[0038] row carries it, dated; [0077] has why this document no longer
+tries. The container/image model itself —
 which build pulls what, and why — is
 [`docs/reference/vendored-images.md`](docs/reference/vendored-images.md),
 kept current the same way [`docs/reference/design.md`](docs/reference/design.md)
@@ -825,15 +819,14 @@ path for a new integration.
 This layer is a deliberate fallback, not something being absorbed into the
 CLI over time — folding `build-natmod` into a thin `cibuildmp --build`
 wrapper was proposed and explicitly rejected (tracker [0038], see
-"Rejected"). It stays because two repos still depend on it directly:
-`micropython-bclibc` and `micropython-wasm3` each keep their `unix-mipsel`
-cross-compile on `build-usermod-unix` (no native runner; the vendored
-`MICROPY_STANDALONE=1`/`deplibs` static path [0043] kept for that cell),
-and both also call `fetch-micropython` in several jobs that have nothing to
-do with mipsel. `a7p` uses none of these actions any more ([0076] — an
-earlier version of this paragraph named it as the holdout, which was never
-true). Read [`docs/ACTIONS.md`](docs/ACTIONS.md) if you're maintaining or
-migrating off a holdout like those — not as a starting point for a new
+"Rejected"). It stays because consuming repos still call it — a
+`unix-mipsel` cross-compile has no native runner, and [0043]'s vendored
+`MICROPY_STANDALONE=1`/`deplibs` static path was kept for exactly that
+cell. **Which repos, and how much of each, is in the tracker's own [0038]
+row rather than here**, dated: this paragraph named the wrong repo for a
+week and was copied to four other files before anyone checked ([0076],
+[0077]). Read [`docs/ACTIONS.md`](docs/ACTIONS.md) if you are maintaining
+or migrating off a holdout like that — not as a starting point for a new
 module.
 
 ## Versioning

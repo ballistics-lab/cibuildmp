@@ -11,16 +11,14 @@ This layer is a deliberate fallback, not a parallel track being absorbed
 into the CLI over time: folding `build-natmod` into a thin
 `cibuildmp --build` wrapper was proposed and explicitly rejected (tracker
 [0038], see "Rejected" in [`docs/0000-TRACKER.md`](0000-TRACKER.md)). It
-survives because two repos still depend on it directly —
-`micropython-bclibc` and `micropython-wasm3` both keep their `unix-mipsel`
-cross-compile on `build-usermod-unix` (no native runner, and [0043]'s
-vendored `MICROPY_STANDALONE=1`/`deplibs` static path kept for that one
-cell), and both call `fetch-micropython` in jobs unrelated to mipsel — not
-because these actions are on any track toward being replaced. `a7p` calls
-none of them; an earlier version of this paragraph named it as the sole
-holdout, which was never accurate ([0076]). Read on only if you're
-maintaining or migrating off a holdout like those, not as a starting point
-for a new module.
+survives because consuming repos still call it — a `unix-mipsel`
+cross-compile has no native runner, and [0043]'s vendored
+`MICROPY_STANDALONE=1`/`deplibs` static path was kept for that one cell —
+not because these actions are on any track toward being replaced. **Which
+repos, and how much of each, lives in the tracker's own [0038] row**, dated,
+rather than here: this paragraph named the wrong repo for a week ([0076],
+[0077]). Read on only if you are maintaining or migrating off a holdout like
+that, not as a starting point for a new module.
 
 Every table below is the action's complete input surface — if it isn't
 listed here, the action doesn't accept it. `MPY_DIR` in a "Requires" line
@@ -49,9 +47,10 @@ Shallow git-clones a MicroPython release branch instead of fetching a
 tarball, with a chosen set of submodules initialised, and exports
 `MPY_DIR`. Use this when the build needs a submodule the release tarball
 doesn't vendor (`lib/pico-sdk` for an rp2 firmware build, for instance) --
-or, as a7p and now bclibc/wasm3's own webassembly/rp2040/windows-adjacent
-jobs use it, any time the caller needs `MPY_DIR` set without dragging in
-`fetch-micropython`'s `wget` dependency.
+or any time the caller needs `MPY_DIR` set without dragging in
+`fetch-micropython`'s `wget` dependency. (This sentence used to name which
+consuming repos use it that way, and "now" was doing real work in it; who
+calls what is the tracker's [0038] row, not this file's.)
 
 | Input                 | Required | Default         | Description                                                                                                                                                                                                                         |
 | --------------------- | -------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -330,3 +329,4 @@ the shared contract.
 [0038]: records/0038-m5-adopt-in-three-repos.md
 [0043]: records/0043-unix-adopts-cibuildwheel-native-image-model.md
 [0076]: records/0076-the-mipsel-holdout-is-bclibc-and-wasm3-not-a7p.md
+[0077]: records/0077-docs-drift-is-a-failing-test-not-a-discipline-problem.md

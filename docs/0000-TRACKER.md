@@ -176,7 +176,15 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
       and already wrong when written (`a7p#86`, the PR this row cites, is
       what moved that cell onto `v1.29.0-manylinux_2_39_mipsel`). The real
       `build-usermod-unix` holdouts are `micropython-bclibc` and
-      `micropython-wasm3`; `a7p` uses no composite action at all. Two real
+      `micropython-wasm3`; `a7p` uses no composite action at all.
+      **Composite-action status, checked 2026-08-31 against each repo's own
+      default branch** (this row is the only place that states it -- README,
+      `docs/ACTIONS.md` and `docs/reference/design.md` all point here now,
+      [0077]): `a7p` zero; `micropython-bclibc` four (`fetch-micropython`
+      x3, `build-usermod-unix` for mipsel); `micropython-wasm3` six
+      (`fetch-micropython` x5, `build-usermod-unix` for mipsel). Migrations
+      for both are written and pushed to a `bump-cibuildmp` branch in each,
+      unmerged and not yet exercised by their own CI. Two real
       bugs surfaced
       and closed along the way, [0066]/[0067]. Confirmed live 2026-08-30 --
       the `build-natmod` wrapper item once tracked alongside this is now its

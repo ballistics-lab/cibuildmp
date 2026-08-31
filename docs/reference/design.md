@@ -28,23 +28,13 @@ fold `.github/actions/build-natmod` into a thin `cibuildmp --build`
 wrapper (the `pypa/cibuildwheel@v3`-style relationship this paragraph used
 to describe) was proposed and explicitly rejected — see tracker [0038],
 "Rejected". `.github/actions/*` stays a permanent, separate legacy layer,
-not a temporary one being absorbed over time. It survives because
-`micropython-bclibc` and `micropython-wasm3` still call it on their own
-default branches — `build-usermod-unix` for `unix-mipsel` in both, plus
-`fetch-micropython` in several jobs unrelated to mipsel. Read
-`docs/ACTIONS.md` only as reference for that kind of holdout, not as an
-alternate way to use `cibuildmp`.
-
-An earlier version of this paragraph named `a7p`'s own `unix-mipsel` as the
-sole holdout, citing [0067]. That was false in every particular — wrong
-repo, wrong record — and [0076] corrected it in `README.md`,
-`docs/ACTIONS.md` and the tracker. **This file was missed in that pass**,
-and stayed wrong for a further day; it is the fourth place the same claim
-had been copied to. Nothing mechanical can catch this class
-(`tests/test_docs.py` checks facts with a machine-readable counterpart, and
-another repository's CI has none), which is exactly why [0076] argues for
-keeping other-repo status claims out of living docs rather than testing
-them.
+not a temporary one being absorbed over time. It survives because consuming
+repos still call it, for a `unix-mipsel` cross-compile with no native
+runner. **Which repos, and how much of each, is the tracker's [0038] row,
+not this file's** — an earlier version of this paragraph answered it here,
+named the wrong repo, and was one of five copies of the same false claim
+([0076], [0077]). Read `docs/ACTIONS.md` only as reference for that kind of
+holdout, not as an alternate way to use `cibuildmp`.
 
 <!-- migrated verbatim from docs/BACKLOG.md lines 433-476 (Identifier scheme) -->
 
@@ -543,3 +533,4 @@ not a toolchain) are an open question — see
 [0074]: ../records/0074-usermod-family-table-and-retired-table-messages-removed.md
 [0075]: ../records/0075-top-level-scalar-keys-are-validated.md
 [0076]: ../records/0076-the-mipsel-holdout-is-bclibc-and-wasm3-not-a7p.md
+[0077]: ../records/0077-docs-drift-is-a-failing-test-not-a-discipline-problem.md

@@ -176,6 +176,35 @@ not merely hard to keep current, it is the one kind nothing in this repo can
 check *at all*, so a living document should not make one. Point at the
 tracker row and stop.
 
+## Addendum, same day -- the one rule that stays a rule
+
+The obvious next step was a test for the class that caused the most damage:
+a living document asserting another repository's state. It was prototyped and
+**deliberately not shipped**. The mechanical proxy -- a consuming repo's name
+near a composite-action name -- fired four times on `docs/ACTIONS.md` and
+three of the four were legitimate examples (`a7p passes path: mpy`, `a7p uses
+make fetch-nanopb`). A guard with that false-positive rate needs an allowlist
+of prose snippets, and an allowlist of prose snippets rots faster than the
+prose does.
+
+So this one is enforced by a written rule in `CONTRIBUTING.md` and by having
+removed every instance, not by CI:
+
+- `README.md`, `docs/ACTIONS.md` and `docs/reference/design.md` no longer say
+  which consuming repo calls what. Each points at the tracker's [0038] row.
+- That row now carries the status with a date and the method
+  (checked against each repo's own default branch, 2026-08-31), including
+  that both migrations exist on unmerged branches and have not run in their
+  own CI.
+- A second `README.md` paragraph -- the post-mortem of the deleted one -- went
+  too. Explaining at length why a document used to be wrong is itself
+  living-doc content that will go stale; it belongs in a record, which is
+  where it now is.
+
+Naming a consuming repo stays fine as an *example*. Asserting its current
+state does not. The distinction is one a person can make and a regex cannot,
+which is the honest reason this is not a test.
+
 [0041]: 0041-docs-restructure.md
 [0050]: 0050-natmod-is-docker-only.md
 [0073]: 0073-composite-actions-are-a-permanent-legacy-fallback.md
