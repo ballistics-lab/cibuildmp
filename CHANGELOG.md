@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   MicroPython checkout**, substituted with the real, already-fetched `mpy_dir` before any
   Docker/mount step, uniformly for every usermod port. Closes the gap [0069] named and
   deliberately left open ("no `{checkout}`-style template today"). Record 0071.
+- **The same `{micropython}` placeholder, and a real upstream-`examples/natmod` CI slice
+  covering all eleven upstream modules, for natmod.** `module-dir` can now name a path
+  inside the pinned checkout directly (`{micropython}/examples/natmod/<module>`), and
+  `collect_output()` gained a fallback for `py/dynruntime.mk`'s own `all` target, which —
+  unlike this project's own `dist` convention — leaves the merged `.mpy` sitting in
+  module-dir itself rather than under `build/<arch>*/`. `test-upstream-natmod.yml` builds
+  `features0` for two real arches (`x64`, `armv7emsp`) in one invocation — the multi-target
+  collision scenario record 0055's own guard survey was about — plus the other ten modules
+  (`features1`-`4`, `btree`, `deflate`, `framebuf`, `heapq`, `random`, `re`) each for `x64`.
+  Closes record 0055: neither of the two risks its own survey flagged (`btree`'s git
+  submodule, an rv32imc arch-flags collision) turned out to be a real blocker. Record 0072.
 - **The `[0054]`/`[0069]` upstream-`examples/usercmodule` fixture now covers all six usermod
   ports**, not just `unix`/`rp2`: `esp32`, `windows`, `webassembly` and `qemu` all build
   `cppexample`/`cexample`/`subpackage` in CI now too. `examples/usercmodule/cibuildmp.toml`
@@ -24,6 +35,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CIBMP_USER_C_MODULES`/`CIBMP_EXTRA_MAKE_ARGS`/`CIBMP_EXTRA_CMAKE_ARGS` any more — a bare
   `cibuildmp examples/usercmodule --build <identifier>` run, CI or local, now resolves
   identically to what a job here does.
+
+### Changed
+
+- **`test-all-platforms.yml` no longer runs on `pull_request`** — the full real matrix
+  (200+ identifiers, bucketed across up to 20 concurrent jobs) took too long to gate every
+  PR's own turnaround time for how rarely its answer actually changes. Now `schedule`
+  (weekly) plus `workflow_dispatch` for an on-demand run; `push`/`pull_request` CI still
+  covers every change through `tests.yml`'s unit suite and `build-examples.yml`'s narrower
+  matrix. The `if: github.actor != 'dependabot[bot]'` guard record 0068 added specifically
+  for the now-gone `pull_request` trigger came out too, moot rather than just redundant.
 
 ### Fixed
 

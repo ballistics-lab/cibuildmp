@@ -206,7 +206,24 @@ def build_all(
             for build_options in group:
                 index += 1
                 print("\n  " + _plan_line(index, total, build_options))
-                module_root = options.package_dir / build_options.module_dir
+                # `{micropython}` -- a literal placeholder, substituted here
+                # with `mpy_dir` itself -- lets `module-dir` name a path
+                # *inside the pinned checkout* directly, the natmod mirror of
+                # usermod's own `user-c-modules` placeholder (record 0071).
+                # `mpy_dir` is already fetched by this point in the loop, for
+                # every tag group uniformly. Record 0055's own option 2
+                # ("`make-target = "all"` plus a fallback in
+                # `collect_output()`") is what this exists to serve --
+                # pointing straight at `{micropython}/examples/natmod/<mod>`
+                # with no vendored copy. Not resolved any earlier (the
+                # pre-loop `build/` cleanup above, or a `--dry-run` preview's
+                # own `_plan_line()`): neither has a real `mpy_dir` to
+                # substitute with yet, so both still show the literal
+                # placeholder -- known, not a bug (docs/records/0072).
+                module_dir = build_options.module_dir.replace(
+                    "{micropython}", mpy_dir.as_posix()
+                )
+                module_root = options.package_dir / module_dir
                 output_dir = options.package_dir / build_options.output_dir
                 start = time.time()
                 try:

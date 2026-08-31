@@ -81,11 +81,18 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
       seven runners already proven by `mp-usermod.yml`, not yet owned by
       cibuildmp
 - [ ] [0053] nine usermod ports have verified rows in `build-platforms.toml` but no real `build_<port>()` driver | `mimxrt`, `samd`, `stm32`, `psoc-edge`, `alif`, `esp8266`, `cc3200`, `renesas-ra`, `nrf` -- flagged by the user as the genuinely larger remaining piece. `rp2` closed 2026-08-29 by [0060]
-- [ ] [0055] an `examples/` natmod fixture on upstream's own `examples/natmod` | real finding: **upstream's own natmod modules don't satisfy cibuildmp's contract** (`dist` + `build/<arch>*/` is a downstream convention, not upstream's). Shim it, teach `collect_output()` a fallback, or narrow the contract on purpose -- undecided. Own "vendor or build from checkout" item cited [0054]'s now-flipped stance; see its own addendum
 - [ ] [0056] build upstream MicroPython through the usermod path with no user C module | driver mechanics settled; open question is only how absence is expressed -- an explicit `no-user-c-modules = true` flag (A) vs. dropping `user-c-modules`'s `"."` default so unset means none (B). Exactly one existing config (`examples/template`) depends on that default either way
 - [ ] [0057] more than one module per build | **decided, documentation not mechanism**: natmod is one config per module (already demonstrated); usermod stays one `user-c-modules` path, N modules live in the consumer's own layout (subdirectories on Make ports, an aggregating `.cmake` on CMake ports) -- no list, since the aggregator is the consumer's own file. Both forms now tested live by [0054]/[0069]; writing it down for users still left
 ### Implemented
 
+- [x] [0055]/[0072] all eleven upstream `examples/natmod/*` modules build through
+      cibuildmp's real natmod path | `{micropython}` placeholder in `module-dir` (the
+      natmod mirror of [0071]) plus a `collect_output()` fallback for `py/dynruntime.mk`'s
+      own `all` target close [0055]'s own option 2, for every module, not just
+      `features0` -- `test-upstream-natmod.yml` covers all eleven, plus a dedicated
+      multi-arch job proving the exact collision scenario [0055]'s guard survey named.
+      Two things that survey called blockers (`btree`'s submodule, rv32imc arch-flags)
+      turned out not to be real gaps -- see [0072]'s own addendum
 - [x] [0071] `{micropython}` placeholder in `user-c-modules` | `orchestrate.py`
       substitutes it with the already-fetched checkout before any Docker/mount step,
       uniformly for every port. Closes the gap [0069] named and left open
@@ -334,3 +341,4 @@ record is added.
 [0069]: records/0069-upstream-usercmodule-narrow-ci-slice.md
 [0070]: records/0070-unix-collected-binary-missing-repaired-lib-sidecar.md
 [0071]: records/0071-micropython-placeholder-in-user-c-modules.md
+[0072]: records/0072-natmod-micropython-placeholder-and-upstream-natmod-ci.md

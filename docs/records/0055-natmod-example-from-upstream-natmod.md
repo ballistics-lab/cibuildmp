@@ -1,8 +1,9 @@
 # 0055 — an `examples/` natmod fixture built on upstream's own `examples/natmod`
 
-- Status: Proposed (nothing built; and the first thing this record found is that it
-  cannot simply be pointed at, which is the interesting part)
-- Related: [0002], [0014], [0049]
+- Status: Implemented ([0072] implemented option 2 for all eleven modules; see this
+  record's own second addendum for the two named risks below that turned out not to be
+  real gaps)
+- Related: [0002], [0014], [0049], [0072]
 
 ## The idea, and what checking it immediately turned up
 
@@ -128,6 +129,32 @@ usermod"), and this record's own three-way choice (shim Makefile / fit-upstream 
 document-and-descope) is still not made. Worth knowing before whoever picks this up reasons
 from the now-stale vendoring citation above.
 
+## Addendum, 2026-08-31 (second) — option 2 implemented, for all eleven modules
+
+[0072] picked option 2 and landed it: a `{micropython}` placeholder for `module-dir`
+(the natmod mirror of [0071]'s `user-c-modules` one) plus a fallback in
+`collect_output()` for `py/dynruntime.mk`'s own `all` target. Wired around all eleven
+upstream modules, not just `features0` -- `examples/natmod/cibuildmp.toml` defaults to
+`features0`, `.github/workflows/test-upstream-natmod.yml`'s own `build-upstream-natmod`
+matrix job overrides `CIBMP_MODULE_DIR` per module for the other ten -- with a real CI
+slice covering every one, plus a dedicated multi-arch job (`x64`+`armv7emsp` for
+`features0` in one invocation) exercising the exact collision scenario this record's own
+guard survey was about. [0072]'s own addendum has the detail on all of it.
+
+[0072] also corrects two things this record got wrong, not just optimistic. First, the
+`BUILD ?= build` citation: upstream's `531c80dc0` scoped it to `BUILD ?= build-$(ARCH)`
+between the checkout this record cited and the currently pinned `v1.29.0` -- real for the
+tag this record checked, no longer true for the newest one. Second, `btree`'s own
+submodule requirement was never actually a blocker for any tag this project's default
+target selection can reach: `sources.fetch_micropython()` prefers the release tarball,
+which already vendors `lib/berkeley-db-1.xx`, and only the tarball-less clone path (never
+`natmod`'s own default) genuinely needs `micropython-submodules`. The rv32imc arch-flags
+collision this record's own guard survey named is closed structurally, not just
+backstopped, by the same `pre-build-command` that makes `all` safe to run across several
+targets in one checkout at all -- see [0072]'s own addendum for why deleting the whole
+build tree before every target removes the possibility outright rather than only
+detecting it after the fact.
+
 [0002]: 0002-delegate-compile-own-environment.md
 [0014]: 0014-mip-package-per-identifier.md
 [0015]: 0015-rv32imc-arch-flags-identifier.md
@@ -136,3 +163,4 @@ from the now-stale vendoring citation above.
 [0054]: 0054-usermod-example-from-upstream-usercmodule.md
 [0069]: 0069-upstream-usercmodule-narrow-ci-slice.md
 [0071]: 0071-micropython-placeholder-in-user-c-modules.md
+[0072]: 0072-natmod-micropython-placeholder-and-upstream-natmod-ci.md

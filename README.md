@@ -292,8 +292,9 @@ executable bit intact (`unix`: one native image per arch/libc;
 `v1.29.0-qemu-MPS2_AN385` runs in its own matrix leg rather than sharing a
 job with already-proven cells, since it was the first build ever run
 through that path). `esp32` and `rp2` are not in that smoke test, but not
-because either is unproven -- both are exercised far more broadly, on
-every pull request, through `test-all-platforms.yml`'s own real matrix
+because either is unproven -- both are exercised far more broadly, on a
+weekly schedule (or manual dispatch any time sooner), through
+`test-all-platforms.yml`'s own real matrix
 (`bin/plan_test_matrix.py`, record 0065): 83 real `esp32` identifiers and
 74 real `rp2` ones, every board/tag row `resources/build-platforms.toml`
 carries, not a spot check. **Both build through the exact same `cibuildmp`
@@ -304,7 +305,7 @@ provisioned onto the bare host; record 0028 moved it fully into
 depends on that composite action's own toolchain-install path. `rp2`'s
 own driver landed the next day (record 0060), live-verified against
 `examples/template` first and now carrying its own share of every
-`test-all-platforms.yml` run since.
+scheduled `test-all-platforms.yml` run since.
 
 <table>
 <thead>
@@ -508,7 +509,7 @@ own driver landed the next day (record 0060), live-verified against
 
 [^cross]: The one target that still cross-compiles: pypa publishes no mipsel image and there's no Docker official image for 32-bit mipsel, so there's nothing to be native to.
 
-[^emulatedci]: `ppc64le`/`s390x`/`riscv64`, both libcs — native to no runner GitHub offers, so still QEMU-emulated, but no longer untested: `test-all-platforms.yml`'s own `unix-emulated` entry gives all six a real `test-emulated` CI leg on every push now (nine of the twelve (cell, tag) pairs green; the other three are the two ⚠️ rows below). Point `CIBMP_UNIX_<TARGET>_DOCKER_IMAGE` at a locally-built image, or an emulated one, to work on one of these locally. Record 0044's own 2026-08-29 addendum.
+[^emulatedci]: `ppc64le`/`s390x`/`riscv64`, both libcs — native to no runner GitHub offers, so still QEMU-emulated, but no longer untested: `test-all-platforms.yml`'s own `unix-emulated` entry gives all six a real `test-emulated` CI leg on its weekly schedule (or manual dispatch) now (nine of the twelve (cell, tag) pairs green; the other three are the two ⚠️ rows below). Point `CIBMP_UNIX_<TARGET>_DOCKER_IMAGE` at a locally-built image, or an emulated one, to work on one of these locally. Record 0044's own 2026-08-29 addendum.
 
 [^s390xclobbered]: `v1.28.0` only — `v1.29.0` of the identical cell is the ✅ above it. `mpy-cross`'s own `main.c` fails a real GCC `-Werror=clobbered` diagnostic specific to s390x's own register allocation around a `longjmp` call site (`parse_integer()`'s locals); `v1.29.0`'s `main.c` does not trip it. Skipped by exact identifier (`v1.28.0-manylinux_2_28_s390x`) in `test-all-platforms.yml` until fixed — not a QEMU/emulation problem, a real compile-time diagnostic. Record 0044's own 2026-08-29 addendum.
 

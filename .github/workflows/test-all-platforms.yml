@@ -23,11 +23,16 @@ name: Test platforms
 # first place -- not upload order, not sorted (docs/records/0065).
 
 on:
-  pull_request:
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
-      - "LICENSE"
+  # No `pull_request` any more: the full real matrix (200+ identifiers,
+  # bucketed across up to 20 concurrent jobs) takes far too long to run on
+  # every PR for how rarely its answer actually changes -- `push`/`pull_request`
+  # CI already runs `tests.yml`'s own unit suite and `build-examples.yml`'s
+  # narrower matrix on every change; this file is for the full sweep,
+  # wanted only occasionally, not gating every PR's own turnaround time.
+  # Weekly by default -- change the cron below, or just run
+  # `workflow_dispatch` by hand whenever a real answer is wanted sooner.
+  schedule:
+    - cron: "0 3 * * 0"
   workflow_dispatch:
     inputs:
       build:
@@ -50,15 +55,12 @@ concurrency:
 
 jobs:
   plan:
-    # A Dependabot PR only ever touches `.github/dependabot.yml` itself or
-    # a `docker/*.Dockerfile` -- a base-image bump, which
-    # `verify-docker-images.yml` already build-checks directly. Running
-    # this file's own 200+-identifier functional matrix on every one of
-    # those (paths-ignore below only excludes **.md/docs/**/LICENSE, not
-    # docker/**) burns the same concurrent-job budget this file's own
-    # header comment already flags as the real ceiling, for a change this
-    # matrix has nothing useful to say about. See docs/records/0068.
-    if: github.actor != 'dependabot[bot]'
+    # No `if: github.actor != 'dependabot[bot]'` guard here any more --
+    # record 0068 added it specifically for the `pull_request` trigger a
+    # Dependabot docker/dependabot.yml PR would otherwise fire this on;
+    # dropping that trigger entirely (this file's own header comment) makes
+    # the guard moot, not just redundant, since `schedule`/`workflow_dispatch`
+    # never runs as that actor in the first place.
     runs-on: ubuntu-latest
     outputs:
       identifiers: ${{ steps.plan.outputs.identifiers }}
@@ -124,10 +126,11 @@ jobs:
   # passed back through `build`'s own outputs.
   aggregate-results:
     needs: [plan, build]
-    # `always()` alone would still run this after `plan`'s own actor guard
-    # skips it, with nothing to aggregate -- same guard, so a skipped plan
-    # means a skipped aggregate too, not a report over zero buckets.
-    if: always() && github.actor != 'dependabot[bot]'
+    # `always()`: render a summary even if a bucket in `build` failed --
+    # `test-platforms.yml`'s own `--keep-going` (record 0063) means a real
+    # failure there still uploads a report, and this is what turns every
+    # bucket's own report into the one table worth looking at.
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

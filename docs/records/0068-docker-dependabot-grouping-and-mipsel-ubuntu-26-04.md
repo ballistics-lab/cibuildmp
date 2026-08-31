@@ -165,6 +165,15 @@ Dockerfile edit itself, the `pinned_docker_images.toml` row removal, the identif
 mipsel leg, and a README ⚠️ note explaining "build it yourself, nothing published" the way the
 three descoped cells above already carry one.
 
+**Addendum, 2026-08-31.** `test-all-platforms.yml` dropped its `pull_request` trigger
+entirely (schedule + `workflow_dispatch` only now — the full sweep is too slow to gate every
+PR's own turnaround time for how rarely its answer changes), which makes this record's own
+`if: github.actor != 'dependabot[bot]'` guard on `plan`/`aggregate-results` moot rather than
+just redundant: neither `schedule` nor a human's own `workflow_dispatch` ever runs as that
+actor. Removed from both jobs rather than left as harmless dead weight — the guard's own
+comment referenced a `pull_request`-triggered Dependabot PR that can no longer trigger this
+file at all.
+
 [0031]: 0031-unix-musllinux-libc-axis.md
 [0033]: 0033-cibuildmp-never-builds-docker-image-itself.md
 [0044]: 0044-unix-native-images-landed.md

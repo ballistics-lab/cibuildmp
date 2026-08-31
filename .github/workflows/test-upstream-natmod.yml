@@ -1,0 +1,131 @@
+name: Test upstream natmod
+
+# Builds every one of MicroPython's own eleven `examples/natmod/*` modules
+# through cibuildmp's real natmod path -- docs/records/0055 scoped why this
+# fixture matters (it tests upstream's own natmod contract, not the one this
+# project wrote for itself in `examples/template/natmod`) and found that
+# contract does not fit unmodified; docs/records/0072 is the mechanism
+# actually landed here and explains every choice below in full.
+#
+# build-features0: one job, deliberately building *two* arches for the same
+# tag in a single invocation, not two separate single-arch jobs: [0055]'s own
+# guard survey is entirely about what happens when cibuildmp builds several
+# targets back to back in one checkout (a stale artifact, or an unscoped
+# `build/`, silently carrying the *previous* target's binary into the next
+# one's output) -- a job that only ever builds one target at a time would
+# never actually exercise that risk. `verify_output()` (build.py, already
+# part of every real build) is the check that would catch it: a wrong arch
+# code in the .mpy header fails the build outright rather than shipping
+# silently wrong -- but `examples/natmod/cibuildmp.toml`'s own
+# `pre-build-command` (record 0072) removes the possibility structurally,
+# for this same reason armv7emsp is a second *real* cross-compiled arch here
+# and not just a second easy one: it shares this checkout and this same
+# invocation with x64, the one thing a single-arch job can never test.
+#
+# build-upstream-natmod: the other ten modules, one `x64` build each (no
+# arch-collision risk to re-prove per module -- that mechanism is
+# `examples/natmod/cibuildmp.toml`'s own, verified once above, not a
+# property of any one module's Makefile). `CIBMP_MODULE_DIR` overrides that
+# file's own `features0` default per matrix entry -- `{micropython}` resolves
+# the same way regardless of which layer supplied `module-dir` (record 0072).
+# `btree` needs no `micropython-submodules` entry for its own
+# `lib/berkeley-db-1.xx`: `sources.fetch_micropython()` prefers the release
+# tarball, which already vendors every `lib/` submodule -- confirmed 2026-08-31
+# against a real, tarball-fetched v1.29.0 checkout, on the bare host (no
+# Docker in that session), building and `verify_output()`-checking all eleven
+# modules for `x64` -- not assumed from [0055]'s own original, narrower
+# "needs a submodule" citation (see docs/records/0072's own addendum).
+#
+# `examples/natmod/cibuildmp.toml` carries the whole mechanism otherwise --
+# `make-target = "all"` (upstream's examples define no `dist` target at all)
+# and its own `pre-build-command` clearing every `.mpy` plus the whole build
+# tree before *every single* build. No job here sets either directly -- a
+# bare `cibuildmp examples/natmod --build <identifier>` run, CI or local,
+# resolves identically to what a job here does (module-dir aside, for the
+# ten `CIBMP_MODULE_DIR`-overridden ones).
+#
+# No `docker/setup-qemu-action` needed anywhere here, unlike
+# test-upstream-usermodule.yml's rp2/esp32/qemu legs: `dockerrun.platform_for()`
+# resolves every non-`unix` port -- natmod included -- to a flat
+# `linux/amd64`, confirmed directly against that function's own source, so
+# every natmod image already runs native on a `ubuntu-latest` runner
+# regardless of which arch's toolchain it carries.
+#
+# push: (no branches: filter), same reasoning build-examples.yml's own header
+# already documents -- this needs to run on every push to a dev branch too.
+
+on:
+  push:
+  pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "LICENSE"
+  workflow_dispatch:
+
+concurrency:
+  group: test-upstream-natmod-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Single source of truth for this job -- bump here, not by hand in the
+  # `build` line below, when this fixture moves to a newer tag. `mpy6.3`
+  # is that tag's own natmod ABI (`identifier_format = "mpy{mpy}-{tag}-
+  # {arch}"`, resources/build-platforms.toml), not an independent value --
+  # a tag bump that also changes ABI needs this updated too.
+  CIBMP_UPSTREAM_ABI_TAG: mpy6.3-v1.29.0
+
+jobs:
+  # x64: a plain native arch, no cross-compiler at all (`images.x64 =
+  # "natmod_host"`) -- the cheapest possible leg.
+  #
+  # armv7emsp: a real cross-compiled arch (`arm-none-eabi-`, `images.
+  # armv7emsp = "arm_embedded"`) sharing this same checkout and this same
+  # `cibuildmp` invocation with x64 above -- the leg that actually exercises
+  # [0055]'s own finding, not just a second easy arch for breadth's sake.
+  build-features0:
+    runs-on: ubuntu-latest
+    env:
+      CIBMP_VERSION: 0.0.0-ci
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build upstream examples/natmod/features0 (x64 + armv7emsp)
+        uses: ./
+        with:
+          package-dir: examples/natmod
+          build: "${{ env.CIBMP_UPSTREAM_ABI_TAG }}-x64 ${{ env.CIBMP_UPSTREAM_ABI_TAG }}-armv7emsp"
+
+      - name: List built artifacts
+        run: ls -laR examples/natmod/mpyhouse
+
+  build-upstream-natmod:
+    strategy:
+      fail-fast: false
+      matrix:
+        module:
+          - features1
+          - features2
+          - features3
+          - features4
+          - heapq
+          - random
+          - re
+          - deflate
+          - framebuf
+          - btree
+    runs-on: ubuntu-latest
+    env:
+      CIBMP_VERSION: 0.0.0-ci
+      CIBMP_MODULE_DIR: "{micropython}/examples/natmod/${{ matrix.module }}"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build upstream examples/natmod/${{ matrix.module }} (x64)
+        uses: ./
+        with:
+          package-dir: examples/natmod
+          build: "${{ env.CIBMP_UPSTREAM_ABI_TAG }}-x64"
+
+      - name: List built artifacts
+        run: ls -laR examples/natmod/mpyhouse
