@@ -107,13 +107,39 @@ only uses it for `mpremote connect auto`'s USB-VID/PID auto-detect path;
 attempt, no retry, whatever the actual cause of the race turns out to be on a
 given runner.
 
-The smoke step now retries the `mpremote` call itself (up to 10 times, 0.5s
-apart) but only when its output contains that exact "failed to access"
-message -- a genuine failure from the script (an assertion, an import error)
-still fails the job on the first attempt, verified the same way the pass/fail
-paths above were: a fake `mpremote` replaying the busy message twice before
-succeeding exits 0 through the retry loop, and one emitting a real traceback
-exits 1 immediately, no retry spent on it.
+The smoke step was given a retry around the `mpremote` call itself (up to 10
+times, 0.5s apart) but only when its output contains that exact "failed to
+access" message -- a genuine failure from the script (an assertion, an import
+error) still fails the job on the first attempt, verified the same way the
+pass/fail paths above were: a fake `mpremote` replaying the busy message
+twice before succeeding exits 0 through the retry loop, and one emitting a
+real traceback exits 1 immediately, no retry spent on it.
+
+**Addendum, 2026-08-31 -- the retry above treated a symptom whose cause was
+not what it looked like.** Pushed and re-run: all 10 attempts failed the same
+way, evenly spaced across five-plus seconds, not the one-shot failure a brief
+enumeration race would produce. Something on that runner held `/dev/pts/0`
+busy for the whole window, not just for the instant right after qemu
+allocated it -- the "just-enumerated-device" framing above was itself
+guessed from `mpremote`'s own retry-loop comment, not from the runner, and
+the guess was wrong.
+
+Rather than keep guessing at what specifically holds a `/dev/pts/N` slot busy
+on a GitHub-hosted runner, the design was changed to need no such guess at
+all: `-serial "tcp:127.0.0.1:<port>,server=on,wait=off"` makes `qemu-system-arm`
+itself the listener on a TCP port nothing else on a fresh runner could
+already hold, and `mpremote connect socket://127.0.0.1:<port>` -- a normal
+pyserial URL scheme, not something this project added -- connects to it
+directly. `exclusive=True` (what made the pty version fail) is simply inert
+for a socket transport. Live-verified the same way the pty version was,
+including three `mpremote run` calls in a row against the same qemu instance
+with no connection issue at all, and the exact YAML step's own script (not
+an approximation of it) run standalone against a real collected `.elf` for
+both the passing and the deliberately-broken script. The retry loop stayed,
+now against connection-refused-while-qemu-is-still-starting instead of a
+busy pty -- `mpremote` wraps that in the identical "failed to access ... it
+may be in use by another program" message, so the same match still applies,
+confirmed by connecting before qemu had opened its listening socket at all.
 
 [0069]: 0069-upstream-usercmodule-narrow-ci-slice.md
 [0079]: 0079-collected-artifact-is-more-than-one-file.md

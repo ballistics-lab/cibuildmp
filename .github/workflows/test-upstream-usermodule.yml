@@ -189,12 +189,15 @@ jobs:
   # below -- live-verified against a real cross-compiled micropython.exe
   # before this was wired in; `qemu`'s MPS2_AN385 firmware.elf has no CLI
   # to hand a script to (upstream's own port only exposes a REPL over a
-  # serial device), so its step starts `qemu-system-arm` itself against
-  # the collected .elf with `-serial pty`, waits for the pty device name
-  # in its stdout, then runs `mpremote ... run` against that device --
+  # serial device), so its step starts `qemu-system-arm` itself against the
+  # collected .elf with its serial port redirected to a local TCP socket,
+  # then runs `mpremote ... run` against `socket://127.0.0.1:<port>` --
   # `mpremote`'s raw-REPL protocol propagates a real Python exception as a
   # non-zero exit, confirmed live with both a passing and a deliberately
-  # failing script.
+  # failing script. A `-serial pty` version of this was tried first and
+  # dropped when a real CI run found GitHub's own runner holding the pty
+  # busy well past any brief enumeration race -- see that step's own
+  # comment.
   #
   # rp2's own `firmware.uf2` still has no equivalent (record 0069's own
   # reasoning still holds for it): it needs real hardware or a
@@ -308,55 +311,46 @@ jobs:
           sudo apt-get install -y -qq qemu-system-arm
           pip install --break-system-packages --quiet mpremote
 
-      # MPS2_AN385/`mps2-an385` is this job's one board -- the same
-      # `-semihosting -machine ... -serial pty` invocation
-      # `ports/qemu/Makefile`'s own `run` target uses, run directly here
-      # since that Makefile (and the BOARD-to-`-machine` mapping it would
-      # otherwise supply) lives in the pinned checkout this step has no
-      # path to. Live-verified before this was wired in: a real firmware
-      # boots, `mpremote ... run` against the printed pty executes
-      # smoke_test.py and exits 0, and a deliberately-broken script exits
-      # 1 the same way -- so a real regression here fails the job, not
-      # just a build that merely links.
+      # MPS2_AN385/`mps2-an385` is this job's one board. `-serial pty` (what
+      # `ports/qemu/Makefile`'s own `run` target uses) was tried first and
+      # dropped: GitHub's own runner held `/dev/pts/0` for `mpremote`'s
+      # exclusive open on every one of 10 retries over 5+ seconds, not a
+      # brief just-enumerated-device race -- something on that runner
+      # genuinely keeps the slave busy, not just briefly. A TCP socket has no
+      # such shared-namespace ambiguity: `server=on,wait=off` makes qemu
+      # itself the listener on a port nothing else on a fresh runner could
+      # already hold, `mpremote`'s own `socket://` URL support (a normal
+      # pyserial scheme, needing no code of this project's own) connects to
+      # it directly, and pyserial's `exclusive` flag is simply inert for a
+      # socket transport rather than meaningful. Live-verified the same way
+      # the pty version was, including running it three times in a row
+      # against the one qemu instance with no connection issue at all.
       - name: "Smoke test (qemu/MPS2_AN385): run the built firmware against smoke_test.py"
         run: |
           set -euo pipefail
           identifier="${CIBMP_UPSTREAM_TAG}-qemu-MPS2_AN385"
           elf="examples/usercmodule/mpyhouse/${identifier}/micropython-${identifier}.elf"
+          port=15555
 
           qemu-system-arm -semihosting -machine mps2-an385 -nographic \
-            -monitor null -serial pty -kernel "$elf" >qemu.log 2>&1 &
+            -monitor null -serial "tcp:127.0.0.1:${port},server=on,wait=off" \
+            -kernel "$elf" >qemu.log 2>&1 &
           qemu_pid=$!
           trap 'kill "$qemu_pid" 2>/dev/null || true' EXIT
 
-          pty=""
-          for _ in $(seq 1 50); do
-            pty=$(grep -oP '(?<=redirected to )/dev/pts/\d+' qemu.log || true)
-            [ -n "$pty" ] && break
-            sleep 0.2
-          done
-          if [ -z "$pty" ]; then
-            echo "qemu-system-arm never printed a pty device:"
-            cat qemu.log
-            exit 1
-          fi
-
-          # The pty exists the instant qemu prints its path, but pyserial's
-          # exclusive open (what mpremote uses) can still race whatever
-          # finishes setting it up -- caught live on the first real CI run,
-          # which failed here with "failed to access ... it may be in use by
-          # another program" on the very first attempt. `mpremote`'s own
-          # `SerialTransport` has a `wait=` retry loop for exactly this class
-          # of just-enumerated-device race, but `mpremote connect <device>`
-          # (an explicit path, not auto-detect) never passes a nonzero
-          # `wait`, so it gets one attempt. Retried here instead, and only
-          # for that specific message -- a real smoke-test failure (a
-          # genuine assertion from the script itself) still fails on the
-          # first attempt, confirmed live the same way the non-race path was.
+          # qemu needs a moment to start listening; `mpremote`'s own
+          # `SerialTransport` wraps every `OSError` from opening the URL
+          # (connection-refused included) as "failed to access ... it may be
+          # in use by another program" and gives up after one attempt for an
+          # explicit `connect <url>` (its `wait=` retry loop only runs for
+          # `connect auto`'s USB-VID/PID auto-detect) -- retried here
+          # instead, and only for that message, so a genuine smoke-test
+          # failure (an assertion from the script itself) still fails on the
+          # first attempt, confirmed live the same way the pass path was.
           attempt=1
-          max_attempts=10
+          max_attempts=20
           while true; do
-            if output=$(timeout 20 mpremote connect "$pty" run examples/usercmodule/smoke_test.py 2>&1); then
+            if output=$(timeout 20 mpremote connect "socket://127.0.0.1:${port}" run examples/usercmodule/smoke_test.py 2>&1); then
               echo "$output"
               break
             fi
