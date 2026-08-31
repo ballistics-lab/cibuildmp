@@ -170,13 +170,47 @@ GENERATED = {
 }
 
 
+def _normalize(block: str) -> str:
+    """A generated block reduced to what it actually asserts.
+
+    Markdown table formatters -- an editor's format-on-save, prettier,
+    whatever a contributor happens to run -- pad cells to a common column
+    width and widen the `---` separator to match. That is a no-op to every
+    renderer and to any reader, but it is a byte difference, and comparing
+    bytes made the generator and the formatter fight: each run of one
+    undid the other, and whichever went last decided whether CI passed.
+
+    So the comparison is semantic. Padding inside a row, the width of a
+    separator row's dashes, and trailing whitespace are all normalised
+    away; cell *content*, column count and row order are not. A formatter
+    can reformat a generated block freely and neither `--check` nor a
+    rewrite will notice, while a genuinely stale value still fails.
+    """
+    lines = []
+    for line in block.strip().splitlines():
+        line = line.rstrip()
+        if line.startswith("|"):
+            cells = [cell.strip() for cell in line.strip("|").split("|")]
+            # `| :---: |` and `| ---- |` differ only in width; keep the
+            # alignment colons, drop how many dashes carry them.
+            cells = [re.sub(r"^(:?)-{2,}(:?)$", r"\1---\2", cell) for cell in cells]
+            line = "| " + " | ".join(cells) + " |"
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def _replace(text: str, name: str, body: str) -> str:
     pattern = re.compile(
-        rf"<!-- generated: {re.escape(name)} .*?-->\n.*?\n<!-- /generated: {re.escape(name)} -->",
+        rf"<!-- generated: {re.escape(name)} .*?-->\n(.*?)\n<!-- /generated: {re.escape(name)} -->",
         re.DOTALL,
     )
-    if not pattern.search(text):
+    match = pattern.search(text)
+    if not match:
         raise SystemExit(f"no `{name}` generated block found -- add the marker pair")
+    if _normalize(match.group(1)) == _normalize(body):
+        # Same content, different whitespace -- leave the file alone rather
+        # than churning a diff a formatter will only re-apply.
+        return text
     return pattern.sub(lambda _: BLOCK.format(name=name, body=body), text)
 
 

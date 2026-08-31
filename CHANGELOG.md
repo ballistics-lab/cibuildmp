@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`bin/refresh_docs.py` no longer fights a markdown table formatter.** Its
+  generated blocks were compared byte-for-byte, so an editor's format-on-save
+  padding table cells to a common column width — a no-op to every renderer —
+  made `--check` fail and a plain run churn the padding straight back out. The
+  comparison is semantic now (cell content, column count, row order; padding,
+  separator width and trailing whitespace ignored), and a block equivalent
+  modulo whitespace is left alone rather than rewritten. Verified both ways: a
+  simulated format-on-save leaves `--check` clean and rewrites nothing, and
+  changing one real value in the same block still fails. Record 0077.
+
 ### Added
 
 - **`bin/update_toolchains.py` and a weekly `pin-staleness.yml`** — record 0046's

@@ -230,6 +230,30 @@ weaker question than "which claims did I check". The mechanical guards cover
 the claims that have a machine-readable counterpart; everything else is
 found by reading, and is found in the places you did not expect to look.
 
+## Addendum, same day -- the generator fought the editor, and lost
+
+A generated block is a byte-for-byte comparison, and a markdown table
+formatter -- an editor's format-on-save here, but prettier or anything else
+would do the same -- pads cells to a common column width and widens the
+`---` separator to match. That is a no-op to every renderer, and a byte
+difference to `--check`. The two then undo each other on every save and every
+run, and whichever went last decided whether CI passed.
+
+Replicating the formatter's exact output was the wrong fix: it means matching
+a tool this repo does not configure, own, or even know the identity of.
+
+`_normalize()` compares what the block *asserts* instead -- cell content,
+column count, row order -- and ignores padding inside rows, separator width
+and trailing whitespace. `refresh_docs.py` also leaves a block alone when it
+is equivalent modulo whitespace, so a plain run no longer churns a diff the
+formatter will only re-apply.
+
+Verified both directions, not just the happy one: a simulated format-on-save
+over a generated block leaves `--check` clean and causes no rewrite, while
+changing one real value in the same block still fails `--check` (exit 1) and
+the test. A guard that stops flapping is only worth having if it still
+catches the thing it exists for.
+
 [0041]: 0041-docs-restructure.md
 [0050]: 0050-natmod-is-docker-only.md
 [0073]: 0073-composite-actions-are-a-permanent-legacy-fallback.md
