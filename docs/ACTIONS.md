@@ -1,10 +1,21 @@
-# Composite actions reference
+# Legacy composite actions reference
 
-The pre-CLI building blocks — one GitHub Action per build step, still fully
-supported for CI, but no longer where new work starts (see the main
-[README](../README.md)). New usermod ports and arches land in the
-`cibuildmp` CLI's own `usermod/build_<port>.py` first; these actions absorb the
-CLI's work once it's wired up, not the other way around.
+**This is not usage documentation for `cibuildmp`.** These actions predate
+the CLI and don't invoke `cibuildmp` at all — each installs a toolchain by
+hand and runs the port's own `make`/`idf.py` directly. The current, only
+recommended way to use this project is the root
+[`action.yml`](../action.yml) wrapping the CLI — see the main
+[README](../README.md)'s Quick start.
+
+This layer is a deliberate fallback, not a parallel track being absorbed
+into the CLI over time: folding `build-natmod` into a thin
+`cibuildmp --build` wrapper was proposed and explicitly rejected (tracker
+[0038], see "Rejected" in [`docs/0000-TRACKER.md`](0000-TRACKER.md)). It
+survives because one real case still depends on it directly — `a7p`'s own
+`unix-mipsel` cross-compile has no native runner and deliberately stays on
+`build-usermod-unix` ([0067]) — not because these actions are on any track
+toward being replaced. Read on only if you're maintaining or migrating off
+a holdout like that, not as a starting point for a new module.
 
 Every table below is the action's complete input surface — if it isn't
 listed here, the action doesn't accept it. `MPY_DIR` in a "Requires" line

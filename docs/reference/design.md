@@ -15,21 +15,24 @@ This repository is `ballistics-lab/cibuildmp`, and it superseded
 `ballistics-lab/micropython-native-ci` (**D11**): the composite actions and
 the tool live together, one version line, one place a fix lands.
 
-The composite actions in `.github/actions/` solve the toolchain problem, but
-only inside GitHub Actions. Everything around them stays hand-copied in each
-consuming repo:
+The composite actions in `.github/actions/` solved the toolchain problem,
+but only inside GitHub Actions, and only hand-driven per consumer.
+`cibuildmp` — the CLI, wrapped by the root `action.yml` — is what actually
+absorbed that ground: the arch matrix, `runs-on:` selection, artifact
+layout, the version pin, and local reproducibility all now go through one
+config and one action, for natmod fully and for six of the fifteen
+verified usermod ports (see the README's own "Target support" table).
 
-- the arch matrix itself (`natmod.yml`'s 10-entry `arch:` list, duplicated
-  per repo),
-- `runs-on:` selection, which a composite action structurally cannot do for
-  itself (documented under `build-usermod-unix` in `README.md`),
-- `upload-artifact` name/path globs, deliberately left to the caller,
-- the `@v0.2.0` pin, repeated ~15 times across three repos,
-- and there is no way to reproduce any of it locally.
-
-`cibuildmp` absorbs those five. The actions stay as the low-level layer until
-`cibuildmp` covers their ground, then become thin wrappers over it (the same
-relationship `pypa/cibuildwheel@v3` has with `python -m cibuildwheel`).
+**Not** absorbed the way this section originally expected: the plan to
+fold `.github/actions/build-natmod` into a thin `cibuildmp --build`
+wrapper (the `pypa/cibuildwheel@v3`-style relationship this paragraph used
+to describe) was proposed and explicitly rejected — see tracker [0038],
+"Rejected". `.github/actions/*` stays a permanent, separate legacy layer,
+not a temporary one being absorbed over time; it survives specifically
+because `a7p`'s own `unix-mipsel` cross-compile still depends on
+`build-usermod-unix` directly, with no native runner to move it off of
+([0067]). Read `docs/ACTIONS.md` only as reference for that kind of
+holdout, not as an alternate way to use `cibuildmp`.
 
 <!-- migrated verbatim from docs/BACKLOG.md lines 433-476 (Identifier scheme) -->
 
@@ -155,16 +158,14 @@ from `resources/build-platforms.toml` as a candidate row, always, the
 identical model natmod's own arch axis already had before this round
 (record 0052's own Track C) — `natmod_all_targets()`/
 `all_usermod_targets()` are now the *only* place that enumerates what
-exists; `build`/`skip` narrow it, nothing else does. `[usermod]` is not
-one of the retired six — it survives, unaffected, as shared defaults for
-every usermod port at once (`user-c-modules`/`manifest`/
-`extra-make-args`/`build`/`skip`), sibling to the bare top level rather
-than a selector of any kind (record 0051's ninth addendum, kept at the
-user's own explicit insistence through every later round of retraction —
-see below).
+exists; `build`/`skip` narrow it, nothing else does. `[usermod]` survived
+this round as a seventh table, shared defaults for every usermod port at
+once — since removed too (record 0074, see below); every one of these
+seven names is now just an unrecognised top-level table, with no
+per-name migration message.
 
 `cibuildmp/options.py`'s cascade-based option resolution (`default →
-global → family → environment → CLI`) is wired into both
+global → environment → CLI`) is wired into both
 `cibuildmp/platforms/natmod/options.py` and
 `cibuildmp/platforms/usermod/options.py`, for the base layers *and* for
 `[override]`/`inherit` — one shared top-level `[override]` table, keyed
@@ -210,18 +211,16 @@ numerically older one, so an unpinned glob never silently lands on an
 in-progress preview tag just because it happens to be the newest thing
 verified for that ABI.
 
-`[usermod]` itself sits one cascade tier above the bare top level —
-`default → global → [usermod] → env → CLI`, resolved through the same
-`Options` class natmod's own keys use, natmod's own instance simply never
-given a family table since it has no sibling platforms to share defaults
-with. Its own settable option keys (`user-c-modules`/`manifest`/
-`extra-make-args`/`build`/`skip` — `user-c-modules` renamed from
-`module-dir`, since that name collided with natmod's own key of the same
-name meaning something different, see [0051]'s sixth addendum) were kept
-through every later retraction at the user's own explicit insistence:
-unlike a per-platform table, `[usermod]` is not a selection mechanism (it
-gates nothing), only a value-holding tier, the same category as any other
-global option.
+**Superseded, record 0074:** `[usermod]` used to sit one cascade tier
+above the bare top level (`default → global → [usermod] → env → CLI`),
+kept through every earlier round of retraction "at the user's own
+explicit insistence" (record 0051's ninth addendum) as a value-holding
+tier, not a selection mechanism. That tier is gone now, `Options` itself
+no longer has a family layer at all: no real config in this project's own
+examples ever actually wrote `[usermod]`, so the principle that kept it
+alive never had a real caller behind it. `user-c-modules`/`manifest`/
+`extra-make-args` resolve from `default → global → env → CLI` only, the
+same as every other option.
 
 [0022]: ../records/0022-zephyr-third-selector-axis.md
 [0043]: ../records/0043-unix-adopts-cibuildwheel-native-image-model.md
@@ -278,11 +277,11 @@ arch-flags = ""               # rv32imc only, e.g. "zba,zcmp" (D15) -- part
                               # of that arch's identifier, so this cannot be
                               # set per-[override], only here
 
-# usermod's own shared-across-every-port defaults -- not a selector (every
-# port is always in scope regardless of this table's own presence), one
-# cascade tier above the bare top level. user-c-modules/manifest are
-# usermod-only by name (natmod has no such keys at all).
-[usermod]
+# usermod's own shared-across-every-port keys -- user-c-modules/manifest
+# are usermod-only by name (natmod has no such keys at all), set at the
+# bare top level like every other global option; no [usermod] table (or
+# any other family-level tier) exists to hold them separately any more
+# (record 0074 -- see below).
 user-c-modules = "."
 manifest = "usermod/manifest.py"
 
@@ -323,21 +322,24 @@ identifier → environment → CLI flags.
 **Where a key goes is part of the schema, and getting it wrong is an
 error** ([0048], generalised into a cascade by [0051]'s own Phase F, then
 simplified further by [0052]'s own retraction of every per-platform
-table). The keys above the first table header — `output-dir`, `build`,
-`skip`, `name`, `version`, `micropython-submodules` — are invocation-wide
-and are read **only** from the top level (`micropython`/`mpy-abi` are
-gone entirely, not merely relocated — writing either anywhere is now a
-plain unknown-key error). Writing a generic key inside `[usermod]` (its
-own one remaining table) still fails with a message naming where it
-belongs; so does any key `[usermod]`'s own schema does not read at all
-(a typo, or `arch-flags`, which only natmod reads). Until [0048] every
-one of those was silently ignored, which meant a misplaced `skip`
-produced a successful build of something you had asked not to build; the
-check has moved twice since (a fixed per-table-shape partition, then a
-per-platform cascade, now a two-tier global/`[usermod]`-family split),
-but the guarantee is the same.
+table, and again by [0074]'s own removal of the family tier). The keys
+above the first table header — `output-dir`, `build`, `skip`, `name`,
+`version`, `micropython-submodules` — are invocation-wide and are read
+**only** from the top level. `[0048]`'s own original bug (a `skip` placed
+in the wrong table was silently ignored, so a misplaced key produced a
+successful build of something you had asked not to build) is what every
+one of these rounds has been about; today an unrecognised top-level
+*table* (`[natmod]`, `[usermod]`, a typo like `[stm32]`, ...) is a plain
+"unknown table" error via `cli.py`'s own `_validate_top_level_tables()`.
+An unrecognised bare *scalar* key at the top level (`micropython =`,
+`mpy-abi =`, or a plain typo) is a narrower gap this round did not touch
+— nothing in `Options.load()`/`UsermodOptions.load()` validates the
+top-level scalar keyset directly, so one is currently read as simply
+absent (its default applies) rather than flagged; see the open-questions
+reference if this needs closing.
 
 [0048]: ../records/0048-build-skip-live-in-opposite-tables.md
+[0074]: ../records/0074-usermod-family-table-and-retired-table-messages-removed.md
 
 Usermod's own real identifier space is documented in [0023] rather than
 transcribed here — it is a genuinely different shape from natmod's
@@ -348,10 +350,12 @@ no per-port config table at all any more (`[unix]`, `[esp32]`, ... —
 [0051]'s Phase F introduced them, [0052]'s own live-caught retraction
 removed them again along with the `archs =`/`boards =` axis config they
 carried): every real `(port, tag, arch/board)` row is a candidate always,
-narrowed only by `build`/`skip`. `[usermod]` survives as shared defaults
-for every port at once — it was never a selector, so none of that
-retraction touched it (record 0051's ninth addendum, kept at the user's
-own explicit insistence through every later round).
+narrowed only by `build`/`skip`. `[usermod]` outlived that round as
+shared defaults for every port at once — it was never a selector, so none
+of that retraction touched it directly — but is gone too now ([0074]):
+`user-c-modules`/`manifest`/`extra-make-args` are plain top-level keys,
+narrowed per port the same way everything else is, through
+`[override."<glob>"]`.
 
 **Opt-in groups and host-convenience keywords are both gone** ([0051]
 point 8 added `enable`/`GROUPS` and record 0049 added `--archs auto`/

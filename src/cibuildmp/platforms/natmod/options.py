@@ -143,7 +143,7 @@ def check_keys(
 ) -> None:
     """Reject a key this table does not read -- the cascade-era
     replacement for record 0048's own `check_table_keys()`. Shared with
-    `usermod/options.py`, which passes its own `USERMOD_PLATFORM_KEYS`
+    `usermod/options.py`, which passes its own `USERMOD_PORT_BASE`
     schema and `UsermodConfigError`.
 
     A key that belongs to `GENERIC_KEYS` (read from the top level,
@@ -374,25 +374,6 @@ class Options:
         config_path, raw = (
             preread if preread is not None else read_config(package_dir, config_file)
         )
-
-        # `[natmod]` no longer exists as a config table at all -- it used
-        # to gate whether natmod was active in an invocation, and before
-        # that carried its own settable keys; both concepts are retracted
-        # (every family is always in scope now, and every option that
-        # used to live here moved to the bare top level or [override]).
-        # `cli.py`'s own `_reject_platform_tables()` already rejects it
-        # before this ever runs for a caller going through `main()`; this
-        # direct check is what still catches it for a caller (most tests)
-        # that constructs `Options.load()` on its own.
-        if "natmod" in raw:
-            raise ConfigError(
-                "[natmod] no longer exists -- every platform is always in "
-                "scope now, selected purely by build/skip glob-matching "
-                "its own real identifiers (see the README for the full "
-                "identifier list). Move any module-dir/make-target/"
-                "extra-make-args/pre-build-command/arch-flags value to the "
-                "top level."
-            )
 
         overrides = load_overrides(raw)
         publish = dict(raw.get("publish") or {})

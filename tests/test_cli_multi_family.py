@@ -177,36 +177,30 @@ def test_cli_build_can_name_exactly_one_identifier(tmp_path, capsys):
 # ── the flattened config tree: retired tables ────────────────────────────
 
 
-def test_legacy_usermod_ports_key_is_a_clear_error(tmp_path, capsys):
+def test_usermod_table_is_just_an_unknown_table_now(tmp_path, capsys):
+    # [usermod] (record 0051's ninth addendum) is gone (record 0074), with
+    # no dedicated migration message: no real config in this project's own
+    # examples ever actually used it, unlike the six real tables below --
+    # a stray [usermod] falls through to the same plain "unknown table"
+    # error as any other unrecognised name.
     write(tmp_path, '[usermod]\nports = ["unix"]\n')
 
     assert main([str(tmp_path)]) == 2
-    assert "[usermod] ports = [...] no longer exists" in capsys.readouterr().err
+    assert "unknown table(s) at the top level: [usermod]" in capsys.readouterr().err
 
 
-def test_usermod_family_table_still_works_as_shared_defaults(tmp_path, capsys):
-    make_module_dir(tmp_path)
-    write(
-        tmp_path,
-        f'[usermod]\nuser-c-modules = "."\nbuild = "{UNIX_V129_X86_64}"\n',
-    )
-
-    assert main([str(tmp_path), "--print-build-identifiers"]) == 0
-    assert capsys.readouterr().out.split() == [UNIX_V129_X86_64]
-
-
-def test_retired_natmod_table_is_a_clear_error(tmp_path, capsys):
+def test_retired_natmod_table_is_just_an_unknown_table_now(tmp_path, capsys):
     write(tmp_path, "[natmod]\n")
 
     assert main([str(tmp_path)]) == 2
-    assert "[natmod] no longer exists" in capsys.readouterr().err
+    assert "unknown table(s) at the top level: [natmod]" in capsys.readouterr().err
 
 
-def test_retired_unix_table_is_a_clear_error(tmp_path, capsys):
+def test_retired_unix_table_is_just_an_unknown_table_now(tmp_path, capsys):
     write(tmp_path, "[unix]\n")
 
     assert main([str(tmp_path)]) == 2
-    assert "[unix] no longer exists" in capsys.readouterr().err
+    assert "unknown table(s) at the top level: [unix]" in capsys.readouterr().err
 
 
 def test_unknown_top_level_table_is_an_error(tmp_path, capsys):

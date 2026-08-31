@@ -23,13 +23,13 @@
 #   defaults -> this file -> matching [override] -> environment -> CLI
 #
 # There is no per-platform table at all any more -- no [natmod], no
-# [unix]/[windows]/[qemu]/[webassembly]/[esp32]. Every platform is always
-# in scope; every option key below lives at the bare top level (or, for a
-# usermod-only default shared across every port, inside [usermod] -- see
-# examples/template/cibuildmp.toml). What actually gets built is decided
-# purely by `build`/`skip` glob-matching the real identifier, or by a
-# specific `[override."<glob>"]` entry. An unconfigured `build` selects
-# nothing at all, from any platform -- there is no implicit default.
+# [unix]/[windows]/[qemu]/[webassembly]/[esp32], and no [usermod] either
+# (record 0074): every option key lives at the bare top level, usermod's
+# own user-c-modules/manifest/extra-make-args included. What actually gets
+# built is decided purely by `build`/`skip` glob-matching the real
+# identifier, or by a specific `[override."<glob>"]` entry. An unconfigured
+# `build` selects nothing at all, from any platform -- there is no
+# implicit default.
 
 # ── Global ────────────────────────────────────────────────────────────────
 

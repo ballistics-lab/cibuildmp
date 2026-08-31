@@ -279,16 +279,6 @@ def build_all(
     return 0
 
 
-def validate_family_table(
-    raw: dict[str, Any], *, error: type[Exception] = ConfigError
-) -> None:
-    """No-op -- part of the `PlatformModule` contract (`platforms/__init__.py`'s
-    own docstring has the full reasoning), satisfied trivially here:
-    natmod's one platform already *is* its only family, so there is no
-    separate family-level table for a stale/misplaced key to hide in."""
-    return
-
-
 # Every exception Options.load()/.targets() can raise -- what cli.py's own
 # coordinator catches around "load config, resolve targets" for this
 # family, uniformly with usermod's own equivalent tuple.

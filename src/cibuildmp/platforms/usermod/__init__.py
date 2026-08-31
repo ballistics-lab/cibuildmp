@@ -42,7 +42,7 @@ from ...sources import SourceError
 from ...stepsummary import write_step_summary
 from . import orchestrate
 from .build_common import UsermodBuildError
-from .options import UsermodConfigError, UsermodOptions, check_usermod_family_table
+from .options import UsermodConfigError, UsermodOptions
 from .targets import UsermodTarget
 
 # Every exception UsermodOptions.load()/.targets() can raise -- what
@@ -69,18 +69,6 @@ BUILD_ERRORS: tuple[type[Exception], ...] = (
 def _plan_line(index: int, total: int, target: UsermodTarget) -> str:
     counter = f"[{index:>{len(str(total))}}/{total}]"
     return f"{counter} {target.identifier}"
-
-
-def validate_family_table(
-    raw: dict[str, Any], *, error: type[Exception] = UsermodConfigError
-) -> None:
-    """Part of the `PlatformModule` contract (`platforms/__init__.py`'s
-    own docstring has the full reasoning) -- validates `[usermod]`
-    unconditionally, on every invocation. Thin wrapper:
-    `check_usermod_family_table()` does the real work, and is also called
-    again, independently, by `UsermodOptions.load()` itself for callers
-    that bypass `cli.py` entirely (most tests)."""
-    check_usermod_family_table(raw, error=error)
 
 
 def resolve_options(
