@@ -257,22 +257,22 @@ onto each other rather than the first winning.
 
 ### Every key
 
-| Key | Read by | Default | Also in `[override]`? |
-| --- | --- | --- | :-: |
-| `build` | both | `""` (selects nothing) | ✗ |
-| `skip` | both | `""` | ✗ |
-| `output-dir` | both | `"mpyhouse"` | ✗ |
-| `name` | both | `""` | ✗ |
-| `version` | both | `""` | ✗ |
-| `arch-flags` | natmod | `[]` | ✗ — resolved once for the whole config, before any target exists |
-| `micropython-submodules` | natmod | `[]` | ✗ |
-| `module-dir` | natmod | `"natmod"` | ✓ |
-| `make-target` | natmod | `"dist"` | ✓ |
-| `pre-build-command` | natmod | `""` | ✓ |
-| `extra-make-args` | both | `[]` | ✓ |
-| `user-c-modules` | usermod | `"."` | ✓ |
-| `manifest` | usermod | `""` | ✓ |
-| `extra-cmake-args` | usermod | `[]` | ✓ |
+| Key                      | Read by | Default                |                      Also in `[override]`?                       |
+| ------------------------ | ------- | ---------------------- | :--------------------------------------------------------------: |
+| `build`                  | both    | `""` (selects nothing) |                                ✗                                 |
+| `skip`                   | both    | `""`                   |                                ✗                                 |
+| `output-dir`             | both    | `"mpyhouse"`           |                                ✗                                 |
+| `name`                   | both    | `""`                   |                                ✗                                 |
+| `version`                | both    | `""`                   |                                ✗                                 |
+| `arch-flags`             | natmod  | `[]`                   | ✗ — resolved once for the whole config, before any target exists |
+| `micropython-submodules` | natmod  | `[]`                   |                                ✗                                 |
+| `module-dir`             | natmod  | `"natmod"`             |                                ✓                                 |
+| `make-target`            | natmod  | `"dist"`               |                                ✓                                 |
+| `pre-build-command`      | natmod  | `""`                   |                                ✓                                 |
+| `extra-make-args`        | both    | `[]`                   |                                ✓                                 |
+| `user-c-modules`         | usermod | `"."`                  |                                ✓                                 |
+| `manifest`               | usermod | `""`                   |                                ✓                                 |
+| `extra-cmake-args`       | usermod | `[]`                   |                                ✓                                 |
 
 Every key is valid at the top level whatever family reads it — the global
 layer is just every platform's own default, so a natmod-only key in a
@@ -322,16 +322,16 @@ config file — not to narrow the run as a whole.
 A second group of variables configures the machinery rather than the build,
 and has no config-file counterpart at all:
 
-| Variable | Effect |
-| --- | --- |
-| `CIBMP_CACHE_PATH` | Where MicroPython checkouts and mpy-cross builds are cached. Defaults to `$XDG_CACHE_HOME/cibuildmp`, or `~/.cache/cibuildmp`. Pin it in CI when a later step needs the checkout by path — `<CIBMP_CACHE_PATH>/micropython/<tag>` |
-| `CIBMP_REPORT_PATH` | Where the JSON build report is written |
-| `CIBMP_TIMEOUT` | Seconds before a build container is killed (`docker kill`, not just the CLI). No limit by default |
-| `CIBMP_<PORT>_<TARGET>_TIMEOUT` | The same, for one container — `CIBMP_UNIX_MANYLINUX_2_28_X86_64_TIMEOUT` |
-| `CIBMP_<PORT>_<TARGET>_DOCKER_IMAGE` | Run this (port, target) in a different image — a locally built one, or a fork's. Wins over the pinned default. Omit the `<TARGET>` segment for a port with no per-build image axis (`CIBMP_WEBASSEMBLY_DOCKER_IMAGE`) |
-| `CIBMP_<PORT>_<TARGET>_DOCKER_PLATFORM` | Same shape, for the container's `--platform` |
-| `CIBMP_DEBUG_TRACEBACK` | Print a full traceback instead of a one-line error (same as `--debug-traceback`) |
-| `CIBMP_DISABLE_GITHUB_STEP_SUMMARY` | Suppress the step-summary table on GitHub Actions |
+| Variable                                | Effect                                                                                                                                                                                                                            |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CIBMP_CACHE_PATH`                      | Where MicroPython checkouts and mpy-cross builds are cached. Defaults to `$XDG_CACHE_HOME/cibuildmp`, or `~/.cache/cibuildmp`. Pin it in CI when a later step needs the checkout by path — `<CIBMP_CACHE_PATH>/micropython/<tag>` |
+| `CIBMP_REPORT_PATH`                     | Where the JSON build report is written                                                                                                                                                                                            |
+| `CIBMP_TIMEOUT`                         | Seconds before a build container is killed (`docker kill`, not just the CLI). No limit by default                                                                                                                                 |
+| `CIBMP_<PORT>_<TARGET>_TIMEOUT`         | The same, for one container — `CIBMP_UNIX_MANYLINUX_2_28_X86_64_TIMEOUT`                                                                                                                                                          |
+| `CIBMP_<PORT>_<TARGET>_DOCKER_IMAGE`    | Run this (port, target) in a different image — a locally built one, or a fork's. Wins over the pinned default. Omit the `<TARGET>` segment for a port with no per-build image axis (`CIBMP_WEBASSEMBLY_DOCKER_IMAGE`)             |
+| `CIBMP_<PORT>_<TARGET>_DOCKER_PLATFORM` | Same shape, for the container's `--platform`                                                                                                                                                                                      |
+| `CIBMP_DEBUG_TRACEBACK`                 | Print a full traceback instead of a one-line error (same as `--debug-traceback`)                                                                                                                                                  |
+| `CIBMP_DISABLE_GITHUB_STEP_SUMMARY`     | Suppress the step-summary table on GitHub Actions                                                                                                                                                                                 |
 
 ### Precedence
 
@@ -375,9 +375,9 @@ extra-make-args = ["A=1"]
 
 [override."*-x64"]
 extra-make-args = ["B=2"]
-inherit = { extra-make-args = "append" }   # -> A=1 B=2   ("prepend" -> B=2 A=1)
-```                                        # without inherit -> B=2
-
+inherit = { extra-make-args = "append" }  # -> A=1 B=2   ("prepend" -> B=2 A=1)
+                                          # without inherit -> B=2
+```
 `inherit` only applies to list-valued options — `extra-make-args` is the one
 option genuinely list-shaped across every platform's own override surface;
 naming a scalar option in `inherit` is a config error, not a silent no-op.

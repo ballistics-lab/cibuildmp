@@ -157,6 +157,15 @@ is [0058]'s own still-open "`resources/pinned_toolchains.toml` not written" item
 seen from the other side; noted here rather than silently, since anyone picking
 this work up from the table alone would look in the wrong file.
 
+**The emsdk bullet above is wrong about `resources/usermod.toml` too.** It says
+that file's own `[emsdk]` table records the human-readable version separately;
+[0042] had already deleted `[emsdk]` and `[llvm-mingw]` from it before this
+record was written. What `usermod.toml` still carries is one table, `[port]`,
+and `natmod.toml` two, `[arch]` and `[arch-flags.rv32imc]` -- all three live,
+all three read (`usermod/portinfo.py`, `natmod/targets.py`). The emsdk version
+is only in `emscripten-releases-tags.json` upstream, which is where
+`bin/update_toolchains.py` reads it from.
+
 **`bin/update_toolchains.py`** covers all six, in the three shapes this record
 predicted: four GitHub releases (one API call each), emsdk via
 `emscripten-releases-tags.json` (which is as easy as this record said), and
