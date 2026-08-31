@@ -3,22 +3,27 @@
 package versions that are safe to delete: not tagged, and not referenced
 as a child manifest (platform image or buildx attestation) inside any
 currently-tagged index. Prints gh api DELETE commands; runs nothing."""
+
 import json
 import subprocess
-import urllib.request
 import urllib.error
+import urllib.request
 
 ORG = "ballistics-lab"
-ACCEPT = ",".join([
-    "application/vnd.oci.image.index.v1+json",
-    "application/vnd.docker.distribution.manifest.list.v2+json",
-    "application/vnd.oci.image.manifest.v1+json",
-    "application/vnd.docker.distribution.manifest.v2+json",
-])
+ACCEPT = ",".join(  # noqa: FLY002
+    [
+        "application/vnd.oci.image.index.v1+json",
+        "application/vnd.docker.distribution.manifest.list.v2+json",
+        "application/vnd.oci.image.manifest.v1+json",
+        "application/vnd.docker.distribution.manifest.v2+json",
+    ]
+)
 
 
 def gh_json(path):
-    out = subprocess.run(["gh", "api", path], capture_output=True, text=True, check=True)
+    out = subprocess.run(
+        ["gh", "api", path], capture_output=True, text=True, check=True
+    )
     return json.loads(out.stdout)
 
 

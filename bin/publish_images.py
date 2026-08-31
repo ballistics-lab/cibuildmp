@@ -90,9 +90,7 @@ def cells() -> list[tuple[str, str]]:
         # `esp_idf_base`) is an amd64 cross host. `mipsel` is in
         # ARCH_OCI_PLATFORM as amd64 for exactly that reason, so the
         # lookup covers it without a special case here.
-        arch = next(
-            (a for a in ARCH_OCI_PLATFORM if name.endswith(f"_{a}")), None
-        )
+        arch = next((a for a in ARCH_OCI_PLATFORM if name.endswith(f"_{a}")), None)
         out.append((name, ARCH_OCI_PLATFORM[arch] if arch else _PORT_OCI_PLATFORM))
     return out
 

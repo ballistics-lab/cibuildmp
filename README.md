@@ -1,5 +1,17 @@
 # cibuildmp
 
+[![SWUbanner]][SWUBadge]
+[![license]][license-url]
+[![pypi version]][PyPiUrl]
+[![python versions]][PyPiUrl]
+[![Tests]][tests-workflow]
+[![coverage]][CodecovUrl]
+
+> [!WARNING]
+> Pre-1.0.0 and still alpha software — the config schema and CLI can change
+> between releases without a deprecation cycle. Pin an exact `@vX.Y.Z` tag,
+> never a branch.
+
 Build MicroPython native C extensions for every target they support, from
 one declarative config — on CI and on your own machine. `cibuildwheel`, for
 MicroPython.
@@ -94,7 +106,7 @@ On CI, use the action instead of installing the CLI yourself — it already
 runs on a bare runner with the runner's own Docker daemon reachable:
 
 ```yaml
-- uses: ballistics-lab/cibuildmp@v0.4.2
+- uses: ballistics-lab/cibuildmp@v0.5.0
   with:
     build: "mpy6.3-* v1.29.0-manylinux_2_28_x86_64"
 ```
@@ -149,7 +161,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ballistics-lab/cibuildmp@v0.4.2
+      - uses: ballistics-lab/cibuildmp@v0.5.0
         with:
           build: "mpy6.3-v1.29.0-*"
       - uses: actions/upload-artifact@v4
@@ -730,14 +742,14 @@ identifiers are `{tag}-{arch}`, with no `unix-` in them.
 
 ### unknown key &#96;buidl&#96;. Perhaps you meant &#96;build&#96;?
 
-A typo, or a key from a config schema older than v0.4.0. The suggestion is
+A typo, or a key from a config schema older than v0.5.0. The suggestion is
 usually right. See [Configuration](#configuration) for every key that
 exists.
 
 ### unknown table(s) at the top level: [natmod].
 
 Per-platform tables (`[natmod]`, `[unix]`, `[esp32]`, `[usermod]`, …) were
-removed in v0.4.0. Everything lives at the top level now, narrowed with
+removed in v0.5.0. Everything lives at the top level now, narrowed with
 `[override."<glob>"]`. Move the keys up and delete the table.
 
 ### `docker run against image '…' was requested but the docker CLI itself is not on PATH`
@@ -1284,9 +1296,9 @@ bumping any other CI dependency.
 The `cibuildmp` package and the actions share one version. **Which tag is
 current is not restated here** — [`CHANGELOG.md`](CHANGELOG.md)'s own
 newest released heading is that, and `tests/test_docs.py` checks every
-`@vX.Y.Z` example in this file against it. (This paragraph named `v0.4.0`
+`@vX.Y.Z` example in this file against it. (This paragraph named `v0.5.0`
 as current, and as "the one every example in this README targets", for two
-releases after that stopped being true.) `v0.4.0` is worth knowing as
+releases after that stopped being true.) `v0.5.0` is worth knowing as
 history: it is the breaking one — config surface rewritten, `unix`
 identifiers renamed, see `CHANGELOG.md`'s own `[0.4.0]` entry. `v0.3.0` was the first tag
 where the CLI actually built a module at all, not just planned it, and
@@ -1302,3 +1314,36 @@ runs), so the tool that runs on CI is always exactly the ref you pinned,
 with no index to keep in sync. Running it yourself with `uv tool install
 cibuildmp`/`pip install cibuildmp` instead pulls whatever's newest on
 PyPI unless you pin a version there too.
+
+<!-- REUSABLE LINKS -->
+
+[license]:
+https://img.shields.io/github/license/ballistics-lab/cibuildmp
+
+[license-url]:
+https://opensource.org/licenses/MIT
+
+[pypi version]:
+https://img.shields.io/pypi/v/cibuildmp?logo=pypi
+
+[python versions]:
+https://img.shields.io/pypi/pyversions/cibuildmp?logo=python
+
+[PyPiUrl]:
+https://pypi.org/project/cibuildmp/
+
+[Tests]:
+https://github.com/ballistics-lab/cibuildmp/actions/workflows/tests.yml/badge.svg
+
+[tests-workflow]:
+https://github.com/ballistics-lab/cibuildmp/actions/workflows/tests.yml
+
+[coverage]:
+https://codecov.io/gh/ballistics-lab/cibuildmp/graph/badge.svg
+
+[CodecovUrl]:
+https://codecov.io/gh/ballistics-lab/cibuildmp
+
+[SWUbanner]:
+    https://img.shields.io/badge/made_in-Ukraine-ffd700.svg?labelColor=0057b7&style=flat-square
+[SWUBadge]: https://stand-with-ukraine.pp.ua

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A pre-1.0/alpha warning at the top of `README.md`.** Nothing said the config
+  schema and CLI can still change between releases without a deprecation cycle;
+  this repo has no `1.0.0` yet and no stability guarantee to imply otherwise.
+
+### Fixed
+
+- **`README.md`/`docs/ACTIONS.md` still pinned `@v0.4.2`** after `v0.5.0`
+  released — the same repeat-offender pattern `CLAUDE.md` already names this pin
+  for. Bumped both to `@v0.5.0`;
+  `tests/test_docs.py::test_action_pins_match_the_current_version` was red until
+  this landed.
+
 ## [0.5.0] - 2026-08-31
 
 ### Added

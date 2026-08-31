@@ -94,6 +94,8 @@ try:
 except:
     Archive = None
 ...
+
+
 class CachedArFile:
     def __init__(self, fn):
         if not Archive:

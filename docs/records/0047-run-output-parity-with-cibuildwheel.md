@@ -247,8 +247,10 @@ running". That premise is false. Upstream prefixes its own diagnostics with its 
 name in **every** mode:
 
 ```python
-print(f"::error::cibuildwheel: {error}\n",  file=sys.stderr)     # fold_mode == "github"
-print(f"cibuildwheel: {c.bright_red}error{c.end}: {error}\n", file=sys.stderr)  # otherwise
+print(f"::error::cibuildwheel: {error}\n", file=sys.stderr)  # fold_mode == "github"
+print(
+    f"cibuildwheel: {c.bright_red}error{c.end}: {error}\n", file=sys.stderr
+)  # otherwise
 ```
 
 Same shape for `notice` and `warning`. So the decision stands unchanged, but the

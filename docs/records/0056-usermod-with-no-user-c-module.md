@@ -53,9 +53,9 @@ Verified in `src/cibuildmp/platforms/usermod/build.py`. Every port driver — al
 passes the option through unconditionally:
 
 ```python
-f"USER_C_MODULES={opts.user_c_modules}",
+(f"USER_C_MODULES={opts.user_c_modules}",)
 ...
-mounts=[mpy_dir, Path(opts.user_c_modules)],
+mounts = ([mpy_dir, Path(opts.user_c_modules)],)
 ```
 
 and `user-c-modules` defaults to `"."` ([0051]'s ninth addendum). There is no sentinel
