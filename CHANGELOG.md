@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Every documented `@vX.Y.Z` action pin is now checked against
+  `cibuildmp.__version__`.** Four were stuck at `@v0.4.1` with `v0.4.2`
+  released — the same pin `CLAUDE.md` already names as a repeat offender for
+  having sat on `@v0.3.0` weeks after `v0.4.0` shipped. Record 0077.
+- **`docs/ACTIONS.md`'s input tables verified against the real
+  `.github/actions/*/action.yml`** — all nine actions, every input, nothing
+  fictional. No change needed, recorded because the assumption was the
+  opposite.
+- **A `README.md` paragraph about consuming-repo migration status is deleted,
+  not corrected.** It claimed all three repos were "fully migrated off every"
+  composite action and then, in its own parenthesis, that two were not; named
+  `a7p` as a `unix-mipsel` holdout (never true); paired it with the wrong
+  second repo; and carried the stale pin. It was the fifth copy of that claim,
+  all traceable to one tracker row. Migration status now lives only in the
+  tracker, which is the one place that self-corrects.
 - **`docs/reference/*.md` audited claim by claim against the source**, which
   found six things no mechanical check can catch. `design.md` still carried the
   false `a7p unix-mipsel` claim record 0076 corrected in three other files; it

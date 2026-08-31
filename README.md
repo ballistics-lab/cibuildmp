@@ -78,7 +78,7 @@ On CI, use the action instead of installing the CLI yourself — it already
 runs on a bare runner with the runner's own Docker daemon reachable:
 
 ```yaml
-- uses: ballistics-lab/cibuildmp@v0.4.1
+- uses: ballistics-lab/cibuildmp@v0.4.2
   with:
     build: "mpy6.3-* v1.29.0-manylinux_2_28_x86_64"
 ```
@@ -789,15 +789,18 @@ toolchain-group images rather than a host-side toolchain resolver (that
 resolver, and its own `--toolchain` flag, are deleted) — verified on real CI
 in all three consuming repos, not just `--dry-run`. Usermod's own build
 drivers are wired into the CLI too (see [Target support](#target-support)
-above), covering every port with a real driver, not just three. All three
-consuming repos have repinned and are fully migrated off every
-`build-usermod-*`/`fetch-micropython` composite action onto the unified
-CLI/action, `cibuildmp@v0.4.1`, CI green on each repo's current `main` (`a7p`
-and `micropython-wasm3` each keep their own genuine
-cross-compile-with-no-native-host cell, `unix-mipsel`, on the old composite
-action deliberately). See the tracker's own [0038] row for current status
-rather than trusting this paragraph, which this project's own `CLAUDE.md`
-warns goes stale exactly this way. The container/image model itself —
+above), covering every port with a real driver, not just three. How far each consuming repo has migrated onto the unified
+CLI/action is **not stated here** — see the tracker's own [0038] row, and
+[0076] for why. This paragraph used to answer it, and was wrong in four
+ways at once: it claimed all three repos were "fully migrated off every"
+composite action and then, in its own parenthesis, that two of them were
+not; it named `a7p` as a `unix-mipsel` holdout, which was never true; it
+paired `a7p` with `micropython-wasm3` when the two real holdouts are
+`micropython-bclibc` and `micropython-wasm3`; and it pinned a version two
+releases old. It even warned the reader not to trust it — and was believed
+anyway, four more times, in four other files. A status claim about another
+repository is the one kind nothing here can check, so it does not belong in
+a living document at all. The container/image model itself —
 which build pulls what, and why — is
 [`docs/reference/vendored-images.md`](docs/reference/vendored-images.md),
 kept current the same way [`docs/reference/design.md`](docs/reference/design.md)

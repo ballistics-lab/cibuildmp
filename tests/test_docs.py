@@ -30,6 +30,7 @@ from pathlib import Path
 
 import pytest
 
+from cibuildmp import __version__
 from cibuildmp.platforms import FAMILIES
 from cibuildmp.platforms.natmod.options import OVERRIDE_UNION_KEYS
 
@@ -361,6 +362,33 @@ def test_vendored_images_reference_names_real_image_groups() -> None:
     assert not unknown, (
         f"vendored-images.md names image groups that "
         f"resources/pinned_docker_images.toml does not have: {unknown}"
+    )
+
+
+@pytest.mark.parametrize("doc", LIVING_DOCS, ids=lambda p: p.name)
+def test_action_pins_match_the_current_version(doc: Path) -> None:
+    """Every `ballistics-lab/cibuildmp...@vX.Y.Z` a living doc shows must be
+    the version this tree actually is.
+
+    `CLAUDE.md` names this pin as a repeat offender by itself: it sat on
+    `@v0.3.0` for weeks after `v0.4.0` shipped, and was found again at
+    `@v0.4.1` across four places in `README.md` and `docs/ACTIONS.md` with
+    `v0.4.2` released. Checked against `cibuildmp.__version__` rather than
+    against git tags, which a shallow CI checkout does not have.
+    """
+    current = f"v{__version__}"
+    wrong = sorted(
+        {
+            pin
+            for pin in re.findall(
+                r"ballistics-lab/cibuildmp[^\s`]*@(v\d+\.\d+\.\d+)", _text(doc)
+            )
+            if pin != current
+        }
+    )
+    assert not wrong, (
+        f"{doc.relative_to(REPO)} pins {wrong}; this tree is {current}. "
+        f"An example nobody can copy is worse than no example."
     )
 
 

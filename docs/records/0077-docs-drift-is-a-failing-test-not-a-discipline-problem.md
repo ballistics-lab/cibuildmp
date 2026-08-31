@@ -144,6 +144,38 @@ One source comment went the same way: `usermod/__init__.py` explained that
 `--toolchain` "is natmod-specific and stays that way", outliving the flag
 itself by two records.
 
+## Addendum, same day -- `docs/ACTIONS.md`, and the fifth copy
+
+`docs/ACTIONS.md`'s own input tables turned out to be **completely accurate**:
+all nine actions documented, every real input covered, nothing fictional --
+checked mechanically against each `.github/actions/*/action.yml`. Worth
+recording, because the assumption going in was the opposite.
+
+What was wrong was the version pin and one paragraph in `README.md`.
+
+**The pin, again.** Four `@v0.4.1` pins across `README.md` and
+`docs/ACTIONS.md` with `v0.4.2` released. `CLAUDE.md` already names this pin
+as a repeat offender in its own right -- it sat on `@v0.3.0` for weeks after
+`v0.4.0` shipped. Now guarded: `tests/test_docs.py` compares every
+`ballistics-lab/cibuildmp...@vX.Y.Z` in a living doc against
+`cibuildmp.__version__`, not against git tags, which a shallow CI checkout
+does not have.
+
+**The fifth copy.** A `README.md` paragraph claimed all three consuming repos
+were "fully migrated off every" composite action and then, in its own
+parenthesis, that two of them were not; named `a7p` as a `unix-mipsel`
+holdout; paired it with `micropython-wasm3` when the real pair is
+`micropython-bclibc` and `micropython-wasm3`; and carried the stale pin. It
+closed by telling the reader not to trust it and to check the tracker
+instead -- and was believed anyway, in four other files.
+
+That paragraph is now deleted rather than corrected. Counting this one, the
+same false claim had been copied to five places from a single tracker row.
+The lesson is [0076]'s, sharpened: a status claim about another repository is
+not merely hard to keep current, it is the one kind nothing in this repo can
+check *at all*, so a living document should not make one. Point at the
+tracker row and stop.
+
 [0041]: 0041-docs-restructure.md
 [0050]: 0050-natmod-is-docker-only.md
 [0073]: 0073-composite-actions-are-a-permanent-legacy-fallback.md
