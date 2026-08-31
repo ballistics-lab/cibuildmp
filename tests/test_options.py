@@ -230,39 +230,6 @@ def test_extra_files_from_publish_table(tmp_path):
     assert options.extra_files() == ["src/facade.py", "src/ffi.py"]
 
 
-def test_natmod_table_no_longer_exists(tmp_path):
-    # [natmod] used to gate activation and, before that, carry its own
-    # settable keys -- neither concept survives (record 0052's own
-    # live-caught retraction, folded into the same round that removed
-    # table-presence activation entirely). A config still writing it gets
-    # a specific error naming the real replacement.
-    write(tmp_path, '[natmod]\nname = "x"\n')
-
-    with pytest.raises(ConfigError, match=r"\[natmod\] no longer exists"):
-        Options.load(tmp_path)
-
-
-def test_natmod_table_present_but_empty_is_still_rejected(tmp_path):
-    write(tmp_path, "[natmod]\n")
-
-    with pytest.raises(ConfigError, match=r"\[natmod\] no longer exists"):
-        Options.load(tmp_path)
-
-
-def test_archs_is_gone_as_a_config_key(tmp_path):
-    # record 0052's own live-caught correction: archs filtered candidate
-    # rows by .arch alone, before build/skip ever ran -- exactly what a
-    # build/skip glob over the identifier already expresses directly
-    # (e.g. build = "*-x64"), so it is removed rather than kept dual-read.
-    # There is no [natmod] table left to write it inside any more either,
-    # so this is now caught by that table's own rejection, not a
-    # dedicated per-key error.
-    write(tmp_path, '[natmod]\narchs = ["x64"]\n')
-
-    with pytest.raises(ConfigError, match=r"\[natmod\] no longer exists"):
-        Options.load(tmp_path)
-
-
 def test_arch_flags_in_an_overrides_table_is_an_error(tmp_path):
     # `arch-flags` is resolved by the global opt() against the top level
     # and `[natmod]`, never per target, so an override carrying one was

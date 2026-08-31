@@ -136,39 +136,24 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-# The two top-level tables every platform used to gate activation with
-# (before that, carry a per-port axis) -- neither concept exists any more,
-# so a config still writing one of these six gets a specific error naming
-# the real replacement, the same courtesy every other retired config
-# surface in this project gets (record 0048's own "a misplaced/stale key
-# must never silently do nothing"). `[usermod]`/`[publish]`/`[override]`
-# are the only tables left with any meaning at all -- shared defaults for
-# every usermod port, natmod's own extra-files list, and the shared
-# per-target override list, respectively.
-_RETIRED_PLATFORM_TABLES: frozenset[str] = frozenset(
-    {"natmod", "unix", "windows", "qemu", "webassembly", "esp32"}
-)
-_KNOWN_TABLES: frozenset[str] = frozenset({"usermod", "publish", "override"})
+# `[natmod]`/`[unix]`/`[windows]`/`[qemu]`/`[webassembly]`/`[esp32]`/
+# `[usermod]` all used to be real, meaningful top-level tables (activation
+# gates, then per-port axes, then -- `[usermod]` alone -- shared defaults)
+# across records 0048-0052/0074. None of that history gets a dedicated
+# migration message any more: every one of them is just an unrecognised
+# top-level table today, the same as a typo like `[stm32]`. `[publish]`/
+# `[override]` are the only tables left with any meaning at all --
+# natmod's own extra-files list, and the shared per-target override list,
+# respectively.
+_KNOWN_TABLES: frozenset[str] = frozenset({"publish", "override"})
 
 
 def _validate_top_level_tables(raw: dict) -> None:
-    """A top-level table whose name is neither one of the three still-
-    meaningful ones nor one of the six retired platform names is almost
-    certainly a typo (`[stm32]` for a port this project has no build
-    driver for yet, `[usermdo]` for `[usermod]`)."""
-    retired = sorted(_RETIRED_PLATFORM_TABLES & raw.keys())
-    if retired:
-        raise ConfigError(
-            f"[{retired[0]}] no longer exists -- every platform is always in "
-            "scope now, selected purely by build/skip glob-matching its own "
-            "real identifiers (see the README for the full identifier list). "
-            "Move any module-dir/user-c-modules/manifest/extra-make-args/"
-            "extra-cmake-args/make-target/pre-build-command/arch-flags value "
-            "to the top level "
-            "(or [usermod] for a usermod-wide default), and narrow with "
-            'build/skip (e.g. build = "*-x64") or [override."<glob>"] '
-            "instead."
-        )
+    """A top-level table whose name is not one of the two still-meaningful
+    ones is almost certainly a typo (`[stm32]` for a port this project has
+    no build driver for yet, `[overide]` for `[override]`) or a config
+    written against an old, retired version of this schema -- either way,
+    naming it is enough; there is no per-name migration story to tell."""
     unknown = sorted(
         key
         for key, value in raw.items()
@@ -363,8 +348,6 @@ def main(argv: list[str] | None = None) -> int:
     try:
         preread = read_config(args.package_dir, args.config_file)
         _validate_top_level_tables(preread[1])
-        for family in FAMILIES:
-            family.validate_family_table(preread[1], error=ConfigError)
     except ConfigError as exc:
         if args.debug_traceback:
             raise

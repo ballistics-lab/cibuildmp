@@ -19,15 +19,13 @@
 # still uses --build/CIBMP_BUILD to narrow which of these platforms *that
 # job* wants, not to disambiguate a mode.
 #
-# No [usermod] table here, deliberately, in keeping with this file's own
-# "no override that isn't needed" discipline: user-c-modules defaults to
-# "." (record 0051's ninth addendum) -- the whole project root, which is
-# exactly what every port below already wants (src/template_core.c is a
-# sibling of usermod/, not a descendant of it, so USER_C_MODULES has to
-# reach one level above usermod/ to see it at all). [usermod]'s own
-# mechanism -- shared defaults for every port at once -- is covered
-# directly by tests/test_cli_multi_family.py's own
-# test_usermod_family_table_still_works_as_shared_defaults, not here.
+# No [usermod] table -- it doesn't exist as a config table at all any more
+# (record 0074, following [natmod]/[unix]/etc.'s own earlier retraction).
+# user-c-modules defaults to "." (record 0051's ninth addendum) -- the
+# whole project root, which is exactly what every port below already wants
+# (src/template_core.c is a sibling of usermod/, not a descendant of it,
+# so USER_C_MODULES has to reach one level above usermod/ to see it at
+# all).
 #
 # version is deliberately not set here -- CI sets CIBMP_VERSION so every
 # push exercises D14's packaging step (extra-files + package.json) too,
@@ -49,12 +47,9 @@
 # tag, so naming it is what a `build` glob does directly.
 #
 # Genuinely shared across every usermod port below -- natmod's own schema
-# has no `manifest` key at all, so this is harmless to it. Still written at
-# the bare top level, not [usermod] -- record 0051's sixth addendum decided
-# the module-dir/user-c-modules key split specifically to make *that* key
-# promotable; whether manifest itself should move to [usermod] too was
-# deliberately left open the same day, so this stays exactly where it
-# always was until that's decided.
+# has no `manifest` key at all, so this is harmless to it. Written at the
+# bare top level, the only place any option key lives now that [usermod]
+# is gone too (record 0074).
 manifest = "usermod/manifest.py"
 
 # natmod: every arch dynruntime.mk supports, one MicroPython tag -- module-

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **`[usermod]`, the shared-defaults table for every usermod port at once.** No real
+  config in this project's own examples ever actually wrote it (checked directly, not
+  assumed) — the family-tier cascade layer it alone populated is deleted from
+  `cibuildmp.options.Options` entirely, not just left empty. `user-c-modules`/
+  `manifest`/`extra-make-args` are plain top-level keys now; narrow one port at a time
+  through `[override."<glob>"]` instead. A stray `[usermod]` table is now an ordinary
+  "unknown table(s) at the top level" error, the same as any other unrecognised name.
+  Record 0074.
+- **The dedicated "no longer exists, move X here instead" error message for
+  `[natmod]`/`[unix]`/`[windows]`/`[qemu]`/`[webassembly]`/`[esp32]`.** These six tables
+  are still rejected — as ordinary unknown top-level tables — but no longer explain what
+  replaced them individually; `build`/`skip`/`[override."<glob>"]` has been the only real
+  mechanism since record 0052, and all three consuming repos have long since migrated
+  onto it. Record 0074.
+
 ## [0.4.2] - 2026-08-31
 
 ### Added

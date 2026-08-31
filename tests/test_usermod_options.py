@@ -132,60 +132,6 @@ def test_user_c_modules_and_manifest_overridable_globally(tmp_path):
     assert build_options.manifest == "extra_manifest.py"
 
 
-def test_usermod_family_table_beats_global(tmp_path):
-    # [usermod] still sits strictly between the bare top level and every
-    # per-target override -- that tier was never in question (record
-    # 0051's ninth addendum, kept at the user's own explicit insistence
-    # through every later round of retraction).
-    write_config(
-        tmp_path,
-        """
-        user-c-modules = "global-default"
-        build = "v1.29.0-wasm32"
-        [usermod]
-        user-c-modules = "family-default"
-        """,
-    )
-    options = UsermodOptions.load(tmp_path)
-    build_options = options.build_options(options.targets()[0])
-
-    assert build_options.user_c_modules == "family-default"
-
-
-def test_empty_usermod_family_table_is_not_an_error(tmp_path):
-    write_config(tmp_path, '[usermod]\nbuild = "v1.29.0-manylinux_2_28_x86_64"\n')
-    options = UsermodOptions.load(tmp_path)
-    build_options = options.build_options(options.targets()[0])
-
-    assert build_options.user_c_modules == "."
-
-
-def test_usermod_family_build_narrows_every_port(tmp_path):
-    write_config(
-        tmp_path,
-        """
-        [usermod]
-        build = "v1.29.0-wasm32"
-        """,
-    )
-    identifiers = [t.identifier for t in UsermodOptions.load(tmp_path).targets()]
-    assert identifiers == ["v1.29.0-wasm32"]
-
-
-def test_legacy_ports_key_inside_usermod_is_rejected(tmp_path):
-    write_config(tmp_path, '[usermod]\nports = ["unix"]\n')
-
-    with pytest.raises(UsermodConfigError, match=r"\[usermod\] ports = \[\.\.\.\]"):
-        UsermodOptions.load(tmp_path)
-
-
-def test_legacy_nested_port_table_is_rejected(tmp_path):
-    write_config(tmp_path, "[usermod.unix]\narchs = []\n")
-
-    with pytest.raises(UsermodConfigError, match=r"\[usermod\.unix\] no longer exists"):
-        UsermodOptions.load(tmp_path)
-
-
 def test_build_skip_selectors(tmp_path):
     write_config(
         tmp_path,
@@ -278,23 +224,6 @@ def test_extra_cmake_args_via_override(tmp_path):
 
     assert by_identifier["v1.29.0-rp2-RPI_PICO"] == ["-DMICROPY_C_HEAP_SIZE=131072"]
     assert by_identifier["v1.29.0-esp32-ESP32_GENERIC"] == []
-
-
-# ── record 0048: where build/skip live, and typos ────────────────────────
-
-
-def test_a_generic_key_inside_usermod_names_where_it_goes(tmp_path):
-    write_config(tmp_path, '[usermod]\nversion = "0.1.0"\n')
-
-    with pytest.raises(UsermodConfigError, match="read from the top level"):
-        UsermodOptions.load(tmp_path)
-
-
-def test_an_unknown_key_inside_usermod_is_an_error(tmp_path):
-    write_config(tmp_path, "[usermod]\narch = []\n")
-
-    with pytest.raises(UsermodConfigError, match=r"\[usermod\]: unknown key"):
-        UsermodOptions.load(tmp_path)
 
 
 def test_per_port_build_skip_env_override(tmp_path, monkeypatch):
