@@ -30,7 +30,6 @@ from pathlib import Path
 
 import pytest
 
-from cibuildmp import __version__
 from cibuildmp.platforms import FAMILIES
 from cibuildmp.platforms.natmod.options import OVERRIDE_UNION_KEYS
 
@@ -152,6 +151,16 @@ def _source_text() -> str:
 
 
 SOURCE = _source_text()
+
+
+def _latest_released_version() -> str:
+    """The newest `## [X.Y.Z]` heading in `CHANGELOG.md`, skipping
+    `[Unreleased]` -- file order, since the changelog is newest-first."""
+    match = re.search(
+        r"^## \[(\d+\.\d+\.\d+[^\]]*)\]", _text(REPO / "CHANGELOG.md"), re.MULTILINE
+    )
+    assert match, "CHANGELOG.md has no released version heading"
+    return match.group(1)
 
 
 def _constructed_env_names() -> set[str]:
@@ -373,10 +382,17 @@ def test_action_pins_match_the_current_version(doc: Path) -> None:
     `CLAUDE.md` names this pin as a repeat offender by itself: it sat on
     `@v0.3.0` for weeks after `v0.4.0` shipped, and was found again at
     `@v0.4.1` across four places in `README.md` and `docs/ACTIONS.md` with
-    `v0.4.2` released. Checked against `cibuildmp.__version__` rather than
-    against git tags, which a shallow CI checkout does not have.
+    `v0.4.2` released.
+
+    The expected value comes from `CHANGELOG.md`'s own newest released
+    heading, not from `cibuildmp.__version__` and not from `git tag`. Both
+    of those are derived from the checkout: this test's first version used
+    `__version__` and passed locally while failing on CI, where a shallow
+    clone with no tags makes it `0.0.0.dev1+g<sha>`. The changelog is
+    committed data, identical in every checkout, and a release moves it in
+    the same commit that moves the docs.
     """
-    current = f"v{__version__}"
+    current = f"v{_latest_released_version()}"
     wrong = sorted(
         {
             pin
