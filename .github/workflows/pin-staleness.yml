@@ -1,0 +1,69 @@
+name: Pin staleness
+
+# Record 0046's own "make staleness visible on a schedule" half. Everything
+# this repo pins -- container digests, pypa bases, compiler tarballs --
+# goes stale on somebody else's schedule, and until this workflow existed
+# nothing said so: `bin/update_docker.py --check` had been written for
+# exactly this and had no caller, and the toolchain tarballs had no checker
+# at all.
+#
+# **Weekly, not per-push.** None of these pins changes between commits; they
+# change between weeks. Running this on every push would cost an API round
+# trip per pin for a result that cannot have moved since the last one, and
+# would put an upstream outage in the path of every PR.
+#
+# **It reports; a human decides** (0046, and 0033's own cadence). This job
+# failing is a notification, not a bug in the tree at that commit -- a base
+# image bump can change a libc floor, a MicroPython tag bump can change the
+# .mpy ABI and therefore every natmod identifier. Nothing here opens a PR
+# or edits a pin.
+#
+# Not covered here, deliberately, because each already has its own notifier:
+# every `docker/*.Dockerfile`'s own base OS tag (`FROM ubuntu:24.04`) rides
+# Dependabot, isolated into its own PR by record 0068's grouping fix; and
+# this repo's `uv`/Actions dependencies are Dependabot's already.
+
+on:
+  schedule:
+    # Mondays 04:00 UTC -- an hour after test-all-platforms.yml's own
+    # Sunday run, so a week's two scheduled jobs do not collide.
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pins:
+    name: pins
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+
+      # Both checkers run even if the first reports drift: the point is one
+      # report naming everything that is behind, not the first thing that
+      # is. `continue-on-error` plus an explicit gate at the end, rather
+      # than `||`, so each step's own status is visible in the run.
+      - name: Container image digests
+        id: images
+        continue-on-error: true
+        run: uv run bin/update_docker.py --check
+
+      - name: Toolchain tarballs
+        id: toolchains
+        continue-on-error: true
+        # No --slow: re-downloading the unversioned xtensa-lx106 tarball to
+        # re-hash it is minutes of transfer for a signal that only changes
+        # when micropython.org replaces the file. Run it by hand
+        # (`bin/update_toolchains.py --slow`) when that is the question.
+        run: uv run bin/update_toolchains.py --check
+
+      - name: Fail if anything is behind
+        if: steps.images.outcome == 'failure' || steps.toolchains.outcome == 'failure'
+        run: |
+          echo "::error::A pin is behind upstream -- see the step logs above."
+          echo "Record 0046: this reports, a human decides. Move a pin in its"
+          echo "own reviewed PR; the diff is the review."
+          exit 1

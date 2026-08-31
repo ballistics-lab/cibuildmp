@@ -51,6 +51,17 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
       design corrected 2026-08-28 against a real installed cibuildwheel
       4.1.0 (folds are per *step*, not per identifier)
 - [ ] [0046] nothing notices when a pin goes stale, except container images |
+      **mostly closed 2026-08-31**: `bin/update_toolchains.py` covers all six
+      compiler-tarball pins (four GitHub releases, emsdk via its own
+      `emscripten-releases-tags.json`, xtensa-lx106 reported as unversioned with
+      `--slow` to re-hash), and `.github/workflows/pin-staleness.yml` runs it
+      weekly alongside `update_docker.py --check`, which until then had been
+      written for exactly that and had no caller. Found real drift on its first
+      run: llvm-mingw two months behind (`20260616` -> `20260826`). The record's
+      own inventory table pointed at `resources/natmod.toml` for pins that live
+      in `docker/*.Dockerfile` `ARG`s now -- corrected in its addendum. Still
+      open: results go only to the job log ([0029]'s `stepsummary.py` unreused),
+      and whether consumers' own `micropython` pins are in scope |
       no longer hypothetical -- [0068]'s `mipsel`/`ubuntu:26.04` incident is a
       real pin going stale with nothing scheduled to have caught it first.
       `bin/update_docker.py` covers both image tables but runs on no schedule

@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`bin/update_toolchains.py` and a weekly `pin-staleness.yml`** — record 0046's
+  own "make staleness visible on a schedule", for the six compiler-tarball pins
+  neither `update_docker.py` nor Dependabot could see. Three upstream shapes:
+  four GitHub releases (one API call each), emsdk resolved through
+  `emscripten-releases-tags.json` (a build hash is comparable after all, because
+  emsdk publishes the mapping), and `xtensa-lx106`'s unversioned URL reported
+  *as* unversioned rather than pretended into a version, with `--slow` to
+  re-download and compare the served sha256. It reports and never rewrites:
+  moving one of these means recomputing a sha256, and 0046 is explicit that a pin
+  moves in a reviewed PR.
+  - Found real drift on its first run: **llvm-mingw pinned at `20260616` with
+    `20260826` upstream**, a bit over two months behind, and nothing would have
+    said so.
+  - The weekly workflow also gives `update_docker.py --check` its first caller —
+    it had been written for this and run on no schedule at all.
+  - Record 0046's own inventory table said these pins live in
+    `resources/natmod.toml`; they are `ARG`s in `docker/*.Dockerfile` now.
+    Corrected in its addendum, since anyone working from the table alone would
+    look in the wrong file.
+
 - **Two more stale claims in `README.md` sections the first audit pass had not
   reached.** Its "Conventions" section said `dynruntime.mk` defaults to an
   unscoped `BUILD ?= build`, true up to v1.28.0 and false from v1.29.0
