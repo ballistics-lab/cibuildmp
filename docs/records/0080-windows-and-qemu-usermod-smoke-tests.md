@@ -141,5 +141,45 @@ busy pty -- `mpremote` wraps that in the identical "failed to access ... it
 may be in use by another program" message, so the same match still applies,
 confirmed by connecting before qemu had opened its listening socket at all.
 
+**Addendum, 2026-08-31 -- neither of the two addenda above was the actual
+bug.** The TCP version failed in real CI too, all 20 attempts, the same
+generic message -- which could no longer be a pty-specific race, and could
+not be reproduced locally either (root or non-root, tight or loose timing,
+the identical qemu version): every local attempt connected on the first try.
+Rather than guess a third time, the give-up branch was given real
+diagnostics -- `qemu.log`'s content, whether the qemu process was still
+alive, and a raw `bash`-only `/dev/tcp` connect check independent of
+`mpremote`/pyserial entirely -- and the next real failure answered it
+outright:
+
+```
+examples/usercmodule/mpyhouse/v1.29.0-qemu-MPS2_AN385/micropython-v1.29.0-qemu-MPS2_AN385.elf: No such file or directory
+qemu-system-arm: Could not load kernel '...'
+```
+
+The smoke step's own `$elf` path was wrong, and had been from the start:
+`_dest_name()` (`orchestrate.py`) renames a collected artifact by
+`produced.stem`, and `build_qemu()`'s own docstring -- read earlier in this
+same record's own investigation, and not connected to this at the time --
+says plainly "The output path is `opts.build_dir / firmware.elf`". Every
+other port smoke-tested here produces a file literally named `micropython.*`,
+so `micropython-<identifier>.elf` was typed by pattern-matching the other
+three steps rather than checked against this port's own real output. The
+real collected name is `firmware-<identifier>.elf`, confirmed directly from
+a real job's own `ls -laR examples/usercmodule/mpyhouse` output. `qemu`
+was never failing to bind a port or being held busy at all -- it was exiting
+immediately, every single time, because the kernel image it was told to load
+did not exist, and both the pty and the TCP-socket versions of this step
+faithfully reported the only symptom visible from the client side of a
+process that never started: "failed to access", indistinguishable from a
+real contention error until something actually printed `qemu.log`.
+
+Fixed by pointing `$elf` at `firmware-${identifier}.elf`, verified live
+against the exact fixed YAML step for both the passing and the
+deliberately-broken script. The retry loop and the give-up diagnostics both
+stay: the loop still covers qemu's real (if brief) startup latency, and the
+diagnostics are what actually found this bug rather than the two prior
+theories -- removing them now would remove the only thing that worked.
+
 [0069]: 0069-upstream-usercmodule-narrow-ci-slice.md
 [0079]: 0079-collected-artifact-is-more-than-one-file.md

@@ -13,14 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   two of record 0079's own "not done here" gaps. `build-windows` installs `wine`
   and runs the collected `win_amd64` `.exe` against `smoke_test.py` unmodified;
   `build-qemu` installs `qemu-system-arm` and `mpremote`, starts qemu itself
-  against the collected `MPS2_AN385` `firmware.elf` with its serial port
-  redirected to a local TCP socket, and runs `mpremote ... run` against it over
-  `socket://`. Both paths (a passing script and a deliberately broken one) were
-  verified live against real cross-compiled binaries before being wired into CI.
-  A `-serial pty` version shipped first and was replaced after a real CI run
-  found GitHub's own runner holding the pty exclusively busy well past any
-  brief enumeration race — `rp2`'s own `.uf2` still has no smoke test, for the
-  same hardware/emulator reason record 0069 gives. Record 0080.
+  against the collected `firmware-<identifier>.elf` (`qemu`'s own build target
+  is `firmware.elf`, not `micropython.elf` like every other port here — the
+  first two real CI attempts pointed at the wrong filename by pattern-matching
+  the other three steps, and failed with a generic "device busy" message that
+  looked like a pty race and then a socket-startup race until `qemu.log` itself
+  was actually read) with its serial port redirected to a local TCP socket, and
+  runs `mpremote ... run` against it over `socket://`. Both paths (a passing
+  script and a deliberately broken one) were verified live against real
+  cross-compiled binaries before being wired into CI — `rp2`'s own `.uf2` still
+  has no smoke test, for the same hardware/emulator reason record 0069 gives.
+  Record 0080.
 
 - **A `webassembly` smoke step in `test-upstream-usermodule.yml`**, running the
   unmodified `examples/usercmodule/smoke_test.py` under `node` from `mpyhouse/`.

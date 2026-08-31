@@ -329,7 +329,11 @@ jobs:
         run: |
           set -euo pipefail
           identifier="${CIBMP_UPSTREAM_TAG}-qemu-MPS2_AN385"
-          elf="examples/usercmodule/mpyhouse/${identifier}/micropython-${identifier}.elf"
+          # `_dest_name()` renames by `produced.stem`, and `build_qemu()`'s
+          # own produced path is `firmware.elf` -- unlike every other port
+          # here, whose stem is `micropython`. Collected as
+          # `firmware-<identifier>.elf`, not `micropython-<identifier>.elf`.
+          elf="examples/usercmodule/mpyhouse/${identifier}/firmware-${identifier}.elf"
           port=15555
 
           qemu-system-arm -semihosting -machine mps2-an385 -nographic \
