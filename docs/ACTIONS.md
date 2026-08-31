@@ -11,11 +11,16 @@ This layer is a deliberate fallback, not a parallel track being absorbed
 into the CLI over time: folding `build-natmod` into a thin
 `cibuildmp --build` wrapper was proposed and explicitly rejected (tracker
 [0038], see "Rejected" in [`docs/0000-TRACKER.md`](0000-TRACKER.md)). It
-survives because one real case still depends on it directly — `a7p`'s own
-`unix-mipsel` cross-compile has no native runner and deliberately stays on
-`build-usermod-unix` ([0067]) — not because these actions are on any track
-toward being replaced. Read on only if you're maintaining or migrating off
-a holdout like that, not as a starting point for a new module.
+survives because two repos still depend on it directly —
+`micropython-bclibc` and `micropython-wasm3` both keep their `unix-mipsel`
+cross-compile on `build-usermod-unix` (no native runner, and [0043]'s
+vendored `MICROPY_STANDALONE=1`/`deplibs` static path kept for that one
+cell), and both call `fetch-micropython` in jobs unrelated to mipsel — not
+because these actions are on any track toward being replaced. `a7p` calls
+none of them; an earlier version of this paragraph named it as the sole
+holdout, which was never accurate ([0076]). Read on only if you're
+maintaining or migrating off a holdout like those, not as a starting point
+for a new module.
 
 Every table below is the action's complete input surface — if it isn't
 listed here, the action doesn't accept it. `MPY_DIR` in a "Requires" line

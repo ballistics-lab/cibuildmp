@@ -49,6 +49,24 @@ they are not a second supported integration path, and the one reason they still 
 is `a7p`'s own `unix-mipsel` holdout — read `docs/ACTIONS.md` only if maintaining or
 migrating off something like that, not as a starting point for a new module.
 
+## Addendum, 2026-08-31 -- the example was wrong, the argument stands
+
+Every one of the three rewrites above justified keeping this layer with the same
+concrete case: `a7p`'s own `unix-mipsel` cross-compile staying on
+`build-usermod-unix` ([0067]). That case does not exist and never did -- wrong
+repo, wrong record, and false already when this record was written. The real
+holdouts are `micropython-bclibc` and `micropython-wasm3`. See [0076], which
+corrects `README.md`, `docs/ACTIONS.md` and this tracker's own rows.
+
+Worth noting where it came from, since this record is itself about drift: the
+claim was read out of the tracker's own [0038] row and believed. A tracker row
+asserting something about *another repository* is the one kind of status claim
+nothing in this repo can check for itself -- unlike a claim about this project's
+own source, which a grep settles. The argument this record actually makes (the
+layer is permanent, not being absorbed) never depended on which repo the example
+named, and is unaffected.
+
 [0038]: 0038-m5-adopt-in-three-repos.md
 [0039]: 0039-usermod-composite-actions-status.md
 [0067]: 0067-user-c-modules-flat-shape-autodetect.md
+[0076]: 0076-the-mipsel-holdout-is-bclibc-and-wasm3-not-a7p.md

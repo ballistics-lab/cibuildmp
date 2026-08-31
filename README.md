@@ -614,11 +614,16 @@ path for a new integration.
 This layer is a deliberate fallback, not something being absorbed into the
 CLI over time — folding `build-natmod` into a thin `cibuildmp --build`
 wrapper was proposed and explicitly rejected (tracker [0038], see
-"Rejected"). It stays only because one real case still depends on it
-directly: `a7p`'s own `unix-mipsel` cross-compile has no native runner and
-deliberately stays on `build-usermod-unix` ([0067]). Read
-[`docs/ACTIONS.md`](docs/ACTIONS.md) if you're maintaining or migrating off
-a holdout like that — not as a starting point for a new module.
+"Rejected"). It stays because two repos still depend on it directly:
+`micropython-bclibc` and `micropython-wasm3` each keep their `unix-mipsel`
+cross-compile on `build-usermod-unix` (no native runner; the vendored
+`MICROPY_STANDALONE=1`/`deplibs` static path [0043] kept for that cell),
+and both also call `fetch-micropython` in several jobs that have nothing to
+do with mipsel. `a7p` uses none of these actions any more ([0076] — an
+earlier version of this paragraph named it as the holdout, which was never
+true). Read [`docs/ACTIONS.md`](docs/ACTIONS.md) if you're maintaining or
+migrating off a holdout like those — not as a starting point for a new
+module.
 
 ## Versioning
 

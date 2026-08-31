@@ -35,8 +35,19 @@ from ...sources import (
 )
 from ...stepsummary import write_step_summary
 from .build import BuildError, BuildResult, build_mpy_cross, build_target
-from .options import BuildOptions, ConfigError, Options
+from .options import (
+    NATMOD_TOP_LEVEL_KEYS,
+    BuildOptions,
+    ConfigError,
+    Options,
+)
 from .targets import Target, UnknownArchError, UnknownTagError
+
+# This family's own half of the `PlatformModule` contract's `OPTION_KEYS`
+# -- every scalar key it reads from the bare top level. `cli.py`'s own
+# coordinator unions this with every other family's, so a key no family
+# recognises is a loud error instead of silently absent (record 0075).
+OPTION_KEYS: frozenset[str] = NATMOD_TOP_LEVEL_KEYS
 
 
 def _plan_line(index: int, total: int, options: BuildOptions) -> str:

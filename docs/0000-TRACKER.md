@@ -83,8 +83,30 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 - [ ] [0053] nine usermod ports have verified rows in `build-platforms.toml` but no real `build_<port>()` driver | `mimxrt`, `samd`, `stm32`, `psoc-edge`, `alif`, `esp8266`, `cc3200`, `renesas-ra`, `nrf` -- flagged by the user as the genuinely larger remaining piece. `rp2` closed 2026-08-29 by [0060]
 - [ ] [0056] build upstream MicroPython through the usermod path with no user C module | driver mechanics settled; open question is only how absence is expressed -- an explicit `no-user-c-modules = true` flag (A) vs. dropping `user-c-modules`'s `"."` default so unset means none (B). Exactly one existing config (`examples/template`) depends on that default either way
 - [ ] [0057] more than one module per build | **decided, documentation not mechanism**: natmod is one config per module (already demonstrated); usermod stays one `user-c-modules` path, N modules live in the consumer's own layout (subdirectories on Make ports, an aggregating `.cmake` on CMake ports) -- no list, since the aggregator is the consumer's own file. Both forms now tested live by [0054]/[0069]; writing it down for users still left
+
 ### Implemented
 
+- [x] [0076] the `unix-mipsel` composite-action holdout is `micropython-bclibc`
+      and `micropython-wasm3`, not `a7p` | [0073] took the claim from this
+      tracker's own [0038] row and propagated it into `README.md` and
+      `docs/ACTIONS.md` -- the drift [0073] exists to fix, reproduced inside the
+      fix. Checked against all three repos' real workflows: `a7p` calls no
+      composite action at all (its last two `clone-micropython` uses went the
+      same session), the other two both keep `build-usermod-unix` for mipsel and
+      call `fetch-micropython` in eight jobs between them. The cited record
+      ([0067], `resolve_user_c_modules()` autodetect) never mentioned mipsel
+- [x] [0075] an unrecognised top-level *scalar* key is an error, not a silent
+      default | the gap [0074] found while checking a `design.md` claim and left
+      open: `check_known_keys()`/`known_option_names()` had been dead code since
+      [0051]'s Phase E, so `micropython = "v1.29.0"` (a real key [0052] retired)
+      was read as absent, its default applying, with no complaint -- [0048]'s own
+      original bug one level up. `cli.py` gains `_validate_top_level_keys()`,
+      unioning each family module's own new `OPTION_KEYS` over `FAMILIES` (no key
+      list in `cli.py`, so a third family needs no edit there), plus `difflib`
+      suggestions the helper already had and nothing exercised. Found running it,
+      not in review: the check first raised the wrong `ConfigError` class and
+      printed a traceback, and `_validate_top_level_tables()`'s `dict`-only test
+      never saw `[[name]]` at all
 - [x] [0074] `[usermod]` removed outright, and the six other retired tables lose
       their dedicated migration message | checked directly: no real config in this
       project's own examples ever wrote `[usermod]`, so the family-tier cascade
@@ -99,9 +121,10 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 - [x] [0073] `design.md`'s "Positioning" section still described the rejected
       `build-natmod`-as-wrapper plan as live | fixed alongside README's own
       "Composite actions" section and `docs/ACTIONS.md`'s intro -- all three now
-      say plainly that `.github/actions/*` doesn't call `cibuildmp` at all, isn't
-      a second usage path, and stays only for `a7p`'s own `unix-mipsel` holdout
-      ([0067])
+      say plainly that `.github/actions/*` doesn't call `cibuildmp` at all and
+      isn't a second usage path. The *example* it attached to that -- `a7p`'s
+      own `unix-mipsel` holdout ([0067]) -- was false in every particular and
+      is corrected by [0076]; the argument itself stands
 - [x] [0055]/[0072] all eleven upstream `examples/natmod/*` modules build through
       cibuildmp's real natmod path | `{micropython}` placeholder in `module-dir` (the
       natmod mirror of [0071]) plus a `collect_output()` fallback for `py/dynruntime.mk`'s
@@ -128,8 +151,14 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 - [x] [0038] M5 -- adopt cibuildmp in the three consuming repos | all three
       (`micropython-bclibc` #18, `micropython-wasm3` #6, `a7p` #86) merged to
       `main`, CI fully green on the current head (31/32/29 checks), all
-      pinned to `cibuildmp@v0.4.0`. `a7p`'s own `unix-mipsel` cell stays on
-      the old composite action deliberately ([0067]). Two real bugs surfaced
+      pinned to `cibuildmp@v0.4.0`. **Corrected 2026-08-31 ([0076]):** this
+      row used to say `a7p`'s own `unix-mipsel` cell stays on the old
+      composite action deliberately ([0067]) -- wrong repo and wrong record,
+      and already wrong when written (`a7p#86`, the PR this row cites, is
+      what moved that cell onto `v1.29.0-manylinux_2_39_mipsel`). The real
+      `build-usermod-unix` holdouts are `micropython-bclibc` and
+      `micropython-wasm3`; `a7p` uses no composite action at all. Two real
+      bugs surfaced
       and closed along the way, [0066]/[0067]. Confirmed live 2026-08-30 --
       the `build-natmod` wrapper item once tracked alongside this is now its
       own row under Rejected, not a blocker on this one
@@ -361,3 +390,5 @@ record is added.
 [0072]: records/0072-natmod-micropython-placeholder-and-upstream-natmod-ci.md
 [0073]: records/0073-composite-actions-are-a-permanent-legacy-fallback.md
 [0074]: records/0074-usermod-family-table-and-retired-table-messages-removed.md
+[0075]: records/0075-top-level-scalar-keys-are-validated.md
+[0076]: records/0076-the-mipsel-holdout-is-bclibc-and-wasm3-not-a7p.md

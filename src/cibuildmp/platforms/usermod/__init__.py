@@ -42,8 +42,12 @@ from ...sources import SourceError
 from ...stepsummary import write_step_summary
 from . import orchestrate
 from .build_common import UsermodBuildError
-from .options import UsermodConfigError, UsermodOptions
+from .options import USERMOD_TOP_LEVEL_KEYS, UsermodConfigError, UsermodOptions
 from .targets import UsermodTarget
+
+# This family's own half of the `PlatformModule` contract's `OPTION_KEYS`
+# -- see `natmod/__init__.py`'s own identical declaration (record 0075).
+OPTION_KEYS: frozenset[str] = USERMOD_TOP_LEVEL_KEYS
 
 # Every exception UsermodOptions.load()/.targets() can raise -- what
 # cli.py's own coordinator catches around "load config, resolve targets"

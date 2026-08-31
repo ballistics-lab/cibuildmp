@@ -210,6 +210,84 @@ def test_unknown_top_level_table_is_an_error(tmp_path, capsys):
     assert "unknown table(s) at the top level: [stm32]" in capsys.readouterr().err
 
 
+# ── the same treatment for scalar keys (record 0075) ─────────────────────
+
+
+def test_unknown_top_level_scalar_key_is_an_error(tmp_path, capsys):
+    # The gap record 0074 found while checking a claim in design.md:
+    # neither family's own load() validated the top-level scalar keyset at
+    # all, so a key no family reads was silently absent -- the config
+    # looked accepted and the option simply never applied. `micropython =`
+    # is the real shape this bites (record 0052 retired that key; a config
+    # written against the old schema keeps it and gets no complaint).
+    write(tmp_path, 'micropython = "v1.29.0"\n')
+
+    assert main([str(tmp_path)]) == 2
+    assert "unknown key `micropython`" in capsys.readouterr().err
+
+
+def test_unknown_top_level_scalar_key_suggests_a_close_match(tmp_path, capsys):
+    write(tmp_path, 'buidl = "mpy*-x64"\n')
+
+    assert main([str(tmp_path)]) == 2
+    err = capsys.readouterr().err
+    assert "unknown key `buidl`" in err
+    assert "Perhaps you meant `build`?" in err
+
+
+def test_every_family_own_top_level_keys_are_accepted(tmp_path, capsys):
+    # The union across FAMILIES, not one family's own set: natmod-only
+    # (`module-dir`, `make-target`, `arch-flags`, `pre-build-command`,
+    # `micropython-submodules`) and usermod-only (`user-c-modules`,
+    # `manifest`, `extra-cmake-args`) keys are both valid at the bare top
+    # level, since the global layer is every platform's own default.
+    write(
+        tmp_path,
+        """
+        name = "mod"
+        version = "1.0"
+        output-dir = "mpyhouse"
+        build = ""
+        skip = ""
+        extra-make-args = []
+        micropython-submodules = []
+        module-dir = "natmod"
+        make-target = "all"
+        pre-build-command = ""
+        arch-flags = []
+        user-c-modules = "."
+        manifest = ""
+        extra-cmake-args = []
+        """,
+    )
+
+    assert main([str(tmp_path), "--print-build-identifiers"]) == 0
+    assert capsys.readouterr().err == ""
+
+
+def test_unknown_array_of_tables_is_reported_as_a_table(tmp_path, capsys):
+    # `[[name]]` parses to a list of dicts, not a dict -- a `dict`-only
+    # test would hand it to the scalar keyset check and report "unknown
+    # key `stm32`" for something that is plainly a table.
+    write(tmp_path, '[[stm32]]\nboard = "PYBV11"\n')
+
+    assert main([str(tmp_path)]) == 2
+    assert "unknown table(s) at the top level: [stm32]" in capsys.readouterr().err
+
+
+def test_publish_and_override_tables_are_not_scalar_keys(tmp_path, capsys):
+    # The scalar check skips table-valued keys outright -- neither is in
+    # any family's own OPTION_KEYS, and _validate_top_level_tables() is
+    # what judges those.
+    write(
+        tmp_path,
+        '[publish]\nextra-files = []\n\n[override."*"]\nmodule-dir = "natmod"\n',
+    )
+
+    assert main([str(tmp_path), "--print-build-identifiers"]) == 0
+    assert capsys.readouterr().err == ""
+
+
 def test_platform_and_only_flags_no_longer_exist(tmp_path, capsys):
     # Both retired in the same round (record 0052): everything either one
     # reached, an ordinary build/skip glob against the real identifier

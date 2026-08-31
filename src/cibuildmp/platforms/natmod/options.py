@@ -133,6 +133,26 @@ OVERRIDE_UNION_KEYS: frozenset[str] = (
 # override surface -- the one key `inherit` can name.
 INHERITABLE_OVERRIDE_KEYS: frozenset[str] = frozenset({"extra-make-args"})
 
+# Every scalar key this family reads from the bare top level -- what
+# `platforms/natmod/__init__.py` re-exports as its own `OPTION_KEYS`, and
+# `known_option_names()` unions with usermod's to decide whether a
+# top-level key is real at all (record 0075).
+#
+# `arch-flags` is listed explicitly and belongs to no other set: it is
+# global-only by construction (resolved once for the whole config, never
+# per target -- see `OVERRIDE_UNION_KEYS` above, which deliberately
+# excludes it), so unlike every other key here it has no override-surface
+# home to be picked up from.
+#
+# `NATMOD_OVERRIDE_OPTION_KEYS` rather than `OVERRIDE_UNION_KEYS`: the
+# union also carries usermod's own mirror plus `select`/`inherit`, and
+# neither is a natmod top-level key. Usermod's real ones reach the check
+# through its own module's `OPTION_KEYS`, and `select`/`inherit` are
+# meaningful only *inside* an `[override]` entry.
+NATMOD_TOP_LEVEL_KEYS: frozenset[str] = (
+    GENERIC_KEYS | NATMOD_OVERRIDE_OPTION_KEYS | frozenset({"arch-flags"})
+)
+
 
 def check_keys(
     table: Mapping[str, Any],

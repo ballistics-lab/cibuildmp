@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
+from .options import check_known_keys, known_option_names
 from .platforms import FAMILIES, PlatformModule
 from .platforms.natmod.options import ConfigError, read_config
 from .sources import cache_root
@@ -148,6 +149,31 @@ def build_parser() -> argparse.ArgumentParser:
 _KNOWN_TABLES: frozenset[str] = frozenset({"publish", "override"})
 
 
+def _is_table(value: Any) -> bool:
+    """Whether a top-level value is TOML *table* syntax rather than a
+    scalar option -- what decides which of the two validators below owns
+    a key.
+
+    A dict is `[name]`; a non-empty list of dicts is `[[name]]`, an array
+    of tables. Neither of this project's own two real tables uses that
+    second form -- `[override]` is keyed directly by its own glob
+    (`[override."<glob>"]`, deliberately unlike cibuildwheel's own
+    `[[tool.cibuildwheel.overrides]]`), so both parse to plain dicts --
+    but a `dict`-only test would send a stray `[[stm32]]` to the scalar
+    keyset check instead of the table check, reporting "unknown key"
+    for something that is a table. `and value` matters: an empty list is
+    `extra-make-args = []`, a real scalar option, and an array of tables
+    is never empty.
+    """
+    if isinstance(value, dict):
+        return True
+    return (
+        isinstance(value, list)
+        and bool(value)
+        and all(isinstance(item, dict) for item in value)
+    )
+
+
 def _validate_top_level_tables(raw: dict) -> None:
     """A top-level table whose name is not one of the two still-meaningful
     ones is almost certainly a typo (`[stm32]` for a port this project has
@@ -157,13 +183,40 @@ def _validate_top_level_tables(raw: dict) -> None:
     unknown = sorted(
         key
         for key, value in raw.items()
-        if isinstance(value, dict) and key not in _KNOWN_TABLES
+        if _is_table(value) and key not in _KNOWN_TABLES
     )
     if unknown:
         raise ConfigError(
             f"unknown table(s) at the top level: "
             f"{', '.join(f'[{k}]' for k in unknown)}."
         )
+
+
+def _validate_top_level_keys(raw: dict) -> None:
+    """The scalar counterpart of `_validate_top_level_tables()` above, and
+    the gap record 0074 found while checking a claim about it: neither
+    family's own `load()` ever validated the top-level scalar keyset at
+    all, so `micropyton = "v1.29.0"` (or any other key no family reads)
+    was silently absent rather than flagged -- the config looked accepted
+    and the option simply never applied.
+
+    `known_option_names()`/`check_known_keys()` (`options.py`) already
+    existed for exactly this and were dead code until this call site;
+    `check_known_keys()` brings the same `difflib` close-match suggestion
+    cibuildwheel's own `_validate_global_option()` gives.
+
+    Unioned from `FAMILIES` rather than a list written out here, for the
+    same reason `_resolve_all()` iterates it: `cli.py` does not know the
+    name `natmod` or `usermod`, and a third family must not need an edit
+    in this file to have its own keys accepted.
+
+    Table-valued keys are skipped, not passed through: `[publish]` and
+    `[override]` are real config that no family's own `OPTION_KEYS`
+    contains, and `_validate_top_level_tables()` above is what judges
+    those."""
+    known = known_option_names({f.__name__: f.OPTION_KEYS for f in FAMILIES})
+    scalars = {k: v for k, v in raw.items() if not _is_table(v)}
+    check_known_keys(scalars, known, where="cibuildmp.toml", error=ConfigError)
 
 
 def _resolve_all(
@@ -348,6 +401,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         preread = read_config(args.package_dir, args.config_file)
         _validate_top_level_tables(preread[1])
+        _validate_top_level_keys(preread[1])
     except ConfigError as exc:
         if args.debug_traceback:
             raise

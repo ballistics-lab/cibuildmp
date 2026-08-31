@@ -127,11 +127,22 @@ def suggest(name: str, known: frozenset[str]) -> str | None:
 
 
 def check_known_keys(
-    table: Mapping[str, Any], known: frozenset[str], *, where: str
+    table: Mapping[str, Any],
+    known: frozenset[str],
+    *,
+    where: str,
+    error: type[Exception] = ConfigError,
 ) -> None:
     """Reject any key in `table` that is not in `known` anywhere -- the
     one placement-independent error the cascade still needs: a key no
     platform's schema recognises at all is a typo, not a location choice.
+
+    `error` follows the same convention `matching_overrides()` and
+    `check_selector_reachable()` below already use: this module's own
+    `ConfigError` is not the class any caller catches, since each family
+    owns its own hierarchy (`platforms/__init__.py`'s own Protocol
+    docstring has the reasoning). `cli.py`'s own top-level keyset check
+    passes the class it already catches around the sibling table check.
     """
     for key in table:
         if key in known:
@@ -140,7 +151,7 @@ def check_known_keys(
         hint = suggest(key, known)
         if hint:
             msg += f" Perhaps you meant `{hint}`?"
-        raise ConfigError(msg)
+        raise error(msg)
 
 
 def matching_overrides(

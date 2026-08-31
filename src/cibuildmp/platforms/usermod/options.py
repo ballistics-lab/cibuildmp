@@ -70,6 +70,7 @@ from ...options import (
 from ...selector import parse_selector, select
 from ..natmod.options import (
     DEFAULT_OUTPUT_DIR,
+    GENERIC_KEYS,
     check_keys,
     load_overrides,
     read_config,
@@ -121,6 +122,13 @@ USERMOD_PORT_BASE: frozenset[str] = frozenset(
 USERMOD_ONLY_GENERIC_KEYS: frozenset[str] = frozenset(
     {"user-c-modules", "manifest", "extra-cmake-args"}
 )
+
+# Every scalar key this family reads from the bare top level, natmod's own
+# `NATMOD_TOP_LEVEL_KEYS` counterpart (record 0075). `GENERIC_KEYS` is
+# natmod's module but genuinely shared, not natmod-owned -- `build`,
+# `skip`, `output-dir`, `name` and `version` are all read by
+# `UsermodOptions.load()` below under exactly those names.
+USERMOD_TOP_LEVEL_KEYS: frozenset[str] = GENERIC_KEYS | USERMOD_ONLY_GENERIC_KEYS
 
 __all__ = [
     "UsermodBuildOptions",

@@ -332,14 +332,21 @@ one of these rounds has been about; today an unrecognised top-level
 *table* (`[natmod]`, `[usermod]`, a typo like `[stm32]`, ...) is a plain
 "unknown table" error via `cli.py`'s own `_validate_top_level_tables()`.
 An unrecognised bare *scalar* key at the top level (`micropython =`,
-`mpy-abi =`, or a plain typo) is a narrower gap this round did not touch
-— nothing in `Options.load()`/`UsermodOptions.load()` validates the
-top-level scalar keyset directly, so one is currently read as simply
-absent (its default applies) rather than flagged; see the open-questions
-reference if this needs closing.
+`mpy-abi =`, or a plain typo) is the same kind of error, via the sibling
+`_validate_top_level_keys()` ([0075]) — with a `difflib` close-match
+suggestion, so `buidl = "..."` answers "Perhaps you meant `build`?".
+Neither `Options.load()` nor `UsermodOptions.load()` validates that
+keyset itself; the check lives in `cli.py` because only the coordinator
+sees every family at once, and it unions each family module's own
+`OPTION_KEYS` over `FAMILIES` rather than listing keys locally — a third
+family's keys become valid by declaring them, with no edit to `cli.py`.
+Until [0075] this was the one real hole left in the [0048] story: an
+unrecognised scalar key was read as simply absent, its default silently
+applying, which is [0048]'s own original bug wearing different clothes.
 
 [0048]: ../records/0048-build-skip-live-in-opposite-tables.md
 [0074]: ../records/0074-usermod-family-table-and-retired-table-messages-removed.md
+[0075]: ../records/0075-top-level-scalar-keys-are-validated.md
 
 Usermod's own real identifier space is documented in [0023] rather than
 transcribed here — it is a genuinely different shape from natmod's

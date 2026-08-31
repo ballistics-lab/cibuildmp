@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **An unrecognised scalar key at the top level of `cibuildmp.toml` is now an
+  error**, with a close-match suggestion — `buidl = "..."` answers "Perhaps you
+  meant `build`?". Previously only unknown *tables* were caught; an unknown
+  scalar key (`micropython =`, retired back in record 0052, or any typo) was
+  read as simply absent, its default silently applying, and the build succeeded
+  having ignored the line you wrote. Every family module now declares its own
+  `OPTION_KEYS` and the CLI unions them across `FAMILIES`, so no key list lives
+  in `cli.py`. `[[name]]` array-of-tables syntax is now recognised as a table by
+  the sibling table check too, rather than falling through to this one. Record
+  0075.
+
+### Fixed
+
+- **Docs: the reason given for keeping the legacy composite actions named the
+  wrong repository.** Record 0073's rewrite of `README.md`/`docs/ACTIONS.md`
+  said `a7p`'s own `unix-mipsel` cell was the one remaining dependency on
+  `.github/actions/*`, citing record 0067. `a7p` uses no composite action at
+  all, 0067 is about something else entirely, and the claim was already untrue
+  when written. The real `build-usermod-unix` holdouts are `micropython-bclibc`
+  and `micropython-wasm3`, both of which also use `fetch-micropython` far more
+  widely than the mipsel story suggested. No code change. Record 0076.
+
 ### Removed
 
 - **`[usermod]`, the shared-defaults table for every usermod port at once.** No real

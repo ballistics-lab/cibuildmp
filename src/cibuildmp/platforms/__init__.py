@@ -40,7 +40,12 @@ class PlatformModule(Protocol):
     """Documentation only, not enforced through isinstance/runtime checks
     -- the same PEP 544 module-as-Protocol shape cibuildwheel's own
     `platforms/__init__.py` uses. Every family module exposes exactly
-    these four names.
+    these four names, plus `OPTION_KEYS` -- a frozenset of every scalar
+    key that family reads from the bare top level of the config.
+    `cli.py`'s own coordinator unions those across `FAMILIES` so a
+    top-level key no family recognises at all is a loud error rather
+    than silently absent (record 0075); a new family's keys become
+    valid by declaring them, with no edit to `cli.py`.
 
     `resolve_options()` loads config and applies this family's own
     CLI overrides (`--build`/`--skip`, `--output-dir` for natmod);
