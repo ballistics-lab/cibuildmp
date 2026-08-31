@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A third uncontexted agent read the repo, and the drift had moved.** Every
+  documented claim it checked in `README.md`/`CONTRIBUTING.md` reproduced exactly
+  — the first-module transcript byte for byte, all six error messages, the
+  env-var scoping example, the version pins. What it found instead was in
+  **source comments, docstrings and error strings**, which the drift guards did
+  not cover at all:
+  - `docker/natmod.Dockerfile` cited in the present tense in two files, two
+    records after 0058 split it into six; `PORT_IMAGES` (removed by 0043) at
+    five sites and `PORT_PLATFORMS` (never existed under that name) in a message
+    a *user* sees; `usermod/build.py` (split by 0061) and `docs/BACKLOG.md` (a
+    redirect stub since 0041) across ten files.
+  - `tests/test_docs.py` now checks source for removed names, which is how all
+    13 files were found. The guards' scope was the boundary the drift moved past.
+  - `Target.tag`'s field comment said the tag is "not part of the identifier"
+    fifteen lines above the property that puts it there.
+  - `_BUILD_FN`'s comment stated a driver signature missing `package_dir`, which
+    `build_one()` always passes — a new port author following it writes a broken
+    one. `toolchain_root` is documented as what it is: dead in production, set
+    only by tests.
+  - Records 0053 and 0056 still listed `rp2` as driverless (0060 shipped it) and
+    cited a `usermod/build.py` that 0061 split; both now carry a dated
+    correction. 0046's status line said "the rest not built" below its own
+    addendum saying it was built.
+  - `open-questions.md` still reasoned about a `host` toolchain strategy that
+    0050 deleted, and the tracker's own conventions listed `0054`-`0057` as
+    "Proposed" after two of them shipped. Neither carries examples now.
 - **A second uncontexted agent read the repo; these are its findings.** It
   confirmed the previous round (every quoted error message reproduced verbatim,
   the `CIBMP_BUILD_UNIX` example produced exactly the documented two lines), and
@@ -87,6 +113,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **What the third agent could only learn from source**: the `+0x<hex>`
+  identifier suffix `arch-flags` produces (so `[override."*rv32imc+0x3"]` is
+  writable from the docs now, and `skip = "*-rv32imc"` is documented as *not*
+  matching it); which `<TARGET>` segment each port uses in
+  `CIBMP_<PORT>_<TARGET>_*`, as a table; that `--dry-run` shows a `make` line
+  for natmod and identifiers alone for usermod; that `name`/`version` replace a
+  usermod filename stem but produce no manifest; that a key a family does not
+  read is accepted and ignored; the full host prerequisite list including `git`
+  and the bind-mounted `pyelftools`; that JSON reports accumulate under the
+  cache root until `--clean-cache`; and that the suite must be run with
+  `uv run pytest`, since one test needs the console script on `PATH`.
 - **The three things the second agent said it still would not know.**
   `CONTRIBUTING.md` now gives the exact one-line local check for each of the six
   usermod ports (`cibuildmp examples/template --build "<identifier>"` — one real

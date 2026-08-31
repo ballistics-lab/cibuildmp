@@ -75,7 +75,11 @@ the same way [docs/0000-TRACKER.md](../0000-TRACKER.md) folds resolved
   works around per-project.
 - **Toolchain pinning vs. reproducibility.** Pinned tarball versions make
   builds reproducible but drift from what a contributor has on `PATH`. The
-  `host` strategy running first means a laptop and CI can silently use
+  **premise is gone** — [0050] deleted the resolver, and every build now runs
+  in a pulled, digest-pinned image, so a laptop and CI get the same compiler by
+  construction. What survives is narrower and belongs to [0046]: whether those
+  pins are refreshed often enough. The old wording follows. The
+  `host` strategy running first meant a laptop and CI could silently use
   different compilers — acceptable, but the summary output must always say
   which toolchain was actually used.
 - **Pin staleness** moved out of this file and into its own record, [0046] --

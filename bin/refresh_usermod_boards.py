@@ -8,7 +8,7 @@ list and crossing it against every MicroPython tag, this shallow-clones
 each tag given on the command line and reads its own real
 `ports/<port>/boards/*/board.json` files -- reusing
 `cibuildmp.platforms.usermod.boards.Database`, the same vendored `mpbuild`
-board-database reader `usermod/build.py` already trusts, rather than
+board-database reader `usermod/build_<port>.py` already trusts, rather than
 parsing the JSON a second time by hand.
 
     bin/refresh_usermod_boards.py esp32 v1.20.0 v1.21.0 v1.24.0 v1.29.0 > /tmp/esp32.toml

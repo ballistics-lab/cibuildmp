@@ -71,7 +71,7 @@ def pinned_docker_images() -> dict[str, Any]:
     reason this module's own docstring already gave for `natmod.toml`:
     those values go stale on pypa's schedule, so bumping one has to be a
     reviewable data diff rather than a patch to resolver logic. It was a
-    `PORT_IMAGES` dict literal inside `dockerrun.py` until 0043 -- the one
+    `resources/pinned_docker_images.toml` dict literal inside `dockerrun.py` until 0043 -- the one
     pinned table that had escaped **record 0010**'s own rule.
     """
     return _load("pinned_docker_images.toml")

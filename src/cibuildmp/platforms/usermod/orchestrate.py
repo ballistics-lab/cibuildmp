@@ -50,8 +50,12 @@ _BUILD_ERRORS: tuple[type[Exception], ...] = (
     UsermodConfigError,
 )
 
-# port -> the build_<port>() function, uniform signature across all six:
-# build_x(opts, mpy_dir, *, toolchain_root=None, quiet=False) -> Path.
+# port -> the build_<port>() function, uniform signature across all six.
+# Every driver's real signature is
+# `build_<port>(opts, mpy_dir, *, package_dir=None, toolchain_root=None,
+# quiet=False) -> Path`. `package_dir` is not optional in practice --
+# `build_one()` below always passes it, and a new driver written without
+# it takes the wrong shape.
 _BUILD_FN: dict[str, Callable[..., Path]] = {
     "unix": build_unix,
     "windows": build_windows,
@@ -371,9 +375,16 @@ def build(
 ) -> list[UsermodBuildResult]:
     """Build every selected target in one invocation.
 
+    `toolchain_root` is a leftover of the toolchain resolver [0050]
+    deleted. `run_resolved()` never passes it, so in production it is
+    always `None` and `esp32`'s ESP-IDF cache sits under `CIBMP_CACHE_PATH`
+    like everything else; only tests set it. There is deliberately no way
+    to relocate that cache on its own -- wanting one is a change, not a
+    hidden flag.
+
     Grouped by MicroPython tag (**0051**), the same D9/D13 reasoning
     natmod's own `build_all()` already applies: fetching a checkout (and,
-    for the two ports that still need one, a host mpy-cross) is identical
+    for `qemu`, the one port that still needs one, a host mpy-cross) is identical
     for every target sharing a release -- none of the five ports' own
     axes (arch/board) change which MicroPython release is being built,
     only how it is cross-compiled -- so paying for it once per tag beats

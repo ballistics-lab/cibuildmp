@@ -52,6 +52,13 @@ each target lands in its own `output-dir/<identifier>/` directory
 (`mpyhouse/mpy6.3-v1.29.0-x64/`, …), with a `package.json` mip can install from
 once `version` is set.
 
+**Host prerequisites, in full:** Docker (below), `git` — needed only for a
+preview tag, which publishes no release tarball and is therefore cloned —
+and a C compiler for the one `qemu` usermod cell. natmod additionally
+bind-mounts *cibuildmp's own installed* `pyelftools`/`ar` into every
+container rather than baking them into six images, so those come from your
+`cibuildmp` install, not from the image and not from your system Python.
+
 **`cibuildmp` needs a reachable Docker daemon on whatever host runs it —
 one that shares this machine's filesystem.** Every path is bind-mounted
 into the container at its identical host path, so a remote or
@@ -417,11 +424,19 @@ onto each other rather than the first winning.
 | `manifest`               | usermod | `""`                   |                                ✓                                 |
 | `extra-cmake-args`       | usermod | `[]`                   |                                ✓                                 |
 
+A key a family does not read is accepted and ignored, so
+`pre-build-command` in a usermod-only config is silently inert — usermod has
+no pre-build hook at all. The "Read by" column is the one to check.
+
 Two more keys live in tables rather than at the top level, so they are not
 in the list above: `[publish] extra-files` (natmod — files copied beside
 every built `.mpy`) and `inherit` inside an `[override]` entry.
 
-**`version` gates more than the version string.** With `version` unset,
+**`name` and `version` do different things per family.** For natmod they
+name the artifact *and* gate `package.json`; for usermod they only replace
+the output filename's stem — there is no manifest for a firmware image.
+
+**`version` gates more than the version string.** For natmod, with `version` unset,
 `cibuildmp` writes no `package.json` *and copies no `[publish] extra-files`*
 — the identifier directory holds the built artifact alone. Set `name` and
 `version` as soon as you want either.
@@ -452,6 +467,17 @@ Two notes on individual keys:
 - `arch-flags` is a *list*, and each entry produces its own target: it is an
   axis, not a flag. That is why it cannot live in `[override]` — an override
   is matched against an identifier that arch-flags itself helped create.
+  The extra entries get a `+0x<hex>` suffix, which the generated shape table
+  above cannot express because it is built from `identifier_format`:
+
+  ```console
+  $ cibuildmp --print-build-identifiers   # arch-flags = ["", "zba,zcmp"]
+  mpy6.3-v1.29.0-rv32imc
+  mpy6.3-v1.29.0-rv32imc+0x3
+  ```
+
+  So an override for the flagged variant is `[override."*rv32imc+0x3"]`, and
+  a plain `skip = "*-rv32imc"` will *not* match it — `*-rv32imc*` does.
 
 ### Environment variables
 
@@ -478,7 +504,17 @@ global one. Use it to widen one platform in one CI job without touching the
 config file — not to narrow the run as a whole.
 
 A second group of variables configures the machinery rather than the build,
-and has no config-file counterpart at all:
+and has no config-file counterpart at all. **What `<TARGET>` is depends on
+the port**, because it is that port's own build axis:
+
+| `<PORT>` | `<TARGET>` | example |
+| --- | --- | --- |
+| `unix` | the platform tag | `CIBMP_UNIX_MANYLINUX_2_28_X86_64_DOCKER_IMAGE` |
+| `windows` | the arch | `CIBMP_WINDOWS_WIN_AMD64_DOCKER_IMAGE` |
+| `qemu` | the board | `CIBMP_QEMU_MPS2_AN385_DOCKER_IMAGE` |
+| `natmod` | the arch | `CIBMP_NATMOD_ARMV7EMSP_DOCKER_IMAGE` |
+| `esp32`, `rp2`, `webassembly` | *none* | `CIBMP_WEBASSEMBLY_DOCKER_IMAGE` |
+
 
 | Variable                                | Effect                                                                                                                                                                                                                            |
 | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -670,10 +706,16 @@ it runs to several GB. `cibuildmp --clean-cache` deletes the lot
 (`$XDG_CACHE_HOME/cibuildmp`, or wherever `CIBMP_CACHE_PATH` points);
 Docker images are Docker's own to prune.
 
+That includes the JSON build reports: one per invocation, never
+overwritten, under the same cache root — so they accumulate until you clean
+the cache, and cleaning the cache takes them with it. Set
+`CIBMP_REPORT_PATH` if you want one kept somewhere you control.
+
 ### Still stuck
 
-`--dry-run` prints what would be built and with which `make`
-command line, without building. It prints a `{micropython}` placeholder
+`--dry-run` prints what would be built, without building — with the `make`
+command line for natmod targets, and identifiers alone for usermod ones
+(each port's own driver composes its command far too late for a preview). It prints a `{micropython}` placeholder
 literally rather than resolved — the checkout it would point at is not
 fetched during a dry run, so `make -C {micropython}/examples/natmod/btree`
 in that output is correct, not a broken config. `--debug-traceback` turns a

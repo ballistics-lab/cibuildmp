@@ -2,7 +2,7 @@
 usermod ports with a real `build_<port>()` driver, one module per port
 (`usermod/build_<port>.py`, plus shared `build_common.py` -- see
 docs/records/0061-usermod-build-drivers-split-per-port.md). See
-docs/BACKLOG.md, "Later -- usermod".
+docs/0000-TRACKER.md, "Later -- usermod".
 
 Also usermod's own half of the CLI dispatch (Phase H, record 0051; the
 `--platform`/`--only`/`--archs`/`--enable` retraction folded into this

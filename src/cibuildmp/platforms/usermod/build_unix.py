@@ -1,5 +1,5 @@
 """usermod build driver: `unix`, the first port covered under M8's own
-scope ("ports that need no exotic provisioning first" -- docs/BACKLOG.md).
+scope ("ports that need no exotic provisioning first" -- docs/0000-TRACKER.md).
 `ports/unix/Makefile` owns the actual compile (D2's "delegate the compile,
 own the environment"), the same shape build.py already uses for natmod --
 this module resolves per-arch settings and runs it, nothing more.
@@ -733,7 +733,7 @@ def verify_unix_output(target: str, binary: Path) -> None:
     as little-endian would be meaningless.
 
     Deliberately silent about *why* a mismatch happened: an unregistered
-    or mis-registered `PORT_PLATFORMS` entry, a `CIBMP_*_DOCKER_IMAGE`
+    or mis-registered `ARCH_OCI_PLATFORM` entry, a `CIBMP_*_DOCKER_IMAGE`
     override pointing at another architecture's image, and a genuinely
     mis-set `CROSS_COMPILE` all land here identically, and guessing
     between them in the message would be worse than reporting the fact.

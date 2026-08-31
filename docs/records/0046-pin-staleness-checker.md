@@ -1,7 +1,9 @@
 # 0046 — nothing notices when a pin goes stale, except container images
 
-Status: Accepted (design; container images covered, the docker base-OS tag partially
-covered by [0068], the rest not built)
+Status: Implemented in part — container images ([0044]), the docker base-OS tag
+([0068]), and the six toolchain-tarball pins plus a weekly schedule (this record's
+own 2026-08-31 addendum). Still open: results go only to a job log, and whether
+consumers' own `micropython` pins are in scope.
 
 Lifted out of [reference/open-questions.md](../reference/open-questions.md),
 where it had grown into a real work item sitting in a living document. It

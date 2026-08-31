@@ -5,7 +5,7 @@ separately, in usermod/boards.py) -- USER_C_MODULES shape and manifest
 layout are cibuildmp's own concern, not something mpbuild ever resolves.
 The pinned table itself, and how each value was verified, lives in
 resources/usermod.toml (D10's own "pinned data lives in resources/, not in
-Python" pattern) -- see docs/BACKLOG.md D16 and D17.
+Python" pattern) -- see docs/0000-TRACKER.md D16 and D17.
 """
 
 from __future__ import annotations

@@ -137,7 +137,8 @@ def build_all(
     # not where do we get one" -- apt probe, pinned tarball, host
     # multilib -- and to reconcile a prefix the tarball ships with the
     # one dynruntime.mk hardcodes. Every one of those questions is
-    # answered by `docker/natmod.Dockerfile` now: the image has all ten
+    # answered by the toolchain-group images now ([0058]): between them
+    # they carry all ten
     # arches' compilers under exactly the names dynruntime.mk expects,
     # so there is nothing to probe, nothing to download and no `CROSS=`
     # override to add.

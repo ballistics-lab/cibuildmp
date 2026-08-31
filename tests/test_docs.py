@@ -126,8 +126,11 @@ TAGLESS_NATMOD = re.compile(r"\bmpy\d+\.\d+-(?!v\d)[A-Za-z0-9_]+\b")
 ENV_VAR = re.compile(r"CIBMP_[A-Z0-9_]+")
 
 # A path is only worth checking when it looks like one this repo owns.
+# The negative lookbehind keeps `.venv/bin/python` from matching as
+# `bin/python`: a repo-relative path never has a `/` or a `.` immediately
+# before it.
 REPO_PATH = re.compile(
-    r"(?:src|tests|docs|bin|examples|resources|\.github)/[A-Za-z0-9_./-]+"
+    r"(?<![/.\w])(?:src|tests|docs|bin|examples|resources|\.github)/[A-Za-z0-9_./-]+"
 )
 
 # Paths that look like this repo's and belong to someone else. Every entry
@@ -445,6 +448,44 @@ def test_generated_doc_blocks_are_current() -> None:
     assert refresh_docs.main(["--check"]) == 0, (
         "a generated doc block is out of date -- run bin/refresh_docs.py"
     )
+
+
+SOURCE_FILES = sorted(
+    [*(REPO / "src").rglob("*.py"), *(REPO / "bin").glob("*.py"), REPO / "action.yml"]
+)
+
+# Names that existed, were removed, and are still cited in comments,
+# docstrings and -- worse -- user-facing error strings. Each entry is
+# (dead name, what to say instead), and each was found by a reader
+# following it and hitting nothing.
+REMOVED_NAMES = {
+    "PORT_IMAGES": "resources/pinned_docker_images.toml",
+    "PORT_PLATFORMS": "ARCH_OCI_PLATFORM / _PORT_OCI_PLATFORM",
+    "docker/natmod.Dockerfile": "the six toolchain-group Dockerfiles ([0058])",
+    "usermod/build.py": "usermod/build_<port>.py ([0061])",
+    "docs/BACKLOG.md": "docs/0000-TRACKER.md and docs/records/",
+}
+
+
+@pytest.mark.parametrize("path", SOURCE_FILES, ids=lambda p: p.name)
+def test_source_does_not_cite_removed_names(path: Path) -> None:
+    """Source comments, docstrings and error strings must not name things
+    this project deleted.
+
+    The docs guards cover `LIVING_DOCS` and deliberately skip
+    `docs/records/`. Source was in neither set, and that is where the
+    drift went: `docker/natmod.Dockerfile` cited in the present tense two
+    records after it was split up, `PORT_IMAGES` and `PORT_PLATFORMS`
+    named in messages a *user* sees, ten files pointing at a
+    `docs/BACKLOG.md` that is a redirect stub. A comment that sends a
+    reader to nothing costs exactly as much as a wrong sentence in
+    README, and nothing was checking for it.
+    """
+    text = _text(path)
+    found = sorted(
+        f"`{dead}` (use {live})" for dead, live in REMOVED_NAMES.items() if dead in text
+    )
+    assert not found, f"{path.relative_to(REPO)} cites removed names: {found}"
 
 
 def test_publish_script_and_workflow_publish_the_same_images() -> None:

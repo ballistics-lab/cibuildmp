@@ -257,8 +257,11 @@ class Target:
 
     abi: str  # "6.3"
     arch: str  # "armv7emsp"
-    # The MicroPython tag actually fetched and built to produce this target
-    # -- not part of the identifier (that's ABI, the compatibility axis),
+    # The MicroPython tag actually fetched and built to produce this
+    # target, and part of the identifier -- see `identifier` below, whose
+    # own comment records the live correction that put it there. This
+    # comment said "not part of the identifier" for as long as that
+    # correction went unapplied here,
     # but the build itself needs to know which checkout to run against.
     tag: str = ""
     # rv32imc's ARCH_FLAGS=, packed the way the .mpy header itself packs it

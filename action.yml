@@ -56,7 +56,7 @@ inputs:
     required: false
     default: ""
 
-# Composite, not Docker -- docs/BACKLOG.md's own D28/D30 (container-per-port
+# Composite, not Docker -- docs/0000-TRACKER.md's own D28/D30 (container-per-port
 # migration, step 1). The Docker action this used to be ran *inside* one
 # container; cibuildmp itself is meant to launch sibling per-port containers
 # for usermod builds (D26's own "no Docker-in-Docker" reasoning), which needs

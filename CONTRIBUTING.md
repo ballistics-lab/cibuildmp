@@ -109,6 +109,12 @@ document points at that row. Naming a consuming repo is fine when it is an
 *example* ("a7p passes `pre_build_command: make fetch-nanopb`"); asserting
 its current state is not.
 
+Run the tests as `uv run pytest -q`, not `.venv/bin/python -m pytest`: one
+test shells out to a bare `cibuildmp` on `PATH`
+(`tests/test_plan_test_matrix.py`) and fails with `FileNotFoundError`
+without it. `uv run` puts the console script on `PATH`; a bare interpreter
+does not.
+
 ## A green test run does not mean a build works
 
 `uv run pytest -q` needs no Docker and finishes in seconds because **every

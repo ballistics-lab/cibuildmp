@@ -348,3 +348,12 @@ first.
 [0051]: 0051-usermod-identifiers-have-no-version-axis.md
 [0053]: 0053-usermod-ports-without-a-build-driver.md
 [0067]: 0067-user-c-modules-flat-shape-autodetect.md
+
+## Correction, 2026-08-31 — "five port drivers" in one file is two records old
+
+The opening paragraph says "the five port drivers" and cites
+`usermod/build.py`. There are **six** drivers and that file no longer exists:
+[0061] split it into one `usermod/build_<port>.py` per port, and [0060] added
+`rp2` as the sixth. The substantive claim is unchanged and was re-checked
+against each of the six — all pass `USER_C_MODULES=` unconditionally, which is
+what this record is about.

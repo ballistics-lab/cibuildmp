@@ -19,7 +19,13 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 - **Status** line at the top of each record: `Accepted` for a locked design decision,
   `Implemented` / `Implemented (done)` for a build phase that shipped, `In progress` where
   real work remains, `Proposed` for a record that scopes work and names what is in the way
-  without deciding it (`0054`-`0057`), `Not scheduled` for explicitly deferred work.
+  without deciding it, `Not scheduled` for explicitly deferred work, `Accepted` for a
+  decision or an incident with no code of its own. **No examples here on purpose** — a
+  list of which records are which goes stale the moment one closes, and this bullet
+  carried `0054`-`0057` as "Proposed" after two of them shipped.
+- **"In progress / Proposed" means "not closed", whatever a record's own `Status:` says.**
+  Several of its rows are `Not scheduled` or `Accepted`. The checkbox is the claim; the
+  heading is only where unclosed rows live.
 - **A record whose code landed is not automatically fully closed.** Some records
   document a decision that shipped and still carry their own "still open" items
   inside. The checkbox says whether the record is closed; what is left inside it

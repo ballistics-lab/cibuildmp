@@ -95,7 +95,7 @@ from .resources import build_platforms_data, pinned_docker_images, pinned_pypa_i
 
 # ── where the pins live now ───────────────────────────────────────────
 #
-# `PORT_IMAGES` used to be a dict literal right here: a maintainer-edited
+# `resources/pinned_docker_images.toml` used to be a dict literal right here: a maintainer-edited
 # table of digest-pinned references sitting in the middle of resolver
 # logic. It is gone, and its contents now live in
 # `resources/pinned_docker_images.toml` -- **record 0010** ("pinned data
@@ -552,7 +552,7 @@ def _probe_platform(image: str, oci_platform: str) -> str:
             f"{image} is not published for {oci_platform} -- the pinned "
             f"reference resolves to a different platform. Each image is "
             f"published for exactly one platform (see dockerrun's own "
-            f"PORT_PLATFORMS and record 0043); either the pin or that "
+            f"ARCH_OCI_PLATFORM and record 0043); either the pin or that "
             f"table is stale, or a CIBMP_*_DOCKER_IMAGE override is "
             f"pointing at an image built for another architecture."
         )
@@ -596,7 +596,7 @@ def run(
     rewriting: every path it references already lives under one of them.
 
     `--pull missing` -- correct here specifically because `image` is
-    always a digest-pinned reference (`PORT_IMAGES`'s own comment, or a
+    always a digest-pinned reference (`resources/pinned_docker_images.toml`'s own comment, or a
     caller's own override): an already-cached `image` (Docker's own
     local store, the only cache involved -- `ensure_image()` above does
     not pre-fetch anything itself, see its own docstring) runs
