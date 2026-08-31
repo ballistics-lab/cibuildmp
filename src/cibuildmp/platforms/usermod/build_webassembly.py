@@ -152,4 +152,3 @@ def webassembly_companions(produced: Path) -> list[Path]:
     """
     wasm_blob = produced.parent / "micropython.wasm"
     return [wasm_blob] if wasm_blob.is_file() else []
-

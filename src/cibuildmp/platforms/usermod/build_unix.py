@@ -910,4 +910,3 @@ def unix_companions(produced: Path) -> list[Path]:
     """
     lib_dir = produced.parent / "lib"
     return [lib_dir] if lib_dir.is_dir() else []
-

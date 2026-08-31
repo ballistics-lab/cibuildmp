@@ -226,4 +226,3 @@ def esp32_companions(produced: Path) -> list[Path]:
     """
     combined = produced.parent / "firmware.bin"
     return [combined] if combined.is_file() else []
-

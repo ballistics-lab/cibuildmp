@@ -684,7 +684,9 @@ def test_build_one_collects_the_wasm_blob_beside_the_mjs(tmp_path, monkeypatch):
     def fake_run(cmd, **kwargs):
         build_dir = mpy_dir / "ports" / "webassembly" / "build-webassembly-wasm32"
         build_dir.mkdir(parents=True, exist_ok=True)
-        (build_dir / "micropython.mjs").write_text("var wasmBinaryFile='micropython.wasm'")
+        (build_dir / "micropython.mjs").write_text(
+            "var wasmBinaryFile='micropython.wasm'"
+        )
         (build_dir / "micropython.wasm").write_bytes(b"\x00asm\x01\x00\x00\x00")
 
     monkeypatch.setattr(dockerrun, "run", fake_run)
@@ -764,4 +766,3 @@ def test_build_one_does_not_copy_a_non_unix_lib_directory(tmp_path, monkeypatch)
     result = build_one(options, target, mpy_dir)
 
     assert not (result.output.parent / "lib").exists()
-
