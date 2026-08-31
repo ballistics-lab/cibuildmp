@@ -398,6 +398,120 @@ naming a scalar option in `inherit` is a config error, not a silent no-op.
 [0076]: docs/records/0076-the-mipsel-holdout-is-bclibc-and-wasm3-not-a7p.md
 [0077]: docs/records/0077-docs-drift-is-a-failing-test-not-a-discipline-problem.md
 
+## When a build fails
+
+Every message below is one `cibuildmp` actually prints. Find yours, read the
+cause, apply the fix.
+
+### `no targets selected. Pass --allow-empty if that is expected.`
+
+Your `build` glob matched nothing. This is the normal first-run result,
+because an unset `build` selects **nothing at all** — there is no "build
+everything" default.
+
+Check what you asked for against what exists:
+
+```console
+$ cibuildmp --print-build-identifiers        # what your config selects
+$ cibuildmp --build "*" --print-build-identifiers | head   # what exists
+```
+
+A glob that matches nothing is usually a tag that has no rows (`v1.28.1`
+is not a MicroPython release) or a port spelled as a port when the
+identifier has no port segment — `unix`, `windows` and `webassembly`
+identifiers are `{tag}-{arch}`, with no `unix-` in them.
+
+### `unknown key 'buidl'. Perhaps you meant 'build'?`
+
+A typo, or a key from a config schema older than v0.4.0. The suggestion is
+usually right. See [Configuration](#configuration) for every key that
+exists.
+
+### `unknown table(s) at the top level: [natmod]`
+
+Per-platform tables (`[natmod]`, `[unix]`, `[esp32]`, `[usermod]`, …) were
+removed in v0.4.0. Everything lives at the top level now, narrowed with
+`[override."<glob>"]`. Move the keys up and delete the table.
+
+### `docker run against image '…' was requested but the docker CLI itself is not on PATH`
+
+`cibuildmp` builds everything in containers — there is no bare-host path
+for any target. Install Docker and make sure `docker info` works as the
+user running the build.
+
+### `… cannot run as linux/arm64 on this host (x86_64): the kernel has no binfmt handler registered`
+
+You asked for a target that is not your machine's architecture. `cibuildmp`
+does not install emulation itself:
+
+```console
+$ docker run --privileged --rm tonistiigi/binfmt --install all   # locally, once
+```
+
+On CI, add `docker/setup-qemu-action` to the job before the build step.
+
+### `ambiguous output -- found 2 .mpy files under natmod/build/x64*: mymod.mpy, mymod_x64.mpy`
+
+Your `dist` target left an intermediate file next to the one it produced.
+This bites when a MicroPython bump renames that intermediate — v1.29.0
+renamed `$(BUILD)/$(MOD).native.mpy` to `$(BUILD)/$(MOD).mpy`, so a `dist`
+cleaning up only the old name suddenly leaves the new one behind. Remove
+both:
+
+```make
+dist: all
+	mv $(MOD).mpy $(BUILD)/mymod.mpy
+	rm -f $(BUILD)/$(MOD).native.mpy $(BUILD)/$(MOD).mpy
+```
+
+### `'dist' produced no .mpy under natmod/build/x64*/ or directly in natmod`
+
+Either `module-dir` points at the wrong directory, or your `make-target`
+does not put its output where `cibuildmp` looks. It looks in
+`<module-dir>/build/<arch>*/` first, then in `<module-dir>` itself.
+
+### `mymod.mpy's header encodes native arch code 2, expected 4 (armv6m)`
+
+Two arches shared one build directory, so the second one reused the first
+one's object files and the `.mpy` is the *first* arch's binary.
+`cibuildmp` catches this rather than shipping it. Scope `BUILD` by arch in
+your Makefile, before the `include`:
+
+```make
+BUILD = .obj/$(ARCH)
+```
+
+(MicroPython v1.29.0 and later already default to `build-$(ARCH)`, so this
+only matters on older tags or if you set `BUILD` yourself.)
+
+### `no image registered for …` / `… is not published for linux/…`
+
+The image that target needs is not in
+`resources/pinned_docker_images.toml`, or the pinned reference does not
+cover your platform. If you are testing a locally built image, point at it
+directly — `CIBMP_UNIX_MANYLINUX_2_28_X86_64_DOCKER_IMAGE=my-image:local`
+and the equivalent for other ports. Otherwise this is a bug here: please
+open an issue.
+
+### `checksum mismatch for …: expected …, got …`
+
+A pinned download no longer matches its recorded sha256 — upstream
+replaced the file. This is a pin to update in a reviewed PR, not something
+to work around; `bin/update_toolchains.py` reports which pins are behind.
+
+### `config file not found: …`
+
+`--config-file` was given a path that does not exist. Without that flag,
+`cibuildmp` looks for `<package-dir>/cibuildmp.toml`, then
+`[tool.cibuildmp]` in `<package-dir>/pyproject.toml`.
+
+### Still stuck
+
+`--dry-run` prints exactly what would be built and with which `make`
+command line, without building. `--debug-traceback` turns a one-line error
+into a full traceback. Both are the fastest way to turn "it failed" into a
+specific question.
+
 ## Target support
 
 ### Natmod, per arch

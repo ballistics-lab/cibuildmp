@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A "When a build fails" section in `README.md`.** Twelve real error messages
+  the tool actually prints — `no targets selected`, `unknown key`, the missing
+  Docker CLI, the missing binfmt handler, `ambiguous output`, the arch-code
+  mismatch that means two arches shared a build directory — each with what
+  causes it and what to do. Every message is quoted from the source that raises
+  it, not paraphrased. Until now the docs said what `cibuildmp` does and never
+  what to do when it stops.
+
 ### Fixed
 
 - **`bin/refresh_docs.py` no longer fights a markdown table formatter.** Its
