@@ -105,3 +105,29 @@ Rejected by explicit user call: the action stays as its own bare-host natmod
 toolchain implementation, not folded into a `cibuildmp --build "<glob>"` wrapper.
 With that, this record has no open items left; status above moves to
 `Implemented`.
+
+## Addendum, 2026-08-31 — this record is the only place consuming-repo status lives
+
+`README.md`, `docs/ACTIONS.md` and `docs/reference/design.md` all used to answer
+"which repo still calls the legacy composite actions" themselves, and all of them
+got it wrong from one bad tracker note copied five times ([0076], [0077]). They
+point here now, so it has to be *here*, dated, with the method.
+
+**Checked 2026-08-31 against each repo's own default branch, by reading the
+workflow files:**
+
+| repo | composite actions on `main` |
+| --- | --- |
+| `o-murphy/a7p` | none — fully on the CLI |
+| `ballistics-lab/micropython-bclibc` | 4 (`fetch-micropython` ×3, `build-usermod-unix` for `unix-mipsel`) |
+| `o-murphy/micropython-wasm3` | 6 (`fetch-micropython` ×5, `build-usermod-unix` for `unix-mipsel`) |
+
+Migrations off the remaining two are written and pushed to a `bump-cibuildmp`
+branch in each, **unmerged and never run in their own CI**. The action pin those
+repos carry is a separate question from this repo's own released version — do not
+infer one from the other; grep their workflows.
+
+Anything below this line about pins or migration state is that date's answer, not
+today's. This table is what a living document is allowed to point at; nothing in
+this repository can verify it, which is the whole reason it is dated.
+

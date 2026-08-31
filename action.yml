@@ -9,7 +9,10 @@ inputs:
     required: false
     default: .
   output-dir:
-    description: 'Folder to place the outputs in, defaults to "mpyhouse"'
+    description: >
+      Folder to place the outputs in, defaults to "mpyhouse".
+      natmod only -- usermod reads its own output-dir from the config file
+      or CIBMP_OUTPUT_DIR, and ignores this input.
     required: false
     default: ""
   config-file:

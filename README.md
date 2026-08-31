@@ -52,11 +52,14 @@ each target lands in its own `output-dir/<identifier>/` directory
 (`mpyhouse/mpy6.3-x64/`, …), with a `package.json` mip can install from
 once `version` is set.
 
-**`cibuildmp` needs a reachable Docker daemon on whatever host runs it.**
+**`cibuildmp` needs a reachable Docker daemon on whatever host runs it —
+one that shares this machine's filesystem.** Every path is bind-mounted
+into the container at its identical host path, so a remote or
+VM-isolated daemon that cannot see your working tree will not work.
 It never builds an image itself — it pulls pre-built, pinned images
 (`ghcr.io/ballistics-lab/<target>`) and launches sibling containers, one
 per target, the same way cibuildwheel's own container runtime does. That
-covers natmod (five toolchain-group images between them cover all ten
+covers natmod (five of the six toolchain-group images cover all ten
 arches — see [`docs/reference/vendored-images.md`](docs/reference/vendored-images.md))
 and every usermod port, `esp32` included — only the ESP-IDF `git clone` itself
 stays on the host (source, not a binary, the same reasoning `mpy_dir`
@@ -200,6 +203,13 @@ own CI step. `cibuildmp` assembles the tree and stops there, the same line
 cibuildwheel draws at `wheelhouse/`.
 
 ### When you outgrow three files
+
+Two more example trees exist and are built by CI on every push:
+[`examples/natmod`](examples/natmod) and
+[`examples/usercmodule`](examples/usercmodule) are MicroPython's *own*
+upstream examples, built through `cibuildmp` unmodified — proof the tool
+works on modules it did not shape, and the closest thing here to a
+compatibility suite.
 
 [`examples/template`](examples/template) is the same module with everything
 a real project ends up needing: a shared `src/` core compiled by both the
@@ -412,6 +422,12 @@ cibuildmp: error: cibuildmp.toml: unknown key `buidl`. Perhaps you meant `build`
 
 Two notes on individual keys:
 
+- `user-c-modules` is **rewritten to its parent** for a Make port when the
+  directory you name contains `micropython.mk` itself. MicroPython's own
+  `py/py.mk` globs `<USER_C_MODULES>/*/micropython.mk`, one level *below*
+  the path it is given, so a flat single-module layout would otherwise link
+  nothing and still succeed. `cibuildmp` detects that shape and adjusts;
+  you do not need to point one level up yourself.
 - `module-dir` and `user-c-modules` accept a literal `{micropython}`
   placeholder, substituted with the pinned checkout cibuildmp itself
   fetched ([0071]/[0072]) — `module-dir = "{micropython}/examples/natmod/btree"`
@@ -653,7 +669,7 @@ All ten `ARCH=` values `py/dynruntime.mk` accepts, each running inside a
 pulled `linux/amd64` image — natmod builds no bare-host toolchain of any
 kind any more, `x86`'s 32-bit multilib included, which is exactly what makes
 it buildable on an arm64 runner too. There is no single `natmod` image any
-more either: five toolchain-group images between them cover all ten arches
+more either: five of the six toolchain-group images cover all ten arches
 (`arm_embedded`, `riscv_embedded`, `xtensa_lx106`, `xtensa_esp`,
 `natmod_host`), and three of those five are shared with several usermod
 ports too, keyed by toolchain rather than by port — see
@@ -974,7 +990,7 @@ scheduled `test-all-platforms.yml` run since.
 [^nodriver]: `resources/build-platforms.toml` has real, independently-verified rows for each of these ports (walked against a real MicroPython checkout the same way every ✅ row above was); a config can name their identifiers today. What's missing is a `build_<port>()` driver (`platforms/usermod/build_<port>.py`) to actually run one — not a scope decision, just not built yet.
 [^rp2ci]: `build_rp2()` runs no provisioning step inside the container at all — the Pico SDK and everything it needs (`lib/pico-sdk`/`lib/tinyusb`/`lib/lwip`/`lib/btstack`/`lib/cyw43-driver`) are plain git submodules of the MicroPython checkout, already vendored as real files by the release tarball this project prefers. Running the port's own `make ... submodules` target was tried first and failed live against a real tarball checkout ("fatal: not a git repository", since a release tarball is not a git checkout at all); those submodules are threaded into `sources.fetch_micropython()` instead, reached only on its clone path (a preview tag with no tarball). Live-verified: a real `examples/template` build against `v1.29.0-rp2-RPI_PICO` producing a genuine 681984-byte `firmware.uf2` with the project's own C module linked in. Record 0060.
 
-[^esp32ci]: `build_esp32()` went Docker 2026-08-28 (`esp_idf_base`, [0058]), closing the venv conflict that made every real esp32 build fail on the bare host; `idf_version`/`idf_target` are threaded from each board's own real row rather than a fixed default, and `HOME` is exported explicitly for the same reason `esp32`'s own `ports/esp32` needs a real per-user cache dir that `dockerrun.run()`'s `--user <uid>:<gid>` doesn't otherwise give it (unmapped on GitHub's own runners specifically, live-caught on real CI). `test-platforms.yml`'s own broad sweep is what actually proves this across the whole board matrix, not a spot check — Xtensa and RISC-V both, both MicroPython tags this project currently tracks.
+[^esp32ci]: `build_esp32()` went Docker 2026-08-28 (`esp_idf_base`, [0058]), closing the venv conflict that made every real esp32 build fail on the bare host; `idf_version`/`idf_target` are threaded from each board's own real row rather than a fixed default, and `HOME` is exported explicitly for the same reason `esp32`'s own `ports/esp32` needs a real per-user cache dir that `dockerrun.run()`'s `--user <uid>:<gid>` doesn't otherwise give it (unmapped on GitHub's own runners specifically, live-caught on real CI). `test-all-platforms.yml`'s own broad sweep is what actually proves this across the whole board matrix, not a spot check — Xtensa and RISC-V both, both MicroPython tags this project currently tracks.
 
 [^windowsimg]: One combined `docker/windows.Dockerfile` image (`ghcr.io/ballistics-lab/windows`) for all three arches, not split per arch like `unix`'s own five images — there is no second Windows libc a binary could be built against, so the isolation argument that drives `unix`'s split doesn't apply here. `x64`/`x86` are plain apt-installed `gcc-mingw-w64-x86-64`/`gcc-mingw-w64-i686` inside the image; `arm64` is a pinned `llvm-mingw` tarball baked into the same image (no Debian/Ubuntu package targets `aarch64-w64-mingw32` at all). None of this runs on the CI runner itself any more — `apt install gcc-mingw-w64-*` on the bare host was removed as part of Record 0042's own container migration.
 

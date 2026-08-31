@@ -431,6 +431,35 @@ def test_generated_doc_blocks_are_current() -> None:
     )
 
 
+def test_publish_script_and_workflow_publish_the_same_images() -> None:
+    """`bin/publish_images.py` and `publish-docker-images.yml` must name the
+    same (image, platform) cells.
+
+    They are two implementations of one list, and they drifted: the script
+    still read `pinned_docker_images.toml`'s pre-[0058] `[image.<arch>]`
+    shape long after that became a flat `[image_group]`, so it raised
+    `KeyError: 'image'` on any invocation. Nothing noticed, because no
+    workflow calls it -- it exists for the two things the workflow cannot
+    do, publishing one cell by hand and reading package visibility back.
+    """
+    sys.path.insert(0, str(REPO / "bin"))
+    import publish_images
+
+    from_script = sorted(publish_images.cells())
+    workflow = _text(REPO / ".github" / "workflows" / "publish-docker-images.yml")
+    from_workflow = sorted(
+        (name, platform)
+        for name, platform in re.findall(
+            r"\{ image: (\S+), platform: (\S+) \}", workflow
+        )
+    )
+    assert from_script == from_workflow, (
+        "bin/publish_images.py and publish-docker-images.yml disagree:\n"
+        f"  only in script:   {sorted(set(from_script) - set(from_workflow))}\n"
+        f"  only in workflow: {sorted(set(from_workflow) - set(from_script))}"
+    )
+
+
 def test_tracker_rows_are_their_records_own_titles() -> None:
     """Every tracker row under "In progress / Proposed" and "Implemented"
     must be its record's own `# ` title, verbatim.

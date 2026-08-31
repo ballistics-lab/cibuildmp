@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`bin/publish_images.py` was broken and nothing noticed** — it still read
+  `pinned_docker_images.toml`'s pre-0058 `[image.<arch>]` shape, so every
+  invocation raised `KeyError: 'image'`. No workflow calls it (it exists for
+  publishing one cell by hand and for reading GHCR package visibility back,
+  neither of which the workflow can do), so it drifted unseen. Fixed to read the
+  flat `[image_group]`, and a test now asserts it names exactly the same
+  (image, platform) cells as `publish-docker-images.yml` — verified identical,
+  all 15.
+- **Contradictions between files, each now stated once**: "five toolchain-group
+  images" (README) vs "six" (`design.md`, `vendored-images.md`) — five of the six
+  cover natmod, `ppc64le_linux` is qemu-only, and `vendored-images.md` now says
+  so; `arm_embedded` served "ten usermod ports" above a list of nine;
+  `open-questions.md` recommended running cibuildmp inside a root `Dockerfile`
+  that record 0033 deleted, and negated itself in its own last sentence; README
+  credited `test-platforms.yml` with a sweep that is `test-all-platforms.yml`'s;
+  `CONTRIBUTING.md` named `CIBMP_<TARGET>_DOCKER_IMAGE` without its `<PORT>`
+  segment. There is no record 0064, and the tracker now says so.
+- **Consuming-repo status had nowhere left to live.** README/ACTIONS/design were
+  changed to point at record 0038 for it, and the tracker rework then flattened
+  that row to a title — so nothing stated it at all. It is in record 0038 now,
+  dated, with the method used to check it.
 - **Three user-facing claims that were provably false**, found by handing the
   repository to an agent with no context and asking it to explain the project:
   - `README.md`, `docs/reference/design.md` and `docs/reference/vendored-images.md`
@@ -33,6 +54,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`CONTRIBUTING.md` now says that a green local test run proves nothing about
+  a build.** All 452 tests pass without Docker in seconds because every build
+  driver is mocked; a broken `build_esp32()` stays green locally, on push and on
+  a PR. The section names what actually compiles something and when.
 - **Behaviour the docs never mentioned and a user hits on the first run**:
   `version` gates not just `package.json` but `[publish] extra-files` too (both
   are silently skipped without it); `CIBMP_TIMEOUT` is usermod-only; a `unix`

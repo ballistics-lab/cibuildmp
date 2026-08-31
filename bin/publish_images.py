@@ -77,14 +77,23 @@ def cells() -> list[tuple[str, str]]:
     mirrors rather than queries them: there is no `docker/<name>.Dockerfile`
     to build and no GHCR package to push.
     """
-    pins = pinned_docker_images()
-    out = [
-        (f"{floor}_{arch}", ARCH_OCI_PLATFORM[arch])
-        for arch, floors in pins["image"].items()
-        for floor, reference in floors.items()
-        if reference.startswith("ghcr.io/")
-    ]
-    out += [(port, _PORT_OCI_PLATFORM) for port in pins["port"]]
+    out = []
+    for name, reference in pinned_docker_images()["image_group"].items():
+        # Only what this project publishes. A group pinned straight at
+        # `quay.io/pypa/...` is upstream's own image, mirrored rather than
+        # rebuilt (0043), so there is no Dockerfile to build or package to
+        # push for it.
+        if not reference.startswith("ghcr.io/"):
+            continue
+        # A `unix` group's name ends in the arch it is native to; every
+        # other group (`windows`, `webassembly`, the six toolchain images,
+        # `esp_idf_base`) is an amd64 cross host. `mipsel` is in
+        # ARCH_OCI_PLATFORM as amd64 for exactly that reason, so the
+        # lookup covers it without a special case here.
+        arch = next(
+            (a for a in ARCH_OCI_PLATFORM if name.endswith(f"_{a}")), None
+        )
+        out.append((name, ARCH_OCI_PLATFORM[arch] if arch else _PORT_OCI_PLATFORM))
     return out
 
 

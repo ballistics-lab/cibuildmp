@@ -142,6 +142,10 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 - [reference/open-questions.md](reference/open-questions.md) — questions flagged but not yet
   designed or decided
 
+**There is no record 0064.** The number was skipped, not lost — nothing
+was written under it and nothing references it. `0034`-`0038` are the
+`M0`-`M5` build-phase write-ups, which is why no `M4` appears either.
+
 ## Record links
 
 Reference-style link targets for every `[NNNN]` used above (records are immutable/append-only,

@@ -87,7 +87,9 @@ isolation argument that drives `unix`'s split does not apply.
 
 **3. `webassembly`** — one shared image, no per-build axis.
 
-**4. Six toolchain-group images ([0058]).** Before [0058], `natmod.Dockerfile`
+**4. Six toolchain-group images ([0058]).** Five of the six cover natmod's
+own ten arches; `ppc64le_linux` is `qemu`-only and reaches no natmod arch,
+which is why README counts five and this file counts six. Before [0058], `natmod.Dockerfile`
 baked all ten `dynruntime.mk` toolchains into one image, and `qemu.Dockerfile`
 carried one board's worth of `arm-none-eabi`. Both are gone: an **image group
 is a toolchain, not a port** — ten of the fifteen usermod ports and four of
@@ -96,7 +98,7 @@ routinely pulled in by more than one (port, target) pair.
 
 | Group | Holds | Named for |
 | --- | --- | --- |
-| `arm_embedded` | `arm-none-eabi-` | ten usermod ports (`rp2`, `mimxrt`, `samd`, `stm32`, `psoc-edge`, `alif`, `cc3200`, `renesas-ra`, `nrf`) + natmod's four Cortex-M arches + six `qemu` boards |
+| `arm_embedded` | `arm-none-eabi-` | nine usermod ports (`rp2`, `mimxrt`, `samd`, `stm32`, `psoc-edge`, `alif`, `cc3200`, `renesas-ra`, `nrf`) + natmod's four Cortex-M arches + six `qemu` boards |
 | `riscv_embedded` | `riscv64-unknown-elf-`/`riscv-none-elf-` | natmod's `rv32imc`/`rv64imc` + `qemu`'s `VIRT_RV32`/`VIRT_RV64` |
 | `xtensa_lx106` | `xtensa-lx106-elf-` (standalone tarball, micropython.org) | natmod's `xtensa` + usermod's `esp8266` |
 | `xtensa_esp` | `xtensa-esp32-elf-`/`xtensa-esp-elf-` (Espressif crosstool-NG) | natmod's `xtensawin` only |

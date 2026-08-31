@@ -28,7 +28,9 @@ too. Python floor is 3.11 (`tomllib`); CI itself runs on 3.14.
 
 Most of `pytest`'s own suite runs with no Docker daemon at all. Exercising
 a real build — the thing every record in this project insists on before
-calling something done — needs one: point `CIBMP_<TARGET>_DOCKER_IMAGE` at
+calling something done — needs one: point `CIBMP_<PORT>_<TARGET>_DOCKER_IMAGE` (e.g.
+`CIBMP_UNIX_MANYLINUX_2_28_X86_64_DOCKER_IMAGE`; drop the `<TARGET>` segment
+for a port with no per-build image axis) at
 a locally built image (each `docker/*.Dockerfile`'s own header comment
 gives the `docker build`/`docker buildx build` command and the env var it
 answers to) to test a change against your own image before it's published.
@@ -106,6 +108,27 @@ in `docs/0000-TRACKER.md`'s [0038] row, dated, and nowhere else. A living
 document points at that row. Naming a consuming repo is fine when it is an
 *example* ("a7p passes `pre_build_command: make fetch-nanopb`"); asserting
 its current state is not.
+
+## A green test run does not mean a build works
+
+`uv run pytest -q` needs no Docker and finishes in seconds because **every
+build driver is mocked**. It covers option resolution, selectors,
+identifiers, config validation and the docs — not one real compile. You can
+break `build_esp32()`, `build_rp2()` or any emulated `unix` cell and see
+green locally, on push, and on a PR.
+
+What actually compiles something:
+
+| | what it builds | when |
+| --- | --- | --- |
+| `build-examples.yml` | a narrow slice — `unix`, `windows`, `webassembly`, `qemu` | every push |
+| `test-upstream-natmod.yml` / `-usermodule.yml` | MicroPython's own example modules | every push |
+| `test-all-platforms.yml` | every identifier, bucketed | weekly, or manual dispatch |
+
+So: if you touch a driver, run it for real before believing the tests.
+`cibuildmp examples/template --build "<identifier>"` on a machine with
+Docker is the shortest honest check, and `workflow_dispatch` on
+`test-all-platforms.yml` is the thorough one.
 
 ## Adding a new MicroPython tag
 

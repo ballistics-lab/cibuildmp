@@ -53,17 +53,17 @@ the same way [docs/0000-TRACKER.md](../0000-TRACKER.md) folds resolved
   cross-compile from Linux — see **D18**'s own addenda), so `cibuildmp`
   itself running natively on Windows stopped being a real question for
   usermod specifically. `x86`'s multilib and `docker` (D3) are still
-  Linux-only, unchanged. The repo's own root `Dockerfile` + README's own
-  "Target support" tables are the answer for an actual Windows end user
-  today: run `cibuildmp` inside Docker under WSL2, not natively on
-  Windows Python — not verified with a real `docker build`/`docker run`
-  in this project's own dev sandbox (Docker does not run there at all,
-  the same finding **D19**'s own addendum already recorded), but every
-  ingredient in it was checked directly: each `apt install` package
-  live-installed and used for a real build earlier in this same session,
-  and `uv tool install .` → `cibuildmp --dry-run` run for real outside
-  the container. (The root `Dockerfile` itself was later deleted — see
-  [0033].)
+  Linux-only, unchanged.
+
+  **There is no stated answer for a Windows end user right now.** This
+  paragraph used to give one — run `cibuildmp` inside Docker under WSL2,
+  using the repo's own root `Dockerfile` — and then negated it in its own
+  final sentence, because [0033] deleted that `Dockerfile` once usermod
+  needed to launch sibling containers (Docker-in-Docker was ruled out).
+  What is true today: `cibuildmp` is a Python package that needs a
+  reachable Docker daemon, so WSL2 with Docker Desktop is the shape that
+  should work, and nobody has run it that way and reported back. Until
+  someone does, this is the open question, not a recommendation.
 - **Old tags vs. a modern host `gcc`.** Found while verifying **D13** live:
   `v1.21.0` fails to build `mpy-cross` under a recent `gcc`
   (`-Werror=unterminated-string-initialization` on upstream's own
