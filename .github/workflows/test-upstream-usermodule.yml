@@ -341,4 +341,30 @@ jobs:
             exit 1
           fi
 
-          timeout 20 mpremote connect "$pty" run examples/usercmodule/smoke_test.py
+          # The pty exists the instant qemu prints its path, but pyserial's
+          # exclusive open (what mpremote uses) can still race whatever
+          # finishes setting it up -- caught live on the first real CI run,
+          # which failed here with "failed to access ... it may be in use by
+          # another program" on the very first attempt. `mpremote`'s own
+          # `SerialTransport` has a `wait=` retry loop for exactly this class
+          # of just-enumerated-device race, but `mpremote connect <device>`
+          # (an explicit path, not auto-detect) never passes a nonzero
+          # `wait`, so it gets one attempt. Retried here instead, and only
+          # for that specific message -- a real smoke-test failure (a
+          # genuine assertion from the script itself) still fails on the
+          # first attempt, confirmed live the same way the non-race path was.
+          attempt=1
+          max_attempts=10
+          while true; do
+            if output=$(timeout 20 mpremote connect "$pty" run examples/usercmodule/smoke_test.py 2>&1); then
+              echo "$output"
+              break
+            fi
+            echo "$output"
+            if [[ "$output" == *"failed to access"* ]] && [ "$attempt" -lt "$max_attempts" ]; then
+              attempt=$((attempt + 1))
+              sleep 0.5
+              continue
+            fi
+            exit 1
+          done

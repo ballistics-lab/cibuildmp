@@ -89,5 +89,31 @@ better than the `ls`-only step it replaces.
   them gets a smoke step here -- the same "widen only if it finds something"
   call [0079] itself made for `webassembly`/`esp32`.
 
+**Addendum, 2026-08-31 — the sandbox verification above hid a real GitHub
+Actions race.** The first real CI run of `build-qemu` failed immediately:
+
+```
+mpremote: failed to access /dev/pts/0 (it may be in use by another program)
+```
+
+on the very first `mpremote connect` call, right after the polling loop found
+the "redirected to" line -- something this record's own live verification
+never hit, because every manual check above had several seconds of human
+typing time between starting qemu and connecting to it. `mpremote`'s own
+`SerialTransport.__init__` (`transport_serial.py`) has a `wait=` retry loop
+built for exactly this class of just-enumerated-device race, but `do_connect`
+only uses it for `mpremote connect auto`'s USB-VID/PID auto-detect path;
+`mpremote connect <explicit-path>` always constructs it with `wait=0`, one
+attempt, no retry, whatever the actual cause of the race turns out to be on a
+given runner.
+
+The smoke step now retries the `mpremote` call itself (up to 10 times, 0.5s
+apart) but only when its output contains that exact "failed to access"
+message -- a genuine failure from the script (an assertion, an import error)
+still fails the job on the first attempt, verified the same way the pass/fail
+paths above were: a fake `mpremote` replaying the busy message twice before
+succeeding exits 0 through the retry loop, and one emitting a real traceback
+exits 1 immediately, no retry spent on it.
+
 [0069]: 0069-upstream-usercmodule-narrow-ci-slice.md
 [0079]: 0079-collected-artifact-is-more-than-one-file.md
