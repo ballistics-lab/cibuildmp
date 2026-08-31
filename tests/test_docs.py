@@ -24,6 +24,7 @@ reason -- its rows describe past states on purpose.
 from __future__ import annotations
 
 import re
+import sys
 import tomllib
 from pathlib import Path
 
@@ -360,6 +361,24 @@ def test_vendored_images_reference_names_real_image_groups() -> None:
     assert not unknown, (
         f"vendored-images.md names image groups that "
         f"resources/pinned_docker_images.toml does not have: {unknown}"
+    )
+
+
+def test_generated_doc_blocks_are_current() -> None:
+    """The blocks `bin/refresh_docs.py` owns must match what it produces.
+
+    The stronger half of this suite: the checks above catch a documented
+    fact that became wrong, while this one removes the chance to write it
+    by hand at all. Both blocks under it were hand-maintained tables
+    carrying a promise that they were current -- `vendored-images.md`'s
+    said so in as many words -- which is the promise that goes stale with
+    nobody noticing.
+    """
+    sys.path.insert(0, str(REPO / "bin"))
+    import refresh_docs
+
+    assert refresh_docs.main(["--check"]) == 0, (
+        "a generated doc block is out of date -- run bin/refresh_docs.py"
     )
 
 

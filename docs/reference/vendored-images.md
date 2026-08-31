@@ -115,37 +115,82 @@ names it directly (`image = "esp_idf_base"`).
 
 ## Full port/arch → group mapping
 
-From `resources/build-platforms.toml`, current as of this file's own last
-edit — the toml file itself is the source of truth if these ever drift apart:
+Generated from `resources/build-platforms.toml` by `bin/refresh_docs.py`,
+not maintained by hand — the previous version of this section promised it was
+"current as of this file's own last edit", which is exactly the promise that
+goes stale without anyone noticing. `tests/test_docs.py` fails the build if
+the block below is out of date, and a group named here that
+`resources/pinned_docker_images.toml` does not carry is marked inline rather
+than quietly resolving to nothing at build time.
 
-**natmod** (`images.<arch>`):
+<!-- generated: image-group-mapping -- bin/refresh_docs.py, do not edit by hand -->
+**natmod (`images.<arch>`)**
 
 | Arch | Group |
 | --- | --- |
-| `x64`, `x86` | `natmod_host` |
-| `armv6m`, `armv7m`, `armv7emsp`, `armv7emdp` | `arm_embedded` |
-| `rv32imc`, `rv64imc` | `riscv_embedded` |
+| `armv6m` | `arm_embedded` |
+| `armv7emdp` | `arm_embedded` |
+| `armv7emsp` | `arm_embedded` |
+| `armv7m` | `arm_embedded` |
+| `rv32imc` | `riscv_embedded` |
+| `rv64imc` | `riscv_embedded` |
+| `x64` | `natmod_host` |
+| `x86` | `natmod_host` |
 | `xtensa` | `xtensa_lx106` |
 | `xtensawin` | `xtensa_esp` |
 
-**usermod** (`image = "..."` unless noted):
+**usermod, one image for the whole port (`image = "..."`)**
 
 | Port | Group |
 | --- | --- |
-| `unix` | `images.<tag> = "<tag>"` — identity map, see the table above |
-| `windows` | `windows` |
-| `webassembly` | `webassembly` |
+| `alif` | `arm_embedded` |
+| `cc3200` | `arm_embedded` |
 | `esp32` | `esp_idf_base` |
-| `rp2`, `mimxrt`, `samd`, `stm32`, `psoc-edge`, `alif`, `cc3200`, `renesas-ra`, `nrf` | `arm_embedded` |
 | `esp8266` | `xtensa_lx106` |
+| `mimxrt` | `arm_embedded` |
+| `nrf` | `arm_embedded` |
+| `psoc-edge` | `arm_embedded` |
+| `renesas-ra` | `arm_embedded` |
+| `rp2` | `arm_embedded` |
+| `samd` | `arm_embedded` |
+| `stm32` | `arm_embedded` |
+| `webassembly` | `webassembly` |
+| `windows` | `windows` |
 
-**`qemu`** (`images.<board>`):
+**usermod `qemu` (`images.<target>`)**
 
 | Board | Group |
 | --- | --- |
-| `MICROBIT`, `MPS2_AN385`, `MPS2_AN500`, `MPS3_AN547`, `NETDUINO2`, `SABRELITE` | `arm_embedded` |
-| `VIRT_RV32`, `VIRT_RV64` | `riscv_embedded` |
+| `MICROBIT` | `arm_embedded` |
+| `MPS2_AN385` | `arm_embedded` |
+| `MPS2_AN500` | `arm_embedded` |
+| `MPS3_AN547` | `arm_embedded` |
+| `NETDUINO2` | `arm_embedded` |
 | `POWERNV9` | `ppc64le_linux` |
+| `SABRELITE` | `arm_embedded` |
+| `VIRT_RV32` | `riscv_embedded` |
+| `VIRT_RV64` | `riscv_embedded` |
+
+**usermod `unix` (`images.<target>`)**
+
+| Target | Group |
+| --- | --- |
+| `manylinux_2_28_aarch64` | `manylinux_2_28_aarch64` |
+| `manylinux_2_28_i686` | `manylinux_2_28_i686` |
+| `manylinux_2_28_ppc64le` | `manylinux_2_28_ppc64le` |
+| `manylinux_2_28_s390x` | `manylinux_2_28_s390x` |
+| `manylinux_2_28_x86_64` | `manylinux_2_28_x86_64` |
+| `manylinux_2_31_armv7l` | `manylinux_2_31_armv7l` |
+| `manylinux_2_39_mipsel` | `manylinux_2_39_mipsel` |
+| `manylinux_2_39_riscv64` | `manylinux_2_39_riscv64` |
+| `musllinux_1_2_aarch64` | `musllinux_1_2_aarch64` |
+| `musllinux_1_2_armv7l` | `musllinux_1_2_armv7l` |
+| `musllinux_1_2_i686` | `musllinux_1_2_i686` |
+| `musllinux_1_2_ppc64le` | `musllinux_1_2_ppc64le` |
+| `musllinux_1_2_riscv64` | `musllinux_1_2_riscv64` |
+| `musllinux_1_2_s390x` | `musllinux_1_2_s390x` |
+| `musllinux_1_2_x86_64` | `musllinux_1_2_x86_64` |
+<!-- /generated: image-group-mapping -->
 
 ## Publishing flow
 

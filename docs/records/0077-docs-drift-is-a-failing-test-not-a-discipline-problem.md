@@ -79,6 +79,33 @@ living docs entirely rather than trying to test them. The four incidents this
 suite was written after were all of the mechanical kind, which is the argument
 for it, not a claim that it is sufficient.
 
+## Addendum, same day -- the stronger half: generate what can be generated
+
+The checks above catch a documented fact that *became* wrong. `bin/refresh_docs.py`
+removes the chance to write one by hand at all, for the subset that is a pure
+function of the resource tables. Two blocks so far, each between a
+`<!-- generated: <name> -->` marker pair, with `tests/test_docs.py` failing the
+build when either is out of date:
+
+- **README's identifier-shape table.** Every example is now picked from a real
+  row at that port's own newest stable tag, rather than composed from the format
+  string -- a composed example can be well-formed and name nothing, which is the
+  exact failure this record's own audit found in `design.md`.
+- **`vendored-images.md`'s port/arch -> group mapping.** That section carried the
+  sentence "current as of this file's own last edit", which is the promise that
+  goes stale with nobody noticing; it is generated now, exhaustive over all
+  fifteen usermod ports rather than the subset a person kept up, and a group no
+  published image backs is marked inline instead of resolving to nothing at
+  build time.
+
+One more stale number found while wiring this up, and deliberately **not**
+replaced with a fresh one: README claimed `test-all-platforms.yml` covers "83
+real `esp32` identifiers and 74 real `rp2` ones". Those were a two-tag slice,
+accurate when written; the real totals are now 442 and 374, off by five times,
+because each new MicroPython tag adds a whole board set. The rows are the fact
+and the matrix already says "every row" -- the count was never load-bearing, so
+it is gone rather than pinned to today's value.
+
 [0041]: 0041-docs-restructure.md
 [0050]: 0050-natmod-is-docker-only.md
 [0073]: 0073-composite-actions-are-a-permanent-legacy-fallback.md

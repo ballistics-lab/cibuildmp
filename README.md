@@ -107,15 +107,17 @@ platform.**
 
 Identifier shapes, one per platform:
 
-| Platform              | Shape                   | Example                         |
-| --------------------- | ----------------------- | ------------------------------- |
-| natmod                | `mpy{abi}-{tag}-{arch}` | `mpy6.3-v1.29.0-armv7emsp`      |
-| usermod `unix`        | `{tag}-{arch}`          | `v1.29.0-manylinux_2_28_x86_64` |
-| usermod `windows`     | `{tag}-{arch}`          | `v1.29.0-win_amd64`             |
-| usermod `webassembly` | `{tag}-{arch}`          | `v1.29.0-wasm32`                |
-| usermod `qemu`        | `{tag}-qemu-{board}`    | `v1.24.0-qemu-MICROBIT`         |
-| usermod `esp32`       | `{tag}-esp32-{board}`   | `v1.29.0-esp32-ESP32_GENERIC`   |
-| usermod `rp2`         | `{tag}-rp2-{board}`     | `v1.29.0-rp2-RPI_PICO`          |
+<!-- generated: identifier-shapes -- bin/refresh_docs.py, do not edit by hand -->
+| Platform | Shape | Example |
+| --- | --- | --- |
+| natmod | `mpy{abi}-{tag}-{arch}` | `mpy6.3-v1.29.0-armv6m` |
+| usermod `esp32` | `{tag}-esp32-{board}` | `v1.29.0-esp32-ARDUINO_NANO_ESP32` |
+| usermod `qemu` | `{tag}-qemu-{board}` | `v1.29.0-qemu-MICROBIT` |
+| usermod `rp2` | `{tag}-rp2-{board}` | `v1.29.0-rp2-ADAFRUIT_FEATHER_RP2040` |
+| usermod `unix` | `{tag}-{arch}` | `v1.29.0-manylinux_2_28_aarch64` |
+| usermod `webassembly` | `{tag}-{arch}` | `v1.29.0-wasm32` |
+| usermod `windows` | `{tag}-{arch}` | `v1.29.0-win32` |
+<!-- /generated: identifier-shapes -->
 
 The shape genuinely differs per usermod port — `unix`/`windows`/
 `webassembly` carry no port name at all in the identifier, only `qemu`/
@@ -498,9 +500,12 @@ through that path). `esp32` and `rp2` are not in that smoke test, but not
 because either is unproven -- both are exercised far more broadly, on a
 weekly schedule (or manual dispatch any time sooner), through
 `test-all-platforms.yml`'s own real matrix
-(`bin/plan_test_matrix.py`, record 0065): 83 real `esp32` identifiers and
-74 real `rp2` ones, every board/tag row `resources/build-platforms.toml`
-carries, not a spot check. **Both build through the exact same `cibuildmp`
+(`bin/plan_test_matrix.py`, record 0065): every board/tag row
+`resources/build-platforms.toml` carries for either port, not a spot check.
+(No count here on purpose. It used to say "83 real `esp32` identifiers and
+74 real `rp2` ones" — a two-tag slice that was accurate when written and is
+now off by five times, since each new MicroPython tag adds a full board set.
+The rows are the fact; their number is a snapshot.) **Both build through the exact same `cibuildmp`
 CLI/action every other ✅ row does** -- `esp32`'s own composite action
 (tracker item [0038]) was only ever needed while `build_esp32()` still
 provisioned onto the bare host; record 0028 moved it fully into

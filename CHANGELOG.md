@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`bin/refresh_docs.py` generates the doc tables that are pure functions of
+  the resource files** — README's identifier-shape table and
+  `docs/reference/vendored-images.md`'s port/arch → image-group mapping, each
+  between a `<!-- generated: … -->` marker pair. `tests/test_docs.py` fails the
+  build if either is out of date, so these cannot drift rather than merely being
+  checked for drift. Every identifier example is now picked from a real row at
+  that port's own newest stable tag instead of composed from the format string:
+  a composed example can be well-formed and still name nothing, which is exactly
+  what `design.md` had shipped. The mapping is also exhaustive now (all fifteen
+  usermod ports, not the subset kept up by hand), and a group no published image
+  backs is marked inline. Record 0077.
+  - One more stale number, removed rather than refreshed: README claimed
+    `test-all-platforms.yml` covers "83 real `esp32` identifiers and 74 real
+    `rp2` ones". That was a two-tag slice; the totals are now 442 and 374,
+    because each new MicroPython tag adds a whole board set. The matrix already
+    says "every row", which is the durable statement.
 - **Docs drift now fails the build.** `tests/test_docs.py` checks the living
   docs (`README.md`, `docs/ACTIONS.md`, `docs/reference/*.md`) against the
   source they describe: identifiers must exist in `build-platforms.toml`,

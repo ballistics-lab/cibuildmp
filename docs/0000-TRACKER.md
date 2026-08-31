@@ -99,7 +99,12 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
       claiming usermod identifiers carry a port segment
       (`v1.29.0-unix-manylinux_2_28_x86_64` -- `unix`/`windows`/`webassembly`
       all use a bare `{tag}-{arch}`), and fifteen undefined record links across
-      four files
+      four files. Addendum the same day: `bin/refresh_docs.py` generates the two
+      tables that are pure functions of the resource files (README's identifier
+      shapes, `vendored-images.md`'s group mapping), so those cannot drift at
+      all rather than being checked for it -- and README's "83 esp32 / 74 rp2"
+      count, a two-tag slice now off by five times, is deleted rather than
+      refreshed
 - [x] [0076] the `unix-mipsel` composite-action holdout is `micropython-bclibc`
       and `micropython-wasm3`, not `a7p` | [0073] took the claim from this
       tracker's own [0038] row and propagated it into `README.md` and
