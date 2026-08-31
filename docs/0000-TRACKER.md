@@ -66,6 +66,7 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### Implemented
 
+- [x] [0078] handing the repo to an uncontexted reader is the docs test the suite cannot be
 - [x] [0077] docs drift is a failing test, not a discipline problem
 - [x] [0076] the `unix-mipsel` holdout is `micropython-bclibc` and `micropython-wasm3`, not `a7p`
 - [x] [0075] an unrecognised top-level scalar key is an error, not a silent default
@@ -236,3 +237,4 @@ record is added.
 [0075]: records/0075-top-level-scalar-keys-are-validated.md
 [0076]: records/0076-the-mipsel-holdout-is-bclibc-and-wasm3-not-a7p.md
 [0077]: records/0077-docs-drift-is-a-failing-test-not-a-discipline-problem.md
+[0078]: records/0078-uncontexted-agent-audit-as-a-docs-test.md

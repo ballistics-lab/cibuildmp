@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Record 0078: handing the repo to an uncontexted reader is the docs test the
+  suite cannot be.** Five rounds of it produced this session's findings, and the
+  movement between rounds is the useful part — false user-facing claims, then
+  stale docstrings plus two holes in the guards themselves, then source comments
+  once the docs were clean, then the guard's own dependence on human memory, then
+  (given a *task* instead of a survey) a silent config footgun no reader would
+  ever see. `CONTRIBUTING.md` carries the procedure and the two things that make
+  a round useful: give no hints, and switch from survey to task once surveys
+  saturate. `CLAUDE.md` now also says which docs are machine-checked and which
+  are generated, so the next reader does not rediscover that.
+
 ### Fixed
 
 - **CI caught a false positive in the new path guard that a development tree

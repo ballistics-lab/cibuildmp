@@ -90,6 +90,23 @@ image-group mapping, the toolchain map are generated, not written. Run it
 after any change to `resources/build-platforms.toml` or
 `resources/pinned_docker_images.toml`; the test tells you if you forgot.
 
+### The docs test the suite cannot be
+
+`tests/test_docs.py` checks what has a machine-readable counterpart. For the
+rest — prose that only makes sense if you already know the answer — the
+procedure is [0078]: hand the repository to a reader with **no context**, ask
+it to explain the project back and then to list everything it could not
+answer, everything it had to read source for, and everything contradictory.
+
+Two things that make the difference between a useful round and a wasted one:
+
+- **Give no hints.** Told what to look for, a reader confirms it. Told nothing,
+  it reports where it actually got stuck.
+- **Prefer a task to a survey once surveys stop finding things.** Five rounds
+  in, "explain this project" had saturated; "set up cibuildmp for my module and
+  put it on CI" immediately found a silent config-overriding footgun and the
+  fact that a CI tool had no complete workflow anywhere in its docs.
+
 ### Never state another repository's status in a living document
 
 This is a rule rather than a test because it is the one class nothing here
@@ -227,3 +244,4 @@ progress / Proposed" split is the only status claim worth acting on.
 [0058]: docs/records/0058-image-groups-are-toolchains-not-ports.md
 [0076]: docs/records/0076-the-mipsel-holdout-is-bclibc-and-wasm3-not-a7p.md
 [0077]: docs/records/0077-docs-drift-is-a-failing-test-not-a-discipline-problem.md
+[0078]: docs/records/0078-uncontexted-agent-audit-as-a-docs-test.md
