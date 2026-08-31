@@ -85,6 +85,12 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 - [ ] [0057] more than one module per build | **decided, documentation not mechanism**: natmod is one config per module (already demonstrated); usermod stays one `user-c-modules` path, N modules live in the consumer's own layout (subdirectories on Make ports, an aggregating `.cmake` on CMake ports) -- no list, since the aggregator is the consumer's own file. Both forms now tested live by [0054]/[0069]; writing it down for users still left
 ### Implemented
 
+- [x] [0073] `design.md`'s "Positioning" section still described the rejected
+      `build-natmod`-as-wrapper plan as live | fixed alongside README's own
+      "Composite actions" section and `docs/ACTIONS.md`'s intro -- all three now
+      say plainly that `.github/actions/*` doesn't call `cibuildmp` at all, isn't
+      a second usage path, and stays only for `a7p`'s own `unix-mipsel` holdout
+      ([0067])
 - [x] [0055]/[0072] all eleven upstream `examples/natmod/*` modules build through
       cibuildmp's real natmod path | `{micropython}` placeholder in `module-dir` (the
       natmod mirror of [0071]) plus a `collect_output()` fallback for `py/dynruntime.mk`'s
@@ -342,3 +348,4 @@ record is added.
 [0070]: records/0070-unix-collected-binary-missing-repaired-lib-sidecar.md
 [0071]: records/0071-micropython-placeholder-in-user-c-modules.md
 [0072]: records/0072-natmod-micropython-placeholder-and-upstream-natmod-ci.md
+[0073]: records/0073-composite-actions-are-a-permanent-legacy-fallback.md

@@ -15,21 +15,24 @@ This repository is `ballistics-lab/cibuildmp`, and it superseded
 `ballistics-lab/micropython-native-ci` (**D11**): the composite actions and
 the tool live together, one version line, one place a fix lands.
 
-The composite actions in `.github/actions/` solve the toolchain problem, but
-only inside GitHub Actions. Everything around them stays hand-copied in each
-consuming repo:
+The composite actions in `.github/actions/` solved the toolchain problem,
+but only inside GitHub Actions, and only hand-driven per consumer.
+`cibuildmp` — the CLI, wrapped by the root `action.yml` — is what actually
+absorbed that ground: the arch matrix, `runs-on:` selection, artifact
+layout, the version pin, and local reproducibility all now go through one
+config and one action, for natmod fully and for six of the fifteen
+verified usermod ports (see the README's own "Target support" table).
 
-- the arch matrix itself (`natmod.yml`'s 10-entry `arch:` list, duplicated
-  per repo),
-- `runs-on:` selection, which a composite action structurally cannot do for
-  itself (documented under `build-usermod-unix` in `README.md`),
-- `upload-artifact` name/path globs, deliberately left to the caller,
-- the `@v0.2.0` pin, repeated ~15 times across three repos,
-- and there is no way to reproduce any of it locally.
-
-`cibuildmp` absorbs those five. The actions stay as the low-level layer until
-`cibuildmp` covers their ground, then become thin wrappers over it (the same
-relationship `pypa/cibuildwheel@v3` has with `python -m cibuildwheel`).
+**Not** absorbed the way this section originally expected: the plan to
+fold `.github/actions/build-natmod` into a thin `cibuildmp --build`
+wrapper (the `pypa/cibuildwheel@v3`-style relationship this paragraph used
+to describe) was proposed and explicitly rejected — see tracker [0038],
+"Rejected". `.github/actions/*` stays a permanent, separate legacy layer,
+not a temporary one being absorbed over time; it survives specifically
+because `a7p`'s own `unix-mipsel` cross-compile still depends on
+`build-usermod-unix` directly, with no native runner to move it off of
+([0067]). Read `docs/ACTIONS.md` only as reference for that kind of
+holdout, not as an alternate way to use `cibuildmp`.
 
 <!-- migrated verbatim from docs/BACKLOG.md lines 433-476 (Identifier scheme) -->
 

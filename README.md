@@ -601,14 +601,24 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the dev loop, and
 [`CLAUDE.md`](CLAUDE.md) before touching anything with a `cibuildwheel`
 counterpart — selectors, identifiers, options, container invocation.
 
-## Composite actions
+## Legacy composite actions (not a way to use `cibuildmp`)
 
-The pre-CLI building blocks — one GitHub Action per build step
-(`fetch-micropython`, `build-natmod`, `build-usermod-unix`/`-windows`/
-`-webassembly`/`-rp2040`/`-armv7m`/`-esp32`, …). Still fully supported for
-CI, but no longer where new work starts — new usermod ports and arches
-land in the CLI's own `usermod/build_<port>.py` first. Full input/output
-reference and a usage example: [`docs/ACTIONS.md`](docs/ACTIONS.md).
+`.github/actions/{fetch-micropython,clone-micropython,build-natmod,
+build-usermod-unix/-windows/-webassembly/-rp2040/-armv7m/-esp32}` predate
+the CLI and don't invoke `cibuildmp` at all — each is its own bare-host
+toolchain-install-then-`make`/`idf.py` implementation, one GitHub Action
+per build step. They are **not** a second supported way to use this
+project; `action.yml` above (wrapping the real CLI) is the only current
+path for a new integration.
+
+This layer is a deliberate fallback, not something being absorbed into the
+CLI over time — folding `build-natmod` into a thin `cibuildmp --build`
+wrapper was proposed and explicitly rejected (tracker [0038], see
+"Rejected"). It stays only because one real case still depends on it
+directly: `a7p`'s own `unix-mipsel` cross-compile has no native runner and
+deliberately stays on `build-usermod-unix` ([0067]). Read
+[`docs/ACTIONS.md`](docs/ACTIONS.md) if you're maintaining or migrating off
+a holdout like that — not as a starting point for a new module.
 
 ## Versioning
 
