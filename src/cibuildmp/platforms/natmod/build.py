@@ -294,25 +294,38 @@ def run_make(
 
 
 def collect_output(build_options: BuildOptions, module_root: Path) -> Path:
-    """Find the one .mpy the `dist` target produced.
+    """Find the one .mpy the build produced.
 
-    Every natmod Makefile in the wild drops it under build/<arch>*/ -- the
+    `build/<arch>*/` is this project's own downstream `dist`-target
+    convention (`build.make_command`'s own default `make-target`), the
     same layout build-natmod's own artifact-upload step already assumes
-    (`path: natmod/build/${{ matrix.arch }}*/`), not something cibuildmp
-    invents here.
+    (`path: natmod/build/${{ matrix.arch }}*/`) -- not something every
+    natmod Makefile in the wild follows. Confirmed directly against a real
+    checkout (docs/records/0055): `py/dynruntime.mk`'s own `all` target
+    (upstream's own examples never define a `dist` target at all) instead
+    leaves `$(MOD).mpy` sitting in `module_root` itself, one fixed
+    filename with no arch-scoped directory of its own. Tried only once the
+    arch-scoped location above comes up empty, so a project using this
+    project's own `dist` contract sees exactly the same error it always
+    did.
     """
     arch = build_options.target.arch
     candidates = sorted(module_root.glob(f"build/{arch}*/*.mpy"))
+    fallback = False
+    if not candidates:
+        candidates = sorted(module_root.glob("*.mpy"))
+        fallback = True
     if not candidates:
         raise BuildError(
             f"{build_options.identifier}: `{build_options.make_target}` produced no "
-            f".mpy under {module_root}/build/{arch}*/"
+            f".mpy under {module_root}/build/{arch}*/ or directly in {module_root}"
         )
     if len(candidates) > 1:
+        where = module_root if fallback else module_root / f"build/{arch}*"
         names = ", ".join(p.name for p in candidates)
         raise BuildError(
             f"{build_options.identifier}: ambiguous output -- found "
-            f"{len(candidates)} .mpy files under {module_root}/build/{arch}*/: {names}"
+            f"{len(candidates)} .mpy files under {where}: {names}"
         )
     return candidates[0]
 

@@ -195,6 +195,35 @@ def test_real_build_writes_github_step_summary_when_set(monkeypatch, tmp_path):
     assert "42 Bytes" in text
 
 
+def test_build_substitutes_micropython_placeholder_in_module_dir(monkeypatch, tmp_path):
+    # `{micropython}` (record 0072, the natmod mirror of usermod's own
+    # record 0071) lets `module-dir` name a path *inside the pinned
+    # checkout* without a caller resolving it first -- `mpy_dir` is already
+    # real and resolved by the time build_all()'s own per-target loop runs.
+    config = f'build = "mpy{ABI}-*-x64"\nmodule-dir = "{{micropython}}/examples/natmod/features0"\n'
+    package_dir = Path(write(tmp_path, config))
+
+    mpy_dir = tmp_path / "mpy"
+    monkeypatch.setattr(natmod_cli, "fetch_micropython", lambda tag, **k: mpy_dir)
+    monkeypatch.setattr(natmod_cli, "build_mpy_cross", lambda mpy_dir, arch, **k: None)
+    monkeypatch.setattr(natmod_cli, "read_mpy_abi", lambda mpy_dir: "6.3")
+
+    produced = tmp_path / "features0.mpy"
+    produced.write_bytes(b"\x00" * 7)
+    captured = {}
+
+    def fake_build_target(build_options, mpy_dir, module_root, output_dir, **k):
+        captured["module_root"] = module_root
+        return BuildResult(
+            identifier=build_options.identifier, output=produced, duration=0.1
+        )
+
+    monkeypatch.setattr(natmod_cli, "build_target", fake_build_target)
+
+    assert main([str(package_dir)]) == 0
+    assert captured["module_root"] == (mpy_dir / "examples" / "natmod" / "features0")
+
+
 def test_keep_going_continues_past_a_failed_target_and_writes_json_report(
     monkeypatch, tmp_path
 ):

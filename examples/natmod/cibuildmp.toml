@@ -1,0 +1,46 @@
+# cibuildmp's own [0055]/[0072] fixture: MicroPython's own `examples/natmod/`
+# (features0-4, btree, deflate, framebuf, heapq, random, re), not a module
+# this project wrote for itself the way `examples/template/natmod` is.
+#
+# Only `features0` wired up here, deliberately: [0055]'s own survey names it
+# "deliberately minimal ... would prove the contract" ahead of the modules
+# that "drag in real MicroPython internals" -- `btree` even needs a git
+# submodule cibuildmp's own checkout resolution never initialises (see that
+# record's own "Two examples worth calling out before anyone starts").
+# Widen only if this slice finds something, [0054]'s own rule.
+#
+# No `build =` here, on purpose, matching `examples/usercmodule/cibuildmp.toml`
+# (record 0069): `.github/workflows/test-upstream-natmod.yml` passes its own
+# `--build` per job, and a default here would either duplicate the workflow's
+# own value and drift from it, or resolve to something real but wrong for a
+# caller who runs `cibuildmp examples/natmod` directly with nothing given.
+
+# `{micropython}` (record 0072, the natmod mirror of usermod's own record
+# 0071 `user-c-modules` placeholder) points straight at the pinned checkout
+# `sources.fetch_micropython()` already resolved -- no vendored copy of
+# upstream's own file at all, unlike `examples/template/natmod/Makefile`,
+# which this project wrote for itself.
+module-dir = "{micropython}/examples/natmod/features0"
+
+# `py/dynruntime.mk` only ever defines `all`, never this project's own
+# `dist` convention -- confirmed against a real checkout, docs/records/0055.
+# `build.collect_output()`'s own fallback (record 0072) is what makes that
+# produce a real, findable `.mpy`: `all` leaves `$(MOD).mpy` sitting
+# directly in module-dir, never under `build/<arch>*/`.
+make-target = "all"
+
+# `all`'s own build products are not scoped by arch inside module-dir the
+# way this project's own `dist` target is (record 0055's own guard survey):
+# upstream's examples are written to be built once, by hand, one arch at a
+# time. cibuildmp instead builds every selected arch back to back in this
+# same checkout, so a leftover `features0.mpy` -- or, for any pinned tag
+# older than upstream's own `531c80dc0` ("tools/mpy_ld.py: Do not share
+# build directory across architectures"), a leftover unscoped `build/` --
+# from the *previous* arch can read as up to date and ship silently
+# unchanged. `build_all()`'s own pre-loop `build/` cleanup (this project's
+# `dist` contract) only runs once per invocation, before the tag is even
+# known, so it cannot reach a `{micropython}`-templated module-dir at all
+# (docs/records/0072) -- clearing both files before *every* single arch's
+# build, here instead, keeps each arch starting from nothing, at the one
+# cost of an always-cold rebuild.
+pre-build-command = "rm -rf features0.mpy build build-*"

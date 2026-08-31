@@ -218,6 +218,33 @@ def test_collect_output_ambiguous_is_a_build_error(tmp_path):
         collect_output(build_options(), tmp_path)
 
 
+def test_collect_output_falls_back_to_module_root_for_make_target_all(tmp_path):
+    # record 0055/0072: `make-target = "all"` against an unmodified upstream
+    # `py/dynruntime.mk` leaves `$(MOD).mpy` sitting in module_root itself,
+    # not under build/<arch>*/ at all -- confirmed against a real checkout.
+    write_mpy(tmp_path / "features0.mpy", native_code=7)
+    found = collect_output(build_options(make_target="all"), tmp_path)
+    assert found == tmp_path / "features0.mpy"
+
+
+def test_collect_output_prefers_arch_scoped_dir_over_module_root_fallback(tmp_path):
+    # The fallback is only tried once build/<arch>*/ comes up empty -- a
+    # project already following this project's own `dist` contract must see
+    # exactly the same result it always did, even if a stray .mpy also sits
+    # in module_root for some unrelated reason.
+    write_mpy(tmp_path / "build" / "armv7emsp-eabi" / "mymodule.mpy", native_code=7)
+    write_mpy(tmp_path / "unrelated.mpy", native_code=7)
+    found = collect_output(build_options(), tmp_path)
+    assert found == tmp_path / "build" / "armv7emsp-eabi" / "mymodule.mpy"
+
+
+def test_collect_output_ambiguous_module_root_fallback_is_a_build_error(tmp_path):
+    write_mpy(tmp_path / "one.mpy", native_code=7)
+    write_mpy(tmp_path / "two.mpy", native_code=7)
+    with pytest.raises(BuildError, match="ambiguous output"):
+        collect_output(build_options(make_target="all"), tmp_path)
+
+
 # -- header parsing / verification -------------------------------------------
 
 

@@ -1,8 +1,8 @@
 # 0055 — an `examples/` natmod fixture built on upstream's own `examples/natmod`
 
-- Status: Proposed (nothing built; and the first thing this record found is that it
-  cannot simply be pointed at, which is the interesting part)
-- Related: [0002], [0014], [0049]
+- Status: In progress ([0072] implemented option 2 for one module, `features0`; the
+  other ten and two named risks below are still open)
+- Related: [0002], [0014], [0049], [0072]
 
 ## The idea, and what checking it immediately turned up
 
@@ -128,6 +128,19 @@ usermod"), and this record's own three-way choice (shim Makefile / fit-upstream 
 document-and-descope) is still not made. Worth knowing before whoever picks this up reasons
 from the now-stale vendoring citation above.
 
+## Addendum, 2026-08-31 (second) — option 2 implemented, for `features0` only
+
+[0072] picked option 2 and landed it: a `{micropython}` placeholder for `module-dir`
+(the natmod mirror of [0071]'s `user-c-modules` one) plus a fallback in
+`collect_output()` for `py/dynruntime.mk`'s own `all` target, wired around exactly one
+module (`features0`) with a real, narrow CI slice
+(`.github/workflows/test-upstream-natmod.yml`). [0072] also corrects this record's own
+`BUILD ?= build` citation: upstream's `531c80dc0` scoped it to `BUILD ?= build-$(ARCH)`
+between the checkout this record cited and the currently pinned `v1.29.0` -- real for the
+tag this record checked, no longer true for the newest one. The other ten modules,
+`btree`'s submodule requirement, and the rv32imc arch-flags collision this record's own
+guard survey named are all still open -- see [0072] for the detail on each.
+
 [0002]: 0002-delegate-compile-own-environment.md
 [0014]: 0014-mip-package-per-identifier.md
 [0015]: 0015-rv32imc-arch-flags-identifier.md
@@ -136,3 +149,4 @@ from the now-stale vendoring citation above.
 [0054]: 0054-usermod-example-from-upstream-usercmodule.md
 [0069]: 0069-upstream-usercmodule-narrow-ci-slice.md
 [0071]: 0071-micropython-placeholder-in-user-c-modules.md
+[0072]: 0072-natmod-micropython-placeholder-and-upstream-natmod-ci.md

@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   MicroPython checkout**, substituted with the real, already-fetched `mpy_dir` before any
   Docker/mount step, uniformly for every usermod port. Closes the gap [0069] named and
   deliberately left open ("no `{checkout}`-style template today"). Record 0071.
+- **The same `{micropython}` placeholder, and a real upstream-`examples/natmod` CI slice,
+  for natmod.** `module-dir` can now name a path inside the pinned checkout directly
+  (`{micropython}/examples/natmod/features0`), and `collect_output()` gained a fallback
+  for `py/dynruntime.mk`'s own `all` target, which — unlike this project's own `dist`
+  convention — leaves `$(MOD).mpy` sitting in module-dir itself rather than under
+  `build/<arch>*/`. `test-upstream-natmod.yml` builds MicroPython's own `examples/natmod/
+  features0` for two real arches (`x64`, `armv7emsp`) in one invocation, the scenario
+  record 0055's own guard survey was about. Record 0072.
 - **The `[0054]`/`[0069]` upstream-`examples/usercmodule` fixture now covers all six usermod
   ports**, not just `unix`/`rp2`: `esp32`, `windows`, `webassembly` and `qemu` all build
   `cppexample`/`cexample`/`subpackage` in CI now too. `examples/usercmodule/cibuildmp.toml`
