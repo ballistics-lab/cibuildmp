@@ -919,6 +919,7 @@ than restarting (see the 0.3.0a1 entry). -->
 [0032]: docs/records/0032-unix-docker-default-and-webassembly-wiring.md
 [0038]: docs/records/0038-m5-adopt-in-three-repos.md
 [0043]: docs/records/0043-unix-adopts-cibuildwheel-native-image-model.md
+[0052]: docs/records/0052-config-is-a-tree-not-a-selector-matrix.md
 [0054]: docs/records/0054-usermod-example-from-upstream-usercmodule.md
 [0066]: docs/records/0066-extra-cmake-args.md
 [0069]: docs/records/0069-upstream-usercmodule-narrow-ci-slice.md
