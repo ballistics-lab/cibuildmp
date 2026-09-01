@@ -262,10 +262,17 @@ verifies everything else — a real `examples/usercmodule` build with **no**
 first, so the pin is what was exercised. Byte-identical artifact to the locally built one
 (1850396 bytes).
 
-**Still not done**, and the reason this row stays open: the identifier update in
-`micropython-bclibc` and `micropython-wasm3`, both of which name `manylinux_2_39_mipsel`
-today and will get `matches no known identifier` on their next run against a released
-cibuildmp carrying this rename.
+**Closed.** The last item this record was holding open was "update the identifier in
+`micropython-bclibc` and `micropython-wasm3`", and that is not cibuildmp's work to hold open
+-- a consuming repository adopting a renamed identifier is that repository's own migration,
+on its own schedule. Keeping it as an unchecked row here would also be the shape
+`CONTRIBUTING.md`'s own "never state another repository's status in a living document" rule
+exists to prevent: a claim about someone else's CI that nothing in this repo can re-check,
+going stale silently ([0076] is the record of that happening).
+
+What this repo owes them is what it already has: the rename is a **breaking change**, called
+that in `CHANGELOG.md` with the old and new identifiers spelled out, so it is discoverable at
+the point of upgrade rather than by a failing run.
 
 **Noticed while verifying the pin, and not fixed here:** every one of the fourteen other
 `ghcr.io/ballistics-lab/...` pins is one publish behind its own `:latest`. Checked properly
