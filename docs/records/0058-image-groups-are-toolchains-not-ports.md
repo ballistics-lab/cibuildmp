@@ -363,8 +363,10 @@ and it broke the first time `docker/natmod_host.Dockerfile`'s base moved (`ubunt
 `ubuntu:26.04`, whose own `build-essential` resolves to gcc 15, not 13): every `-m32` `x86`
 build whose module references libgcc failed with "LinkError: incompatible arch", for every one
 of the twenty-two tags this record's own count puts on that path. See docs/records/0068's own
-third correction for the full incident and the fix (the unversioned `gcc-multilib` metapackage,
-which tracks `build-essential`'s own gcc rather than a version pinned by hand).
+third correction for the full incident and the fix -- the same package name, computed at build
+time (`gcc-$(gcc -dumpversion | cut -d. -f1)-multilib`) rather than typed by hand, after the
+first attempt (the unversioned `gcc-multilib` metapackage) turned out to conflict with
+`gcc-i686-linux-gnu`, the other package this image has always installed alongside it.
 
 [0010]: 0010-pinned-data-in-resources.md
 [0012]: 0012-pyelftools-ar-own-deps.md

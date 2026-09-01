@@ -19,41 +19,68 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # architecture at all, and why they are their own group rather than
 # riding along in one of the cross images.
 #
-# `gcc-multilib` + `linux-libc-dev:i386` is the `-m32` path; `gcc-i686-
-# linux-gnu` is the prefixed one. Both are kept, and genuinely both are
-# live -- record 0058 already counted exactly this split while choosing
-# this image's own package list (`x86 {'': 22, 'i686-linux-gnu-': 2}`,
-# its own verification table calling both proven): upstream's own
-# `py/dynruntime.mk` switches `x86`'s `CROSS` from empty (`-m32`, plain
-# host gcc) to `i686-linux-gnu-` starting at v1.29.0 -- "depending on
-# tag" means depending on *which MicroPython version*, not this
-# project's own natmod ABI tag.
+# A real, version-specific `gcc-<N>-multilib` + `linux-libc-dev:i386` is
+# the `-m32` path; `gcc-i686-linux-gnu` is the prefixed one. Both are
+# kept, and genuinely both are live -- record 0058 already counted
+# exactly this split while choosing this image's own package list
+# (`x86 {'': 22, 'i686-linux-gnu-': 2}`, its own verification table
+# calling both proven): upstream's own `py/dynruntime.mk` switches
+# `x86`'s `CROSS` from empty (`-m32`, plain host gcc) to
+# `i686-linux-gnu-` starting at v1.29.0 -- "depending on tag" means
+# depending on *which MicroPython version*, not this project's own
+# natmod ABI tag.
 #
-# It was `gcc-13-multilib` -- correct on `ubuntu:24.04`, whose
-# `build-essential` also pulls gcc 13 -- until the `ubuntu:26.04` bump
-# moved `build-essential`'s own gcc to 15 without this pin following it:
-# every `x86` build still on the `-m32` path (every supported tag through
-# v1.28.0) that needs anything from libgcc (soft-float, 64-bit-arithmetic
-# helpers) links against gcc 15's 64-bit-only `libgcc.a` (no matching
-# `gcc-15-multilib` installed) and fails with "LinkError: incompatible
-# arch". `docker build`, `verify-docker-images`, and even a *real* `x86`
-# natmod build all stayed green throughout -- but every one of them
+# It was hardcoded to `gcc-13-multilib` -- correct on `ubuntu:24.04`,
+# whose `build-essential` also pulls gcc 13 -- until the `ubuntu:26.04`
+# bump moved `build-essential`'s own gcc to 15 without this pin
+# following it: every `x86` build still on the `-m32` path (every
+# supported tag through v1.28.0) that needs anything from libgcc
+# (soft-float, 64-bit-arithmetic helpers) links against gcc 15's
+# 64-bit-only `libgcc.a` (no matching `gcc-15-multilib` installed) and
+# fails with "LinkError: incompatible arch". `docker build`,
+# `verify-docker-images`, and even a *real* `x86` natmod build all
+# stayed green throughout -- but every one of them
 # (`test-upstream-natmod.yml`, `build-examples.yml`) pins `v1.29.0` or
 # newer, so every `x86` build this repo's own CI ever ran used the
 # *other*, cross-prefixed path, which never touches this image's
 # multilib at all (`gcc-i686-linux-gnu` is a self-contained cross
 # toolchain, its own `libgcc` always matches its own version). A
-# trivial module (`examples/template`) would not have caught this even
-# on the right tag -- it never references anything from libgcc, so
+# trivial module (`examples/template`, or even upstream's own
+# `examples/natmod/features0`) would not have caught this on the right
+# tag either -- neither references anything from libgcc, so
 # `mpy_ld.py` never loads the archive at all. Found only downstream, by
 # `micropython-wasm3`'s own CI, pinned to `v1.28.0`.
 #
-# Repinned to the unversioned `gcc-multilib` metapackage -- matching what
-# this Dockerfile's own comment already pointed at, upstream's own
-# `tools/ci.sh` installing plain `gcc-multilib` for the identical job
-# (`ci_unix_32bit_setup`) -- so it tracks whatever gcc `build-essential`
-# resolves to on this base image and the next one, instead of a version
-# that has to be bumped by hand in lockstep.
+# **First attempt at a fix, reverted here: the unversioned `gcc-multilib`
+# metapackage.** It matched what this Dockerfile's own comment already
+# said upstream's `tools/ci.sh` installs for the identical job, and
+# looked like it would track whatever gcc `build-essential` resolves to
+# without needing a version bumped by hand. It does not build: apt
+# reports `gcc-multilib:amd64=4:15.2.0-5ubuntu1` (the metapackage)
+# **Conflicts** `gcc-15-i686-linux-gnu` -- which `gcc-i686-linux-gnu`
+# (unversioned, also resolving to the `15` build) already pulls in --
+# so the two packages this image has always installed side by side
+# cannot both be satisfied through the metapackage on this base.
+# Upstream's own `tools/ci.sh` never combines the two in one image, so
+# it never meets this conflict; this image always has.
+#
+# Fixed instead by computing the real, version-specific package name at
+# build time -- `gcc-$(gcc -dumpversion | cut -d. -f1)-multilib` --
+# which is exactly the shape that already worked (`gcc-13-multilib`),
+# just no longer typed by hand: whatever `build-essential` resolves to
+# on this base image or the next one is what gets asked for, and the
+# real per-version package (unlike the metapackage) declares no such
+# conflict with `gcc-i686-linux-gnu`.
+#
+# This `RUN` now proves both toolchains actually link, not just that apt
+# considered them installed: an explicit 64-bit multiply (no native i386
+# instruction for it, so it unconditionally needs `__muldi3` from libgcc)
+# is compiled and linked through `gcc -m32` and through
+# `i686-linux-gnu-gcc` before this layer finishes. A future base bump
+# that breaks either path again fails `docker build` itself -- wherever
+# it runs, not just a job that happens to run the image afterward --
+# instead of staying green while the real link quietly breaks the way
+# this incident did the first time.
 #
 # `ca-certificates`/`curl` are not needed to build this image's own
 # toolchain (nothing here is downloaded, unlike the other five toolchain
@@ -75,10 +102,15 @@ RUN set -eux; \
         git \
         ca-certificates \
         curl \
-        gcc-multilib \
         gcc-i686-linux-gnu \
         linux-libc-dev:i386 \
         python3 \
         python3-pyelftools; \
+    apt-get install -y --no-install-recommends \
+        "gcc-$(gcc -dumpversion | cut -d. -f1)-multilib"; \
     rm -rf /var/lib/apt/lists/*; \
-    python3 -c "from elftools.elf.elffile import ELFFile"
+    python3 -c "from elftools.elf.elffile import ELFFile"; \
+    echo 'long long mul64(long long a, long long b) { return a * b; }' > /tmp/probe.c; \
+    gcc -m32 -shared -fPIC /tmp/probe.c -o /tmp/probe-m32.so; \
+    i686-linux-gnu-gcc -shared -fPIC /tmp/probe.c -o /tmp/probe-cross.so; \
+    rm -f /tmp/probe.c /tmp/probe-m32.so /tmp/probe-cross.so

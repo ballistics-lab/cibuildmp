@@ -373,25 +373,37 @@ Found only downstream: `micropython-wasm3` pins `v1.28.0` (`-m32`, the broken pa
 `natmod.yml` builds a real module (`wasm3_mp.c`, which does reference libgcc) — the two
 conditions this repo's own fixtures never combined at once.
 
-**Fixed:** `gcc-13-multilib` → `gcc-multilib`, the unversioned metapackage — matching what this
-same Dockerfile's own comment already said upstream's `tools/ci.sh` installs for the identical
-job, rather than a hand-picked version that has to be remembered and bumped in lockstep with
-whatever `build-essential` resolves to on the next base-image bump.
+**First fix attempt, and it does not build: `gcc-13-multilib` → `gcc-multilib`.** The unversioned
+metapackage matched what this Dockerfile's own comment already said upstream's `tools/ci.sh`
+installs for the identical job, and looked like it would track whatever gcc `build-essential`
+resolves to without a version pinned by hand. Checked live rather than trusted: `apt` reports
+`gcc-multilib:amd64=4:15.2.0-5ubuntu1` (the metapackage) **Conflicts** `gcc-15-i686-linux-gnu` —
+which `gcc-i686-linux-gnu` (unversioned, also resolving to the `15` build on this base) already
+pulls in — so the two packages this image has always installed side by side cannot both be
+satisfied through the metapackage here. Upstream's own `tools/ci.sh` never combines the two in
+one image, so it never meets this conflict; this image always has.
 
-**The actual regression guard is in `verify-docker-images.yml`, not `test-upstream-natmod.yml`.**
-The first attempt at closing this gap added `mpy6.3-v1.28.0-x86` to `build-features0` — and it
-does not catch this incident, checked live rather than assumed: `features0`'s own `factorial()`
-links `x86`/`v1.28.0` clean on the very image this bump broke, no "Loading ... libgcc.a" line at
-all, for the identical reason `examples/template` never did either — `mpy_ld.py` loads libgcc.a
-lazily, only when an actual undefined symbol sends it looking, and neither module's C ever
-produces one on this arch. That leg stays (it still proves `v1.28.0`'s `-m32` toolchain produces
-a *loadable* `x86` artifact at all), but the real guard is `verify-docker-images.yml`'s own
-`natmod_host` job, which now runs the freshly built image and compiles+links an explicit 64-bit
+**Actual fix: the real, version-specific package name, computed at build time.**
+`gcc-$(gcc -dumpversion | cut -d. -f1)-multilib` is exactly the shape that already worked
+(`gcc-13-multilib`), just no longer typed by hand — and the real per-version package, unlike the
+metapackage, declares no conflict with `gcc-i686-linux-gnu`. `docker/natmod_host.Dockerfile`'s
+own comment carries the full account.
+
+**The regression guard is the image build itself, not a downstream CI job.** The first attempt at
+closing the coverage gap added `mpy6.3-v1.28.0-x86` to `test-upstream-natmod.yml`'s
+`build-features0` — and it does not catch this incident, checked live rather than assumed:
+`features0`'s own `factorial()` links `x86`/`v1.28.0` clean on the very image this bump broke, no
+"Loading ... libgcc.a" line at all, for the identical reason `examples/template` never did
+either — `mpy_ld.py` loads libgcc.a lazily, only when an actual undefined symbol sends it
+looking, and neither module's C ever produces one on this arch. That leg stays (it still proves
+`v1.28.0`'s `-m32` toolchain produces a *loadable* `x86` artifact at all), but the real guard is
+`docker/natmod_host.Dockerfile`'s own `RUN`, which now compiles and links an explicit 64-bit
 multiply (`long long mul64(long long a, long long b) { return a * b; }`, no native i386
 instruction for it, so it unconditionally needs `__muldi3` from libgcc) through both of this
 image's `x86` toolchains — the `-m32` path this incident broke, and the self-contained
-`i686-linux-gnu-` cross path that stayed fine throughout it — directly against the toolchain
-rather than hoping some module's C code happens to exercise it.
+`i686-linux-gnu-` cross path that stayed fine throughout it — before the layer finishes. A future
+base bump that breaks either path fails `docker build` itself, everywhere it runs, rather than
+staying green while the real link quietly breaks the way this incident did the first time.
 
 [0055]: 0055-natmod-example-from-upstream-natmod.md
 

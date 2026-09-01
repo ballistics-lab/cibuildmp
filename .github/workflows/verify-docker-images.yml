@@ -99,6 +99,21 @@ jobs:
 
       - uses: docker/setup-buildx-action@v4
 
+      # `docker build` alone did not used to catch the incident
+      # docs/records/0068's third correction and 0058's own correction
+      # describe -- `apt install gcc-13-multilib` succeeded regardless of
+      # which gcc `build-essential` actually resolved to, so the
+      # `ubuntu:24.04` -> `ubuntu:26.04` bump built clean here while every
+      # real `-m32` link needing a libgcc symbol failed outright
+      # downstream. Fixed at the source rather than with a second check
+      # bolted on here: `docker/natmod_host.Dockerfile`'s own `RUN` now
+      # compiles and links an explicit 64-bit multiply (no native i386
+      # instruction for it, so it unconditionally needs `__muldi3` from
+      # libgcc) through both of `x86`'s toolchains before the layer
+      # finishes, so `docker build` itself fails the moment either one
+      # stops actually linking -- here, in a local build, and in
+      # `publish-docker-images.yml`, not only in a job that happens to
+      # run the image afterward.
       - name: docker build docker/${{ matrix.image }}.Dockerfile
         uses: docker/build-push-action@v7
         with:
@@ -106,36 +121,6 @@ jobs:
           file: docker/${{ matrix.image }}.Dockerfile
           platforms: ${{ matrix.platform }}
           push: false
-          load: ${{ matrix.image == 'natmod_host' }}
-          tags: cibuildmp-${{ matrix.image }}
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
-
-      # `docker build` alone never caught the incident docs/records/0068's
-      # third correction and 0058's own correction describe: `apt install
-      # gcc-13-multilib` succeeds regardless of which gcc `build-essential`
-      # actually resolves to, so a base-image bump that moves that default
-      # (ubuntu:24.04's gcc 13 -> ubuntu:26.04's gcc 15) built clean here
-      # while every real `-m32` link needing a libgcc symbol (soft-float,
-      # 64-bit arithmetic) failed outright downstream. Neither
-      # `examples/template` nor upstream's own `examples/natmod/features0`
-      # exercises this either -- both link clean on `x86` regardless,
-      # verified live: `mpy_ld.py` only loads libgcc.a when an actual
-      # undefined symbol sends it looking, and neither module's C ever
-      # produces one. A module choosing to exercise this by accident is
-      # not something to depend on, so this probes the toolchain directly:
-      # an explicit 64-bit multiply has no native i386 instruction and
-      # unconditionally needs `__muldi3` from libgcc, on both halves of
-      # this image's own dual `x86` toolchain ([0058]) -- the `-m32` path
-      # this incident broke, and the self-contained `i686-linux-gnu-`
-      # cross path that stayed fine throughout it.
-      - name: Probe natmod_host's x86 toolchains actually link 64-bit arithmetic
-        if: matrix.image == 'natmod_host'
-        run: |
-          set -eu
-          echo 'long long mul64(long long a, long long b) { return a * b; }' > /tmp/probe.c
-          docker run --rm -v /tmp/probe.c:/tmp/probe.c cibuildmp-natmod_host \
-            gcc -m32 -shared -fPIC /tmp/probe.c -o /tmp/probe-m32.so
-          docker run --rm -v /tmp/probe.c:/tmp/probe.c cibuildmp-natmod_host \
-            i686-linux-gnu-gcc -shared -fPIC /tmp/probe.c -o /tmp/probe-cross.so
 

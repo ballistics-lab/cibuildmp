@@ -18,12 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `i686-linux-gnu-` cross compiler, unaffected) linked against gcc 15's
   64-bit-only `libgcc.a` and failed outright (`LinkError: incompatible arch`)
   the moment a module actually referenced a libgcc symbol (soft-float,
-  64-bit arithmetic). Repinned to the unversioned `gcc-multilib` metapackage,
-  matching what this Dockerfile's own comment already said upstream's
-  `tools/ci.sh` installs for the same job — it now tracks whatever gcc
-  `build-essential` resolves to, rather than a version that has to be bumped
-  by hand alongside the base image. `x64` and every cross-compiled arch were
-  unaffected. See docs/records/0068's own third correction.
+  64-bit arithmetic). Fixed by computing the real, version-specific package
+  name at build time (`gcc-$(gcc -dumpversion | cut -d. -f1)-multilib`)
+  instead of typing one by hand — the unversioned `gcc-multilib` metapackage
+  was tried first and does not build, since it conflicts with
+  `gcc-i686-linux-gnu`, the other package this image has always installed
+  alongside it. The image build itself now also compiles and links an
+  explicit 64-bit multiply through both of `x86`'s toolchains before the
+  layer finishes, so a future regression here fails `docker build`, not
+  just a real link somewhere downstream. `x64` and every cross-compiled
+  arch were unaffected. See docs/records/0068's own third correction.
 
 ## [0.6.0] - 2026-09-01
 
