@@ -286,6 +286,29 @@ second time, and `bin/update_docker.py --images` is the one-pass fix whenever it
 [0058]: 0058-image-groups-are-toolchains-not-ports.md
 [0076]: 0076-the-mipsel-holdout-is-bclibc-and-wasm3-not-a7p.md
 
+**Addendum, 2026-09-01 (second) — the base bump this record blocked has landed.**
+
+All ten `ubuntu`-based images are on `ubuntu:26.04`. This record is closed and stays
+closed; the bump is recorded here rather than as a new record because it is the direct
+consequence of the decision above ("a major-version bump of a floating tag needs a human
+decision before merge, every time"), and this is that human decision being taken with the
+blocker removed.
+
+Ten of ten build. Two real builds through the result, because "the image builds" and "a
+build in the image works" are different claims and only `verify-docker-images` checks the
+first: `natmod` `x64` through the bumped `natmod_host` (gcc **15.2**, up from 13.3) is green
+with zero warnings, and a `wasm32` usermod build is green with its `.mjs` passing
+`smoke_test.py` under the image's own `node` (**22.x**, up from 18.x).
+
+The bump's blast radius turned out narrower than the gcc jump suggests, and the reason is
+this record's own toolchain argument generalised: an image whose toolchain is a pinned
+tarball does not move when its base does. `arm_embedded`/`riscv_embedded`/`xtensa_esp`/
+`xtensa_lx106` are unchanged ([0025]'s pins), `manylinux_2_41_mipsel`'s cross-gcc stays
+Bootlin 14.3.0, and `windows` is unchanged too — apt's mingw-w64 is GCC 13 on both 24.04 and
+26.04 (checked in a real `ubuntu:24.04` container) and its `arm64` frontend is the pinned
+`llvm-mingw`. Only `natmod_host` and `ppc64le_linux` actually hand the artifact to the
+base's own compiler, which is why those two are what a bump has to be judged on.
+
 [0031]: 0031-unix-musllinux-libc-axis.md
 [0033]: 0033-cibuildmp-never-builds-docker-image-itself.md
 [0044]: 0044-unix-native-images-landed.md

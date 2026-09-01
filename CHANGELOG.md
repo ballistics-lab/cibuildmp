@@ -24,6 +24,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Every `ubuntu`-based build image moves to `ubuntu:26.04`** — all ten of them
+  (`natmod_host`, `ppc64le_linux`, `arm_embedded`, `riscv_embedded`,
+  `xtensa_esp`, `xtensa_lx106`, `esp_idf_base`, `windows`, `webassembly`,
+  `manylinux_2_41_mipsel`). This is the bump record 0068 blocked and left to a
+  human: it failed there because `manylinux_2_39_mipsel`'s apt cross-toolchain
+  does not exist on 26.04's archive at all, and the Bootlin pin above is what
+  removed that dependency. The five `manylinux_2_28_*` images are unaffected —
+  they are `FROM quay.io/pypa/...`, a different base on a different cadence.
+
+  Measured rather than assumed, by building all ten locally and running two real
+  cibuildmp builds through the result:
+
+  * The host compiler moves **gcc 13.3 → 15.2**, two majors. That only touches
+    the images where the *host* compiler produces the artifact — `natmod_host`
+    and `ppc64le_linux`. A real `natmod` `x64` build through the bumped image is
+    green with **zero warnings**, which is the check that matters: a new
+    `-Werror` diagnostic from a compiler jump is exactly how this breaks
+    (README's own `[^s390xclobbered]` is that failure on s390x).
+  * `windows` is unchanged where it counts: apt's mingw-w64 is GCC 13 on both
+    24.04 and 26.04 (checked in a real `ubuntu:24.04` container, not recalled),
+    and `arm64` is the pinned `llvm-mingw` (clang 22.1.8), independent of the
+    base by design. The same holds for all four embedded toolchain images, which
+    pin tarballs (record 0025) — `manylinux_2_41_mipsel`'s cross-gcc stays
+    Bootlin's 14.3.0 while the host's moves to 15.2.
+  * `webassembly`'s `node` moves **18.x → 22.x** (that Dockerfile's own comment
+    said 18.x and now says 22.x). A real `wasm32` usermod build is green and its
+    `.mjs` passes `smoke_test.py` under that very node.
+
 - **BREAKING: the `mipsel` cell is `manylinux_2_41_mipsel`, not
   `manylinux_2_39_mipsel`.** Every identifier naming it changes with it
   (`v1.29.0-manylinux_2_39_mipsel` -> `v1.29.0-manylinux_2_41_mipsel`), and a
