@@ -27,8 +27,12 @@ htmlcov/
 # cibuildmp's own outputs and caches
 mpyhouse/
 
-# Claude Code session scratch (agent worktrees, local state)
-.claude/
+# Claude Code session scratch (agent worktrees, local state) -- but not
+# .claude/skills/, which is checked in on purpose so an agent in a future
+# session gets the same repo-specific knowledge (e.g. docker-local) rather
+# than re-deriving it from scratch every time.
+.claude/*
+!.claude/skills/
 
 # Build scratch inside the examples. `.wabt/` is what wasm2mpy's own
 # pre-build-command unpacks a wabt .deb into (record 0050 moved that step

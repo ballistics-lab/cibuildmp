@@ -424,3 +424,98 @@ host with no 32-bit multilib either: `ld: skipping incompatible .../libgcc.a whe
 [0044]: 0044-unix-native-images-landed.md
 [0046]: 0046-pin-staleness-checker.md
 [0059]: 0059-ghcr-untagged-cleanup-deletes-referenced-manifests.md
+
+**Addendum, 2026-09-01 (fourth) — the bump's other named casualty,
+`ppc64le_linux`, broke the same way `natmod_host` did: a real link, not
+`docker build`, is what a bump has to be judged on.**
+
+`docker/ppc64le_linux.Dockerfile` installed `gcc-powerpc64le-linux-gnu` +
+`libc6-dev-ppc64el-cross` from apt — a real cross toolchain, but still a
+Debian-packaged one paired with whatever gcc `build-essential` resolves
+to on the base, the same shape `natmod_host`'s multilib pin turned out to
+be. A real `POWERNV9` firmware link (`ports/qemu`'s own `readline.c`,
+which every board's firmware links in) failed on `ubuntu:26.04` with
+
+```
+undefined reference to `__snprintfieee128'
+```
+
+— powerpc64le's own glibc long-double transition (IBM double-double →
+IEEE binary128): the symbol a `snprintf`/`%Lf` call redirects to under
+the newer ABI. `docker build` never caught it for the identical reason
+`natmod_host`'s did not — [0058]'s own verification table for this image
+only ever asked `#include <stdio.h>` to resolve, never a real link — and
+the earlier "confirmed live" `examples/template` build [0060]/[0058]'s
+own POWERNV9 wiring cites was run before this base bump, against the
+`ubuntu:24.04` pairing that still worked; nothing re-ran it after.
+
+**Fixed by replacing the apt toolchain outright, not by chasing the
+Ubuntu packaging bug.** `docker/ppc64le_linux.Dockerfile` now pins
+Bootlin's `powerpc64le-power8--glibc--stable-2025.08-1` (URL + sha256,
+`relocate-sdk.sh`, `argv[0]`-preserving `exec` wrappers renaming
+Bootlin's `powerpc64le-linux-` frontend to the `powerpc64le-linux-gnu-`
+prefix `QEMU_BOARD_CROSS["POWERNV9"]` expects) — exactly this record's
+own mipsel model, and for the same reason: Bootlin ships one Buildroot
+build of gcc 14.3.0 against its own matched glibc `2.41-70` sysroot,
+so there is no separately-packaged "-cross" half to drift from the
+native compiler's own version the way Debian's split packaging let
+`natmod_host` and this image both do. No rename needed here the way
+mipsel's PEP-600 tag forced one — `ppc64le_linux` is a toolchain-group
+image name ([0058]), not a libc-floor claim.
+
+Checked before ever touching CI: the exact failing call shape
+(`snprintf(buf, n, "%Lf", (long double)1.5L)`), statically linked
+straight through the extracted-and-relocated tarball on the host, no
+Docker involved — the point being that a cross-compiler is just another
+x86_64 binary, and this class of ABI mismatch is a property of the
+toolchain, not of the container it runs in. Then confirmed the same
+probe inside a real `docker build` of the changed Dockerfile
+(`verify-docker-images.yml` run 33538846175, ~73s, not cached — a real
+download+sha256-verify+extract+relocate+wrap+compile, not a no-op):
+green.
+
+**Every other image checked against the same "hands the artifact to the
+base's own compiler" question this record's own third addendum posed —
+none of them do.** `arm_embedded`/`riscv_embedded`/`xtensa_esp`/
+`xtensa_lx106` (xpack/Espressif tarballs) and `manylinux_2_41_mipsel`
+(Bootlin, this record's own second/third addenda) are already
+self-contained pinned toolchains; `windows`' `gcc-mingw-w64-*` bundles
+its own libgcc for the mingw sysroot rather than sharing the base's;
+`esp_idf_base` bakes no toolchain at all (ESP-IDF's own `install.sh`
+downloads Espressif's, at cache time, per [0058]); `webassembly` bakes a
+pinned emsdk tarball. `natmod_host` and `ppc64le_linux` were the only
+two, and both are now fixed.
+
+**Verified end-to-end, not just the probe.** `docker build`'s own local
+network is proxied and CA-intercepted in the session that wrote this
+addendum, which is a session-local wrinkle, not anything about the image —
+worked around by installing the proxy's own CA in a scratch copy of the
+image, never in the committed Dockerfile (see the `docker-local` skill
+this session also added, `.claude/skills/docker-local/SKILL.md`). Against
+that locally built image:
+
+```
+CIBMP_QEMU_POWERNV9_DOCKER_IMAGE=local-ppc64le_linux \
+  cibuildmp examples/template --build v1.29.0-qemu-POWERNV9
+```
+
+— the same command [0058]'s own live verification used — compiled and
+linked the full `ports/qemu` port, `shared/readline/readline.c` (the exact
+file whose `snprintf`/long-double call originally hit
+`__snprintfieee128`) included, producing a genuine
+`firmware-v1.29.0-qemu-POWERNV9.elf` (584576 bytes — matching, to within
+64 bytes, [0058]'s own 584640-byte figure for the last build that worked
+before this bump). Not a probe standing in for the real thing; the real
+thing.
+
+**Published and repinned.** `publish-docker-images.yml only=ppc64le_linux`
+(dispatched directly off `claude/ppc64le-bootlin-toolchain`, run
+33542783474) pushed
+`ghcr.io/ballistics-lab/ppc64le_linux@sha256:f39cbc832447565d8ff10101299d07213a92f50a5a6c213d06385f723dd7885a`;
+`bin/update_docker.py --images` picked up the new digest, one line
+changed. Verified the way this record verifies everything else: with the
+locally built image deleted first and no
+`CIBMP_QEMU_POWERNV9_DOCKER_IMAGE` override, a real `cibuildmp
+examples/template --build v1.29.0-qemu-POWERNV9` pulled the pin fresh and
+produced a byte-identical `firmware-v1.29.0-qemu-POWERNV9.elf` (584576
+bytes) to the locally built one. Not yet merged to `main`.

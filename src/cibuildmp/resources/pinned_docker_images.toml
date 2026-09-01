@@ -206,7 +206,7 @@ riscv_embedded = "ghcr.io/ballistics-lab/riscv_embedded@sha256:47826777013650cee
 xtensa_lx106 = "ghcr.io/ballistics-lab/xtensa_lx106@sha256:bd995c552089749441f038e7a20eacb60ea5af23c98d91cec60ae60aababc040"
 xtensa_esp = "ghcr.io/ballistics-lab/xtensa_esp@sha256:2b7985855597188faa2d3750ecbe144cbee814768620f96dccfa5dc2848cb638"
 natmod_host = "ghcr.io/ballistics-lab/natmod_host@sha256:05454c937c3d7d712d10631662592fa789570278dd47ee78b1eaf60f73894b35"
-ppc64le_linux = "ghcr.io/ballistics-lab/ppc64le_linux@sha256:b1bf705e76ec3ceae473a0e402b8dcd66a6a3f40c83d180b235bd9f6e17b4d43"
+ppc64le_linux = "ghcr.io/ballistics-lab/ppc64le_linux@sha256:f39cbc832447565d8ff10101299d07213a92f50a5a6c213d06385f723dd7885a"
 
 # Not a toolchain image (record 0058's own "esp_idf_base is not a
 # toolchain image"): ESP-IDF is installed into it at build time by

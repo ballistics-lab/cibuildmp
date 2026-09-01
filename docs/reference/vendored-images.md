@@ -113,6 +113,20 @@ routinely pulled in by more than one (port, target) pair.
 | `natmod_host` | plain host-arch gcc (+ `-m32` multilib for `x86`) | natmod's `x64`/`x86` — a container's own `linux/amd64` *is* amd64 by construction, whatever machine is underneath, which is what frees `x86` from needing an amd64 runner |
 | `ppc64le_linux` | `arm-none-eabi-`-equivalent for `qemu`'s one Linux-userspace board | `qemu`'s `POWERNV9` only |
 
+`ppc64le_linux`'s toolchain is a **pinned Bootlin tarball**
+(`powerpc64le-power8--glibc--stable-2025.08-1`, gcc 14.3.0, glibc 2.41-70,
+sha256-checked) as of [0068]'s fourth addendum, not the apt
+`gcc-powerpc64le-linux-gnu`/`libc6-dev-ppc64el-cross` pair it used until
+then (upstream's own `tools/ci.sh` combination, kept as long as it
+worked): a `ubuntu:24.04` -> `26.04` base bump left the native gcc and the
+separately-packaged `-cross` libc out of step, and a real `POWERNV9`
+firmware link failed with `undefined reference to '__snprintfieee128'`
+(glibc's own powerpc64le long-double ABI transition). Bootlin's toolchain
+is one matched Buildroot build of both halves, so there is no
+separately-packaged pairing left to drift. No identifier rename this
+time, unlike `manylinux_2_41_mipsel` above — `ppc64le_linux` is a
+toolchain-group name ([0058]), not a PEP 600/libc-floor claim.
+
 None of these six is a PEP 600 tag, so each is named for what it holds —
 there is no upstream naming convention to reuse the way `unix` reuses pypa's.
 `xtensa_lx106` and `xtensa_esp` stay two separate images despite sharing an
