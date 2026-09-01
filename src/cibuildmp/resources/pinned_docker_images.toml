@@ -153,12 +153,24 @@ musllinux_1_2_riscv64 = "quay.io/pypa/musllinux_1_2_riscv64@sha256:203b43d3c4965
 # `manylinux_${GLIBCMAJOR}_${GLIBCMINOR}_${ARCH}` with the architecture
 # being whatever the platform reports -- it defines a *form*, not a
 # closed list of architectures, so `manylinux_2_39_mipsel` is a
-# well-formed tag that simply has no pypa image behind it. `2_39` is
-# checked, not assumed: `libc6-dev-mipsel-cross` on `ubuntu:24.04` is
+# well-formed tag that simply has no pypa image behind it. `2_39` was
+# checked, not assumed: `libc6-dev-mipsel-cross` on `ubuntu:24.04` was
 # glibc `2.39-0ubuntu8cross2` (`apt-cache policy`, run in the real
 # image). Recording it beats claiming nothing -- record 0031 found that
 # even this arch's static build still reaches glibc's own `dlopen`-based
 # NSS at runtime, so "no floor" would be the less honest of the two.
+#
+# ⚠️  **`2_39` is now stale, and the digest below is the last apt-built
+# image.** `docker/manylinux_2_39_mipsel.Dockerfile` no longer installs
+# that apt cross-toolchain at all -- Debian 13 "Trixie" dropped the mipsel
+# port and took `gcc-mipsel-linux-gnu`/`libc6-dev-mipsel-cross` out of
+# Ubuntu's archive with it, so the toolchain is a pinned Bootlin tarball
+# now (gcc 14.3.0, glibc `2.41-70`; record 0068). Nothing changes for a
+# caller until that image is republished, which is exactly why the pin
+# below is left alone: republishing under this name would make the tag
+# claim a 2.39 floor the image no longer has. The rename to
+# `manylinux_2_41_mipsel` (record 0068's own addendum, on record 0031's
+# principle) has to land *before* the next publish, not after it.
 manylinux_2_39_mipsel = "ghcr.io/ballistics-lab/manylinux_2_39_mipsel@sha256:aec4468c39bdcd167cbb4c45e09a9bb03968475174df2de175529471c19f7e83"
 
 # ── cross-compiling ports with no image axis of their own ─────────────

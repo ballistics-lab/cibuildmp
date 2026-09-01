@@ -143,11 +143,21 @@ UNIX_ARCH_SETTINGS: dict[str, UnixArchSettings] = {
     # no mipsel image, PEP 600 defines no `manylinux_*_mipsel` tag, and
     # there is no Docker official image for 32-bit mipsel either -- there
     # is nothing to be native to. So this arch alone keeps the old
-    # model unchanged: an amd64 container, an apt cross-toolchain, the
+    # shape: an amd64 container, a cross-toolchain, the
     # `MICROPY_STANDALONE` static libffi path, and the `libltdl-dev`
-    # that D25 found `deplibs`' own `autogen.sh` needs. Its tag is
+    # that D25 found `deplibs`' own `autogen.sh` needs. Only the
+    # toolchain's *source* changed -- `docker/manylinux_2_39_mipsel.Dockerfile`
+    # pins a Bootlin tarball (gcc 14.3.0, glibc 2.41) rather than apt's
+    # `gcc-mipsel-linux-gnu`, which Debian 13 "Trixie" dropping the mipsel
+    # port took out of Ubuntu's archive entirely (record 0068). The
+    # `mipsel-linux-gnu-` prefix below is unchanged and deliberately so:
+    # Bootlin's own prefix is `mipsel-linux-`, and that Dockerfile
+    # generates `mipsel-linux-gnu-*` wrappers rather than this constant
+    # moving. Its tag is
     # `manylinux_2_39_mipsel`, PEP 425's plain unqualified platform tag, because
-    # a binary making no libc-floor claim is exactly what that tag names.
+    # a binary making no libc-floor claim is exactly what that tag names --
+    # and `2_39` is stale as of that toolchain change, with the rename to
+    # `manylinux_2_41_mipsel` pending (record 0068's own addendum).
     # `EM_MIPS` is spelled "MIPS R3000 big-endian" in elf.h, but the
     # value is shared with little-endian MIPS -- `EI_DATA` is what
     # separates them, which is why it is checked.

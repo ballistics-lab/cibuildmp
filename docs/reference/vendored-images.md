@@ -75,9 +75,19 @@ tag form but not a closed architecture list, and there is no Docker Official
 Image for 32-bit mipsel either — there is nothing to be native to. It has no
 `pinned_pypa_images.toml` entry at all (that base is not one of pypa's) and
 builds as a cross-compile from a plain `ubuntu:24.04` its own Dockerfile
-names. See [0068] for why this cell's own toolchain story is currently being
-revisited — the apt cross-toolchain it relies on today lost upstream Debian
-support entirely.
+names. Its cross-toolchain is a **pinned Bootlin tarball** (gcc 14.3.0,
+glibc 2.41, sha256-checked) as of [0068]'s toolchain pass, not the apt
+`gcc-mipsel-linux-gnu` it used until then: Debian 13 "Trixie" dropped the
+mipsel port outright, taking those packages out of Ubuntu's archive with it.
+Two consequences that are *not* done yet, both in [0068]: the published
+digest in `pinned_docker_images.toml` still points at the last apt-built
+image (nothing changes for callers until that image is republished), and
+`2_39` no longer names the glibc this image carries, so the rename [0068]
+decided (to the same tag with a 2_41 floor) has to land before a republish
+rather than after. It is deliberately not written as a code span anywhere in
+this file: it is not an image group yet, and
+`test_vendored_images_reference_names_real_image_groups` is right to fail on
+one that does not exist.
 
 **2. `windows`** — one shared image for all three arches (`x64`/`x86` plain
 apt `gcc-mingw-w64-*`, `arm64` a pinned `llvm-mingw` tarball; no Debian/Ubuntu
