@@ -152,7 +152,7 @@ musllinux_1_2_riscv64 = "quay.io/pypa/musllinux_1_2_riscv64@sha256:203b43d3c4965
 # cell rather than given a private spelling. PEP 600's tag is
 # `manylinux_${GLIBCMAJOR}_${GLIBCMINOR}_${ARCH}` with the architecture
 # being whatever the platform reports -- it defines a *form*, not a
-# closed list of architectures, so `manylinux_2_39_mipsel` is a
+# closed list of architectures, so `manylinux_2_41_mipsel` is a
 # well-formed tag that simply has no pypa image behind it. `2_39` was
 # checked, not assumed: `libc6-dev-mipsel-cross` on `ubuntu:24.04` was
 # glibc `2.39-0ubuntu8cross2` (`apt-cache policy`, run in the real
@@ -160,18 +160,30 @@ musllinux_1_2_riscv64 = "quay.io/pypa/musllinux_1_2_riscv64@sha256:203b43d3c4965
 # even this arch's static build still reaches glibc's own `dlopen`-based
 # NSS at runtime, so "no floor" would be the less honest of the two.
 #
-# ⚠️  **`2_39` is now stale, and the digest below is the last apt-built
-# image.** `docker/manylinux_2_39_mipsel.Dockerfile` no longer installs
-# that apt cross-toolchain at all -- Debian 13 "Trixie" dropped the mipsel
-# port and took `gcc-mipsel-linux-gnu`/`libc6-dev-mipsel-cross` out of
-# Ubuntu's archive with it, so the toolchain is a pinned Bootlin tarball
-# now (gcc 14.3.0, glibc `2.41-70`; record 0068). Nothing changes for a
-# caller until that image is republished, which is exactly why the pin
-# below is left alone: republishing under this name would make the tag
-# claim a 2.39 floor the image no longer has. The rename to
-# `manylinux_2_41_mipsel` (record 0068's own addendum, on record 0031's
-# principle) has to land *before* the next publish, not after it.
-manylinux_2_39_mipsel = "ghcr.io/ballistics-lab/manylinux_2_39_mipsel@sha256:aec4468c39bdcd167cbb4c45e09a9bb03968475174df2de175529471c19f7e83"
+# That `2_39` reading is why this cell is now `manylinux_2_41_mipsel`:
+# `docker/manylinux_2_41_mipsel.Dockerfile` no longer installs that apt
+# cross-toolchain at all -- Debian 13 "Trixie" dropped the mipsel port and
+# took `gcc-mipsel-linux-gnu`/`libc6-dev-mipsel-cross` out of Ubuntu's
+# archive with it, so the toolchain is a pinned Bootlin tarball now (gcc
+# 14.3.0, glibc `2.41-70`, sha256-checked; record 0068). Renamed rather
+# than repointed, on record 0031's own principle: a real PEP 600 tag must
+# not keep claiming a floor its image no longer has.
+#
+# **Empty on purpose, not unfinished.** A GHCR digest is per *package*
+# name, and nothing has been published under `manylinux_2_41_mipsel` yet
+# -- the last mipsel publish went out under the old name (its digest is
+# still pullable, and still tagged `pre-aec4468c39bd`, but it is a
+# different package). An empty group is the state `dockerrun.image_for()`
+# already defines as "this target exists, nothing published for it yet"
+# (`or None`), so every mipsel build raises a clean "no image registered"
+# until this is filled -- rather than the far worse alternative of a
+# plausible-looking reference to a digest that does not exist under this
+# name. Fill it from a real `publish-docker-images.yml` dispatch with
+# `only=manylinux_2_41_mipsel` (or `bin/update_docker.py --images`, which
+# reads the digest straight off GHCR). Until then
+# `CIBMP_UNIX_MANYLINUX_2_41_MIPSEL_DOCKER_IMAGE` is the way to build this
+# cell, the same override the Dockerfile's own header documents.
+manylinux_2_41_mipsel = ""
 
 # ── cross-compiling ports with no image axis of their own ─────────────
 #

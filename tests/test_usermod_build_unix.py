@@ -92,7 +92,7 @@ def test_every_native_target_shares_that_shape():
 def test_mipsel_is_the_one_target_that_still_cross_compiles():
     # 0043's documented exception -- no pypa image, no PEP 600 tag, no
     # Docker official image for 32-bit mipsel, so nothing to be native to.
-    command = unix_make_command(opts("manylinux_2_39_mipsel"), Path("/gh/ws/mpy"))
+    command = unix_make_command(opts("manylinux_2_41_mipsel"), Path("/gh/ws/mpy"))
 
     assert "CROSS_COMPILE=mipsel-linux-gnu-" in command
     assert "MICROPY_STANDALONE=1" in command
@@ -134,7 +134,7 @@ def test_deplibs_command_shape(monkeypatch):
         lambda cmd, **k: calls.append(cmd),
     )
     run_unix_deplibs(
-        opts("manylinux_2_39_mipsel"), Path("/gh/ws/mpy"), docker_image=_FAKE_UNIX_IMAGE
+        opts("manylinux_2_41_mipsel"), Path("/gh/ws/mpy"), docker_image=_FAKE_UNIX_IMAGE
     )
 
     assert calls[0][-1] == "deplibs"
@@ -176,7 +176,7 @@ def test_a_real_arch_under_an_undeclared_floor_is_rejected():
         "manylinux_2_28_i686",
         "manylinux_2_28_aarch64",
         "manylinux_2_31_armv7l",
-        "manylinux_2_39_mipsel",
+        "manylinux_2_41_mipsel",
     ],
 )
 def test_unix_no_image_registered_is_a_clear_error(monkeypatch, tmp_path, arch):
@@ -201,7 +201,7 @@ def test_unix_no_image_registered_is_a_clear_error(monkeypatch, tmp_path, arch):
     assert calls == []
 
 
-@pytest.mark.parametrize("arch", ["manylinux_2_39_mipsel"])
+@pytest.mark.parametrize("arch", ["manylinux_2_41_mipsel"])
 def test_mipsel_runs_deplibs_before_build(monkeypatch, tmp_path, arch):
     _mock_unix_image(monkeypatch)
     run_calls = []
@@ -219,7 +219,7 @@ def test_mipsel_runs_deplibs_before_build(monkeypatch, tmp_path, arch):
     assert any("USER_C_MODULES" in arg for arg in run_calls[1])
 
 
-@pytest.mark.parametrize("arch", ["manylinux_2_39_mipsel"])
+@pytest.mark.parametrize("arch", ["manylinux_2_41_mipsel"])
 def test_mipsel_builds_and_returns_binary_path(monkeypatch, tmp_path, arch):
     _mock_unix_image(monkeypatch)
     build_dir = tmp_path / f"build-{arch}"

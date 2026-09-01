@@ -174,6 +174,92 @@ actor. Removed from both jobs rather than left as harmless dead weight — the g
 comment referenced a `pull_request`-triggered Dependabot PR that can no longer trigger this
 file at all.
 
+**Addendum, 2026-09-01 — the toolchain and the rename both landed, and one thing decided
+above was reversed.**
+
+Executed, and verified on real artifacts rather than inferred at every step:
+
+* **`docker/manylinux_2_41_mipsel.Dockerfile` pins `mips32el--glibc--stable-2025.08-1`**
+  (URL + sha256 `1085fe6b…`, `relocate-sdk.sh` after extraction), exactly the release this
+  record's own addendum chose. Read out of the tarball's own `README.txt` rather than
+  assumed from the release name: gcc 14.3.0, binutils 2.43.1, glibc `2.41-70`.
+  `gcc-mipsel-linux-gnu`/`libc6-dev-mipsel-cross` are gone from the file entirely; the base
+  stays `ubuntu:24.04`, and is now incidental to the toolchain rather than the source of it.
+* **The `mipsel-linux-gnu-*` frontends are generated `exec` scripts, not symlinks, and that
+  is a live-caught correction rather than a preference.** Bootlin ships the `mipsel-linux-`
+  prefix; `UNIX_ARCH_SETTINGS["mipsel"].cross_compile` is apt's `mipsel-linux-gnu-`. Symlinks
+  were the obvious bridge and they fail: every Bootlin frontend is Buildroot's
+  `toolchain-wrapper`, which finds the real binary as *its own directory* (from
+  `/proc/self/exe`, so it follows a symlink) plus *`argv[0]`'s basename* (so it does not)
+  plus `.br_real` — a `mipsel-linux-gnu-gcc` symlink therefore looks for
+  `/opt/.../bin/mipsel-linux-gnu-gcc.br_real`, which does not exist. The image build failed
+  on its own `--version` check, which is why that check is in the same `RUN`. Wrapping keeps
+  `argv[0]` resolvable and keeps this a Dockerfile-only change, with no source constant,
+  fixture or test moving for it.
+* **Verified:** a full `examples/usercmodule` build (`deplibs` static-libffi step included,
+  since this is still the one `MICROPY_STANDALONE` cell) links, and the artifact runs under
+  `qemu-mipsel` with all three upstream modules importing — `ELF 32-bit LSB executable, MIPS,
+  statically linked`. `verify-docker-images`' own mipsel leg is green on the real runner too.
+  One genuine difference from the apt toolchain, worth recording because it is a property of
+  the shipped binary and not of the build: the ELF is now `o32, mips32` (r1) where apt's gcc
+  emitted `mips32r2`. That widens the hardware it runs on rather than narrowing it.
+* **The rename landed:** `manylinux_2_39_mipsel` -> `manylinux_2_41_mipsel` across
+  `build-platforms.toml` (sixteen identifier rows plus the `images.` key),
+  `pinned_docker_images.toml`, `dockerrun.py`, `build_unix.py`, three workflows, four test
+  modules and the living docs. Breaking, with no alias: an old identifier now gets
+  `matches no known identifier`.
+
+**Reversed from this record's own second addendum: the image keeps its
+`pinned_docker_images.toml` row and stays published.** That addendum argued mipsel should
+come out of the pin table entirely — EOL upstream, so stop publishing for it — with users
+building the Dockerfile themselves through the existing env override. The argument does not
+survive the fix it was attached to. Its own premise was that this image is a standing
+liability *because* it depends on an archive Debian has abandoned; pinning the toolchain by
+URL + sha256 is precisely what removes that dependency, so the reason to stop publishing
+went away in the same change that was supposed to justify it. What remains is only the cost:
+`micropython-bclibc` and `micropython-wasm3` both run a real mipsel leg in CI ([0076]), and
+"build a Dockerfile out of another repository, then set an env override" is a worse story
+than a pulled image for no benefit either of them receives.
+
+**The row is empty rather than repointed, and that is not an unfinished edit.** A GHCR digest
+is per package *name*: the last publish went out under `manylinux_2_39_mipsel` (its digest is
+still pullable, and the old pinned one is still tagged `pre-aec4468c39bd` — [0059]'s own
+preserve step working as designed), and nothing has been published under the new name yet.
+`dockerrun.image_for()` already defines an empty group as "this target exists, nothing
+published for it yet" and raises a clean "no image registered", which beats a
+plausible-looking reference to a digest that does not exist under that name. Filling it is a
+`publish-docker-images.yml` dispatch with `only=manylinux_2_41_mipsel` plus the usual repin
+PR.
+
+**`publish-docker-images.yml` no longer runs on push.** It carried `push: branches: [main],
+paths: docker/**`, marked `# temporary` from the day it was written. The `only` filter lives
+on the steps, and a `push` event leaves `github.event.inputs.only` empty — so every such push
+republished all **fifteen** images (three of them emulated) for a one-Dockerfile change, and
+moved fifteen `:latest` tags, opening [0059]'s untagged-cleanup window fifteen times to
+publish fourteen images nobody had touched. It also made a merge publish a Dockerfile the
+moment it landed, before anyone decided the image was ready to go out under that name — and
+this record is the concrete example: merging the toolchain change with that trigger in place
+would have published glibc 2.41 under a tag claiming 2.39, automatically. Dispatch-only now;
+`verify-docker-images.yml` still build-checks every Dockerfile on every push and PR, which is
+the part that catches breakage.
+
+**Two smaller things this pass surfaced, both by a test rather than by reading.**
+`bin/publish_images.py` filtered its publish list with "does not start with `ghcr.io/`" to
+mean "upstream's own image, nothing to build" — which swallowed the *empty* case too, so the
+one image with nothing published was the one the script would not publish;
+`test_publish_script_and_workflow_publish_the_same_images` caught it the moment the row was
+emptied. And `publish-docker-images.yml`'s own `only` input documented values that could not
+work: its example named `natmod` and `qemu`, neither a matrix entry since [0058] split them
+into the six toolchain-group images, so both matched nothing silently — and it said "all ten"
+for a fifteen-entry matrix.
+
+**Still not done**, and the reason this row stays open: the first publish under
+`manylinux_2_41_mipsel` and the repin PR that fills the empty row, then the identifier update
+in `micropython-bclibc` and `micropython-wasm3`, both of which name the old identifier today.
+
+[0058]: 0058-image-groups-are-toolchains-not-ports.md
+[0076]: 0076-the-mipsel-holdout-is-bclibc-and-wasm3-not-a7p.md
+
 [0031]: 0031-unix-musllinux-libc-axis.md
 [0033]: 0033-cibuildmp-never-builds-docker-image-itself.md
 [0044]: 0044-unix-native-images-landed.md

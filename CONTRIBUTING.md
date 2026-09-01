@@ -16,15 +16,51 @@ comment.
 
 ```console
 $ uv sync
-$ uv run ruff check src tests
-$ uv run ruff format --check src tests
-$ uv run pyright src
+$ uv tool install pre-commit
+$ pre-commit install
 $ uv run pytest -q
 ```
 
-This is exactly what `.github/workflows/tests.yml` and `publish.yml`'s own
-`build` job run — if all four pass locally, CI's lint/type/test stage will
-too. Python floor is 3.11 (`tomllib`); CI itself runs on 3.14.
+Lint, formatting and types are **`pre-commit`'s job now**, not four commands
+you remember to run. `.pre-commit-config.yaml` drives them all through `uv`:
+`uv lock --upgrade` and `uv sync` first, then `pyright`, then `ruff check
+--fix`, then `ruff format`. Two things about that worth knowing before your
+first commit:
+
+* **The `ruff` hooks rewrite your files rather than just failing.** A commit
+  that trips them aborts with the fixes already applied to the working tree —
+  `git add` them and commit again. That is the intended flow, not a mistake.
+* **Every hook is `pass_filenames: false`.** They run over the whole project,
+  not just your staged files, so an unrelated pre-existing failure will stop
+  your commit too.
+
+**`pytest` is deliberately not a hook, so run it yourself** — the line above,
+or `uv run pytest -q` before you push. The whole suite is a few seconds with
+no Docker daemon.
+
+Python floor is 3.11 (`tomllib`), and the pre-commit workflow now pins exactly
+that, so CI checks the floor rather than the newest interpreter.
+
+### What CI runs, and the one gap to know about
+
+| Workflow | Runs | On |
+| --- | --- | --- |
+| `pre-commit.yml` | `pre-commit run --all-files` — lint, format, types | every push; PRs from this repo |
+| `coverage.yml` | `pytest` with coverage | pushes to `main`, and PRs — but only when `pyproject.toml`, `src/**` or `tests/**` changed |
+| `publish.yml` | lint, types **and** `pytest` | a release |
+
+On a same-repo pull request the Pre-commit workflow **commits and pushes its
+own fixes back to your branch** (`style: auto-fix via pre-commit`) — expect
+your branch to move under you, and pull before your next commit.
+
+The gap is `coverage.yml`'s `paths:` filter, and it bites exactly where this
+project is most fragile: **a change touching only `docs/**` or `.github/**`
+runs no `pytest` anywhere until release.** `tests/test_docs.py` — the suite
+that fails on a doc naming an identifier, option key, image group, record
+link or action pin that does not exist ([0077]) — is precisely what a
+docs-only change needs and precisely what such a change no longer triggers.
+Until that is closed, run `uv run pytest -q` yourself on any docs or workflow
+change; a green Pre-commit check does not cover it.
 
 Most of `pytest`'s own suite runs with no Docker daemon at all. Exercising
 a real build — the thing every record in this project insists on before

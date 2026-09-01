@@ -1,0 +1,79 @@
+default_install_hook_types: [pre-commit]
+default_language_version:
+  python: python3
+
+repos:
+  - repo: local
+    hooks:
+      # `uv lock`, not `uv lock --upgrade`. `--upgrade` re-resolves every
+      # dependency to the newest version that satisfies the constraints,
+      # on every run -- and since CI runs `--all-files`, this hook's own
+      # `files:` filter always matches, so a routine lint run would open
+      # dependency bumps and the workflow would push them back onto the PR
+      # as `style: auto-fix via pre-commit`. Bumping dependencies is
+      # Dependabot's job, in its own reviewable PR. Plain `uv lock` only
+      # brings `uv.lock` back in sync with `pyproject.toml`, which is what
+      # this hook is actually for.
+      - id: uv-lock
+        name: uv lock
+        entry: uv
+        args: ["lock"]
+        language: system
+        pass_filenames: false
+        files: '^(pyproject\.toml|uv\.lock)$'
+
+      - id: uv-sync
+        name: uv sync before hooks
+        entry: uv
+        args: ["sync"]
+        language: system
+        pass_filenames: false
+
+      - id: uv-pyright
+        name: pyright
+        entry: uv
+        args: ["run", "pyright"]
+        language: system
+        pass_filenames: false
+        files: '\.(py|pyi|pyx|pxd)$'
+
+      - id: uv-ruff-check
+        name: ruff lint & fix
+        entry: uv
+        args: ["run", "ruff", "check", "--fix"]
+        language: system
+        pass_filenames: false
+        files: '\.py$'
+
+      - id: uv-ruff-format
+        name: ruff format
+        entry: uv
+        args: ["run", "ruff", "format"]
+        language: system
+        pass_filenames: false
+        files: '\.py$'
+
+      # The unit suite, as a hook rather than a command to remember.
+      #
+      # It is here because leaving it out left a real hole: `coverage.yml`
+      # is the only other place `pytest` runs before a release, and its
+      # `paths:` filter is `pyproject.toml`/`src/**`/`tests/**` -- so a
+      # change touching only `docs/**` or `.github/**` ran no tests at all.
+      # That is exactly the change `tests/test_docs.py` exists to catch
+      # (a doc naming an identifier, option key, image group, record link
+      # or action pin that does not exist -- record 0077), so the one kind
+      # of change least covered was the one most in need of it.
+      #
+      # `always_run`, not a `files:` filter, for the same reason: the suite
+      # asserts things about docs, resources and workflows, not just about
+      # the Python files a commit happens to touch. The whole run is a few
+      # seconds and needs no Docker daemon (record: every test that would
+      # need one is skipped or faked), so there is nothing to buy by
+      # narrowing it.
+      - id: uv-pytest
+        name: pytest
+        entry: uv
+        args: ["run", "pytest", "-q"]
+        language: system
+        pass_filenames: false
+        always_run: true

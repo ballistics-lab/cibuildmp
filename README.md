@@ -4,7 +4,7 @@
 [![license]][license-url]
 [![pypi version]][PyPiUrl]
 [![python versions]][PyPiUrl]
-[![Tests]][tests-workflow]
+[![pre-commit]][pre-commit-workflow]
 [![coverage]][CodecovUrl]
 
 > [!WARNING]
@@ -983,7 +983,7 @@ scheduled `test-all-platforms.yml` run since.
     <code>manylinux_2_28_i686</code><br>
     <code>manylinux_2_28_aarch64</code><br>
     <code>manylinux_2_31_armv7l</code><br>
-    <code>manylinux_2_39_mipsel</code>
+    <code>manylinux_2_41_mipsel</code>
   </td>
   <td>
 
@@ -1332,11 +1332,11 @@ https://img.shields.io/pypi/pyversions/cibuildmp?logo=python
 [PyPiUrl]:
 https://pypi.org/project/cibuildmp/
 
-[Tests]:
-https://github.com/ballistics-lab/cibuildmp/actions/workflows/tests.yml/badge.svg
+[pre-commit]:
+https://github.com/ballistics-lab/cibuildmp/actions/workflows/pre-commit.yml/badge.svg
 
-[tests-workflow]:
-https://github.com/ballistics-lab/cibuildmp/actions/workflows/tests.yml
+[pre-commit-workflow]:
+https://github.com/ballistics-lab/cibuildmp/actions/workflows/pre-commit.yml
 
 [coverage]:
 https://codecov.io/gh/ballistics-lab/cibuildmp/graph/badge.svg

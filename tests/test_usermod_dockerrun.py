@@ -25,7 +25,7 @@ _FAKE_PINS = {
         "musllinux_1_2_x86_64": "",
         "manylinux_2_28_aarch64": "",
         "musllinux_1_2_aarch64": "",
-        "manylinux_2_39_mipsel": "",
+        "manylinux_2_41_mipsel": "",
         "qemu": "ghcr.io/example/qemu@sha256:" + "b" * 64,
         "windows": "ghcr.io/example/windows@sha256:" + "c" * 64,
         "webassembly": "",
@@ -69,8 +69,8 @@ def test_split_tag_separates_floor_from_arch():
     # separator -- it is a match against the known architecture list.
     assert dockerrun.split_tag("manylinux_2_28_x86_64") == ("manylinux_2_28", "x86_64")
     assert dockerrun.split_tag("musllinux_1_2_ppc64le") == ("musllinux_1_2", "ppc64le")
-    assert dockerrun.split_tag("manylinux_2_39_mipsel") == (
-        "manylinux_2_39",
+    assert dockerrun.split_tag("manylinux_2_41_mipsel") == (
+        "manylinux_2_41",
         "mipsel",
     )
 
@@ -92,10 +92,10 @@ def test_unix_targets_lists_every_declared_target():
     assert len(targets) == 15
     assert "manylinux_2_28_x86_64" in targets
     assert "musllinux_1_2_x86_64" in targets
-    assert "manylinux_2_39_mipsel" in targets
+    assert "manylinux_2_41_mipsel" in targets
     for arch in ("x86_64", "i686", "aarch64", "armv7l", "ppc64le", "s390x", "riscv64"):
         assert f"musllinux_1_2_{arch}" in targets
-    assert "manylinux_2_39_mipsel" in targets
+    assert "manylinux_2_41_mipsel" in targets
 
 
 # ── image_for() ─────────────────────────────────────────────────────────
@@ -112,7 +112,7 @@ def test_declared_but_unpublished_cell_resolves_to_none():
     # yet" and must behave exactly like an unknown one -- returning `""`
     # would sail straight into `docker run ... "" make`.
     assert dockerrun.image_for("unix", "musllinux_1_2_x86_64") is None
-    assert dockerrun.image_for("unix", "manylinux_2_39_mipsel") is None
+    assert dockerrun.image_for("unix", "manylinux_2_41_mipsel") is None
 
 
 def test_env_override_wins_over_the_pinned_digest(monkeypatch):
@@ -183,7 +183,7 @@ def test_unix_platform_is_the_targets_own_architecture():
 def test_mipsel_is_an_amd64_cross_host_not_a_native_target():
     # 0043's documented exception: there is no 32-bit mipsel image to be
     # native to, so this cell keeps the old cross model and says so.
-    assert dockerrun.platform_for("unix", "manylinux_2_39_mipsel") == "linux/amd64"
+    assert dockerrun.platform_for("unix", "manylinux_2_41_mipsel") == "linux/amd64"
 
 
 def test_cross_compiling_ports_are_amd64_hosts():
@@ -214,7 +214,7 @@ def test_mipsel_has_no_pypa_base(monkeypatch):
     # Its Dockerfile names its own base; pinning one in the pypa mirror
     # would imply a libc floor this arch does not claim.
     monkeypatch.undo()
-    assert dockerrun.base_image_for("manylinux_2_39_mipsel") is None
+    assert dockerrun.base_image_for("manylinux_2_41_mipsel") is None
 
 
 # ── needs_linux32() ─────────────────────────────────────────────────────
@@ -224,7 +224,7 @@ def test_only_the_two_32bit_arches_are_linux32_candidates():
     assert dockerrun.needs_linux32("unix", "manylinux_2_28_i686")
     assert dockerrun.needs_linux32("unix", "musllinux_1_2_armv7l")
     assert not dockerrun.needs_linux32("unix", "manylinux_2_28_x86_64")
-    assert not dockerrun.needs_linux32("unix", "manylinux_2_39_mipsel")
+    assert not dockerrun.needs_linux32("unix", "manylinux_2_41_mipsel")
     assert not dockerrun.needs_linux32("windows", "x86")
 
 

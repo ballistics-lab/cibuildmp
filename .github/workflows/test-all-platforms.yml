@@ -26,7 +26,7 @@ on:
   # No `pull_request` any more: the full real matrix (200+ identifiers,
   # bucketed across up to 20 concurrent jobs) takes far too long to run on
   # every PR for how rarely its answer actually changes -- `push`/`pull_request`
-  # CI already runs `tests.yml`'s own unit suite and `build-examples.yml`'s
+  # CI already runs `coverage.yml`'s own unit suite and `build-examples.yml`'s
   # narrower matrix on every change; this file is for the full sweep,
   # wanted only occasionally, not gating every PR's own turnaround time.
   # Weekly by default -- change the cron below, or just run

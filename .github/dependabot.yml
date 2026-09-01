@@ -47,9 +47,14 @@ updates:
   # against" was this comment's own reasoning until 2026-08-29. Wrong:
   # Dependabot proposed `ubuntu:24.04` -> `26.04` in its very first grouped
   # bump (PR #16), and CI caught the reason this needed a human first --
-  # `manylinux_2_39_mipsel.Dockerfile`'s apt-based mipsel cross-toolchain
-  # doesn't exist on 26.04's archive at all (Debian dropped the mipsel
-  # port in Trixie). See docs/records/0068 for the full incident.
+  # the mipsel Dockerfile's apt-based cross-toolchain doesn't exist on
+  # 26.04's archive at all (Debian dropped the mipsel port in Trixie).
+  # See docs/records/0068 for the full incident. That file is
+  # `docker/manylinux_2_41_mipsel.Dockerfile` now, and no longer apt-based
+  # at all -- its toolchain is a pinned Bootlin tarball, which is what
+  # closed this particular hole. The reasoning above stands regardless:
+  # `ubuntu` stays out of the group because a base-OS major bump is not
+  # routine hygiene, not because of this one arch.
   - package-ecosystem: "docker"
     directory: "/docker"
     schedule:

@@ -1,4 +1,4 @@
-# `unix` build image for the **manylinux_2_39_mipsel** cell -- the one documented
+# `unix` build image for the **manylinux_2_41_mipsel** cell -- the one documented
 # exception to record 0043's native-image model, and the only `unix`
 # image that still cross-compiles.
 #
@@ -8,18 +8,18 @@
 # a cross-toolchain, and says so plainly instead of pretending to a
 # floor it cannot claim.
 #
-# ⚠️  **The `2_39` in this file's own name is stale as of the toolchain
-# change below, and the rename is the next pass, not this one.** The
-# tarball pinned here bundles glibc `2.41-70`, not the `2.39-0ubuntu8cross2`
-# the apt cross-toolchain used to supply, so `manylinux_2_39_mipsel` now
-# claims a floor this image does not have. Record 0068's own addendum
-# decided the rename (`manylinux_2_39_mipsel` -> `manylinux_2_41_mipsel`,
-# on record 0031's principle that a real PEP 600 tag must not claim a
-# floor the image no longer has) together with dropping the published
-# GHCR image; this pass deliberately does the toolchain half alone, to
-# establish that a mipsel build is alive on the new toolchain at all
-# before an identifier rename fans out across `build-platforms.toml`,
-# the tests, the docs and two consuming repositories.
+# **This file was `docker/manylinux_2_39_mipsel.Dockerfile` until the
+# toolchain change below.** `2_39` was the version of apt's own
+# `libc6-dev-mipsel-cross` (`2.39-0ubuntu8cross2`); the Bootlin tarball
+# pinned below bundles glibc `2.41-70`, so the name moved with it rather
+# than the toolchain being frozen to preserve a name -- record 0031's own
+# principle, that a real PEP 600 tag must not keep claiming a floor its
+# image no longer has. Record 0068 has the whole decision.
+#
+# The rename is a **breaking change to the identifier**: every
+# `*-manylinux_2_39_mipsel` becomes `*-manylinux_2_41_mipsel`, in this
+# repo and in any caller naming it (`micropython-bclibc` and
+# `micropython-wasm3` both do).
 #
 # It has no `resources/pinned_pypa_images.toml` entry because that file
 # mirrors upstream's own pins, and this base is not one of them.
@@ -34,9 +34,9 @@
 # every native cell it has no system libffi for its target.
 #
 # Build: docker buildx build --platform=linux/amd64 \
-#          -t manylinux_2_39_mipsel \
-#          -f docker/manylinux_2_39_mipsel.Dockerfile .
-# Use:   CIBMP_UNIX_MANYLINUX_2_39_MIPSEL_DOCKER_IMAGE=manylinux_2_39_mipsel cibuildmp ...
+#          -t manylinux_2_41_mipsel \
+#          -f docker/manylinux_2_41_mipsel.Dockerfile .
+# Use:   CIBMP_UNIX_MANYLINUX_2_41_MIPSEL_DOCKER_IMAGE=manylinux_2_41_mipsel cibuildmp ...
 FROM ubuntu:24.04
 
 # Host-side build tooling only. The cross-toolchain no longer comes from

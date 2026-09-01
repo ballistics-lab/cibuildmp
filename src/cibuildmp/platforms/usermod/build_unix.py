@@ -146,7 +146,7 @@ UNIX_ARCH_SETTINGS: dict[str, UnixArchSettings] = {
     # shape: an amd64 container, a cross-toolchain, the
     # `MICROPY_STANDALONE` static libffi path, and the `libltdl-dev`
     # that D25 found `deplibs`' own `autogen.sh` needs. Only the
-    # toolchain's *source* changed -- `docker/manylinux_2_39_mipsel.Dockerfile`
+    # toolchain's *source* changed -- `docker/manylinux_2_41_mipsel.Dockerfile`
     # pins a Bootlin tarball (gcc 14.3.0, glibc 2.41) rather than apt's
     # `gcc-mipsel-linux-gnu`, which Debian 13 "Trixie" dropping the mipsel
     # port took out of Ubuntu's archive entirely (record 0068). The
@@ -154,10 +154,11 @@ UNIX_ARCH_SETTINGS: dict[str, UnixArchSettings] = {
     # Bootlin's own prefix is `mipsel-linux-`, and that Dockerfile
     # generates `mipsel-linux-gnu-*` wrappers rather than this constant
     # moving. Its tag is
-    # `manylinux_2_39_mipsel`, PEP 425's plain unqualified platform tag, because
-    # a binary making no libc-floor claim is exactly what that tag names --
-    # and `2_39` is stale as of that toolchain change, with the rename to
-    # `manylinux_2_41_mipsel` pending (record 0068's own addendum).
+    # `manylinux_2_41_mipsel`, and the `2_41` moved with the toolchain: it
+    # was `manylinux_2_39_mipsel` while apt's cross-glibc was 2.39, and
+    # renaming rather than repointing is record 0031's own principle --
+    # a real PEP 600 tag must not keep claiming a floor its image no
+    # longer has.
     # `EM_MIPS` is spelled "MIPS R3000 big-endian" in elf.h, but the
     # value is shared with little-endian MIPS -- `EI_DATA` is what
     # separates them, which is why it is checked.
@@ -179,7 +180,7 @@ UNIX_RUNNABLE_ARCHS = tuple(UNIX_ARCH_SETTINGS)
 @dataclass(frozen=True)
 class UnixBuildOptions:
     """`target` is the **platform tag** -- `manylinux_2_28_x86_64`,
-    `musllinux_1_2_aarch64`, `manylinux_2_39_mipsel` -- not a bare architecture.
+    `musllinux_1_2_aarch64`, `manylinux_2_41_mipsel` -- not a bare architecture.
 
     It was `arch: str` (`"x64"`, `"armhf"`) until record 0043. The rename
     is not cosmetic: a bare arch cannot name a cell of the matrix any
@@ -345,7 +346,7 @@ def run_unix_deplibs(
     called -- `build_unix()` itself raises before ever reaching here if
     `ensure_image()` returned `None`.
 
-    Only `manylinux_2_39_mipsel` still reaches this at all. Every other
+    Only `manylinux_2_41_mipsel` still reaches this at all. Every other
     architecture builds natively in an image whose own `pkg-config`
     resolves `-lffi` (verified by running it inside the real
     `manylinux_2_28_x86_64` / `manylinux_2_31_armv7l` / `musllinux_1_2_*`
@@ -417,7 +418,7 @@ def _required_glibc(binary: Path) -> tuple[int, int] | None:
     nothing new -- 0031 checked that specifically before recommending it.
 
     `None` covers two real cases, both legitimate: a fully static build
-    (`manylinux_2_39_mipsel`, whose `-static` link leaves no version
+    (`manylinux_2_41_mipsel`, whose `-static` link leaves no version
     requirements to read) and a musl binary (musl does not use symbol
     versioning at all, which is why PEP 656 is a separate spec rather
     than manylinux with a different number).
@@ -810,7 +811,7 @@ def build_unix(
 
     Two consequences worth stating because they are easy to misread as
     bugs. `CROSS_COMPILE=` is passed empty for every target except
-    `manylinux_2_39_mipsel` -- correct, not missing: the compiler in the container
+    `manylinux_2_41_mipsel` -- correct, not missing: the compiler in the container
     already targets the right architecture. And a mismatch cannot be
     caught by the build succeeding, so `verify_unix_output()` below
     checks the finished ELF's own machine type against the identifier;
