@@ -1,15 +1,28 @@
 ---
 name: docker-local
-description: Get `docker build`/`docker run` actually working against this repo's own docker/*.Dockerfile files inside a sandboxed, proxied agent session — starting the daemon, and the specific network gotchas that make a build fail even once the daemon is up. Use before claiming a local Docker verification "doesn't work here".
+description: Get `docker build`/`docker run` actually working against this repo's own docker/*.Dockerfile files inside a Claude Code on the web / cloud container session — starting the daemon, and the specific network-proxy gotchas that make a build fail even once the daemon is up. Use before claiming a local Docker verification "doesn't work here". Does not apply to a real local machine (a developer's own laptop/desktop, or a self-hosted runner) — there is no such proxy there and Docker generally works unmodified.
 ---
 
-# Running Docker locally in an agent session
+# Running Docker in a Claude Code on the web / cloud container session
 
-Written after a real session hit every failure mode below, one at a time,
-against this repo's own `docker/ppc64le_linux.Dockerfile` and
-`docker/natmod_host.Dockerfile`. Do not re-derive these from first
-principles — they were each verified live, and re-guessing costs a session
-the way CLAUDE.md's own top rule warns about for cibuildwheel.
+**Scope: this is about the ephemeral cloud container a Claude Code on the
+web (claude.ai/code) session runs in — ballistics-lab/cibuildmp's own
+managed remote execution environment — not a real machine.** Everything
+below (the daemon not auto-starting, the allowlisted egress proxy, the
+proxy's own TLS interception) is a property of that sandbox. A session
+running on an actual local machine — a contributor's own laptop, or a
+self-hosted CI runner — has none of this: Docker Desktop/`dockerd` is
+already running, there is no `$HTTPS_PROXY`, and `docker build` behaves
+the way its own documentation says. Check `$HTTPS_PROXY` and
+`/root/.ccr/README.md`'s existence before assuming this skill applies;
+don't "fix" a real machine's working Docker setup with anything here.
+
+Written after a real *cloud-container* session hit every failure mode
+below, one at a time, against this repo's own
+`docker/ppc64le_linux.Dockerfile` and `docker/natmod_host.Dockerfile`. Do
+not re-derive these from first principles — they were each verified live,
+and re-guessing costs a session the way CLAUDE.md's own top rule warns
+about for cibuildwheel.
 
 ## 1. The daemon is not running by default
 

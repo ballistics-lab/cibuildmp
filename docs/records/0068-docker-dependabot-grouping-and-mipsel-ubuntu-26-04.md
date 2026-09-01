@@ -508,7 +508,14 @@ file whose `snprintf`/long-double call originally hit
 before this bump). Not a probe standing in for the real thing; the real
 thing.
 
-Still open: republishing under `ghcr.io/ballistics-lab/ppc64le_linux` and
-repinning `pinned_docker_images.toml` (`bin/update_docker.py --images`
-after a `publish-docker-images.yml only=ppc64le_linux` dispatch), on
-`claude/ppc64le-bootlin-toolchain`, not yet merged to `main`.
+**Published and repinned.** `publish-docker-images.yml only=ppc64le_linux`
+(dispatched directly off `claude/ppc64le-bootlin-toolchain`, run
+33542783474) pushed
+`ghcr.io/ballistics-lab/ppc64le_linux@sha256:f39cbc832447565d8ff10101299d07213a92f50a5a6c213d06385f723dd7885a`;
+`bin/update_docker.py --images` picked up the new digest, one line
+changed. Verified the way this record verifies everything else: with the
+locally built image deleted first and no
+`CIBMP_QEMU_POWERNV9_DOCKER_IMAGE` override, a real `cibuildmp
+examples/template --build v1.29.0-qemu-POWERNV9` pulled the pin fresh and
+produced a byte-identical `firmware-v1.29.0-qemu-POWERNV9.elf` (584576
+bytes) to the locally built one. Not yet merged to `main`.
