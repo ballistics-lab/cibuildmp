@@ -64,9 +64,13 @@ on:
       only:
         description: >
           Republish just these images -- comma-separated with no spaces,
-          e.g. "natmod" or "windows,qemu". Empty rebuilds all ten,
-          which is hours: three of them (aarch64, ppc64le, s390x) are
-          emulated on this runner's amd64 host.
+          matched against this job's own matrix `image` values, e.g.
+          "webassembly" or "windows,natmod_host". Empty rebuilds all
+          fifteen, which is hours: three of them (aarch64, ppc64le,
+          s390x) are emulated on this runner's amd64 host. The example
+          used to read "natmod" and "qemu" -- neither has been a matrix
+          entry since record 0058 split them into the six toolchain-group
+          images, so both silently matched nothing.
         required: false
         default: ""
 
