@@ -486,12 +486,29 @@ downloads Espressif's, at cache time, per [0058]); `webassembly` bakes a
 pinned emsdk tarball. `natmod_host` and `ppc64le_linux` were the only
 two, and both are now fixed.
 
-**Not yet done:** a real `POWERNV9` firmware build through the new image
-via `cibuildmp` itself (`examples/template --build v1.29.0-qemu-POWERNV9`,
-the same command [0058]'s own live verification used) — the probe above
-proves the specific symbol resolves, not that the full port links
-end-to-end against this toolchain. Republishing under
-`ghcr.io/ballistics-lab/ppc64le_linux` and repinning
-`pinned_docker_images.toml` (`bin/update_docker.py --images` after a
-`publish-docker-images.yml only=ppc64le_linux` dispatch) is also still
-open, on `claude/ppc64le-bootlin-toolchain`, not yet merged to `main`.
+**Verified end-to-end, not just the probe.** `docker build`'s own local
+network is proxied and CA-intercepted in the session that wrote this
+addendum, which is a session-local wrinkle, not anything about the image —
+worked around by installing the proxy's own CA in a scratch copy of the
+image, never in the committed Dockerfile (see the `docker-local` skill
+this session also added, `.claude/skills/docker-local/SKILL.md`). Against
+that locally built image:
+
+```
+CIBMP_QEMU_POWERNV9_DOCKER_IMAGE=local-ppc64le_linux \
+  cibuildmp examples/template --build v1.29.0-qemu-POWERNV9
+```
+
+— the same command [0058]'s own live verification used — compiled and
+linked the full `ports/qemu` port, `shared/readline/readline.c` (the exact
+file whose `snprintf`/long-double call originally hit
+`__snprintfieee128`) included, producing a genuine
+`firmware-v1.29.0-qemu-POWERNV9.elf` (584576 bytes — matching, to within
+64 bytes, [0058]'s own 584640-byte figure for the last build that worked
+before this bump). Not a probe standing in for the real thing; the real
+thing.
+
+Still open: republishing under `ghcr.io/ballistics-lab/ppc64le_linux` and
+repinning `pinned_docker_images.toml` (`bin/update_docker.py --images`
+after a `publish-docker-images.yml only=ppc64le_linux` dispatch), on
+`claude/ppc64le-bootlin-toolchain`, not yet merged to `main`.
