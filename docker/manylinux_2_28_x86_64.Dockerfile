@@ -26,7 +26,7 @@
 # Published by .github/workflows/publish-docker-images.yml; the digest it
 # prints goes into resources/pinned_docker_images.toml (record 0033 --
 # cibuildmp never builds this itself, it only ever pulls it).
-FROM quay.io/pypa/manylinux_2_28_x86_64@sha256:0bf9db09181f36be8cf0628332abb5d31855b7d0f372faa776f492ccd9d3100d
+FROM quay.io/pypa/manylinux_2_28_x86_64@sha256:94c816d38ad56d2dc1df2f28007d18d306b0f5d05096c6f6b9141345df504d3e
 
 # `libffi-devel` is the one thing missing, and the only reason this image
 # is published at all rather than pypa's being pinned directly.
