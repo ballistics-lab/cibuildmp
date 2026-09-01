@@ -76,11 +76,29 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # considered them installed: an explicit 64-bit multiply (no native i386
 # instruction for it, so it unconditionally needs `__muldi3` from libgcc)
 # is compiled and linked through `gcc -m32` and through
-# `i686-linux-gnu-gcc` before this layer finishes. A future base bump
-# that breaks either path again fails `docker build` itself -- wherever
-# it runs, not just a job that happens to run the image afterward --
-# instead of staying green while the real link quietly breaks the way
-# this incident did the first time.
+# `i686-linux-gnu-gcc` before this layer finishes.
+#
+# `-nostartfiles -nostdlib -Wl,-e,mul64 ... -lgcc`, not a plain
+# `-shared`/executable link -- found live, the first version of this
+# check (`gcc -shared -fPIC`) failed `i686-linux-gnu-gcc` on a missing
+# `crti.o`, a real gap (this image never installs a full i686 cross
+# sysroot, only `gcc-i686-linux-gnu` itself) but the wrong one to chase:
+# `mpy_ld.py` never asks the system linker for a runnable ELF, shared or
+# not, only for `libgcc.a`'s own member objects to resolve a natmod's
+# undefined symbols, so this image never needed a full sysroot for real
+# natmod builds either. `-nostartfiles -nostdlib` skips every crt object
+# a real link would need, `-Wl,-e,mul64` gives the linker an entry point
+# so it does not go looking for the also-absent `_start`, and `-lgcc`
+# is the one library still on the command line -- so this fails exactly
+# when `__muldi3` cannot be resolved from it, and nothing else. Verified
+# against this exact failure mode locally first, on a host with no
+# 32-bit multilib either: `ld: skipping incompatible .../libgcc.a when
+# searching for -lgcc` -- the same error class the real incident hit.
+#
+# A future base bump that breaks either toolchain's own libgcc match
+# fails `docker build` itself -- wherever it runs, not just a job that
+# happens to run the image afterward -- instead of staying green while
+# the real link quietly breaks the way this incident did the first time.
 #
 # `ca-certificates`/`curl` are not needed to build this image's own
 # toolchain (nothing here is downloaded, unlike the other five toolchain
@@ -111,6 +129,6 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*; \
     python3 -c "from elftools.elf.elffile import ELFFile"; \
     echo 'long long mul64(long long a, long long b) { return a * b; }' > /tmp/probe.c; \
-    gcc -m32 -shared -fPIC /tmp/probe.c -o /tmp/probe-m32.so; \
-    i686-linux-gnu-gcc -shared -fPIC /tmp/probe.c -o /tmp/probe-cross.so; \
-    rm -f /tmp/probe.c /tmp/probe-m32.so /tmp/probe-cross.so
+    gcc -m32 -nostartfiles -nostdlib -Wl,-e,mul64 /tmp/probe.c -lgcc -o /tmp/probe-m32; \
+    i686-linux-gnu-gcc -nostartfiles -nostdlib -Wl,-e,mul64 /tmp/probe.c -lgcc -o /tmp/probe-cross; \
+    rm -f /tmp/probe.c /tmp/probe-m32 /tmp/probe-cross

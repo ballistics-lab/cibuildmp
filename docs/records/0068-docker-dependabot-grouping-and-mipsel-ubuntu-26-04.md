@@ -405,6 +405,18 @@ image's `x86` toolchains — the `-m32` path this incident broke, and the self-c
 base bump that breaks either path fails `docker build` itself, everywhere it runs, rather than
 staying green while the real link quietly breaks the way this incident did the first time.
 
+**The check itself needed one more pass.** Its first form (`gcc -shared -fPIC ...`) failed
+`i686-linux-gnu-gcc` on a missing `crti.o` — a real gap (this image installs the cross compiler
+itself but never a full i686 cross sysroot) but not the one worth chasing: `mpy_ld.py` never asks
+the system linker for a runnable ELF, shared or not, only for `libgcc.a`'s own member objects, so
+real natmod builds never needed a full sysroot here either. Rewritten as
+`gcc ... -nostartfiles -nostdlib -Wl,-e,mul64 probe.c -lgcc -o probe` — every crt object a normal
+link needs is skipped, an explicit entry point stands in for the also-absent `_start`, and `-lgcc`
+is the only library left on the command line, so this fails exactly when `__muldi3` cannot be
+resolved from it and nothing else. Verified against the exact failure mode locally first, on a
+host with no 32-bit multilib either: `ld: skipping incompatible .../libgcc.a when searching for
+-lgcc` — the same error class the real incident hit.
+
 [0055]: 0055-natmod-example-from-upstream-natmod.md
 
 [0031]: 0031-unix-musllinux-libc-axis.md
