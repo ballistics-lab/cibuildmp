@@ -7,8 +7,8 @@ name: Test upstream natmod
 # contract does not fit unmodified; docs/records/0072 is the mechanism
 # actually landed here and explains every choice below in full.
 #
-# build-features0: one job, deliberately building *two* arches for the same
-# tag in a single invocation, not two separate single-arch jobs: [0055]'s own
+# build-features0: one job, deliberately building *three* arches for the same
+# tag in a single invocation, not three separate single-arch jobs: [0055]'s own
 # guard survey is entirely about what happens when cibuildmp builds several
 # targets back to back in one checkout (a stale artifact, or an unscoped
 # `build/`, silently carrying the *previous* target's binary into the next
@@ -21,6 +21,17 @@ name: Test upstream natmod
 # for this same reason armv7emsp is a second *real* cross-compiled arch here
 # and not just a second easy one: it shares this checkout and this same
 # invocation with x64, the one thing a single-arch job can never test.
+#
+# x86 joins the two above for a different reason, found the hard way: it is
+# `images.x64`'s own `natmod_host` image, so nothing here exercised it as a
+# distinct *link*, not just a distinct package install, until the
+# `ubuntu:26.04` bump (docs/records/0068) shipped an `x86` that failed to
+# link on every single build ("LinkError: incompatible arch", gcc 15's
+# 64-bit-only `libgcc.a` against a `-m32` compile) while `docker build` and
+# every job in this very file stayed green -- caught only by
+# `micropython-wasm3`'s own downstream CI, which builds every arch. `x64`
+# and `x86` share a host gcc but not its `-m32` half, so `x64` alone can
+# never stand in for `x86`'s own link step.
 #
 # build-upstream-natmod: the other ten modules, one `x64` build each (no
 # arch-collision risk to re-prove per module -- that mechanism is
@@ -90,11 +101,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Build upstream examples/natmod/features0 (x64 + armv7emsp)
+      - name: Build upstream examples/natmod/features0 (x64 + x86 + armv7emsp)
         uses: ./
         with:
           package-dir: examples/natmod
-          build: "${{ env.CIBMP_UPSTREAM_ABI_TAG }}-x64 ${{ env.CIBMP_UPSTREAM_ABI_TAG }}-armv7emsp"
+          build: "${{ env.CIBMP_UPSTREAM_ABI_TAG }}-x64 ${{ env.CIBMP_UPSTREAM_ABI_TAG }}-x86 ${{ env.CIBMP_UPSTREAM_ABI_TAG }}-armv7emsp"
 
       - name: List built artifacts
         run: ls -laR examples/natmod/mpyhouse

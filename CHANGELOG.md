@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`natmod`'s `x86` arch failed every build through `natmod_host`, on every
+  identifier, since `0.6.0`'s own `ubuntu:26.04` bump.**
+  `docker/natmod_host.Dockerfile` pinned `gcc-13-multilib` by version; once
+  the base image's own `build-essential` started resolving to gcc 15, `-m32`
+  linked against gcc 15's 64-bit-only `libgcc.a` and failed outright
+  (`LinkError: incompatible arch`). Repinned to the unversioned `gcc-multilib`
+  metapackage, matching what this Dockerfile's own comment already said
+  upstream's `tools/ci.sh` installs for the same job — it now tracks whatever
+  gcc `build-essential` resolves to, rather than a version that has to be
+  bumped by hand alongside the base image. `x64` and every cross-compiled
+  arch were unaffected; this was `x86`'s own `-m32` half only. See
+  docs/records/0068's own third correction.
+
 ## [0.6.0] - 2026-09-01
 
 ### Added

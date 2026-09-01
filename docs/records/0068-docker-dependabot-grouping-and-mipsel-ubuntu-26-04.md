@@ -319,6 +319,51 @@ Bootlin 14.3.0, and `windows` is unchanged too — apt's mingw-w64 is GCC 13 on 
 `llvm-mingw`. Only `natmod_host` and `ppc64le_linux` actually hand the artifact to the
 base's own compiler, which is why those two are what a bump has to be judged on.
 
+**Correction, 2026-09-01 (third) — "natmod `x64` ... is green with zero warnings" was true and
+irrelevant; `x86` was the arch the bump actually broke, and nothing here tested it.**
+
+`natmod_host` serves two arches, not one — `images.x64` and `images.x86` both resolve to it
+([0058]). The verification this record's own previous addendum reported ("`natmod` `x64`
+through the bumped `natmod_host` ... is green with zero warnings") checked only the native,
+no-multilib half. `x86` is the one that actually exercises the image's `-m32` toolchain, and it
+was never built through the bumped image at all before this record called the bump's blast
+radius "narrower than the gcc jump suggests" — a claim that did not survive contact with a real
+`x86` build.
+
+**What broke, and why nothing in this repo's own CI noticed.** `docker/natmod_host.Dockerfile`
+pinned `gcc-13-multilib` by version — correct on `ubuntu:24.04`, whose own `build-essential`
+also resolves to gcc 13, so the plain host `gcc` invoked by `dynruntime.mk`'s `-m32` path and
+the versioned multilib package agreed on which gcc's 32-bit runtime to use. `ubuntu:26.04`
+moved `build-essential`'s own default to gcc 15 without this pin following it: `-m32` then
+linked against gcc 15's own `libgcc.a` search path, found only the 64-bit archive (no
+`gcc-15-multilib` installed), and failed outright —
+
+```
+Loading /usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a
+LinkError: incompatible arch
+make: *** [.../dynruntime.mk:242: build/x86/wasm3_x86.native.mpy] Error 1
+```
+
+— deterministically, on every single `x86` natmod build through this image, not a flake.
+Nothing here caught it because nothing here actually links one: `verify-docker-images.yml`'s
+own `natmod_host` leg is a bare `docker build` (apt successfully installs `gcc-13-multilib`
+regardless of which gcc is default, so that step stayed green throughout), and
+`test-upstream-natmod.yml` — the workflow that does build real natmod artifacts through this
+image — built `x64` and `armv7emsp` only, never `x86` ([0055]'s original matrix choice, unrelated
+to this incident). Found downstream instead: `micropython-wasm3`'s own `natmod.yml` builds every
+arch in its matrix, `x86` included, and its first run against `cibuildmp@v0.6.0` (which carries
+this bump) failed exactly there.
+
+**Fixed:** `gcc-13-multilib` → `gcc-multilib`, the unversioned metapackage — matching what this
+same Dockerfile's own comment already said upstream's `tools/ci.sh` installs for the identical
+job, rather than a hand-picked version that has to be remembered and bumped in lockstep with
+whatever `build-essential` resolves to on the next base-image bump. `test-upstream-natmod.yml`'s
+`build-features0` job now builds `x86` alongside `x64`/`armv7emsp` in the same invocation, so a
+regression in this image's `-m32` half fails in this repo's own CI next time, not only in a
+consumer's.
+
+[0055]: 0055-natmod-example-from-upstream-natmod.md
+
 [0031]: 0031-unix-musllinux-libc-axis.md
 [0033]: 0033-cibuildmp-never-builds-docker-image-itself.md
 [0044]: 0044-unix-native-images-landed.md
