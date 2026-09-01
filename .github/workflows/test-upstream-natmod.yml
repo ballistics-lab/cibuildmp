@@ -31,21 +31,30 @@ name: Test upstream natmod
 # pinned to `v1.28.0` deliberately rather than `CIBMP_UPSTREAM_ABI_TAG`:
 # upstream's own `py/dynruntime.mk` builds `x86` on the plain host `gcc`'s
 # `-m32` mode for every tag through `v1.28.0`, and switches to a separate
-# `i686-linux-gnu-` cross compiler from `v1.29.0` on
-# (`resources/build-platforms.toml`'s own `cross` column records exactly
-# this split). `images.x64`'s own `natmod_host` image carries both, but
-# nothing here ever exercised the `-m32` half as a distinct *link* -- until
-# the `ubuntu:26.04` bump (docs/records/0068) broke it for every tag on
-# that path whose module actually references libgcc (soft-float, 64-bit
-# arithmetic), while this file stayed green throughout: pinned to
-# `v1.29.0`, every `x86` build here has only ever exercised the *other*,
-# unaffected cross-prefixed path. Caught only by `micropython-wasm3`'s own
-# downstream CI, pinned to `v1.28.0`. `CIBMP_UPSTREAM_ABI_TAG` tracks the
-# newest release on purpose (this file's own `env:` comment) and will move
-# past `v1.29.0` again, at which point it would just as happily hide this
-# path a second time -- `v1.28.0-x86` stays a fixed probe of the `-m32`
-# path specifically, independent of wherever the rest of this file's own
-# tag moves next.
+# `i686-linux-gnu-` cross compiler from `v1.29.0` on ([0058]'s own count:
+# `x86 {'': 22, 'i686-linux-gnu-': 2}`). `images.x64`'s own `natmod_host`
+# image carries both, but pinned to `v1.29.0`, every `x86` build this file
+# has ever run used only the cross-prefixed half -- which is exactly why
+# the `ubuntu:26.04` bump's break of the *other* half (docs/records/0068's
+# third correction, 0058's own correction) went unnoticed here and was
+# only caught by `micropython-wasm3`'s downstream CI, pinned to `v1.28.0`.
+#
+# **This leg alone would not have caught that incident, and does not
+# claim to.** `features0`'s `factorial()` links `x86`/`v1.28.0` clean
+# either way -- verified live, no "Loading ... libgcc.a" line at all --
+# the same reason `examples/template` didn't either: `mpy_ld.py` only
+# loads libgcc.a when an actual undefined symbol sends it looking, and
+# upstream's own demo modules never produce one on this arch. What
+# actually guards against a repeat is `verify-docker-images.yml`'s own
+# `natmod_host` probe, which forces exactly that symbol directly against
+# the built image rather than hoping some module's C code happens to.
+# This leg still earns its place for a narrower claim: that `v1.28.0`'s
+# `-m32` toolchain produces a *loadable* `x86` `.mpy` at all (wrong
+# compiler entirely, or a build that silently emits the wrong arch code,
+# `verify_output()` aside, would still fail here) -- not tied to
+# `CIBMP_UPSTREAM_ABI_TAG`, since that env var tracks the newest release
+# on purpose (this file's own `env:` comment) and moving past `v1.29.0`
+# again would just as happily stop exercising the `-m32` path at all.
 #
 # build-upstream-natmod: the other ten modules, one `x64` build each (no
 # arch-collision risk to re-prove per module -- that mechanism is

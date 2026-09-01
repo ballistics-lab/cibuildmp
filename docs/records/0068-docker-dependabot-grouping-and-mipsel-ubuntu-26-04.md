@@ -376,13 +376,22 @@ conditions this repo's own fixtures never combined at once.
 **Fixed:** `gcc-13-multilib` → `gcc-multilib`, the unversioned metapackage — matching what this
 same Dockerfile's own comment already said upstream's `tools/ci.sh` installs for the identical
 job, rather than a hand-picked version that has to be remembered and bumped in lockstep with
-whatever `build-essential` resolves to on the next base-image bump. `test-upstream-natmod.yml`'s
-`build-features0` job now also builds `mpy6.3-v1.28.0-x86` specifically (not tied to
-`CIBMP_UPSTREAM_ABI_TAG`, which tracks the newest release and would drift onto the unaffected
-cross-prefixed path the moment that env var next moves) alongside its existing `v1.29.0`
-`x64`/`armv7emsp` legs, so a regression in the `-m32` path this project's own supported range
-still spans (every tag through `v1.28.0`) fails in this repo's own CI next time, not only in a
-consumer's.
+whatever `build-essential` resolves to on the next base-image bump.
+
+**The actual regression guard is in `verify-docker-images.yml`, not `test-upstream-natmod.yml`.**
+The first attempt at closing this gap added `mpy6.3-v1.28.0-x86` to `build-features0` — and it
+does not catch this incident, checked live rather than assumed: `features0`'s own `factorial()`
+links `x86`/`v1.28.0` clean on the very image this bump broke, no "Loading ... libgcc.a" line at
+all, for the identical reason `examples/template` never did either — `mpy_ld.py` loads libgcc.a
+lazily, only when an actual undefined symbol sends it looking, and neither module's C ever
+produces one on this arch. That leg stays (it still proves `v1.28.0`'s `-m32` toolchain produces
+a *loadable* `x86` artifact at all), but the real guard is `verify-docker-images.yml`'s own
+`natmod_host` job, which now runs the freshly built image and compiles+links an explicit 64-bit
+multiply (`long long mul64(long long a, long long b) { return a * b; }`, no native i386
+instruction for it, so it unconditionally needs `__muldi3` from libgcc) through both of this
+image's `x86` toolchains — the `-m32` path this incident broke, and the self-contained
+`i686-linux-gnu-` cross path that stayed fine throughout it — directly against the toolchain
+rather than hoping some module's C code happens to exercise it.
 
 [0055]: 0055-natmod-example-from-upstream-natmod.md
 
