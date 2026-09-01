@@ -24,6 +24,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Every pypa base digest re-pinned, and every image digest with it.** The
+  `manylinux_2_28_*` bases and `pypa-tracker.Dockerfile`'s nine mirrored
+  references move to pypa's `2026.09.01-1` release (Dependabot's own grouped PR),
+  `pinned_pypa_images.toml`'s 34 pins move with them via
+  `bin/update_docker.py --pypa`, and all 15 images were republished and re-pinned
+  with `--images`. `--check` reports zero drift for the first time in a while:
+  fourteen `ghcr.io` pins had been one publish behind their own `:latest` since a
+  `docker/**` push to `main` republished everything with no repin PR behind it —
+  the trigger removed above.
+
+  The pypa bump changes the base but not the floor: the tags are unchanged
+  (`manylinux_2_28` stays `manylinux_2_28`), and a real `usermod` build through
+  each rebuilt `x86_64`/`i686` image is green, which is the check that would catch
+  a floor regression (`verify_unix_floor()` reads the finished binary's own
+  `GLIBC_x.y` requirements, not the image's name).
+
 - **Every `ubuntu`-based build image moves to `ubuntu:26.04`** — all ten of them
   (`natmod_host`, `ppc64le_linux`, `arm_embedded`, `riscv_embedded`,
   `xtensa_esp`, `xtensa_lx106`, `esp_idf_base`, `windows`, `webassembly`,
@@ -104,6 +120,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to catch.
 
 ### Fixed
+
+- **`bin/ghcr_prune_scan.py` could propose deleting a digest a released version
+  still pins.** It protected two things — tagged versions, and children of tagged
+  indexes (record 0059's own incident) — but not "named by a pin in a released
+  cibuildmp". Those were safe only by luck: they happen to still carry a
+  `pre-<digest12>` tag, which nothing maintains on purpose. It now reads
+  `pinned_docker_images.toml` at every `v*` git tag plus the working tree and
+  keeps anything they name, reporting *why* each version is kept. It also
+  paginates (`gh api --paginate`): a `per_page` cap hides versions rather than
+  erroring, and a hidden *tagged* index is the dangerous case — its children
+  never enter the referenced set and get reported as safe to delete.
+
+  Used to prune the registry: 124 versions deleted, after which all 48 tags, all
+  96 child manifests and all 46 released-or-current pins still resolve.
 
 - **`publish-docker-images.yml`'s own `only` input described values that could
   not work.** Its example read `"natmod"` and `"qemu"` — neither has been a
