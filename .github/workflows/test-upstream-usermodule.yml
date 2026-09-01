@@ -185,9 +185,9 @@ jobs:
   # All three now run the same smoke_test.py against the collected
   # artifact (record 0080, closing two of record 0079's own "no smoke
   # test" gaps): `webassembly` needs only node, already preinstalled;
-  # `windows`'s win_amd64 .exe runs unmodified under `wine`, apt-installed
-  # below -- live-verified against a real cross-compiled micropython.exe
-  # before this was wired in; `qemu`'s MPS2_AN385 firmware.elf has no CLI
+  # `windows`'s win_amd64 .exe runs unmodified under `wine`, installed and
+  # invoked by `.github/actions/run-with-wine` -- live-verified against a
+  # real cross-compiled micropython.exe before this was wired in; `qemu`'s MPS2_AN385 firmware.elf has no CLI
   # to hand a script to (upstream's own port only exposes a REPL over a
   # serial device), so its step starts `qemu-system-arm` itself against the
   # collected .elf with its serial port redirected to a local TCP socket,
@@ -218,21 +218,17 @@ jobs:
       - name: List built artifacts
         run: ls -laR examples/usercmodule/mpyhouse
 
-      - name: Install wine (to run the cross-compiled win_amd64 .exe)
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq wine wine64
-
-      # win_amd64's micropython.exe takes a script path on argv exactly
-      # like the unix binary does -- confirmed live under wine before this
-      # step was added, including that a real exception inside the script
-      # still exits non-zero through it.
+      # Both the apt install and the run itself are in
+      # `.github/actions/run-with-wine` -- see that action's own header for
+      # why a .exe under wine is a real smoke test and not a "did it start"
+      # check. The identifier-derived path stays here, in the caller: it is
+      # cibuildmp's own collected layout (records 0070/0079), not something
+      # a wine wrapper should know about.
       - name: "Smoke test (windows): run the built .exe against smoke_test.py"
-        run: |
-          set -euo pipefail
-          identifier="${CIBMP_UPSTREAM_TAG}-win_amd64"
-          exe="examples/usercmodule/mpyhouse/${identifier}/micropython-${identifier}.exe"
-          WINEDEBUG=-all wine "$exe" examples/usercmodule/smoke_test.py
+        uses: ./.github/actions/run-with-wine
+        with:
+          executable: examples/usercmodule/mpyhouse/${{ env.CIBMP_UPSTREAM_TAG }}-win_amd64/micropython-${{ env.CIBMP_UPSTREAM_TAG }}-win_amd64.exe
+          script: examples/usercmodule/smoke_test.py
 
   # `examples/usercmodule/cibuildmp.toml`'s own `[override."*-wasm32"]`
   # carries this identifier's own `extra-make-args` (CXX=em++ plus the

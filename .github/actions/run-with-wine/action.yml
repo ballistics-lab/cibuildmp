@@ -1,0 +1,70 @@
+name: "Run under wine"
+description: >
+  Run a cross-compiled Windows executable against a script under `wine`,
+  on a Linux runner.
+
+# **Not part of the legacy `build-*` layer this directory otherwise holds.**
+# `.github/actions/*` is described in README and docs/ACTIONS.md as a
+# permanent fallback for callers that predate the unified CLI action
+# (record 0073) -- this is not one of those. It is internal CI plumbing for
+# running an artifact cibuildmp already built, and nothing about it is a
+# second way to build anything.
+#
+# `windows`'s own `micropython.exe` takes a script path on argv exactly the
+# way the `unix` binary does -- confirmed live under wine, including that a
+# real exception inside the script still exits non-zero through it, which is
+# what makes this a smoke test rather than a "did it start" check.
+
+inputs:
+  executable:
+    description: "Path to the .exe to run (cibuildmp's own collected artifact)"
+    required: true
+  script:
+    description: "Path to the Python script to run through it"
+    required: true
+  install:
+    description: >
+      Install `wine`/`wine64` from apt first. Default true, since a GitHub
+      Linux runner has neither preinstalled. Set false when the caller has
+      already installed or cached them -- there is no version pin here
+      deliberately: this runs a plain console executable, and pinning wine
+      would mean maintaining a pin for something whose behaviour this
+      never depends on.
+    required: false
+    default: "true"
+  wine-debug:
+    description: >
+      `WINEDEBUG` value. Defaults to `-all`, which silences wine's own
+      startup chatter so the log shows the script's output and nothing
+      else. Set it to e.g. `warn+all` when a run fails for a reason that
+      looks like wine rather than like the script.
+    required: false
+    default: "-all"
+
+runs:
+  using: composite
+  steps:
+    - name: Install wine
+      if: inputs.install == 'true'
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq wine wine64
+
+    # Inputs reach the script through `env:`, never interpolated into the
+    # `run:` body. A path with a space or a quote in it would otherwise be
+    # re-parsed by bash as several words, and an input is attacker-reachable
+    # in a workflow triggered by anything other than a maintainer's own push.
+    - name: Run ${{ inputs.executable }} against ${{ inputs.script }}
+      shell: bash
+      env:
+        EXECUTABLE: ${{ inputs.executable }}
+        SCRIPT: ${{ inputs.script }}
+        WINEDEBUG: ${{ inputs.wine-debug }}
+      run: |
+        set -euo pipefail
+        # Fail with the missing path rather than with wine's own
+        # "c0000135"-style error, which says nothing about which file.
+        test -f "$EXECUTABLE" || { echo "::error::no such executable: $EXECUTABLE"; exit 1; }
+        test -f "$SCRIPT" || { echo "::error::no such script: $SCRIPT"; exit 1; }
+        wine "$EXECUTABLE" "$SCRIPT"

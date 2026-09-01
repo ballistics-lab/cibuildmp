@@ -1274,6 +1274,11 @@ per build step. They are **not** a second supported way to use this
 project; `action.yml` above (wrapping the real CLI) is the only current
 path for a new integration.
 
+That list is the whole of this layer, not the whole of the directory:
+`.github/actions/` also holds internal CI plumbing (`run-with-wine`, which
+runs an already-built `.exe` against a script under wine) that builds
+nothing and is not part of the legacy story.
+
 This layer is a deliberate fallback, not something being absorbed into the
 CLI over time — folding `build-natmod` into a thin `cibuildmp --build`
 wrapper was proposed and explicitly rejected (tracker [0038], see
