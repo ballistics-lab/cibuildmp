@@ -7,7 +7,7 @@
 # `psoc-edge`, and `qemu`'s six ARM boards --
 # all resolve here, so this file exists once instead of once per port.
 #
-# `ubuntu:24.04`, not a pypa image. `unix` builds on pypa's own
+# `ubuntu:26.04`, not a pypa image. `unix` builds on pypa's own
 # ([0043]/[0044]) because those targets are genuinely native and need
 # manylinux's glibc floor; nothing here is. A cross toolchain is a
 # tarball either way, and `manylinux_2_28_x86_64` is 589 MB compressed
@@ -16,7 +16,7 @@
 #
 # Build: docker build -t cibuildmp-arm_embedded -f docker/arm_embedded.Dockerfile .
 # Use:   CIBMP_..._DOCKER_IMAGE=cibuildmp-arm_embedded cibuildmp ...
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 

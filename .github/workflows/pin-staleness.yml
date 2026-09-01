@@ -19,7 +19,7 @@ name: Pin staleness
 # or edits a pin.
 #
 # Not covered here, deliberately, because each already has its own notifier:
-# every `docker/*.Dockerfile`'s own base OS tag (`FROM ubuntu:24.04`) rides
+# every `docker/*.Dockerfile`'s own base OS tag (`FROM ubuntu:26.04`) rides
 # Dependabot, isolated into its own PR by record 0068's grouping fix; and
 # this repo's `uv`/Actions dependencies are Dependabot's already.
 

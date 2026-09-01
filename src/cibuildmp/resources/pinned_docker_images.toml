@@ -110,33 +110,33 @@
 [image_group]
 
 # ── unix -- one native image per (arch, libc floor), identity-keyed ────
-manylinux_2_28_x86_64 = "ghcr.io/ballistics-lab/manylinux_2_28_x86_64@sha256:6afa4abdc2938e4b6efb0b4046f2fd7391e12fb8fc9ce83f0994cf21cafdeb0b"
-musllinux_1_2_x86_64 = "quay.io/pypa/musllinux_1_2_x86_64@sha256:34e72b200d8938bca4d3edac681db7055285e81329beaf5e817e86c9db3d5d2f"
+manylinux_2_28_x86_64 = "ghcr.io/ballistics-lab/manylinux_2_28_x86_64@sha256:1ad90a73ed0dce39d0c59694d87b417a1018303c8c8bc45408b895278615875e"
+musllinux_1_2_x86_64 = "quay.io/pypa/musllinux_1_2_x86_64@sha256:8900a53ed236d85edd6868387b3e3327c45774156519ad492fe8b1c2a434d1dc"
 
-manylinux_2_28_i686 = "ghcr.io/ballistics-lab/manylinux_2_28_i686@sha256:dea33eaea05c895c5562bfc0a862409d04b882bf4aee23718254d72e64a9d288"
-musllinux_1_2_i686 = "quay.io/pypa/musllinux_1_2_i686@sha256:54453c5476d823270839486591771864ccb401df7fd4e5a5463a29dcfdad9d30"
+manylinux_2_28_i686 = "ghcr.io/ballistics-lab/manylinux_2_28_i686@sha256:833f6a528ebacdaa6504b1996e6cf2e022d6488171b897bc932ac4ad4f9eed4f"
+musllinux_1_2_i686 = "quay.io/pypa/musllinux_1_2_i686@sha256:e9029eacb01a207fc991eed8abccf55f653900b4b83068e37fb0ea201176a64a"
 
-manylinux_2_28_aarch64 = "ghcr.io/ballistics-lab/manylinux_2_28_aarch64@sha256:18e5e5f073652ab81ceeedef811fa8941abe86a355ab08b617e61ffad9904a43"
-musllinux_1_2_aarch64 = "quay.io/pypa/musllinux_1_2_aarch64@sha256:a4f053d721429d1d08132f112750b5ef8e794d895a380f40348bfacfccd4fe89"
+manylinux_2_28_aarch64 = "ghcr.io/ballistics-lab/manylinux_2_28_aarch64@sha256:813e623f31e5fc711d9b445ee864abd4acec8c0c0f498b466f151a92f0b3a4fe"
+musllinux_1_2_aarch64 = "quay.io/pypa/musllinux_1_2_aarch64@sha256:ab0391c77648e2b15d37e3e5b8c3d43a0c4a1ca0fb3ab2f60d252be3474d2975"
 
-manylinux_2_28_ppc64le = "ghcr.io/ballistics-lab/manylinux_2_28_ppc64le@sha256:ccba99196585efebf016fa0bc505df296138c502f02855fe04ed92aa8dbde515"
-musllinux_1_2_ppc64le = "quay.io/pypa/musllinux_1_2_ppc64le@sha256:bd56239ef43d8f2ec374e5baa28435b7d9772923adfe529f11898fc2e6442de3"
+manylinux_2_28_ppc64le = "ghcr.io/ballistics-lab/manylinux_2_28_ppc64le@sha256:fd9ebcc5ff2aa63ac54edfedd06ab7265965814ad57d9f247c1825205c789b9f"
+musllinux_1_2_ppc64le = "quay.io/pypa/musllinux_1_2_ppc64le@sha256:e745f8e8e8c7c8e02e6379502d0b73f7cc4fd95283e011a78063292740f3cf42"
 
-manylinux_2_28_s390x = "ghcr.io/ballistics-lab/manylinux_2_28_s390x@sha256:68ffd717e2484bcca5fc9b8ef03a7bca717d0e9fb9105f2c37573b1ffc05757a"
-musllinux_1_2_s390x = "quay.io/pypa/musllinux_1_2_s390x@sha256:7350f167e5ca2818a1fec3bd9c270a99c81921a3c2b1f9afd4c44f6b230eaf49"
+manylinux_2_28_s390x = "ghcr.io/ballistics-lab/manylinux_2_28_s390x@sha256:53df7d9c279db406d9807676b36c0b9dc1696bfc5bc97e715990c5bf4c3c997b"
+musllinux_1_2_s390x = "quay.io/pypa/musllinux_1_2_s390x@sha256:411d3d433dde4b3a9fce85122f7080110e2ec3543ca6c22578acb4a61c38cc14"
 
 # armv7l's manylinux line starts at `_2_31` upstream (Ubuntu 20.04/apt,
 # unlike the AlmaLinux 8/dnf `_2_28` images) -- `_2_31` is the lower,
 # more compatible of the two floors pypa offers, and cibuildwheel makes
 # the same default choice.
-manylinux_2_31_armv7l = "quay.io/pypa/manylinux_2_31_armv7l@sha256:32948ad16f91f2590cb5bf722fbcb1c098ebaa81ca0708b26880c9e41a22756c"
-musllinux_1_2_armv7l = "quay.io/pypa/musllinux_1_2_armv7l@sha256:0d9e52979fbaa113736d24e6794b73f0ba5435a4bdf0b9574f33e5ecf33aeaf1"
+manylinux_2_31_armv7l = "quay.io/pypa/manylinux_2_31_armv7l@sha256:bb0c6355c62cd0971f17a66969b1bce15222e67e4064667e25030923bb216bfe"
+musllinux_1_2_armv7l = "quay.io/pypa/musllinux_1_2_armv7l@sha256:bb213c77861583faa326b24de1c413dab0e7c51af76f8a30f5abcaf749da5265"
 
 # riscv64 is the newest arch upstream and carries the highest floor:
 # `manylinux_2_39` (Rocky Linux 10/dnf) is the only manylinux image pypa
 # publishes for it.
-manylinux_2_39_riscv64 = "quay.io/pypa/manylinux_2_39_riscv64@sha256:452055600f0c5bdac5df069b0b6a9e7cf58658fbe1b634e6975d730324f23ea1"
-musllinux_1_2_riscv64 = "quay.io/pypa/musllinux_1_2_riscv64@sha256:203b43d3c496569c9ff23e9bb50fefdbfede41b0c23778333702bc551d7ab56a"
+manylinux_2_39_riscv64 = "quay.io/pypa/manylinux_2_39_riscv64@sha256:4e74e5408c307666116196383a3bbf741b171fda049c776dac731e5b6087a1d5"
+musllinux_1_2_riscv64 = "quay.io/pypa/musllinux_1_2_riscv64@sha256:3c2e2c26c10c2788046e54e816d8880011e4af9c4292cb735705a89870248082"
 
 # mipsel is cibuildmp's own architecture, not one of cibuildwheel's
 # seven, and the one documented exception to record 0043's model: pypa
@@ -144,7 +144,7 @@ musllinux_1_2_riscv64 = "quay.io/pypa/musllinux_1_2_riscv64@sha256:203b43d3c4965
 # `manylinux_*_mipsel` is well-formed and simply has no pypa image,
 # and there is no Docker official image for 32-bit mipsel either -- there
 # is nothing to be native to. It stays a cross-compile from an amd64
-# host on a plain `ubuntu:24.04` its own Dockerfile names, which is why
+# host on a plain `ubuntu:26.04` its own Dockerfile names, which is why
 # it has no `pinned_pypa_images.toml` entry: that base is not one of
 # pypa's.
 #
@@ -177,7 +177,7 @@ musllinux_1_2_riscv64 = "quay.io/pypa/musllinux_1_2_riscv64@sha256:203b43d3c4965
 # `dockerrun.image_for()`'s own empty-group handling ("this target exists,
 # nothing published for it yet") raised a clean "no image registered" rather
 # than pointing at something that did not exist under this name.
-manylinux_2_41_mipsel = "ghcr.io/ballistics-lab/manylinux_2_41_mipsel@sha256:eee14e84bb5ce27c1e65c467f664a7f13443664766c530d07b161011318e7226"
+manylinux_2_41_mipsel = "ghcr.io/ballistics-lab/manylinux_2_41_mipsel@sha256:cda4d18de7abe304560ffdd3a6579d6ad98f45aff4540712dc8fba1f150c703a"
 
 # ── cross-compiling ports with no image axis of their own ─────────────
 #
@@ -188,8 +188,8 @@ manylinux_2_41_mipsel = "ghcr.io/ballistics-lab/manylinux_2_41_mipsel@sha256:eee
 # `dockerrun.py`, since it is a property of the image rather than of any
 # build target) is what lets them run on an arm64 host at all -- emulated,
 # instead of failing with `exec format error`.
-windows = "ghcr.io/ballistics-lab/windows@sha256:9e69aaecd280dd8cb4d9247f320c98bf0af8f07a97dd370c454f3da76a172a5f"
-webassembly = "ghcr.io/ballistics-lab/webassembly@sha256:d35728567074c9af1b71f22e6f674946fff46ca69d159ea48672a80653544202"
+windows = "ghcr.io/ballistics-lab/windows@sha256:0ea64a917a652d8540dea81b4cf33eff6fac2d46308a3f7418ae9ad023a199d5"
+webassembly = "ghcr.io/ballistics-lab/webassembly@sha256:ffea4467f27e9e7ee494f1cf2797e5b2d49e98f4458304300f08ae53440eb6d8"
 
 # ── the six toolchain-group images (record 0058) ───────────────────────
 #
@@ -201,15 +201,15 @@ webassembly = "ghcr.io/ballistics-lab/webassembly@sha256:d35728567074c9af1b71f22
 # `publish-docker-images.yml` run 33175380705 (2026-08-28), each one
 # verified live before that run -- see record 0058's own "built and
 # verified" table for what each was tested against.
-arm_embedded = "ghcr.io/ballistics-lab/arm_embedded@sha256:9cc51bdf7d1189dd6e7126c32b876e0e178db2206e119498d31c00dfbf9563d8"
-riscv_embedded = "ghcr.io/ballistics-lab/riscv_embedded@sha256:17e6e4fe15787e97b635b22043fc8050bd153ac7dfc4ec0bdcbc9a523d66ef9f"
-xtensa_lx106 = "ghcr.io/ballistics-lab/xtensa_lx106@sha256:fb11daaf73ba8d1742a4d6adbc6703d756671e3cf2002af2700e6b1feb0c546b"
-xtensa_esp = "ghcr.io/ballistics-lab/xtensa_esp@sha256:f6c25dad7c7b8fb209635a5cc1addbab6e7f9f85ee5065f8db8a6b9eb5f2adf3"
-natmod_host = "ghcr.io/ballistics-lab/natmod_host@sha256:ec45bd4cf3b188ea14fbb2124db8093e0b514c0a25a685c6f966d7defe995ebc"
-ppc64le_linux = "ghcr.io/ballistics-lab/ppc64le_linux@sha256:7a5517e3733d9f705c8101bc7261f8013f407c82e40043fea5a18f81555a03e0"
+arm_embedded = "ghcr.io/ballistics-lab/arm_embedded@sha256:607f3163d2600e45e1dd25af5ed273a896d65433a82937940b77d061feae4a5a"
+riscv_embedded = "ghcr.io/ballistics-lab/riscv_embedded@sha256:47826777013650ceef1a3577c041dd3939f1c4e9b642387cfa7e403034f634a5"
+xtensa_lx106 = "ghcr.io/ballistics-lab/xtensa_lx106@sha256:bd995c552089749441f038e7a20eacb60ea5af23c98d91cec60ae60aababc040"
+xtensa_esp = "ghcr.io/ballistics-lab/xtensa_esp@sha256:2b7985855597188faa2d3750ecbe144cbee814768620f96dccfa5dc2848cb638"
+natmod_host = "ghcr.io/ballistics-lab/natmod_host@sha256:b24f0de9cd8b73d052a693e94ec9a42b971fd178b15ae958fb9a23fc2acd527d"
+ppc64le_linux = "ghcr.io/ballistics-lab/ppc64le_linux@sha256:b1bf705e76ec3ceae473a0e402b8dcd66a6a3f40c83d180b235bd9f6e17b4d43"
 
 # Not a toolchain image (record 0058's own "esp_idf_base is not a
 # toolchain image"): ESP-IDF is installed into it at build time by
 # `usermod/espidf.py`, not baked in, since this table carries eight
 # distinct `idf_version`s. `esp32` names it directly.
-esp_idf_base = "ghcr.io/ballistics-lab/esp_idf_base@sha256:a7eb9007773fcc5bb3b200b1a635e52c57fcbd46f9fd945a70fef6f86628a002"
+esp_idf_base = "ghcr.io/ballistics-lab/esp_idf_base@sha256:f3ade0d83ea3229653d454ab13ac882695cc2b549b42ba005f3907d312664dbd"

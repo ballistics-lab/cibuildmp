@@ -197,7 +197,7 @@ def build_mpy_cross(mpy_dir: Path, arch: str) -> Path:
     `slug` scoping here the way that function needs, even after record
     0058 split natmod's one image into six: mpy-cross is a *host* tool
     dynruntime.mk invokes during the build, not a target artifact, so the
-    binary is glibc-portable across every one of them (all `ubuntu:24.04`)
+    binary is glibc-portable across every one of them (all `ubuntu:26.04`)
     regardless of which arch's toolchain built it. `arch` only picks which
     already-required image runs the build -- there is still only one
     binary, at the fixed path dynruntime.mk itself expects, and no

@@ -24,6 +24,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Every pypa base digest re-pinned, and every image digest with it.** The
+  `manylinux_2_28_*` bases and `pypa-tracker.Dockerfile`'s nine mirrored
+  references move to pypa's `2026.09.01-1` release (Dependabot's own grouped PR),
+  `pinned_pypa_images.toml`'s 34 pins move with them via
+  `bin/update_docker.py --pypa`, and all 15 images were republished and re-pinned
+  with `--images`. `--check` reports zero drift for the first time in a while:
+  fourteen `ghcr.io` pins had been one publish behind their own `:latest` since a
+  `docker/**` push to `main` republished everything with no repin PR behind it —
+  the trigger removed above.
+
+  The pypa bump changes the base but not the floor: the tags are unchanged
+  (`manylinux_2_28` stays `manylinux_2_28`), and a real `usermod` build through
+  each rebuilt `x86_64`/`i686` image is green, which is the check that would catch
+  a floor regression (`verify_unix_floor()` reads the finished binary's own
+  `GLIBC_x.y` requirements, not the image's name).
+
+- **Every `ubuntu`-based build image moves to `ubuntu:26.04`** — all ten of them
+  (`natmod_host`, `ppc64le_linux`, `arm_embedded`, `riscv_embedded`,
+  `xtensa_esp`, `xtensa_lx106`, `esp_idf_base`, `windows`, `webassembly`,
+  `manylinux_2_41_mipsel`). This is the bump record 0068 blocked and left to a
+  human: it failed there because `manylinux_2_39_mipsel`'s apt cross-toolchain
+  does not exist on 26.04's archive at all, and the Bootlin pin above is what
+  removed that dependency. The five `manylinux_2_28_*` images are unaffected —
+  they are `FROM quay.io/pypa/...`, a different base on a different cadence.
+
+  Measured rather than assumed, by building all ten locally and running two real
+  cibuildmp builds through the result:
+
+  * The host compiler moves **gcc 13.3 → 15.2**, two majors. That only touches
+    the images where the *host* compiler produces the artifact — `natmod_host`
+    and `ppc64le_linux`. A real `natmod` `x64` build through the bumped image is
+    green with **zero warnings**, which is the check that matters: a new
+    `-Werror` diagnostic from a compiler jump is exactly how this breaks
+    (README's own `[^s390xclobbered]` is that failure on s390x).
+  * `windows` is unchanged where it counts: apt's mingw-w64 is GCC 13 on both
+    24.04 and 26.04 (checked in a real `ubuntu:24.04` container, not recalled),
+    and `arm64` is the pinned `llvm-mingw` (clang 22.1.8), independent of the
+    base by design. The same holds for all four embedded toolchain images, which
+    pin tarballs (record 0025) — `manylinux_2_41_mipsel`'s cross-gcc stays
+    Bootlin's 14.3.0 while the host's moves to 15.2.
+  * `webassembly`'s `node` moves **18.x → 22.x** (that Dockerfile's own comment
+    said 18.x and now says 22.x). A real `wasm32` usermod build is green and its
+    `.mjs` passes `smoke_test.py` under that very node.
+
 - **BREAKING: the `mipsel` cell is `manylinux_2_41_mipsel`, not
   `manylinux_2_39_mipsel`.** Every identifier naming it changes with it
   (`v1.29.0-manylinux_2_39_mipsel` -> `v1.29.0-manylinux_2_41_mipsel`), and a
@@ -76,6 +120,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to catch.
 
 ### Fixed
+
+- **`bin/ghcr_prune_scan.py` could propose deleting a digest a released version
+  still pins.** It protected two things — tagged versions, and children of tagged
+  indexes (record 0059's own incident) — but not "named by a pin in a released
+  cibuildmp". Those were safe only by luck: they happen to still carry a
+  `pre-<digest12>` tag, which nothing maintains on purpose. It now reads
+  `pinned_docker_images.toml` at every `v*` git tag plus the working tree and
+  keeps anything they name, reporting *why* each version is kept. It also
+  paginates (`gh api --paginate`): a `per_page` cap hides versions rather than
+  erroring, and a hidden *tagged* index is the dangerous case — its children
+  never enter the referenced set and get reported as safe to delete.
+
+  Used to prune the registry: 124 versions deleted, after which all 48 tags, all
+  96 child manifests and all 46 released-or-current pins still resolve.
 
 - **`publish-docker-images.yml`'s own `only` input described values that could
   not work.** Its example read `"natmod"` and `"qemu"` — neither has been a

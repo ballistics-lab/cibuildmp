@@ -96,7 +96,7 @@
 #
 # Build: docker build -t cibuildmp-webassembly -f src/cibuildmp/resources/docker/webassembly.Dockerfile .
 # Use:   CIBMP_WEBASSEMBLY_DOCKER_IMAGE=cibuildmp-webassembly cibuildmp ...
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 
 # python3: ports/webassembly/Makefile includes py/mkenv.mk, whose own
 # `PYTHON = python3` default every port's build shells out to directly
@@ -122,7 +122,7 @@ FROM ubuntu:24.04
 # which is exactly the installer path this image (and
 # `usermod/emsdk.py`'s own bare-host resolver, which has the identical
 # gap) deliberately bypasses for a smaller, faster, directly-verified
-# download. Ubuntu 24.04's own `nodejs` package (18.x) is enough --
+# download. Ubuntu 26.04's own `nodejs` package (22.x) is enough --
 # `emcc`'s config sanity check only needs *a* working `node` to run
 # against, confirmed live by installing it into a real container and
 # re-running the exact failing command.

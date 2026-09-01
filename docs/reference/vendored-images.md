@@ -74,7 +74,7 @@ per-arch image" model: pypa publishes no mipsel image, PEP 600 defines the
 tag form but not a closed architecture list, and there is no Docker Official
 Image for 32-bit mipsel either — there is nothing to be native to. It has no
 `pinned_pypa_images.toml` entry at all (that base is not one of pypa's) and
-builds as a cross-compile from a plain `ubuntu:24.04` its own Dockerfile
+builds as a cross-compile from a plain `ubuntu:26.04` its own Dockerfile
 names. Its cross-toolchain is a **pinned Bootlin tarball** (gcc 14.3.0,
 glibc 2.41, sha256-checked) as of [0068]'s toolchain pass, not the apt
 `gcc-mipsel-linux-gnu` it used until then: Debian 13 "Trixie" dropped the

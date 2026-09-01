@@ -3,12 +3,12 @@
 # One of the six toolchain-group images record 0058 splits
 # `natmod.Dockerfile` into. Keyed by the group, not the port: usermod `esp32`, every board and MCU.
 #
-# `ubuntu:24.04`, not a pypa image -- `unix` builds on pypa's own
+# `ubuntu:26.04`, not a pypa image -- `unix` builds on pypa's own
 # ([0043]/[0044]) because those targets are native and need manylinux's
 # glibc floor. Nothing here is.
 #
 # Build: docker build -t cibuildmp-esp_idf_base -f docker/esp_idf_base.Dockerfile .
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 

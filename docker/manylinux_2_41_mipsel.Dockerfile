@@ -37,7 +37,7 @@
 #          -t manylinux_2_41_mipsel \
 #          -f docker/manylinux_2_41_mipsel.Dockerfile .
 # Use:   CIBMP_UNIX_MANYLINUX_2_41_MIPSEL_DOCKER_IMAGE=manylinux_2_41_mipsel cibuildmp ...
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 
 # Host-side build tooling only. The cross-toolchain no longer comes from
 # apt at all: `gcc-mipsel-linux-gnu` and `libc6-dev-mipsel-cross` are
