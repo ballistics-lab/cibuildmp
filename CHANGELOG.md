@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-01
+
 ### Added
 
 - **A pre-1.0/alpha warning at the top of `README.md`.** Nothing said the config
@@ -23,6 +25,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (e.g. a real `!keep-this` exception).
 
 ### Changed
+
+- **BREAKING: the `mipsel` cell is `manylinux_2_41_mipsel`, not
+  `manylinux_2_39_mipsel`.** Every identifier naming it changes with it
+  (`v1.29.0-manylinux_2_39_mipsel` -> `v1.29.0-manylinux_2_41_mipsel`), and a
+  caller still naming the old one gets `matches no known identifier` — there is
+  no alias. The rename follows its toolchain: `docker/manylinux_2_41_mipsel.Dockerfile`
+  no longer installs `gcc-mipsel-linux-gnu`/`libc6-dev-mipsel-cross` at all,
+  because Debian 13 "Trixie" dropped the mipsel port and Ubuntu's archive lost
+  those packages with it. It pins a Bootlin tarball instead
+  (`mips32el--glibc--stable-2025.08-1`, gcc 14.3.0, glibc 2.41-70, URL +
+  sha256), the same version+URL+sha256 model the four embedded toolchain images
+  already use — so this image no longer depends on an apt archive for an
+  architecture upstream has abandoned. `2_39` was apt's cross-glibc version, so
+  keeping the name would have made a real PEP 600 tag claim a floor its image no
+  longer has (record 0031's principle, record 0068's decision).
+
+  Verified on real artifacts, not inferred: a full `examples/usercmodule` build
+  (including the `MICROPY_STANDALONE` static-libffi `deplibs` step) links, and
+  the result runs under `qemu-mipsel` with all three upstream modules importing
+  — `ELF 32-bit LSB executable, MIPS, statically linked`. One real difference
+  from the apt toolchain: the ELF is now `mips32` (r1) rather than `mips32r2`,
+  which widens the hardware it runs on rather than narrowing it.
+
+  The image is published and pinned under the new package name
+  (`ghcr.io/ballistics-lab/manylinux_2_41_mipsel@sha256:eee14e84…`), verified by
+  a real build that pulls it with no `CIBMP_UNIX_MANYLINUX_2_41_MIPSEL_DOCKER_IMAGE`
+  override at all. Its `resources/pinned_docker_images.toml` row was empty
+  between the rename and that publish — a GHCR digest is per package name, so
+  the pre-rename digest was never a reference this cell could carry, and an
+  empty group is the state `dockerrun.image_for()` already defines as "exists,
+  nothing published yet".
 
 - **Every pypa base digest re-pinned, and every image digest with it.** The
   `manylinux_2_28_*` bases and `pypa-tracker.Dockerfile`'s nine mirrored
@@ -67,37 +100,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   * `webassembly`'s `node` moves **18.x → 22.x** (that Dockerfile's own comment
     said 18.x and now says 22.x). A real `wasm32` usermod build is green and its
     `.mjs` passes `smoke_test.py` under that very node.
-
-- **BREAKING: the `mipsel` cell is `manylinux_2_41_mipsel`, not
-  `manylinux_2_39_mipsel`.** Every identifier naming it changes with it
-  (`v1.29.0-manylinux_2_39_mipsel` -> `v1.29.0-manylinux_2_41_mipsel`), and a
-  caller still naming the old one gets `matches no known identifier` — there is
-  no alias. The rename follows its toolchain: `docker/manylinux_2_41_mipsel.Dockerfile`
-  no longer installs `gcc-mipsel-linux-gnu`/`libc6-dev-mipsel-cross` at all,
-  because Debian 13 "Trixie" dropped the mipsel port and Ubuntu's archive lost
-  those packages with it. It pins a Bootlin tarball instead
-  (`mips32el--glibc--stable-2025.08-1`, gcc 14.3.0, glibc 2.41-70, URL +
-  sha256), the same version+URL+sha256 model the four embedded toolchain images
-  already use — so this image no longer depends on an apt archive for an
-  architecture upstream has abandoned. `2_39` was apt's cross-glibc version, so
-  keeping the name would have made a real PEP 600 tag claim a floor its image no
-  longer has (record 0031's principle, record 0068's decision).
-
-  Verified on real artifacts, not inferred: a full `examples/usercmodule` build
-  (including the `MICROPY_STANDALONE` static-libffi `deplibs` step) links, and
-  the result runs under `qemu-mipsel` with all three upstream modules importing
-  — `ELF 32-bit LSB executable, MIPS, statically linked`. One real difference
-  from the apt toolchain: the ELF is now `mips32` (r1) rather than `mips32r2`,
-  which widens the hardware it runs on rather than narrowing it.
-
-  The image is published and pinned under the new package name
-  (`ghcr.io/ballistics-lab/manylinux_2_41_mipsel@sha256:eee14e84…`), verified by
-  a real build that pulls it with no `CIBMP_UNIX_MANYLINUX_2_41_MIPSEL_DOCKER_IMAGE`
-  override at all. Its `resources/pinned_docker_images.toml` row was empty
-  between the rename and that publish — a GHCR digest is per package name, so
-  the pre-rename digest was never a reference this cell could carry, and an
-  empty group is the state `dockerrun.image_for()` already defines as "exists,
-  nothing published yet".
 
 - **`publish-docker-images.yml` is dispatch-only.** It used to also run on any
   push to `main` touching `docker/**` (marked `# temporary` from the day it was
@@ -1333,7 +1335,8 @@ ballistics-lab/micropython-native-ci, but both tags exist here too, so every
 link resolves inside this repository -- the version line continues rather
 than restarting (see the 0.3.0a1 entry). -->
 
-[Unreleased]: https://github.com/ballistics-lab/cibuildmp/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/ballistics-lab/cibuildmp/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/ballistics-lab/cibuildmp/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/ballistics-lab/cibuildmp/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/ballistics-lab/cibuildmp/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/ballistics-lab/cibuildmp/compare/v0.4.0...v0.4.1

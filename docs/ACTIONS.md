@@ -53,7 +53,7 @@ consuming repos use it that way, and "now" was doing real work in it; who
 calls what is the tracker's [0038] row, not this file's.)
 
 | Input                 | Required | Default         | Description                                                                                                                                                                                                                         |
-| --------------------- | -------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| --------------------- | -------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `mpy_tag`             | yes      | --              | MicroPython release tag                                                                                                                                                                                                             |
 | `submodules`          | no       | `''`            | Space-separated submodules to `git submodule update --init` (empty = skip)                                                                                                                                                          |
 | `pico_sdk_submodules` | no       | `'false'`       | Also run `git -C lib/pico-sdk submodule update --init` (rp2040 builds)                                                                                                                                                              |
@@ -72,7 +72,7 @@ Requires: `MPY_DIR` (see above) and the calling repo already checked out,
 submodules included if the natmod Makefile needs any.
 
 | Input               | Required | Default  | Description                                                                                                                                                                                                       |
-| ------------------- | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ------------------- | -------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `arch`              | yes      | --       | `x64`, `x86`, `armv6m`, `armv7m`, `armv7emsp`, `armv7emdp`, `rv32imc`, `rv64imc`, `xtensa`, or `xtensawin` (no `aarch64` -- `dynruntime.mk` has none as of MicroPython ≤ v1.28; build that via a usermod instead) |
 | `natmod_dir`        | no       | `natmod` | Path to the directory containing `natmod/Makefile`, relative to the workspace root (a7p passes `micropython/natmod`)                                                                                              |
 | `esp_idf_ver`       | no       | `v5.4`   | esp-idf tag to install for the `xtensawin` toolchain                                                                                                                                                              |
@@ -114,7 +114,7 @@ composite action can't pick its own runner.
 | `variant`         | no       | `standard`                                      | Value for `VARIANT=`. A caller building against upstream's own `VARIANT=coverage` recipe (a7p's armhf/mipsel qemu legs used to) overrides this                                             |
 
 | Output      | Description                                                                                                                      |
-| ----------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | `build_dir` | The `BUILD=` directory actually used (resolved default included), so the caller can find the built binary without recomputing it |
 
 ## `build-usermod-windows`
@@ -148,7 +148,7 @@ and setting up MSYS2 both stay the caller's own job. Requires:
 | Input             | Required | Default                      | Description                                                                                                                                                                                                                                                                                                          |
 | ----------------- | -------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `user_c_modules`  | no       | `$(pwd)`                     | Value for `USER_C_MODULES=`                                                                                                                                                                                                                                                                                          |
-| `frozen_manifest` | no       | `$(pwd)/usermod/manifest.py` | Value for `FROZEN_MANIFEST=`                                                                                                                                                                                                                                                                                          |
+| `frozen_manifest` | no       | `$(pwd)/usermod/manifest.py` | Value for `FROZEN_MANIFEST=`                                                                                                                                                                                                                                                                                         |
 | `extra_make_args` | no       | `''`                         | Extra space-separated `VAR=value` pairs, e.g. a custom `PROG=` (wasm3 uses `PROG=micropython-wasm3.exe`)                                                                                                                                                                                                             |
 | `build_dir`       | no       | `build-standard`             | Value for `BUILD=` -- a bare relative value, resolving against `$MPY_DIR/ports/windows`                                                                                                                                                                                                                              |
 | `cflags_extra`    | no       | `''`                         | Value for `CFLAGS_EXTRA=` on the main build only (not `mpy-cross`), e.g. `-Wno-error` for CLANGARM64                                                                                                                                                                                                                 |
@@ -184,7 +184,7 @@ writes its own combined manifest first and passes that as
 `frozen_manifest`.
 
 | Input             | Required | Default                                        | Description                                                                                                                                                                                                                                                                                                  |
-| ----------------- | -------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| ----------------- | -------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `variant`         | no       | `pyscript`                                     | Value for `VARIANT=`. `standard`'s `-s ASYNCIFY` is broken against modern emsdk in multiple ways (tracked upstream at [micropython/micropython#19380](https://github.com/micropython/micropython/issues/19380)); `pyscript` is upstream's own recommended workaround, since it doesn't use `ASYNCIFY` at all |
 | `emsdk_ref`       | no       | `latest`                                       | emsdk install/activate ref. `latest` matches every caller today and upstream's own `tools/ci.sh` (`ci_webassembly_setup`) -- a moving target, since some future emsdk release could break a build with no change on either side of this action. Override to pin once that actually happens                   |
 | `user_c_modules`  | no       | `''` → `$GITHUB_WORKSPACE`                     | Value for `USER_C_MODULES=`                                                                                                                                                                                                                                                                                  |
@@ -193,7 +193,7 @@ writes its own combined manifest first and passes that as
 | `build_dir`       | no       | `''` → `$GITHUB_WORKSPACE/usermod/build/wasm`  | Value for `BUILD=`. A bare relative value (no leading `/`) resolves against `$MPY_DIR/ports/webassembly` instead, same as a bare `BUILD=` on the command line always did                                                                                                                                     |
 
 | Output      | Description                                                                                                                               |
-| ----------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `build_dir` | The `BUILD=` directory actually used (resolved default included), so the caller can find `micropython.mjs`/`.wasm` without recomputing it |
 
 ## `build-usermod-rp2040`
@@ -212,7 +212,7 @@ rather than at pico-sdk's own nested vendored copies, so pico-sdk's
 internal submodule tree is never actually touched by this build.
 
 | Input              | Required | Default                                              | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| ------------------ | -------- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ------------------ | -------- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `board`            | no       | `RPI_PICO`                                           | Value for `BOARD=`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `user_c_modules`   | no       | `''` → `$GITHUB_WORKSPACE/usermod/micropython.cmake` | Value for `USER_C_MODULES=` -- a *file*, unlike `build-usermod-unix`/`build-usermod-webassembly`'s own `user_c_modules`: CMake's `USER_C_MODULES` takes a single `.cmake` entry point, not a directory to glob                                                                                                                                                                                                                                                                                                                          |
 | `frozen_manifest`  | no       | `''` → `$GITHUB_WORKSPACE/usermod/manifest.py`       | Value for `FROZEN_MANIFEST=`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
@@ -221,7 +221,7 @@ internal submodule tree is never actually touched by this build.
 | `build_dir`        | no       | `''` → `$GITHUB_WORKSPACE/usermod/build/rp2040`      | Value for `BUILD=`. A bare relative value (no leading `/`) resolves against `$MPY_DIR/ports/rp2` instead, same as a bare `BUILD=` on the command line always did                                                                                                                                                                                                                                                                                                                                                                        |
 
 | Output      | Description                                                                                                                    |
-| ----------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | `build_dir` | The `BUILD=` directory actually used (resolved default included), so the caller can find `firmware.uf2` without recomputing it |
 
 ## `build-usermod-armv7m`
@@ -246,7 +246,7 @@ Requires: `MPY_DIR` and checkout, same as `build-usermod-unix`.
 | `build_dir`       | no       | `''` → `$GITHUB_WORKSPACE/usermod/build/armv7m` | Value for `BUILD=`. A bare relative value (no leading `/`) resolves against `$MPY_DIR/ports/qemu` instead, same as a bare `BUILD=` on the command line always did -- pass one to get the port's own `build-$(BOARD)` default |
 
 | Output      | Description                                                                                                                    |
-| ----------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | `build_dir` | The `BUILD=` directory actually used (resolved default included), so the caller can find `firmware.elf` without recomputing it |
 
 ## `build-usermod-esp32`
@@ -273,7 +273,7 @@ The port's own `build-$(BOARD)` default is always used instead.
 Requires: `MPY_DIR` and checkout, same as `build-usermod-unix`.
 
 | Input             | Required | Default                                              | Description                                                                                                                                                            |
-| ----------------- | -------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ----------------- | -------- | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `board`           | no       | `ESP32_GENERIC`                                      | Value for `BOARD=`                                                                                                                                                     |
 | `idf_target`      | no       | `esp32`                                              | Chip family passed to `install.sh` (e.g. `esp32`, `esp32s3`). Deliberately separate from `board`, not derived from it -- more than one board can exist per chip family |
 | `idf_ver`         | no       | `v5.5.1`                                             | ESP-IDF version tag to clone                                                                                                                                           |
@@ -300,11 +300,11 @@ jobs:
         with:
           submodules: recursive
 
-      - uses: ballistics-lab/cibuildmp/.github/actions/fetch-micropython@v0.5.0
+      - uses: ballistics-lab/cibuildmp/.github/actions/fetch-micropython@v0.6.0
         with:
           mpy_tag: v1.28.0
 
-      - uses: ballistics-lab/cibuildmp/.github/actions/build-natmod@v0.5.0
+      - uses: ballistics-lab/cibuildmp/.github/actions/build-natmod@v0.6.0
         with:
           arch: ${{ matrix.arch }}
           # natmod_dir: natmod              # default; a7p passes micropython/natmod

@@ -106,7 +106,7 @@ On CI, use the action instead of installing the CLI yourself — it already
 runs on a bare runner with the runner's own Docker daemon reachable:
 
 ```yaml
-- uses: ballistics-lab/cibuildmp@v0.5.0
+- uses: ballistics-lab/cibuildmp@v0.6.0
   with:
     build: "mpy6.3-* v1.29.0-manylinux_2_28_x86_64"
 ```
@@ -114,15 +114,15 @@ runs on a bare runner with the runner's own Docker daemon reachable:
 The action takes seven inputs, all optional — every one overrides the
 config file rather than replacing it:
 
-| Input | Default | What it does |
-| --- | --- | --- |
-| `package-dir` | `.` | Directory holding the module and its config |
-| `config-file` | — | Config to use instead of `<package-dir>/cibuildmp.toml` |
-| `build` | — | Override the config's own `build` selector |
-| `skip` | — | Override the config's own `skip` selector |
-| `output-dir` | `mpyhouse` | Where to collect output. **natmod only** — usermod reads it from the config or `CIBMP_OUTPUT_DIR` |
-| `keep-going` | — | Any non-empty value: build every selected target even after one fails |
-| `extras` | — | **Leave empty.** There are no extras today; a non-empty value fails the install |
+| Input         | Default    | What it does                                                                                      |
+| ------------- | ---------- | ------------------------------------------------------------------------------------------------- |
+| `package-dir` | `.`        | Directory holding the module and its config                                                       |
+| `config-file` | —          | Config to use instead of `<package-dir>/cibuildmp.toml`                                           |
+| `build`       | —          | Override the config's own `build` selector                                                        |
+| `skip`        | —          | Override the config's own `skip` selector                                                         |
+| `output-dir`  | `mpyhouse` | Where to collect output. **natmod only** — usermod reads it from the config or `CIBMP_OUTPUT_DIR` |
+| `keep-going`  | —          | Any non-empty value: build every selected target even after one fails                             |
+| `extras`      | —          | **Leave empty.** There are no extras today; a non-empty value fails the install                   |
 
 Anything without an input has an environment form instead — see
 [Configuration](#configuration).
@@ -161,7 +161,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ballistics-lab/cibuildmp@v0.5.0
+      - uses: ballistics-lab/cibuildmp@v0.6.0
         with:
           build: "mpy6.3-v1.29.0-*"
       - uses: actions/upload-artifact@v4
@@ -302,14 +302,14 @@ version = "1.0.0"
 
 **What each port produces**, since it is not a `.mpy` for any of them:
 
-| Port | Artifact |
-| --- | --- |
-| `unix` | `micropython` — plus a `lib/` sidecar, see below |
-| `windows` | `micropython.exe` |
-| `webassembly` | `micropython.mjs` (with its `.wasm` beside it) |
-| `qemu` | `firmware.elf` |
-| `esp32` | `micropython.bin` |
-| `rp2` | `firmware.uf2` |
+| Port          | Artifact                                         |
+| ------------- | ------------------------------------------------ |
+| `unix`        | `micropython` — plus a `lib/` sidecar, see below |
+| `windows`     | `micropython.exe`                                |
+| `webassembly` | `micropython.mjs` (with its `.wasm` beside it)   |
+| `qemu`        | `firmware.elf`                                   |
+| `esp32`       | `micropython.bin`                                |
+| `rp2`         | `firmware.uf2`                                   |
 
 Flashing or running those is your own port's normal procedure —
 `cibuildmp` collects them and stops.
@@ -374,15 +374,15 @@ platform.**
 Identifier shapes, one per platform:
 
 <!-- generated: identifier-shapes -- bin/refresh_docs.py, do not edit by hand -->
-| Platform | Shape | Example |
-| --- | --- | --- |
-| natmod | `mpy{abi}-{tag}-{arch}` | `mpy6.3-v1.29.0-armv6m` |
-| usermod `esp32` | `{tag}-esp32-{board}` | `v1.29.0-esp32-ARDUINO_NANO_ESP32` |
-| usermod `qemu` | `{tag}-qemu-{board}` | `v1.29.0-qemu-MICROBIT` |
-| usermod `rp2` | `{tag}-rp2-{board}` | `v1.29.0-rp2-ADAFRUIT_FEATHER_RP2040` |
-| usermod `unix` | `{tag}-{arch}` | `v1.29.0-manylinux_2_28_aarch64` |
-| usermod `webassembly` | `{tag}-{arch}` | `v1.29.0-wasm32` |
-| usermod `windows` | `{tag}-{arch}` | `v1.29.0-win32` |
+| Platform              | Shape                   | Example                               |
+| --------------------- | ----------------------- | ------------------------------------- |
+| natmod                | `mpy{abi}-{tag}-{arch}` | `mpy6.3-v1.29.0-armv6m`               |
+| usermod `esp32`       | `{tag}-esp32-{board}`   | `v1.29.0-esp32-ARDUINO_NANO_ESP32`    |
+| usermod `qemu`        | `{tag}-qemu-{board}`    | `v1.29.0-qemu-MICROBIT`               |
+| usermod `rp2`         | `{tag}-rp2-{board}`     | `v1.29.0-rp2-ADAFRUIT_FEATHER_RP2040` |
+| usermod `unix`        | `{tag}-{arch}`          | `v1.29.0-manylinux_2_28_aarch64`      |
+| usermod `webassembly` | `{tag}-{arch}`          | `v1.29.0-wasm32`                      |
+| usermod `windows`     | `{tag}-{arch}`          | `v1.29.0-win32`                       |
 <!-- /generated: identifier-shapes -->
 
 The shape genuinely differs per usermod port — `unix`/`windows`/
@@ -630,20 +630,20 @@ A second group of variables configures the machinery rather than the build,
 and has no config-file counterpart at all. **What `<TARGET>` is depends on
 the port**, because it is that port's own build axis:
 
-| `<PORT>` | `<TARGET>` | example |
-| --- | --- | --- |
-| `unix` | the platform tag | `CIBMP_UNIX_MANYLINUX_2_28_X86_64_DOCKER_IMAGE` |
-| `windows` | the arch | `CIBMP_WINDOWS_WIN_AMD64_DOCKER_IMAGE` |
-| `qemu` | the board | `CIBMP_QEMU_MPS2_AN385_DOCKER_IMAGE` |
-| `natmod` | the arch | `CIBMP_NATMOD_ARMV7EMSP_DOCKER_IMAGE` |
-| `esp32`, `rp2`, `webassembly` | *none* | `CIBMP_WEBASSEMBLY_DOCKER_IMAGE` |
+| `<PORT>`                      | `<TARGET>`       | example                                         |
+| ----------------------------- | ---------------- | ----------------------------------------------- |
+| `unix`                        | the platform tag | `CIBMP_UNIX_MANYLINUX_2_28_X86_64_DOCKER_IMAGE` |
+| `windows`                     | the arch         | `CIBMP_WINDOWS_WIN_AMD64_DOCKER_IMAGE`          |
+| `qemu`                        | the board        | `CIBMP_QEMU_MPS2_AN385_DOCKER_IMAGE`            |
+| `natmod`                      | the arch         | `CIBMP_NATMOD_ARMV7EMSP_DOCKER_IMAGE`           |
+| `esp32`, `rp2`, `webassembly` | *none*           | `CIBMP_WEBASSEMBLY_DOCKER_IMAGE`                |
 
 
 | Variable                                | Effect                                                                                                                                                                                                                            |
 | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `CIBMP_CACHE_PATH`                      | Where MicroPython checkouts and mpy-cross builds are cached. Defaults to `$XDG_CACHE_HOME/cibuildmp`, or `~/.cache/cibuildmp`. Pin it in CI when a later step needs the checkout by path — `<CIBMP_CACHE_PATH>/micropython/<tag>` |
 | `CIBMP_REPORT_PATH`                     | Where the JSON build report is written                                                                                                                                                                                            |
-| `CIBMP_TIMEOUT`                         | Seconds before a build container is killed (`docker kill`, not just the CLI). No limit by default. **usermod only** -- natmod's own container call does not consult it |
+| `CIBMP_TIMEOUT`                         | Seconds before a build container is killed (`docker kill`, not just the CLI). No limit by default. **usermod only** -- natmod's own container call does not consult it                                                            |
 | `CIBMP_<PORT>_<TARGET>_TIMEOUT`         | The same, for one container — `CIBMP_UNIX_MANYLINUX_2_28_X86_64_TIMEOUT`                                                                                                                                                          |
 | `CIBMP_<PORT>_<TARGET>_DOCKER_IMAGE`    | Run this (port, target) in a different image — a locally built one, or a fork's. Wins over the pinned default. Omit the `<TARGET>` segment for a port with no per-build image axis (`CIBMP_WEBASSEMBLY_DOCKER_IMAGE`)             |
 | `CIBMP_<PORT>_<TARGET>_DOCKER_PLATFORM` | Same shape, for the container's `--platform`                                                                                                                                                                                      |
@@ -742,14 +742,14 @@ identifiers are `{tag}-{arch}`, with no `unix-` in them.
 
 ### unknown key &#96;buidl&#96;. Perhaps you meant &#96;build&#96;?
 
-A typo, or a key from a config schema older than v0.5.0. The suggestion is
+A typo, or a key from a config schema older than v0.6.0. The suggestion is
 usually right. See [Configuration](#configuration) for every key that
 exists.
 
 ### unknown table(s) at the top level: [natmod].
 
 Per-platform tables (`[natmod]`, `[unix]`, `[esp32]`, `[usermod]`, …) were
-removed in v0.5.0. Everything lives at the top level now, narrowed with
+removed in v0.6.0. Everything lives at the top level now, narrowed with
 `[override."<glob>"]`. Move the keys up and delete the table.
 
 ### `docker run against image '…' was requested but the docker CLI itself is not on PATH`
@@ -1301,9 +1301,9 @@ bumping any other CI dependency.
 The `cibuildmp` package and the actions share one version. **Which tag is
 current is not restated here** — [`CHANGELOG.md`](CHANGELOG.md)'s own
 newest released heading is that, and `tests/test_docs.py` checks every
-`@vX.Y.Z` example in this file against it. (This paragraph named `v0.5.0`
+`@vX.Y.Z` example in this file against it. (This paragraph named `v0.6.0`
 as current, and as "the one every example in this README targets", for two
-releases after that stopped being true.) `v0.5.0` is worth knowing as
+releases after that stopped being true.) `v0.6.0` is worth knowing as
 history: it is the breaking one — config surface rewritten, `unix`
 identifiers renamed, see `CHANGELOG.md`'s own `[0.4.0]` entry. `v0.3.0` was the first tag
 where the CLI actually built a module at all, not just planned it, and
