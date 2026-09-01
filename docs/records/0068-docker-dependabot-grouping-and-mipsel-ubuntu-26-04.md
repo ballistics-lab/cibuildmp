@@ -217,9 +217,9 @@ survive the fix it was attached to. Its own premise was that this image is a sta
 liability *because* it depends on an archive Debian has abandoned; pinning the toolchain by
 URL + sha256 is precisely what removes that dependency, so the reason to stop publishing
 went away in the same change that was supposed to justify it. What remains is only the cost:
-`micropython-bclibc` and `micropython-wasm3` both run a real mipsel leg in CI ([0076]), and
-"build a Dockerfile out of another repository, then set an env override" is a worse story
-than a pulled image for no benefit either of them receives.
+`micropython-bclibc` runs a real mipsel leg in CI, and "build a Dockerfile out of another
+repository, then set an env override" is a worse story than a pulled image for no benefit it
+receives.
 
 **The row is empty rather than repointed, and that is not an unfinished edit.** A GHCR digest
 is per package *name*: the last publish went out under `manylinux_2_39_mipsel` (its digest is
@@ -262,8 +262,18 @@ verifies everything else — a real `examples/usercmodule` build with **no**
 first, so the pin is what was exercised. Byte-identical artifact to the locally built one
 (1850396 bytes).
 
+**Correction, written the same day this record was closed.** Two paragraphs above said
+`micropython-bclibc` **and** `micropython-wasm3` both run a mipsel leg, on [0076]'s
+authority. Half wrong, and wrong in [0076]'s own way: `micropython-wasm3` had already
+dropped mipsel outright -- its `CHANGELOG.md` and `cibuildmp.toml` both say so in as many
+words, and its `build` selector carries no mipsel identifier at all. [0076] was accurate
+when written; the other repo moved, and nothing here can notice that. The claim above is
+corrected to name only `micropython-bclibc`, and this is left as the second worked example
+of why `CONTRIBUTING.md` makes "never state another repository's status in a living
+document" a rule rather than a habit.
+
 **Closed.** The last item this record was holding open was "update the identifier in
-`micropython-bclibc` and `micropython-wasm3`", and that is not cibuildmp's work to hold open
+`micropython-bclibc`", and that is not cibuildmp's work to hold open
 -- a consuming repository adopting a renamed identifier is that repository's own migration,
 on its own schedule. Keeping it as an unchecked row here would also be the shape
 `CONTRIBUTING.md`'s own "never state another repository's status in a living document" rule
