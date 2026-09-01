@@ -320,23 +320,26 @@ Bootlin 14.3.0, and `windows` is unchanged too — apt's mingw-w64 is GCC 13 on 
 base's own compiler, which is why those two are what a bump has to be judged on.
 
 **Correction, 2026-09-01 (third) — "natmod `x64` ... is green with zero warnings" was true and
-irrelevant; `x86` was the arch the bump actually broke, and nothing here tested it.**
+irrelevant; `x86` was the arch the bump actually broke, on every tag but the one this repo's own
+CI happens to test.**
 
 `natmod_host` serves two arches, not one — `images.x64` and `images.x86` both resolve to it
 ([0058]). The verification this record's own previous addendum reported ("`natmod` `x64`
 through the bumped `natmod_host` ... is green with zero warnings") checked only the native,
-no-multilib half. `x86` is the one that actually exercises the image's `-m32` toolchain, and it
-was never built through the bumped image at all before this record called the bump's blast
-radius "narrower than the gcc jump suggests" — a claim that did not survive contact with a real
-`x86` build.
+no-multilib half. `x86` is the one that exercises the image's `-m32` toolchain — for *most*
+supported MicroPython tags, not all, which is the real reason this passed unnoticed here and is
+worth spelling out precisely rather than as "not tested."
 
-**What broke, and why nothing in this repo's own CI noticed.** `docker/natmod_host.Dockerfile`
-pinned `gcc-13-multilib` by version — correct on `ubuntu:24.04`, whose own `build-essential`
-also resolves to gcc 13, so the plain host `gcc` invoked by `dynruntime.mk`'s `-m32` path and
-the versioned multilib package agreed on which gcc's 32-bit runtime to use. `ubuntu:26.04`
-moved `build-essential`'s own default to gcc 15 without this pin following it: `-m32` then
-linked against gcc 15's own `libgcc.a` search path, found only the 64-bit archive (no
-`gcc-15-multilib` installed), and failed outright —
+**What broke.** `docker/natmod_host.Dockerfile` pinned `gcc-13-multilib` by version — correct on
+`ubuntu:24.04`, whose own `build-essential` also resolves to gcc 13. `ubuntu:26.04` moved
+`build-essential`'s own default to gcc 15 without this pin following it: upstream's own
+`py/dynruntime.mk` builds `x86` with `CROSS =` (empty) and `-m32` on the plain host `gcc` for
+every tag through `v1.28.0` (`resources/build-platforms.toml`'s own `cross` column already
+records this: `""` through `v1.28.0`, `i686-linux-gnu-` from `v1.29.0` on — upstream switched
+`x86` to a separate cross compiler starting there, confirmed directly against
+`py/dynruntime.mk` at both tags). On every one of those older tags, `-m32` now links against
+gcc 15's own `libgcc.a` search path, finds only the 64-bit archive (no `gcc-15-multilib`
+installed), and fails —
 
 ```
 Loading /usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a
@@ -344,22 +347,35 @@ LinkError: incompatible arch
 make: *** [.../dynruntime.mk:242: build/x86/wasm3_x86.native.mpy] Error 1
 ```
 
-— deterministically, on every single `x86` natmod build through this image, not a flake.
-Nothing here caught it because nothing here actually links one: `verify-docker-images.yml`'s
-own `natmod_host` leg is a bare `docker build` (apt successfully installs `gcc-13-multilib`
-regardless of which gcc is default, so that step stayed green throughout), and
-`test-upstream-natmod.yml` — the workflow that does build real natmod artifacts through this
-image — built `x64` and `armv7emsp` only, never `x86` ([0055]'s original matrix choice, unrelated
-to this incident). Found downstream instead: `micropython-wasm3`'s own `natmod.yml` builds every
-arch in its matrix, `x86` included, and its first run against `cibuildmp@v0.6.0` (which carries
-this bump) failed exactly there.
+— but only once the module being linked actually references something from libgcc (soft-float,
+64-bit-arithmetic helpers): `mpy_ld.py` loads the archive lazily, only when an undefined symbol
+sends it looking, so a module with no such reference (`examples/template`'s natmod, `int a + int
+b`) links `x86` clean without ever touching it — verified live, on this very image, on this
+project's own `v1.28.0`: no "Loading ... libgcc.a" line appears in that build's log at all.
+
+**Why nothing in this repo's own CI noticed, precisely.** `verify-docker-images.yml`'s
+`natmod_host` leg is a bare `docker build` (apt successfully installs `gcc-13-multilib`
+regardless of which gcc is default), so it was never going to catch a link-time bug. But
+`test-upstream-natmod.yml` and `build-examples.yml` *do* build real `x86` natmod artifacts
+through this exact image, every run, and both stayed green throughout — because both pin
+`v1.29.0` (`CIBMP_UPSTREAM_ABI_TAG`, `examples/template`'s own `cibuildmp.toml`), the one tag
+range where `x86` already uses the *other*, cross-prefixed path (`gcc-i686-linux-gnu` is a
+self-contained cross toolchain; its own `libgcc` always matches its own version, so the
+`ubuntu:26.04` bump never touches it). Every `x86` build this repo's own CI has ever run passed,
+genuinely, and every one of them was proving the wrong half of `dynruntime.mk`'s own `x86` row.
+Found only downstream: `micropython-wasm3` pins `v1.28.0` (`-m32`, the broken path) and its
+`natmod.yml` builds a real module (`wasm3_mp.c`, which does reference libgcc) — the two
+conditions this repo's own fixtures never combined at once.
 
 **Fixed:** `gcc-13-multilib` → `gcc-multilib`, the unversioned metapackage — matching what this
 same Dockerfile's own comment already said upstream's `tools/ci.sh` installs for the identical
 job, rather than a hand-picked version that has to be remembered and bumped in lockstep with
 whatever `build-essential` resolves to on the next base-image bump. `test-upstream-natmod.yml`'s
-`build-features0` job now builds `x86` alongside `x64`/`armv7emsp` in the same invocation, so a
-regression in this image's `-m32` half fails in this repo's own CI next time, not only in a
+`build-features0` job now also builds `mpy6.3-v1.28.0-x86` specifically (not tied to
+`CIBMP_UPSTREAM_ABI_TAG`, which tracks the newest release and would drift onto the unaffected
+cross-prefixed path the moment that env var next moves) alongside its existing `v1.29.0`
+`x64`/`armv7emsp` legs, so a regression in the `-m32` path this project's own supported range
+still spans (every tag through `v1.28.0`) fails in this repo's own CI next time, not only in a
 consumer's.
 
 [0055]: 0055-natmod-example-from-upstream-natmod.md

@@ -9,18 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **`natmod`'s `x86` arch failed every build through `natmod_host`, on every
-  identifier, since `0.6.0`'s own `ubuntu:26.04` bump.**
-  `docker/natmod_host.Dockerfile` pinned `gcc-13-multilib` by version; once
-  the base image's own `build-essential` started resolving to gcc 15, `-m32`
-  linked against gcc 15's 64-bit-only `libgcc.a` and failed outright
-  (`LinkError: incompatible arch`). Repinned to the unversioned `gcc-multilib`
-  metapackage, matching what this Dockerfile's own comment already said
-  upstream's `tools/ci.sh` installs for the same job — it now tracks whatever
-  gcc `build-essential` resolves to, rather than a version that has to be
-  bumped by hand alongside the base image. `x64` and every cross-compiled
-  arch were unaffected; this was `x86`'s own `-m32` half only. See
-  docs/records/0068's own third correction.
+- **`natmod`'s `x86` arch failed to link through `natmod_host`, on every tag
+  through `v1.28.0`, since `0.6.0`'s own `ubuntu:26.04` bump — whenever the
+  module needs anything from libgcc.** `docker/natmod_host.Dockerfile` pinned
+  `gcc-13-multilib` by version; once the base image's own `build-essential`
+  started resolving to gcc 15, upstream's own `-m32` path for `x86` (every
+  MicroPython tag through `v1.28.0` — `v1.29.0` switched to a separate
+  `i686-linux-gnu-` cross compiler, unaffected) linked against gcc 15's
+  64-bit-only `libgcc.a` and failed outright (`LinkError: incompatible arch`)
+  the moment a module actually referenced a libgcc symbol (soft-float,
+  64-bit arithmetic). Repinned to the unversioned `gcc-multilib` metapackage,
+  matching what this Dockerfile's own comment already said upstream's
+  `tools/ci.sh` installs for the same job — it now tracks whatever gcc
+  `build-essential` resolves to, rather than a version that has to be bumped
+  by hand alongside the base image. `x64` and every cross-compiled arch were
+  unaffected. See docs/records/0068's own third correction.
 
 ## [0.6.0] - 2026-09-01
 

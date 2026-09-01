@@ -7,31 +7,45 @@ name: Test upstream natmod
 # contract does not fit unmodified; docs/records/0072 is the mechanism
 # actually landed here and explains every choice below in full.
 #
-# build-features0: one job, deliberately building *three* arches for the same
-# tag in a single invocation, not three separate single-arch jobs: [0055]'s own
-# guard survey is entirely about what happens when cibuildmp builds several
-# targets back to back in one checkout (a stale artifact, or an unscoped
-# `build/`, silently carrying the *previous* target's binary into the next
-# one's output) -- a job that only ever builds one target at a time would
-# never actually exercise that risk. `verify_output()` (build.py, already
-# part of every real build) is the check that would catch it: a wrong arch
-# code in the .mpy header fails the build outright rather than shipping
-# silently wrong -- but `examples/natmod/cibuildmp.toml`'s own
+# build-features0: one job, deliberately building *three* targets in a
+# single invocation (two of them sharing one tag, the third a different one
+# on purpose -- see below), not three separate single-target jobs: [0055]'s
+# own guard survey is entirely about what happens when cibuildmp builds
+# several targets back to back in one checkout (a stale artifact, or an
+# unscoped `build/`, silently carrying the *previous* target's binary into
+# the next one's output) -- a job that only ever builds one target at a
+# time would never actually exercise that risk. `verify_output()` (build.py,
+# already part of every real build) is the check that would catch it: a
+# wrong arch code in the .mpy header fails the build outright rather than
+# shipping silently wrong -- but `examples/natmod/cibuildmp.toml`'s own
 # `pre-build-command` (record 0072) removes the possibility structurally,
 # for this same reason armv7emsp is a second *real* cross-compiled arch here
 # and not just a second easy one: it shares this checkout and this same
 # invocation with x64, the one thing a single-arch job can never test.
+# cibuildmp itself supports mixing tags within one `--build` invocation
+# (`natmod/__init__.py`'s own `tags = ", ".join(dict.fromkeys(...))`), which
+# is what lets x86 below ride along on a different tag than the other two
+# without a second job.
 #
-# x86 joins the two above for a different reason, found the hard way: it is
-# `images.x64`'s own `natmod_host` image, so nothing here exercised it as a
-# distinct *link*, not just a distinct package install, until the
-# `ubuntu:26.04` bump (docs/records/0068) shipped an `x86` that failed to
-# link on every single build ("LinkError: incompatible arch", gcc 15's
-# 64-bit-only `libgcc.a` against a `-m32` compile) while `docker build` and
-# every job in this very file stayed green -- caught only by
-# `micropython-wasm3`'s own downstream CI, which builds every arch. `x64`
-# and `x86` share a host gcc but not its `-m32` half, so `x64` alone can
-# never stand in for `x86`'s own link step.
+# x86 joins the two above for a different reason, found the hard way, and
+# pinned to `v1.28.0` deliberately rather than `CIBMP_UPSTREAM_ABI_TAG`:
+# upstream's own `py/dynruntime.mk` builds `x86` on the plain host `gcc`'s
+# `-m32` mode for every tag through `v1.28.0`, and switches to a separate
+# `i686-linux-gnu-` cross compiler from `v1.29.0` on
+# (`resources/build-platforms.toml`'s own `cross` column records exactly
+# this split). `images.x64`'s own `natmod_host` image carries both, but
+# nothing here ever exercised the `-m32` half as a distinct *link* -- until
+# the `ubuntu:26.04` bump (docs/records/0068) broke it for every tag on
+# that path whose module actually references libgcc (soft-float, 64-bit
+# arithmetic), while this file stayed green throughout: pinned to
+# `v1.29.0`, every `x86` build here has only ever exercised the *other*,
+# unaffected cross-prefixed path. Caught only by `micropython-wasm3`'s own
+# downstream CI, pinned to `v1.28.0`. `CIBMP_UPSTREAM_ABI_TAG` tracks the
+# newest release on purpose (this file's own `env:` comment) and will move
+# past `v1.29.0` again, at which point it would just as happily hide this
+# path a second time -- `v1.28.0-x86` stays a fixed probe of the `-m32`
+# path specifically, independent of wherever the rest of this file's own
+# tag moves next.
 #
 # build-upstream-natmod: the other ten modules, one `x64` build each (no
 # arch-collision risk to re-prove per module -- that mechanism is
@@ -101,11 +115,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Build upstream examples/natmod/features0 (x64 + x86 + armv7emsp)
+      - name: Build upstream examples/natmod/features0 (x64 + armv7emsp + v1.28.0-x86)
         uses: ./
         with:
           package-dir: examples/natmod
-          build: "${{ env.CIBMP_UPSTREAM_ABI_TAG }}-x64 ${{ env.CIBMP_UPSTREAM_ABI_TAG }}-x86 ${{ env.CIBMP_UPSTREAM_ABI_TAG }}-armv7emsp"
+          # v1.28.0-x86 is deliberately not `${{ env.CIBMP_UPSTREAM_ABI_TAG }}-x86`
+          # -- see the header comment above. It stays fixed to this tag on
+          # purpose, as a probe of dynruntime.mk's `-m32` path specifically,
+          # independent of wherever CIBMP_UPSTREAM_ABI_TAG moves next.
+          build: "${{ env.CIBMP_UPSTREAM_ABI_TAG }}-x64 ${{ env.CIBMP_UPSTREAM_ABI_TAG }}-armv7emsp mpy6.3-v1.28.0-x86"
 
       - name: List built artifacts
         run: ls -laR examples/natmod/mpyhouse

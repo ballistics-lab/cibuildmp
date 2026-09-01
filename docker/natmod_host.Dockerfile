@@ -20,24 +20,39 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # riding along in one of the cross images.
 #
 # `gcc-multilib` + `linux-libc-dev:i386` is the `-m32` path; `gcc-i686-
-# linux-gnu` is the prefixed one. Both are kept because `dynruntime.mk`'s
-# `x86` row reaches for either depending on tag -- upstream's own
-# `tools/ci.sh` installs plain `gcc-multilib` for the same job
-# (`ci_unix_32bit_setup`), which this now matches exactly rather than
-# pinning a version by hand. It was `gcc-13-multilib` -- correct on
-# `ubuntu:24.04`, whose `build-essential` also pulls gcc 13 -- until the
-# `ubuntu:26.04` bump moved `build-essential`'s own gcc to 15 without
-# this pin following it: `-m32` then linked against gcc 15's 64-bit-only
-# `libgcc.a` (no matching `gcc-15-multilib` installed), failing every
-# `x86` build with "LinkError: incompatible arch". `docker build` and
-# `verify-docker-images` both stayed green throughout -- `apt install
-# gcc-13-multilib` succeeds regardless of which gcc is default, and
-# neither this image nor `test-upstream-natmod.yml` (x64 and armv7emsp
-# only) ever actually links an `x86` binary -- so this was only caught
-# downstream, by `micropython-wasm3`'s own CI (which builds every arch,
-# `x86` included). The unversioned metapackage is what upstream's own
-# comparison already pointed at: it tracks whatever gcc `build-essential`
-# resolves to on the base image, on this Ubuntu bump and the next one.
+# linux-gnu` is the prefixed one. Both are kept, and genuinely both are
+# live: upstream's own `py/dynruntime.mk` switched `x86`'s `CROSS` from
+# empty (`-m32`, plain host gcc) to `i686-linux-gnu-` starting at v1.29.0
+# (`resources/build-platforms.toml`'s own `cross` column shows exactly
+# this split, `""` through v1.28.0 and `i686-linux-gnu-` from v1.29.0 on)
+# -- "depending on tag" means depending on *which MicroPython version*,
+# not this project's own natmod ABI tag.
+#
+# It was `gcc-13-multilib` -- correct on `ubuntu:24.04`, whose
+# `build-essential` also pulls gcc 13 -- until the `ubuntu:26.04` bump
+# moved `build-essential`'s own gcc to 15 without this pin following it:
+# every `x86` build still on the `-m32` path (every supported tag through
+# v1.28.0) that needs anything from libgcc (soft-float, 64-bit-arithmetic
+# helpers) links against gcc 15's 64-bit-only `libgcc.a` (no matching
+# `gcc-15-multilib` installed) and fails with "LinkError: incompatible
+# arch". `docker build`, `verify-docker-images`, and even a *real* `x86`
+# natmod build all stayed green throughout -- but every one of them
+# (`test-upstream-natmod.yml`, `build-examples.yml`) pins `v1.29.0` or
+# newer, so every `x86` build this repo's own CI ever ran used the
+# *other*, cross-prefixed path, which never touches this image's
+# multilib at all (`gcc-i686-linux-gnu` is a self-contained cross
+# toolchain, its own `libgcc` always matches its own version). A
+# trivial module (`examples/template`) would not have caught this even
+# on the right tag -- it never references anything from libgcc, so
+# `mpy_ld.py` never loads the archive at all. Found only downstream, by
+# `micropython-wasm3`'s own CI, pinned to `v1.28.0`.
+#
+# Repinned to the unversioned `gcc-multilib` metapackage -- matching what
+# this Dockerfile's own comment already pointed at, upstream's own
+# `tools/ci.sh` installing plain `gcc-multilib` for the identical job
+# (`ci_unix_32bit_setup`) -- so it tracks whatever gcc `build-essential`
+# resolves to on this base image and the next one, instead of a version
+# that has to be bumped by hand in lockstep.
 #
 # `ca-certificates`/`curl` are not needed to build this image's own
 # toolchain (nothing here is downloaded, unlike the other five toolchain
