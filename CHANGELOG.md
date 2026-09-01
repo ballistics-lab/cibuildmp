@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-09-01
+
 ### Fixed
 
 - **`natmod`'s `x86` arch failed to link through `natmod_host`, on every tag
@@ -1357,7 +1359,8 @@ ballistics-lab/micropython-native-ci, but both tags exist here too, so every
 link resolves inside this repository -- the version line continues rather
 than restarting (see the 0.3.0a1 entry). -->
 
-[Unreleased]: https://github.com/ballistics-lab/cibuildmp/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/ballistics-lab/cibuildmp/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/ballistics-lab/cibuildmp/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/ballistics-lab/cibuildmp/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/ballistics-lab/cibuildmp/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/ballistics-lab/cibuildmp/compare/v0.4.1...v0.4.2
