@@ -31,6 +31,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   just a real link somewhere downstream. `x64` and every cross-compiled
   arch were unaffected. See docs/records/0068's own third correction.
 
+- **`qemu`'s `POWERNV9` board failed to link through `ppc64le_linux`, since
+  `0.6.0`'s own `ubuntu:26.04` bump — whenever the firmware references a
+  long-double `printf`-family call (`ports/qemu`'s own `readline.c` does).**
+  `docker/ppc64le_linux.Dockerfile` installed a Debian-packaged cross
+  toolchain (`gcc-powerpc64le-linux-gnu` + `libc6-dev-ppc64el-cross`), the
+  same "paired with whatever gcc the base resolves to" shape `natmod_host`'s
+  multilib pin turned out to be. The base bump left the two packages out of
+  step and a real link failed with `undefined reference to
+  '__snprintfieee128'` — powerpc64le's own glibc long-double ABI transition.
+  Fixed by replacing the apt toolchain outright with a pinned Bootlin
+  tarball (`powerpc64le-power8--glibc--stable-2025.08-1`, gcc 14.3.0, glibc
+  2.41-70, URL + sha256 — the same model `manylinux_2_41_mipsel` already
+  uses), rather than chasing the Ubuntu packaging mismatch: Bootlin's own
+  gcc and glibc come from one matched Buildroot build, so there is no
+  separately-packaged "-cross" half left to drift from the compiler's own
+  version. Verified against the exact failing call shape
+  (`snprintf`/`%Lf` on a `long double`), statically linked, both directly
+  through the extracted toolchain and inside a real `docker build` of the
+  changed image. See docs/records/0068's own fourth addendum.
+
 ## [0.6.0] - 2026-09-01
 
 ### Added

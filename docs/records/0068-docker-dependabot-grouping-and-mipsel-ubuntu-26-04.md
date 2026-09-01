@@ -424,3 +424,74 @@ host with no 32-bit multilib either: `ld: skipping incompatible .../libgcc.a whe
 [0044]: 0044-unix-native-images-landed.md
 [0046]: 0046-pin-staleness-checker.md
 [0059]: 0059-ghcr-untagged-cleanup-deletes-referenced-manifests.md
+
+**Addendum, 2026-09-01 (fourth) — the bump's other named casualty,
+`ppc64le_linux`, broke the same way `natmod_host` did: a real link, not
+`docker build`, is what a bump has to be judged on.**
+
+`docker/ppc64le_linux.Dockerfile` installed `gcc-powerpc64le-linux-gnu` +
+`libc6-dev-ppc64el-cross` from apt — a real cross toolchain, but still a
+Debian-packaged one paired with whatever gcc `build-essential` resolves
+to on the base, the same shape `natmod_host`'s multilib pin turned out to
+be. A real `POWERNV9` firmware link (`ports/qemu`'s own `readline.c`,
+which every board's firmware links in) failed on `ubuntu:26.04` with
+
+```
+undefined reference to `__snprintfieee128'
+```
+
+— powerpc64le's own glibc long-double transition (IBM double-double →
+IEEE binary128): the symbol a `snprintf`/`%Lf` call redirects to under
+the newer ABI. `docker build` never caught it for the identical reason
+`natmod_host`'s did not — [0058]'s own verification table for this image
+only ever asked `#include <stdio.h>` to resolve, never a real link — and
+the earlier "confirmed live" `examples/template` build [0060]/[0058]'s
+own POWERNV9 wiring cites was run before this base bump, against the
+`ubuntu:24.04` pairing that still worked; nothing re-ran it after.
+
+**Fixed by replacing the apt toolchain outright, not by chasing the
+Ubuntu packaging bug.** `docker/ppc64le_linux.Dockerfile` now pins
+Bootlin's `powerpc64le-power8--glibc--stable-2025.08-1` (URL + sha256,
+`relocate-sdk.sh`, `argv[0]`-preserving `exec` wrappers renaming
+Bootlin's `powerpc64le-linux-` frontend to the `powerpc64le-linux-gnu-`
+prefix `QEMU_BOARD_CROSS["POWERNV9"]` expects) — exactly this record's
+own mipsel model, and for the same reason: Bootlin ships one Buildroot
+build of gcc 14.3.0 against its own matched glibc `2.41-70` sysroot,
+so there is no separately-packaged "-cross" half to drift from the
+native compiler's own version the way Debian's split packaging let
+`natmod_host` and this image both do. No rename needed here the way
+mipsel's PEP-600 tag forced one — `ppc64le_linux` is a toolchain-group
+image name ([0058]), not a libc-floor claim.
+
+Checked before ever touching CI: the exact failing call shape
+(`snprintf(buf, n, "%Lf", (long double)1.5L)`), statically linked
+straight through the extracted-and-relocated tarball on the host, no
+Docker involved — the point being that a cross-compiler is just another
+x86_64 binary, and this class of ABI mismatch is a property of the
+toolchain, not of the container it runs in. Then confirmed the same
+probe inside a real `docker build` of the changed Dockerfile
+(`verify-docker-images.yml` run 33538846175, ~73s, not cached — a real
+download+sha256-verify+extract+relocate+wrap+compile, not a no-op):
+green.
+
+**Every other image checked against the same "hands the artifact to the
+base's own compiler" question this record's own third addendum posed —
+none of them do.** `arm_embedded`/`riscv_embedded`/`xtensa_esp`/
+`xtensa_lx106` (xpack/Espressif tarballs) and `manylinux_2_41_mipsel`
+(Bootlin, this record's own second/third addenda) are already
+self-contained pinned toolchains; `windows`' `gcc-mingw-w64-*` bundles
+its own libgcc for the mingw sysroot rather than sharing the base's;
+`esp_idf_base` bakes no toolchain at all (ESP-IDF's own `install.sh`
+downloads Espressif's, at cache time, per [0058]); `webassembly` bakes a
+pinned emsdk tarball. `natmod_host` and `ppc64le_linux` were the only
+two, and both are now fixed.
+
+**Not yet done:** a real `POWERNV9` firmware build through the new image
+via `cibuildmp` itself (`examples/template --build v1.29.0-qemu-POWERNV9`,
+the same command [0058]'s own live verification used) — the probe above
+proves the specific symbol resolves, not that the full port links
+end-to-end against this toolchain. Republishing under
+`ghcr.io/ballistics-lab/ppc64le_linux` and repinning
+`pinned_docker_images.toml` (`bin/update_docker.py --images` after a
+`publish-docker-images.yml only=ppc64le_linux` dispatch) is also still
+open, on `claude/ppc64le-bootlin-toolchain`, not yet merged to `main`.
