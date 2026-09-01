@@ -57,7 +57,6 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 - [ ] [0047] the run output works, but it is not cibuildwheel's
 - [ ] [0046] nothing notices when a pin goes stale, except container images
-- [ ] [0068] docker Dependabot grouping, and what the first grouped bump exposed
 - [ ] [0022] zephyr is a third selector axis, not a board-based port that just needs its boards added
 - [ ] [0040] usermod's own test-runner axis, deferred
 - [ ] [0053] usermod ports with verified facts but no build driver
@@ -66,6 +65,7 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### Implemented
 
+- [x] [0068] docker Dependabot grouping, and what the first grouped bump exposed
 - [x] [0081] `output-dir` gets its own `.gitignore` the first time cibuildmp writes into it
 - [x] [0080] `windows` and `qemu` get real smoke tests, live-verified before being wired in
 - [x] [0079] a collected artifact is not always one file, and only the port knows

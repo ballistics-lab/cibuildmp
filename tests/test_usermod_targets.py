@@ -85,7 +85,7 @@ def test_all_usermod_targets_unix_v1_29_0_is_the_full_fifteen_cells():
         "v1.29.0-musllinux_1_2_armv7l",
         "v1.29.0-manylinux_2_39_riscv64",
         "v1.29.0-musllinux_1_2_riscv64",
-        "v1.29.0-manylinux_2_39_mipsel",
+        "v1.29.0-manylinux_2_41_mipsel",
     ]
 
 

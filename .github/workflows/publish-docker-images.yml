@@ -8,11 +8,10 @@ name: Publish Docker images
 # (resources/pinned_docker_images.cfg) is the only thing a real build
 # ever touches (a plain `docker pull`, see cibuildwheel's own
 # oci_container.py). This workflow is cibuildmp's own equivalent of that
-# maintainer task -- it does not run on every push (build-examples.yml's
+# maintainer task -- it does not run on push at all (build-examples.yml's
 # own verify-docker-images job already build-checks every Dockerfile on
-# every push/PR, catching breakage fast); it runs when docker/ actually
-# changes on main, or on demand, and its own job is publishing, not
-# verifying.
+# every push/PR, catching breakage fast); it runs on manual dispatch and
+# nothing else, and its own job is publishing, not verifying.
 #
 # docker/*.Dockerfile lives at the repo root, not inside
 # src/cibuildmp/resources/ -- pyproject.toml's own comment has the full
@@ -53,20 +52,41 @@ name: Publish Docker images
 # and fills the whole table in one pass, which beats copying ten of
 # them out of a job summary by hand.
 
+# **Dispatch only, deliberately.** This used to also carry `push:
+# branches: [main], paths: docker/**` (marked `# temporary` from the day
+# it was written). The `only` filter lives on the *steps*, and a `push`
+# event leaves `github.event.inputs.only` empty, so every such push
+# republished **all fifteen** images -- hours of runner time, three of
+# them emulated -- for a one-Dockerfile change, and moved fifteen
+# `:latest` tags, opening [0059]'s own untagged-cleanup window fifteen
+# times over, to publish fourteen images nobody had touched.
+#
+# It also made a merge do something a merge should not: a Dockerfile
+# change would publish itself the moment it landed, before anyone
+# decided the image was ready to be published under that name. That is
+# not hypothetical -- record 0068's own mipsel toolchain change is a
+# Dockerfile whose *name* has to change before its next publish, and
+# merging it with this trigger in place would have published glibc 2.41
+# under a tag claiming 2.39, automatically.
+#
+# Publishing stays what the header above says it is: rare, deliberate,
+# maintainer-triggered, followed by a real repinning PR. Nothing is lost
+# by dropping the trigger -- `verify-docker-images.yml` still
+# build-checks every Dockerfile on every push and PR, which is the part
+# that actually catches breakage.
 on:
-  push:
-    branches: [main] # temporary
-    paths:
-      - "docker/**"
-      - ".github/workflows/publish-docker-images.yml"
   workflow_dispatch:
     inputs:
       only:
         description: >
           Republish just these images -- comma-separated with no spaces,
-          e.g. "natmod" or "windows,qemu". Empty rebuilds all ten,
-          which is hours: three of them (aarch64, ppc64le, s390x) are
-          emulated on this runner's amd64 host.
+          matched against this job's own matrix `image` values, e.g.
+          "webassembly" or "windows,natmod_host". Empty rebuilds all
+          fifteen, which is hours: three of them (aarch64, ppc64le,
+          s390x) are emulated on this runner's amd64 host. The example
+          used to read "natmod" and "qemu" -- neither has been a matrix
+          entry since record 0058 split them into the six toolchain-group
+          images, so both silently matched nothing.
         required: false
         default: ""
 
@@ -105,7 +125,7 @@ jobs:
           # so its platform is the amd64 *host*, not its build target --
           # there is no 32-bit mipsel image to be native to (record 0043's
           # own documented exception).
-          - { image: manylinux_2_39_mipsel, platform: linux/amd64 }
+          - { image: manylinux_2_41_mipsel, platform: linux/amd64 }
           # Cross-compile hosts targeting Windows, bare metal and wasm.
           - { image: windows, platform: linux/amd64 }
           - { image: webassembly, platform: linux/amd64 }

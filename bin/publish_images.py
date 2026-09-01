@@ -83,7 +83,18 @@ def cells() -> list[tuple[str, str]]:
         # `quay.io/pypa/...` is upstream's own image, mirrored rather than
         # rebuilt (0043), so there is no Dockerfile to build or package to
         # push for it.
-        if not reference.startswith("ghcr.io/"):
+        #
+        # An **empty** reference is not that case and must not be filtered
+        # out with it: `dockerrun.image_for()` defines empty as "this
+        # target exists, nothing published for it yet", which is precisely
+        # the group that still needs publishing -- it has a real
+        # `docker/<name>.Dockerfile` and no digest yet, and skipping it
+        # would leave the one image this script cannot publish being the
+        # one with nothing published. Live-caught by
+        # `test_publish_script_and_workflow_publish_the_same_images` when
+        # `manylinux_2_41_mipsel` was renamed and emptied pending its
+        # first publish under the new package name.
+        if reference and not reference.startswith("ghcr.io/"):
             continue
         # A `unix` group's name ends in the arch it is native to; every
         # other group (`windows`, `webassembly`, the six toolchain images,

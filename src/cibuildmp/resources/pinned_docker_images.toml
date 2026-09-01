@@ -152,14 +152,32 @@ musllinux_1_2_riscv64 = "quay.io/pypa/musllinux_1_2_riscv64@sha256:203b43d3c4965
 # cell rather than given a private spelling. PEP 600's tag is
 # `manylinux_${GLIBCMAJOR}_${GLIBCMINOR}_${ARCH}` with the architecture
 # being whatever the platform reports -- it defines a *form*, not a
-# closed list of architectures, so `manylinux_2_39_mipsel` is a
-# well-formed tag that simply has no pypa image behind it. `2_39` is
-# checked, not assumed: `libc6-dev-mipsel-cross` on `ubuntu:24.04` is
+# closed list of architectures, so `manylinux_2_41_mipsel` is a
+# well-formed tag that simply has no pypa image behind it. `2_39` was
+# checked, not assumed: `libc6-dev-mipsel-cross` on `ubuntu:24.04` was
 # glibc `2.39-0ubuntu8cross2` (`apt-cache policy`, run in the real
 # image). Recording it beats claiming nothing -- record 0031 found that
 # even this arch's static build still reaches glibc's own `dlopen`-based
 # NSS at runtime, so "no floor" would be the less honest of the two.
-manylinux_2_39_mipsel = "ghcr.io/ballistics-lab/manylinux_2_39_mipsel@sha256:aec4468c39bdcd167cbb4c45e09a9bb03968475174df2de175529471c19f7e83"
+#
+# That `2_39` reading is why this cell is now `manylinux_2_41_mipsel`:
+# `docker/manylinux_2_41_mipsel.Dockerfile` no longer installs that apt
+# cross-toolchain at all -- Debian 13 "Trixie" dropped the mipsel port and
+# took `gcc-mipsel-linux-gnu`/`libc6-dev-mipsel-cross` out of Ubuntu's
+# archive with it, so the toolchain is a pinned Bootlin tarball now (gcc
+# 14.3.0, glibc `2.41-70`, sha256-checked; record 0068). Renamed rather
+# than repointed, on record 0031's own principle: a real PEP 600 tag must
+# not keep claiming a floor its image no longer has.
+#
+# Published under the new package name 2026-09-01 and pinned here from that
+# run's own job summary, the same manual-but-deliberate step every other row
+# in this table takes (record 0033). It sat empty between the rename and that
+# publish -- a GHCR digest is per *package* name, so the pre-rename digest
+# was not a reference this row could carry, and
+# `dockerrun.image_for()`'s own empty-group handling ("this target exists,
+# nothing published for it yet") raised a clean "no image registered" rather
+# than pointing at something that did not exist under this name.
+manylinux_2_41_mipsel = "ghcr.io/ballistics-lab/manylinux_2_41_mipsel@sha256:eee14e84bb5ce27c1e65c467f664a7f13443664766c530d07b161011318e7226"
 
 # ── cross-compiling ports with no image axis of their own ─────────────
 #

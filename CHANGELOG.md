@@ -22,7 +22,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   never overwrites one already there, in case a caller wants something else
   (e.g. a real `!keep-this` exception).
 
+### Changed
+
+- **BREAKING: the `mipsel` cell is `manylinux_2_41_mipsel`, not
+  `manylinux_2_39_mipsel`.** Every identifier naming it changes with it
+  (`v1.29.0-manylinux_2_39_mipsel` -> `v1.29.0-manylinux_2_41_mipsel`), and a
+  caller still naming the old one gets `matches no known identifier` — there is
+  no alias. The rename follows its toolchain: `docker/manylinux_2_41_mipsel.Dockerfile`
+  no longer installs `gcc-mipsel-linux-gnu`/`libc6-dev-mipsel-cross` at all,
+  because Debian 13 "Trixie" dropped the mipsel port and Ubuntu's archive lost
+  those packages with it. It pins a Bootlin tarball instead
+  (`mips32el--glibc--stable-2025.08-1`, gcc 14.3.0, glibc 2.41-70, URL +
+  sha256), the same version+URL+sha256 model the four embedded toolchain images
+  already use — so this image no longer depends on an apt archive for an
+  architecture upstream has abandoned. `2_39` was apt's cross-glibc version, so
+  keeping the name would have made a real PEP 600 tag claim a floor its image no
+  longer has (record 0031's principle, record 0068's decision).
+
+  Verified on real artifacts, not inferred: a full `examples/usercmodule` build
+  (including the `MICROPY_STANDALONE` static-libffi `deplibs` step) links, and
+  the result runs under `qemu-mipsel` with all three upstream modules importing
+  — `ELF 32-bit LSB executable, MIPS, statically linked`. One real difference
+  from the apt toolchain: the ELF is now `mips32` (r1) rather than `mips32r2`,
+  which widens the hardware it runs on rather than narrowing it.
+
+  The image is published and pinned under the new package name
+  (`ghcr.io/ballistics-lab/manylinux_2_41_mipsel@sha256:eee14e84…`), verified by
+  a real build that pulls it with no `CIBMP_UNIX_MANYLINUX_2_41_MIPSEL_DOCKER_IMAGE`
+  override at all. Its `resources/pinned_docker_images.toml` row was empty
+  between the rename and that publish — a GHCR digest is per package name, so
+  the pre-rename digest was never a reference this cell could carry, and an
+  empty group is the state `dockerrun.image_for()` already defines as "exists,
+  nothing published yet".
+
+- **`publish-docker-images.yml` is dispatch-only.** It used to also run on any
+  push to `main` touching `docker/**` (marked `# temporary` from the day it was
+  written). Because the `only` filter lives on the steps and a push leaves
+  `github.event.inputs.only` empty, every such push republished **all fifteen**
+  images — hours of runner time, three of them emulated — and moved fifteen
+  `:latest` tags, opening record 0059's untagged-cleanup window fifteen times, to
+  publish fourteen images nobody had touched. It also meant a Dockerfile
+  published itself the moment it merged, before anyone decided the image was
+  ready to go out under that name — which this release's own rename is a direct
+  example of. `verify-docker-images.yml` still build-checks every Dockerfile on
+  every push and PR, so nothing is lost.
+
+- **`CONTRIBUTING.md`'s dev loop is `pre-commit`**, matching the new
+  `.pre-commit-config.yaml` and the reworked `tests.yml`: lint/format/types run
+  as hooks (and rewrite files rather than just failing), `pytest` stays a command
+  you run yourself. It also now spells out which workflow runs what, and names
+  the gap that leaves — a change touching only `docs/**` or `.github/**` runs no
+  `pytest` until release, which is exactly the change `tests/test_docs.py` exists
+  to catch.
+
 ### Fixed
+
+- **`publish-docker-images.yml`'s own `only` input described values that could
+  not work.** Its example read `"natmod"` and `"qemu"` — neither has been a
+  matrix entry since record 0058 split them into the six toolchain-group images,
+  so both silently matched nothing and published nothing. It also said "all ten"
+  for a fifteen-entry matrix. Now it names real values and the real count, and
+  says what the field is matched against.
+
+- **`bin/publish_images.py` skipped any image group with an empty pin**, using
+  "does not start with `ghcr.io/`" to mean "upstream's own image, nothing to
+  build". An empty group means the opposite — ours, with a real Dockerfile and
+  nothing published yet — so the one image that most needed publishing was the
+  one the script would not publish. Caught by
+  `test_publish_script_and_workflow_publish_the_same_images` the moment
+  `manylinux_2_41_mipsel` was emptied pending its first publish.
 
 - **`README.md`/`docs/ACTIONS.md` still pinned `@v0.4.2`** after `v0.5.0`
   released — the same repeat-offender pattern `CLAUDE.md` already names this pin

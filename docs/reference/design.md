@@ -133,7 +133,7 @@ another's output — the tag makes every build's output directory and filename
 unique too, not only the identifier.
 
 For `unix`, the axis value is a **PEP 600 / PEP 656 platform tag** —
-`manylinux_2_28_x86_64`, `musllinux_1_2_aarch64`, `manylinux_2_39_mipsel`.
+`manylinux_2_28_x86_64`, `musllinux_1_2_aarch64`, `manylinux_2_41_mipsel`.
 Records [0043]/[0044] put the libc floor and pypa's own architecture spelling
 into the name deliberately, so the identifier states a compatibility claim
 the build then verifies against the finished ELF, rather than labelling one.

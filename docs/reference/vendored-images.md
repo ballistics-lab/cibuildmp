@@ -67,17 +67,25 @@ than kept as an idle copy:
 | `manylinux_2_28_x86_64` / `_i686` / `_aarch64` / `_ppc64le` / `_s390x` | thin layer over pypa | ✅ (adds `libffi-dev` etc.) |
 | `manylinux_2_31_armv7l`, `manylinux_2_39_riscv64` | pypa's own image, unmodified | ❌ — pinned reference points straight at `quay.io/pypa/...` |
 | `musllinux_1_2_*` (all seven arches) | pypa's own image, unmodified | ❌ — same |
-| `manylinux_2_39_mipsel` | cibuildmp's own, cross-compiling | ✅ — but see below |
+| `manylinux_2_41_mipsel` | cibuildmp's own, cross-compiling | ✅ — but see below |
 
-`manylinux_2_39_mipsel` is the one documented exception to the whole "native
+`manylinux_2_41_mipsel` is the one documented exception to the whole "native
 per-arch image" model: pypa publishes no mipsel image, PEP 600 defines the
 tag form but not a closed architecture list, and there is no Docker Official
 Image for 32-bit mipsel either — there is nothing to be native to. It has no
 `pinned_pypa_images.toml` entry at all (that base is not one of pypa's) and
 builds as a cross-compile from a plain `ubuntu:24.04` its own Dockerfile
-names. See [0068] for why this cell's own toolchain story is currently being
-revisited — the apt cross-toolchain it relies on today lost upstream Debian
-support entirely.
+names. Its cross-toolchain is a **pinned Bootlin tarball** (gcc 14.3.0,
+glibc 2.41, sha256-checked) as of [0068]'s toolchain pass, not the apt
+`gcc-mipsel-linux-gnu` it used until then: Debian 13 "Trixie" dropped the
+mipsel port outright, taking those packages out of Ubuntu's archive with it.
+The cell was named manylinux_2_39_mipsel until that change (no code span: it is not an image group any more, and `test_vendored_images_reference_names_real_image_groups` is right to reject one that does not exist): `2_39` was apt's
+cross-glibc version, and renaming rather than repointing is [0031]'s own
+principle — a real PEP 600 tag must not keep claiming a floor its image no
+longer has. It is published and pinned under the new package name as of
+2026-09-01 — the row sat empty in between, because a GHCR digest is per
+package name and the pre-rename one was not a reference this cell could
+carry.
 
 **2. `windows`** — one shared image for all three arches (`x64`/`x86` plain
 apt `gcc-mingw-w64-*`, `arm64` a pinned `llvm-mingw` tarball; no Debian/Ubuntu
@@ -201,8 +209,8 @@ than quietly resolving to nothing at build time.
 | `manylinux_2_28_s390x` | `manylinux_2_28_s390x` |
 | `manylinux_2_28_x86_64` | `manylinux_2_28_x86_64` |
 | `manylinux_2_31_armv7l` | `manylinux_2_31_armv7l` |
-| `manylinux_2_39_mipsel` | `manylinux_2_39_mipsel` |
 | `manylinux_2_39_riscv64` | `manylinux_2_39_riscv64` |
+| `manylinux_2_41_mipsel` | `manylinux_2_41_mipsel` |
 | `musllinux_1_2_aarch64` | `musllinux_1_2_aarch64` |
 | `musllinux_1_2_armv7l` | `musllinux_1_2_armv7l` |
 | `musllinux_1_2_i686` | `musllinux_1_2_i686` |
@@ -216,10 +224,14 @@ than quietly resolving to nothing at build time.
 
 `docker/*.Dockerfile` live at the repo root (moved out of the installed
 package by [0033] — cibuildmp itself never reads them at runtime).
-`.github/workflows/publish-docker-images.yml` builds and pushes every image
-to GHCR on a push to `main` that touches `docker/**`, or on manual dispatch —
-deliberately rare and maintainer-triggered, the same cadence
-`bin/update_docker.py` has for the pypa mirror. A maintainer then copies the
+`.github/workflows/publish-docker-images.yml` builds and pushes images to
+GHCR **on manual dispatch only** — deliberately rare and maintainer-triggered,
+the same cadence `bin/update_docker.py` has for the pypa mirror. Its `only`
+input takes the image names to republish; left empty it rebuilds all fifteen.
+It used to also fire on any push to `main` touching `docker/**`, which
+republished all fifteen for a one-Dockerfile change and published a changed
+Dockerfile the moment it merged, before anyone decided the image was ready to
+go out under that name. A maintainer then copies the
 real `@sha256:...` digest the workflow prints into
 `pinned_docker_images.toml` by hand — the same manual step a cibuildwheel
 maintainer takes for its own `pinned_docker_images.cfg`. `bin/update_docker.py`

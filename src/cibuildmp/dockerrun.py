@@ -52,7 +52,7 @@ or swap in a fork's image without touching source), and always wins.
 *Which image.* Not the port -- the toolchain a build needs, named at
 each port's own table level in `resources/build-platforms.toml`
 (`_image_group_for()`). `unix` is keyed by **platform tag** --
-`manylinux_2_28_x86_64`, `musllinux_1_2_aarch64`, `manylinux_2_39_mipsel`
+`manylinux_2_28_x86_64`, `musllinux_1_2_aarch64`, `manylinux_2_41_mipsel`
 -- pypa's own names, which are real PEP 600 / PEP 656 tags rather than
 the decorative "manylinux" label record 0031 flagged, and an identity map
 onto the group of the same name: this is the one port whose image axis
@@ -118,7 +118,7 @@ from .resources import build_platforms_data, pinned_docker_images, pinned_pypa_i
 # ── the two shapes a target has ───────────────────────────────────────
 #
 # `unix` is keyed by **platform tag** -- `manylinux_2_28_x86_64`,
-# `musllinux_1_2_aarch64`, `manylinux_2_39_mipsel` -- pypa's own names, which are
+# `musllinux_1_2_aarch64`, `manylinux_2_41_mipsel` -- pypa's own names, which are
 # real PEP 600 / PEP 656 tags rather than the decorative "manylinux"
 # label record 0031 flagged (**0043**, which also renamed `x64`/`x86`/
 # `armhf` to `x86_64`/`i686`/`armv7l` so the labels stop needing
@@ -261,7 +261,7 @@ def split_tag(tag: str) -> tuple[str, str]:
     Split against the known architecture list rather than on a separator:
     both halves contain underscores (`manylinux_2_28`, `x86_64`), so
     there is no character to split on and no positional rule that holds
-    for `manylinux_2_39_mipsel` and `musllinux_1_2_ppc64le` at once.
+    for `manylinux_2_41_mipsel` and `musllinux_1_2_ppc64le` at once.
     """
     for arch in ARCH_OCI_PLATFORM:
         suffix = f"_{arch}"
@@ -324,7 +324,7 @@ def base_image_for(target: str) -> str | None:
     Nothing in a *build* calls this: it exists so
     `publish-docker-images.yml` and anyone building an image by hand
     resolve the base from the pinned mirror rather than from a string
-    typed into a Dockerfile. `manylinux_2_39_mipsel` is the one `None` -- pypa
+    typed into a Dockerfile. `manylinux_2_41_mipsel` is the one `None` -- pypa
     publishes no 32-bit mipsel image, so that Dockerfile names its own
     base (record 0043's own documented exception).
     """
@@ -436,7 +436,7 @@ def ensure_image(port: str, target: str | None = None) -> str | None:
 
 # (image, oci_platform) -> the `uname -m` that pair reports, for pairs
 # `_probe_platform()` has already cleared this process. A build can be two
-# containers against the same image (`manylinux_2_39_mipsel`'s `deplibs` pre-step,
+# containers against the same image (`manylinux_2_41_mipsel`'s `deplibs` pre-step,
 # then the main build) and the 32-bit check asks the same question again,
 # so the answer is cached rather than re-run. `""` means "the probe could
 # not attribute its own failure and `run()` was left to report it".

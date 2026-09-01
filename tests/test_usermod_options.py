@@ -49,7 +49,7 @@ def test_build_glob_selects_the_real_unix_v1_29_0_cells(tmp_path):
         "v1.29.0-musllinux_1_2_armv7l",
         "v1.29.0-manylinux_2_39_riscv64",
         "v1.29.0-musllinux_1_2_riscv64",
-        "v1.29.0-manylinux_2_39_mipsel",
+        "v1.29.0-manylinux_2_41_mipsel",
     ]
 
 

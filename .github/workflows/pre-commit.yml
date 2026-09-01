@@ -1,0 +1,133 @@
+name: Pre-commit
+
+# Lint, format, types and the unit suite, all through `pre-commit` so CI
+# runs exactly what a local commit runs -- one config, not a second list
+# of commands here that drifts from `.pre-commit-config.yaml`.
+#
+# `push` is `main`-only on purpose, and this is the one real trade-off in
+# the file: `pull_request` already covers every branch that has a PR
+# open, and running both unfiltered meant a PR branch was checked twice
+# per push (the concurrency group keys on `github.ref`, which differs
+# between `refs/heads/<branch>` and `refs/pull/<n>/merge`, so the two
+# never cancel each other). The cost is that a branch pushed with **no
+# PR open** is not checked at all -- open the PR, or run
+# `pre-commit run --all-files` locally. Same shape `coverage.yml`
+# already uses.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: pre-commit-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Needed only by the auto-fix push-back at the end, which only ever runs
+# on a pull request from this repository.
+permissions:
+  contents: write
+
+jobs:
+  pre-commit:
+    name: pre-commit run --all-files
+    runs-on: ubuntu-latest
+    steps:
+      # `ref:` is set **only** for a same-repo pull request, where the
+      # point is to commit fixes back onto the PR's own head branch. A
+      # fork's PR must keep the default (the merge ref): `github.head_ref`
+      # there names a branch in the *fork*, and checking it out by name
+      # against this repository either fails or, worse, silently checks
+      # out an unrelated same-named branch of ours.
+      #
+      # No `submodules:` key -- this repository has no `.gitmodules` at
+      # all. It carried `submodules: recursive` with a comment about
+      # `py_ballisticcalc.exts` needing bclibc's C++ sources, which is
+      # another project's requirement copied in wholesale.
+      - uses: actions/checkout@v7
+        with:
+          ref: >-
+            ${{ (github.event_name == 'pull_request'
+                 && github.event.pull_request.head.repo.full_name == github.repository)
+                && github.head_ref || '' }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          # The project's own floor (`requires-python = ">=3.11"`), so CI
+          # checks the version a user is most likely to be furthest from.
+          python-version: "3.11"
+
+      # `uv sync` + `uv run pre-commit`, not `uv tool install pre-commit`:
+      # `pre-commit` is a real dev dependency in `pyproject.toml` and is
+      # pinned in `uv.lock`, so this runs the same version a contributor
+      # runs. A bare `uv tool install` would float to whatever released
+      # most recently, in a repository that pins its own actions by SHA.
+      - name: Install the project
+        run: uv sync
+
+      - name: Run pre-commit
+        id: first_run
+        continue-on-error: true
+        run: uv run pre-commit run --all-files --show-diff-on-failure
+
+      - name: Check for changes
+        id: diff
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fail (no auto-fixable changes, but hooks failed)
+        if: steps.diff.outputs.changed == 'false' && steps.first_run.outcome == 'failure'
+        run: exit 1
+
+      # Everything below is the auto-fix path, and every step of it is
+      # gated on the same condition: a pull request whose head branch
+      # lives in *this* repository. A fork's PR still runs every hook
+      # above -- it just cannot be pushed to, so unfixed changes are a
+      # plain failure with the diff already printed, rather than a job
+      # that was skipped entirely and reported nothing.
+      - name: Fail (changes produced, and nothing here can push them back)
+        if: >-
+          steps.diff.outputs.changed == 'true'
+          && !(github.event_name == 'pull_request'
+               && github.event.pull_request.head.repo.full_name == github.repository)
+        run: |
+          echo "pre-commit modified files. Auto-commit only runs on a pull request"
+          echo "from this repository -- run 'pre-commit run --all-files' locally and"
+          echo "commit the result."
+          exit 1
+
+      - name: Re-run pre-commit after auto-fixes
+        id: verify_run
+        if: >-
+          steps.diff.outputs.changed == 'true'
+          && github.event_name == 'pull_request'
+          && github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
+        run: uv run pre-commit run --all-files --show-diff-on-failure
+
+      - name: Fail (issues remain after auto-fix)
+        if: >-
+          steps.diff.outputs.changed == 'true'
+          && github.event_name == 'pull_request'
+          && github.event.pull_request.head.repo.full_name == github.repository
+          && steps.verify_run.outcome == 'failure'
+        run: exit 1
+
+      - name: Commit and push auto-fixes
+        if: >-
+          steps.diff.outputs.changed == 'true'
+          && github.event_name == 'pull_request'
+          && github.event.pull_request.head.repo.full_name == github.repository
+          && steps.verify_run.outcome == 'success'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "style: auto-fix via pre-commit"
+          git push origin HEAD:${{ github.head_ref }}
