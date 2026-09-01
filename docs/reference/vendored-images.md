@@ -82,10 +82,10 @@ mipsel port outright, taking those packages out of Ubuntu's archive with it.
 The cell was named manylinux_2_39_mipsel until that change (no code span: it is not an image group any more, and `test_vendored_images_reference_names_real_image_groups` is right to reject one that does not exist): `2_39` was apt's
 cross-glibc version, and renaming rather than repointing is [0031]'s own
 principle — a real PEP 600 tag must not keep claiming a floor its image no
-longer has. Its `pinned_docker_images.toml` row is **empty** until a publish
-under the new package name fills it, so a mipsel build raises "no image
-registered" unless `CIBMP_UNIX_MANYLINUX_2_41_MIPSEL_DOCKER_IMAGE` points at
-a locally built one.
+longer has. It is published and pinned under the new package name as of
+2026-09-01 — the row sat empty in between, because a GHCR digest is per
+package name and the pre-rename one was not a reference this cell could
+carry.
 
 **2. `windows`** — one shared image for all three arches (`x64`/`x86` plain
 apt `gcc-mingw-w64-*`, `arm64` a pinned `llvm-mingw` tarball; no Debian/Ubuntu

@@ -46,11 +46,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from the apt toolchain: the ELF is now `mips32` (r1) rather than `mips32r2`,
   which widens the hardware it runs on rather than narrowing it.
 
-  **`resources/pinned_docker_images.toml`'s row for it is empty**, deliberately:
-  a GHCR digest is per package name and nothing has been published under the new
-  one yet, so a mipsel build raises a clean "no image registered" until a
-  publish fills it. Build the Dockerfile and point
-  `CIBMP_UNIX_MANYLINUX_2_41_MIPSEL_DOCKER_IMAGE` at it in the meantime.
+  The image is published and pinned under the new package name
+  (`ghcr.io/ballistics-lab/manylinux_2_41_mipsel@sha256:eee14e84…`), verified by
+  a real build that pulls it with no `CIBMP_UNIX_MANYLINUX_2_41_MIPSEL_DOCKER_IMAGE`
+  override at all. Its `resources/pinned_docker_images.toml` row was empty
+  between the rename and that publish — a GHCR digest is per package name, so
+  the pre-rename digest was never a reference this cell could carry, and an
+  empty group is the state `dockerrun.image_for()` already defines as "exists,
+  nothing published yet".
 
 - **`publish-docker-images.yml` is dispatch-only.** It used to also run on any
   push to `main` touching `docker/**` (marked `# temporary` from the day it was

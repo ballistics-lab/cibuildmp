@@ -253,9 +253,28 @@ work: its example named `natmod` and `qemu`, neither a matrix entry since [0058]
 into the six toolchain-group images, so both matched nothing silently — and it said "all ten"
 for a fifteen-entry matrix.
 
-**Still not done**, and the reason this row stays open: the first publish under
-`manylinux_2_41_mipsel` and the repin PR that fills the empty row, then the identifier update
-in `micropython-bclibc` and `micropython-wasm3`, both of which name the old identifier today.
+**Update, same day.** The publish and the repin both landed:
+`ghcr.io/ballistics-lab/manylinux_2_41_mipsel@sha256:eee14e84bb5ce27c1e65c467f664a7f13443664766c530d07b161011318e7226`,
+a `linux/amd64` OCI index (checked against the registry directly, anonymously, not taken from
+the job summary alone), now `pinned_docker_images.toml`'s own row. Verified the way this record
+verifies everything else — a real `examples/usercmodule` build with **no**
+`CIBMP_UNIX_MANYLINUX_2_41_MIPSEL_DOCKER_IMAGE` override and the locally built image deleted
+first, so the pin is what was exercised. Byte-identical artifact to the locally built one
+(1850396 bytes).
+
+**Still not done**, and the reason this row stays open: the identifier update in
+`micropython-bclibc` and `micropython-wasm3`, both of which name `manylinux_2_39_mipsel`
+today and will get `matches no known identifier` on their next run against a released
+cibuildmp carrying this rename.
+
+**Noticed while verifying the pin, and not fixed here:** every one of the fourteen other
+`ghcr.io/ballistics-lab/...` pins is one publish behind its own `:latest`. Checked properly
+rather than inferred from a digest mismatch — `manylinux_2_28_x86_64`'s `:latest` is index
+`e7732177…` and its pin `6afa4abd…` is a different index that is not among its children (and
+still pulls, so nothing is broken; a build uses the pin, not the tag). The cause is exactly
+the trigger this record removed: a `docker/**` push to `main` republished all fifteen and
+moved every `:latest`, with no repin PR behind it. That is [0046]'s own gap demonstrated a
+second time, and `bin/update_docker.py --images` is the one-pass fix whenever it is taken.
 
 [0058]: 0058-image-groups-are-toolchains-not-ports.md
 [0076]: 0076-the-mipsel-holdout-is-bclibc-and-wasm3-not-a7p.md
