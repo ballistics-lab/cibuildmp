@@ -21,12 +21,13 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 #
 # `gcc-multilib` + `linux-libc-dev:i386` is the `-m32` path; `gcc-i686-
 # linux-gnu` is the prefixed one. Both are kept, and genuinely both are
-# live: upstream's own `py/dynruntime.mk` switched `x86`'s `CROSS` from
-# empty (`-m32`, plain host gcc) to `i686-linux-gnu-` starting at v1.29.0
-# (`resources/build-platforms.toml`'s own `cross` column shows exactly
-# this split, `""` through v1.28.0 and `i686-linux-gnu-` from v1.29.0 on)
-# -- "depending on tag" means depending on *which MicroPython version*,
-# not this project's own natmod ABI tag.
+# live -- record 0058 already counted exactly this split while choosing
+# this image's own package list (`x86 {'': 22, 'i686-linux-gnu-': 2}`,
+# its own verification table calling both proven): upstream's own
+# `py/dynruntime.mk` switches `x86`'s `CROSS` from empty (`-m32`, plain
+# host gcc) to `i686-linux-gnu-` starting at v1.29.0 -- "depending on
+# tag" means depending on *which MicroPython version*, not this
+# project's own natmod ABI tag.
 #
 # It was `gcc-13-multilib` -- correct on `ubuntu:24.04`, whose
 # `build-essential` also pulls gcc 13 -- until the `ubuntu:26.04` bump

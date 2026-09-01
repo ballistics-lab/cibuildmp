@@ -330,14 +330,20 @@ no-multilib half. `x86` is the one that exercises the image's `-m32` toolchain �
 supported MicroPython tags, not all, which is the real reason this passed unnoticed here and is
 worth spelling out precisely rather than as "not tested."
 
+This split is not new information — [0058] already counted it exactly (`x86 {'': 22,
+'i686-linux-gnu-': 2}`, the same section naming `gcc-13-multilib`/`gcc-i686-linux-gnu` as the
+two real Debian packages behind it) and its own verification table calls both paths proven
+("`gcc -m32` produces ELF32; `i686-linux-gnu-gcc` works"). What that record did not establish,
+and stated the opposite of ("nothing about the 32-bit path is fragile"), is that the `''`
+(twenty-two tags, including `v1.28.0`) half depends on a hand-pinned gcc version staying in
+step with the base image's own default — see [0058]'s own correction, added alongside this one.
+
 **What broke.** `docker/natmod_host.Dockerfile` pinned `gcc-13-multilib` by version — correct on
 `ubuntu:24.04`, whose own `build-essential` also resolves to gcc 13. `ubuntu:26.04` moved
-`build-essential`'s own default to gcc 15 without this pin following it: upstream's own
-`py/dynruntime.mk` builds `x86` with `CROSS =` (empty) and `-m32` on the plain host `gcc` for
-every tag through `v1.28.0` (`resources/build-platforms.toml`'s own `cross` column already
-records this: `""` through `v1.28.0`, `i686-linux-gnu-` from `v1.29.0` on — upstream switched
-`x86` to a separate cross compiler starting there, confirmed directly against
-`py/dynruntime.mk` at both tags). On every one of those older tags, `-m32` now links against
+`build-essential`'s own default to gcc 15 without this pin following it. On every one of the
+twenty-two `cross = ""` tags [0058] already counted (`v1.28.0` among them — upstream's own
+`py/dynruntime.mk` confirmed directly at that tag and at `v1.29.0`, where the switch to
+`i686-linux-gnu-` actually happens), `-m32` now links against
 gcc 15's own `libgcc.a` search path, finds only the 64-bit archive (no `gcc-15-multilib`
 installed), and fails —
 

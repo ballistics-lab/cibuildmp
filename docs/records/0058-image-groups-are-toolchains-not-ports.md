@@ -353,6 +353,19 @@ nine boards across both `v1.28.0`/`v1.29.0` tags green in a real `test-platforms
 session (previously the only qemu identifier that workflow's own broad sweep could build at all
 was `MPS2_AN385`, the one board CI already proved via `build-examples.yml`'s own dedicated leg).
 
+**Correction, 2026-09-01 — "nothing about the 32-bit path is fragile" did not hold.** The
+`natmod_host` verification table above names `gcc-13-multilib` as one of the two real Debian
+packages behind `x86`'s `cross = ""` half (the other being `gcc-i686-linux-gnu`, for the
+`i686-linux-gnu-` half this same section's `x86 {'': 22, 'i686-linux-gnu-': 2}` count already
+put at only two tags). `gcc-13-multilib` is pinned by gcc *version*, not by what
+`build-essential` resolves to — fragile exactly the way a hand-picked version pin usually is,
+and it broke the first time `docker/natmod_host.Dockerfile`'s base moved (`ubuntu:24.04` to
+`ubuntu:26.04`, whose own `build-essential` resolves to gcc 15, not 13): every `-m32` `x86`
+build whose module references libgcc failed with "LinkError: incompatible arch", for every one
+of the twenty-two tags this record's own count puts on that path. See docs/records/0068's own
+third correction for the full incident and the fix (the unversioned `gcc-multilib` metapackage,
+which tracks `build-essential`'s own gcc rather than a version pinned by hand).
+
 [0010]: 0010-pinned-data-in-resources.md
 [0012]: 0012-pyelftools-ar-own-deps.md
 [0026]: 0026-one-docker-image-per-port.md
@@ -364,3 +377,4 @@ was `MPS2_AN385`, the one board CI already proved via `build-examples.yml`'s own
 [0050]: 0050-natmod-is-docker-only.md
 [0052]: 0052-config-is-a-tree-not-a-selector-matrix.md
 [0059]: 0059-ghcr-untagged-cleanup-deletes-referenced-manifests.md
+[0068]: 0068-docker-dependabot-grouping-and-mipsel-ubuntu-26-04.md
