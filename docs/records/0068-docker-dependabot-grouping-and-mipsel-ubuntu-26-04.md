@@ -319,6 +319,106 @@ Bootlin 14.3.0, and `windows` is unchanged too — apt's mingw-w64 is GCC 13 on 
 `llvm-mingw`. Only `natmod_host` and `ppc64le_linux` actually hand the artifact to the
 base's own compiler, which is why those two are what a bump has to be judged on.
 
+**Correction, 2026-09-01 (third) — "natmod `x64` ... is green with zero warnings" was true and
+irrelevant; `x86` was the arch the bump actually broke, on every tag but the one this repo's own
+CI happens to test.**
+
+`natmod_host` serves two arches, not one — `images.x64` and `images.x86` both resolve to it
+([0058]). The verification this record's own previous addendum reported ("`natmod` `x64`
+through the bumped `natmod_host` ... is green with zero warnings") checked only the native,
+no-multilib half. `x86` is the one that exercises the image's `-m32` toolchain — for *most*
+supported MicroPython tags, not all, which is the real reason this passed unnoticed here and is
+worth spelling out precisely rather than as "not tested."
+
+This split is not new information — [0058] already counted it exactly (`x86 {'': 22,
+'i686-linux-gnu-': 2}`, the same section naming `gcc-13-multilib`/`gcc-i686-linux-gnu` as the
+two real Debian packages behind it) and its own verification table calls both paths proven
+("`gcc -m32` produces ELF32; `i686-linux-gnu-gcc` works"). What that record did not establish,
+and stated the opposite of ("nothing about the 32-bit path is fragile"), is that the `''`
+(twenty-two tags, including `v1.28.0`) half depends on a hand-pinned gcc version staying in
+step with the base image's own default — see [0058]'s own correction, added alongside this one.
+
+**What broke.** `docker/natmod_host.Dockerfile` pinned `gcc-13-multilib` by version — correct on
+`ubuntu:24.04`, whose own `build-essential` also resolves to gcc 13. `ubuntu:26.04` moved
+`build-essential`'s own default to gcc 15 without this pin following it. On every one of the
+twenty-two `cross = ""` tags [0058] already counted (`v1.28.0` among them — upstream's own
+`py/dynruntime.mk` confirmed directly at that tag and at `v1.29.0`, where the switch to
+`i686-linux-gnu-` actually happens), `-m32` now links against
+gcc 15's own `libgcc.a` search path, finds only the 64-bit archive (no `gcc-15-multilib`
+installed), and fails —
+
+```
+Loading /usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a
+LinkError: incompatible arch
+make: *** [.../dynruntime.mk:242: build/x86/wasm3_x86.native.mpy] Error 1
+```
+
+— but only once the module being linked actually references something from libgcc (soft-float,
+64-bit-arithmetic helpers): `mpy_ld.py` loads the archive lazily, only when an undefined symbol
+sends it looking, so a module with no such reference (`examples/template`'s natmod, `int a + int
+b`) links `x86` clean without ever touching it — verified live, on this very image, on this
+project's own `v1.28.0`: no "Loading ... libgcc.a" line appears in that build's log at all.
+
+**Why nothing in this repo's own CI noticed, precisely.** `verify-docker-images.yml`'s
+`natmod_host` leg is a bare `docker build` (apt successfully installs `gcc-13-multilib`
+regardless of which gcc is default), so it was never going to catch a link-time bug. But
+`test-upstream-natmod.yml` and `build-examples.yml` *do* build real `x86` natmod artifacts
+through this exact image, every run, and both stayed green throughout — because both pin
+`v1.29.0` (`CIBMP_UPSTREAM_ABI_TAG`, `examples/template`'s own `cibuildmp.toml`), the one tag
+range where `x86` already uses the *other*, cross-prefixed path (`gcc-i686-linux-gnu` is a
+self-contained cross toolchain; its own `libgcc` always matches its own version, so the
+`ubuntu:26.04` bump never touches it). Every `x86` build this repo's own CI has ever run passed,
+genuinely, and every one of them was proving the wrong half of `dynruntime.mk`'s own `x86` row.
+Found only downstream: `micropython-wasm3` pins `v1.28.0` (`-m32`, the broken path) and its
+`natmod.yml` builds a real module (`wasm3_mp.c`, which does reference libgcc) — the two
+conditions this repo's own fixtures never combined at once.
+
+**First fix attempt, and it does not build: `gcc-13-multilib` → `gcc-multilib`.** The unversioned
+metapackage matched what this Dockerfile's own comment already said upstream's `tools/ci.sh`
+installs for the identical job, and looked like it would track whatever gcc `build-essential`
+resolves to without a version pinned by hand. Checked live rather than trusted: `apt` reports
+`gcc-multilib:amd64=4:15.2.0-5ubuntu1` (the metapackage) **Conflicts** `gcc-15-i686-linux-gnu` —
+which `gcc-i686-linux-gnu` (unversioned, also resolving to the `15` build on this base) already
+pulls in — so the two packages this image has always installed side by side cannot both be
+satisfied through the metapackage here. Upstream's own `tools/ci.sh` never combines the two in
+one image, so it never meets this conflict; this image always has.
+
+**Actual fix: the real, version-specific package name, computed at build time.**
+`gcc-$(gcc -dumpversion | cut -d. -f1)-multilib` is exactly the shape that already worked
+(`gcc-13-multilib`), just no longer typed by hand — and the real per-version package, unlike the
+metapackage, declares no conflict with `gcc-i686-linux-gnu`. `docker/natmod_host.Dockerfile`'s
+own comment carries the full account.
+
+**The regression guard is the image build itself, not a downstream CI job.** The first attempt at
+closing the coverage gap added `mpy6.3-v1.28.0-x86` to `test-upstream-natmod.yml`'s
+`build-features0` — and it does not catch this incident, checked live rather than assumed:
+`features0`'s own `factorial()` links `x86`/`v1.28.0` clean on the very image this bump broke, no
+"Loading ... libgcc.a" line at all, for the identical reason `examples/template` never did
+either — `mpy_ld.py` loads libgcc.a lazily, only when an actual undefined symbol sends it
+looking, and neither module's C ever produces one on this arch. That leg stays (it still proves
+`v1.28.0`'s `-m32` toolchain produces a *loadable* `x86` artifact at all), but the real guard is
+`docker/natmod_host.Dockerfile`'s own `RUN`, which now compiles and links an explicit 64-bit
+multiply (`long long mul64(long long a, long long b) { return a * b; }`, no native i386
+instruction for it, so it unconditionally needs `__muldi3` from libgcc) through both of this
+image's `x86` toolchains — the `-m32` path this incident broke, and the self-contained
+`i686-linux-gnu-` cross path that stayed fine throughout it — before the layer finishes. A future
+base bump that breaks either path fails `docker build` itself, everywhere it runs, rather than
+staying green while the real link quietly breaks the way this incident did the first time.
+
+**The check itself needed one more pass.** Its first form (`gcc -shared -fPIC ...`) failed
+`i686-linux-gnu-gcc` on a missing `crti.o` — a real gap (this image installs the cross compiler
+itself but never a full i686 cross sysroot) but not the one worth chasing: `mpy_ld.py` never asks
+the system linker for a runnable ELF, shared or not, only for `libgcc.a`'s own member objects, so
+real natmod builds never needed a full sysroot here either. Rewritten as
+`gcc ... -nostartfiles -nostdlib -Wl,-e,mul64 probe.c -lgcc -o probe` — every crt object a normal
+link needs is skipped, an explicit entry point stands in for the also-absent `_start`, and `-lgcc`
+is the only library left on the command line, so this fails exactly when `__muldi3` cannot be
+resolved from it and nothing else. Verified against the exact failure mode locally first, on a
+host with no 32-bit multilib either: `ld: skipping incompatible .../libgcc.a when searching for
+-lgcc` — the same error class the real incident hit.
+
+[0055]: 0055-natmod-example-from-upstream-natmod.md
+
 [0031]: 0031-unix-musllinux-libc-axis.md
 [0033]: 0033-cibuildmp-never-builds-docker-image-itself.md
 [0044]: 0044-unix-native-images-landed.md

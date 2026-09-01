@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-09-01
+
+### Fixed
+
+- **`natmod`'s `x86` arch failed to link through `natmod_host`, on every tag
+  through `v1.28.0`, since `0.6.0`'s own `ubuntu:26.04` bump — whenever the
+  module needs anything from libgcc.** `docker/natmod_host.Dockerfile` pinned
+  `gcc-13-multilib` by version; once the base image's own `build-essential`
+  started resolving to gcc 15, upstream's own `-m32` path for `x86` (every
+  MicroPython tag through `v1.28.0` — `v1.29.0` switched to a separate
+  `i686-linux-gnu-` cross compiler, unaffected) linked against gcc 15's
+  64-bit-only `libgcc.a` and failed outright (`LinkError: incompatible arch`)
+  the moment a module actually referenced a libgcc symbol (soft-float,
+  64-bit arithmetic). Fixed by computing the real, version-specific package
+  name at build time (`gcc-$(gcc -dumpversion | cut -d. -f1)-multilib`)
+  instead of typing one by hand — the unversioned `gcc-multilib` metapackage
+  was tried first and does not build, since it conflicts with
+  `gcc-i686-linux-gnu`, the other package this image has always installed
+  alongside it. The image build itself now also compiles and links an
+  explicit 64-bit multiply through both of `x86`'s toolchains before the
+  layer finishes, so a future regression here fails `docker build`, not
+  just a real link somewhere downstream. `x64` and every cross-compiled
+  arch were unaffected. See docs/records/0068's own third correction.
+
 ## [0.6.0] - 2026-09-01
 
 ### Added
@@ -1335,7 +1359,8 @@ ballistics-lab/micropython-native-ci, but both tags exist here too, so every
 link resolves inside this repository -- the version line continues rather
 than restarting (see the 0.3.0a1 entry). -->
 
-[Unreleased]: https://github.com/ballistics-lab/cibuildmp/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/ballistics-lab/cibuildmp/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/ballistics-lab/cibuildmp/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/ballistics-lab/cibuildmp/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/ballistics-lab/cibuildmp/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/ballistics-lab/cibuildmp/compare/v0.4.1...v0.4.2
