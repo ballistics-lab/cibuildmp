@@ -55,22 +55,23 @@ from .build_common import UsermodBuildError, usermod_mounts
 # makes moot. Found live: `v1.22.1`/`v1.30.0-preview` (both real 404s
 # against `micropython-<ver>.tar.xz`, not just preview tags -- that
 # assumption was wrong) failed every one of `unix`'s 15 cells identically
-# on `mbedtls/platform.h` and `berkeley-db/db.h`. Confirmed against
-# upstream's own build, not just the failure text: `ports/unix/Makefile`
-# adds `lib/berkeley-db-1.xx` to `GIT_SUBMODULES` unconditionally, and
+# on `mbedtls/platform.h` and `berkeley-db/db.h` (and, on `mipsel` only
+# at the time, `lib/libffi/autogen.sh`). Confirmed against upstream's own
+# build, not just the failure text: `ports/unix/Makefile` adds
+# `lib/berkeley-db-1.xx` to `GIT_SUBMODULES` unconditionally,
 # `extmod/extmod.mk`'s `MICROPY_SSL_MBEDTLS` branch (the `unix` standard
-# variant's default SSL backend) adds `lib/mbedtls` the same way -- both
-# true for every arch, unlike `lib/libffi` (only added under
-# `MICROPY_STANDALONE=1`, `mipsel`'s own arch-specific link mode --
-# `UnixArchSettings.standalone`), which stays out of this flat list on
-# purpose rather than threading that condition through here too.
-# `lib/micropython-lib` is a third universal one, added for every port by
-# `py/mkrules.mk` itself -- left out since nothing this project builds
-# today resolves a manifest package from it (a skipped-extraction notice,
-# not a build failure).
+# variant's default SSL backend) adds `lib/mbedtls` the same way, and
+# `ports/unix/Makefile`'s own `MICROPY_STANDALONE`-gated branch adds
+# `lib/libffi` -- unconditional now that `UNIX_ARCH_SETTINGS` sets
+# `standalone=True` on every arch, not just `mipsel`. `lib/micropython-lib`
+# is a fourth universal one, added for every port by `py/mkrules.mk`
+# itself -- left out since nothing this project builds today resolves a
+# manifest package from it (a skipped-extraction notice, not a build
+# failure).
 UNIX_SUBMODULES: tuple[str, ...] = (
     "lib/mbedtls",
     "lib/berkeley-db-1.xx",
+    "lib/libffi",
 )
 
 
@@ -142,25 +143,73 @@ _ELFDATA2LSB, _ELFDATA2MSB = 1, 2
 #     the vendored one -- which in turn is why `libltdl-dev` had to be
 #     installed for `autogen.sh` (D25's sixth bug). `pkg-config --libs
 #     libffi` resolves to `-lffi` inside `manylinux_2_31_armv7l`,
-#     checked directly by running it in the real image, so armv7l joins
-#     every other native arch on the plain dynamic path. Only `mipsel`
-#     still needs it.
+#     checked directly by running it in the real image, so 0043 dropped
+#     `MICROPY_STANDALONE` everywhere but `mipsel`, which has no image at
+#     all to resolve a system `libffi` from.
+#
+# **That second bullet is reversed below.** `STATIC_LINK_OPTS` now applies
+# to every arch, not just `mipsel` -- not because system `libffi` stopped
+# resolving, but because depending on it made the submodule list itself
+# arch-conditional (`lib/libffi` only on the clone path, only when
+# `MICROPY_STANDALONE=1`) for one arch out of eight, and because it stops
+# this project depending on every published image happening to ship
+# `libffi-dev`/`libffi-devel` at all -- already a real gap once
+# (`manylinux_2_28_x86_64` measured with none, record 0084's own
+# baseline). The real cost, stated rather than hidden: `verify_unix_floor()`
+# reads `None` (see `_required_glibc()`'s own docstring) for a fully
+# static binary on *every* arch now, not just `mipsel` -- the glibc-floor
+# check that record 0043 built specifically so `manylinux_2_28` would not
+# be decorative goes uniformly silent. And every glibc (not musl) arch now
+# carries record 0031's own finding: `libffi`'s `dlopen()` and
+# `getaddrinfo()`'s own NSS backends still need the linking host's glibc
+# at runtime even from a "static" binary -- true today for `mipsel` alone,
+# now true for six more.
 #
 # Order is significant, not alphabetical: `targets.py`'s `_PORT_AXES`
 # derives its display/build order from the pin file and this table, so
 # reordering this literal reorders every `--dry-run` plan.
+STATIC_LINK_OPTS = ("MICROPY_STANDALONE=1", "LDFLAGS_EXTRA=-static")
+
 UNIX_ARCH_SETTINGS: dict[str, UnixArchSettings] = {
-    "x86_64": UnixArchSettings(elf=(62, _ELFCLASS64, _ELFDATA2LSB)),
-    "i686": UnixArchSettings(elf=(3, _ELFCLASS32, _ELFDATA2LSB)),
-    "aarch64": UnixArchSettings(elf=(183, _ELFCLASS64, _ELFDATA2LSB)),
-    "armv7l": UnixArchSettings(elf=(40, _ELFCLASS32, _ELFDATA2LSB)),
-    "ppc64le": UnixArchSettings(elf=(21, _ELFCLASS64, _ELFDATA2LSB)),
+    "x86_64": UnixArchSettings(
+        elf=(62, _ELFCLASS64, _ELFDATA2LSB),
+        link_opts=STATIC_LINK_OPTS,
+        standalone=True,
+    ),
+    "i686": UnixArchSettings(
+        elf=(3, _ELFCLASS32, _ELFDATA2LSB),
+        link_opts=STATIC_LINK_OPTS,
+        standalone=True,
+    ),
+    "aarch64": UnixArchSettings(
+        elf=(183, _ELFCLASS64, _ELFDATA2LSB),
+        link_opts=STATIC_LINK_OPTS,
+        standalone=True,
+    ),
+    "armv7l": UnixArchSettings(
+        elf=(40, _ELFCLASS32, _ELFDATA2LSB),
+        link_opts=STATIC_LINK_OPTS,
+        standalone=True,
+    ),
+    "ppc64le": UnixArchSettings(
+        elf=(21, _ELFCLASS64, _ELFDATA2LSB),
+        link_opts=STATIC_LINK_OPTS,
+        standalone=True,
+    ),
     # The one big-endian target in the matrix, and the reason
     # `verify_unix_output()` checks `EI_DATA` at all rather than
     # `e_machine` alone: a big-endian s390x ELF and a hypothetical
     # little-endian one share `EM_S390`.
-    "s390x": UnixArchSettings(elf=(22, _ELFCLASS64, _ELFDATA2MSB)),
-    "riscv64": UnixArchSettings(elf=(243, _ELFCLASS64, _ELFDATA2LSB)),
+    "s390x": UnixArchSettings(
+        elf=(22, _ELFCLASS64, _ELFDATA2MSB),
+        link_opts=STATIC_LINK_OPTS,
+        standalone=True,
+    ),
+    "riscv64": UnixArchSettings(
+        elf=(243, _ELFCLASS64, _ELFDATA2LSB),
+        link_opts=STATIC_LINK_OPTS,
+        standalone=True,
+    ),
     # The documented exception to 0043 (its own open question, answered
     # as "keep it, and say plainly that it is different"): pypa publishes
     # no mipsel image, PEP 600 defines no `manylinux_*_mipsel` tag, and
@@ -188,7 +237,7 @@ UNIX_ARCH_SETTINGS: dict[str, UnixArchSettings] = {
     "mipsel": UnixArchSettings(
         elf=(8, _ELFCLASS32, _ELFDATA2LSB),
         cross_compile="mipsel-linux-gnu-",
-        link_opts=("MICROPY_STANDALONE=1", "LDFLAGS_EXTRA=-static"),
+        link_opts=STATIC_LINK_OPTS,
         standalone=True,
     ),
 }
@@ -378,13 +427,12 @@ def run_unix_deplibs(
     called -- `build_unix()` itself raises before ever reaching here if
     `ensure_image()` returned `None`.
 
-    Only `manylinux_2_41_mipsel` still reaches this at all. Every other
-    architecture builds natively in an image whose own `pkg-config`
-    resolves `-lffi` (verified by running it inside the real
-    `manylinux_2_28_x86_64` / `manylinux_2_31_armv7l` / `musllinux_1_2_*`
-    images), so record 0043 dropped the whole `MICROPY_STANDALONE`
-    static-libffi path for them along with the cross toolchains it
-    existed to work around.
+    Every arch reaches this now (`standalone=True` on every
+    `UnixArchSettings` row) -- record 0043 dropped this step for every
+    arch but `mipsel` on the strength of each native image's own
+    `pkg-config` resolving `-lffi`; it comes back for all eight so the
+    submodule list and the link mode stop being arch-conditional facts.
+    See `UNIX_ARCH_SETTINGS`'s own header for the full argument and cost.
     """
     settings = unix_arch_settings(opts.target)
     command = [
@@ -450,10 +498,10 @@ def _required_glibc(binary: Path) -> tuple[int, int] | None:
     nothing new -- 0031 checked that specifically before recommending it.
 
     `None` covers two real cases, both legitimate: a fully static build
-    (`manylinux_2_41_mipsel`, whose `-static` link leaves no version
-    requirements to read) and a musl binary (musl does not use symbol
-    versioning at all, which is why PEP 656 is a separate spec rather
-    than manylinux with a different number).
+    (every `unix` arch now links `-static` -- see `UNIX_ARCH_SETTINGS`'s
+    own header for why, and what it costs this exact check) and a musl
+    binary (musl does not use symbol versioning at all, which is why PEP
+    656 is a separate spec rather than manylinux with a different number).
     """
     from elftools.common.exceptions import ELFError
     from elftools.elf.elffile import ELFFile
@@ -744,6 +792,14 @@ def verify_unix_floor(target: str, binary: Path) -> None:
     comes from the pinned `musllinux_1_2_<arch>` base rather than from
     inspection. `verify_unix_output()`'s architecture check still applies
     to every target either way.
+
+    **Now a no-op for every `manylinux` target too**, since
+    `UNIX_ARCH_SETTINGS`'s own `-static` link leaves `_required_glibc()`
+    nothing to read (`required is None`, below) on every arch, not just
+    `mipsel` -- the live `GLIBC_2.28` check this docstring describes was
+    real once and is not any more. Left in place rather than deleted: it
+    is still correct for a dynamically-linked binary, and still the
+    right check if any arch here is ever moved off `-static`.
     """
     floor, _arch = _split_target(target)
     if not floor.startswith("manylinux_"):
@@ -864,9 +920,12 @@ def build_unix(
     at that directory with `patchelf --set-rpath` -- this project's own
     `auditwheel repair`, for the one artifact type `auditwheel` itself
     cannot touch. See that function's own docstring for the full
-    reasoning; a no-op for every target that needs nothing repaired,
-    which today is every architecture except the dynamically-linked ones
-    that pull in `libffi`.
+    reasoning; a no-op for every target that needs nothing repaired --
+    every arch, now that `STATIC_LINK_OPTS` applies everywhere and a
+    fully static binary has no `.dynamic` section for
+    `_dynamic_needed_libs()` to find anything in. Left wired in rather
+    than removed: still correct for a dynamically-linked target, and
+    still the right step if any arch here ever moves off `-static`.
     """
     from ... import dockerrun
 

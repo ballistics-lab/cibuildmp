@@ -639,6 +639,9 @@ def test_build_one_copies_repaired_unix_lib_sidecar_alongside_the_binary(
     target = UsermodTarget(port="unix", arch="manylinux_2_28_x86_64")
 
     def fake_run(cmd, **kwargs):
+        # `standalone=True` on every arch now means several dockerrun
+        # calls hit this same fake for one build (deplibs, the main
+        # build, the repair) -- idempotent on purpose, not just once.
         build_dir = mpy_dir / "ports" / "unix" / "build-unix-manylinux_2_28_x86_64"
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
@@ -648,7 +651,7 @@ def test_build_one_copies_repaired_unix_lib_sidecar_alongside_the_binary(
         # lets this test exercise build_one()'s own collection step without
         # a real container.
         lib_dir = build_dir / "lib"
-        lib_dir.mkdir()
+        lib_dir.mkdir(exist_ok=True)
         (lib_dir / "libffi.so.6").write_bytes(b"\x7fELF-stub-shared-object")
 
     monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
@@ -812,11 +815,14 @@ def test_build_one_collects_vendored_libs_without_the_port_object_tree(
     target = UsermodTarget(port="unix", arch="manylinux_2_28_x86_64")
 
     def fake_run(cmd, **kwargs):
+        # `standalone=True` on every arch now means several dockerrun
+        # calls hit this same fake for one build (deplibs, the main
+        # build, the repair) -- idempotent on purpose, not just once.
         build_dir = mpy_dir / "ports" / "unix" / "build-unix-manylinux_2_28_x86_64"
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
         lib_dir = build_dir / "lib"
-        (lib_dir / "mbedtls").mkdir(parents=True)
+        (lib_dir / "mbedtls").mkdir(parents=True, exist_ok=True)
         (lib_dir / "mbedtls" / "aes.o").write_bytes(b"object-file")
         (lib_dir / "mbedtls" / "aes.P").write_bytes(b"depfile")
         (lib_dir / "libffi.so.6").write_bytes(b"\x7fELF-stub-shared-object")

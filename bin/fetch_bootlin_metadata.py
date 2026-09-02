@@ -71,7 +71,8 @@ BASE = "https://toolchains.bootlin.com/downloads/releases/toolchains"
 # `bin/refresh_docs.py`'s own rewrite-in-place shape is the right one.
 # `--stdout` is still there for the case where a diff is wanted first.
 DEFAULT_OUTPUT = (
-    Path(__file__).resolve().parent.parent / "docs/reference/toolchain-facts/bootlin.toml"
+    Path(__file__).resolve().parent.parent
+    / "docs/reference/toolchain-facts/bootlin.toml"
 )
 
 # Every architecture this project has a real target for, and why. Bootlin

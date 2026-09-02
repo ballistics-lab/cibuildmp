@@ -150,9 +150,38 @@ def cmake_extra_args_env(
 # not going to hold a 2023 release to a 2025 diagnostic. Live-caught in
 # CI (run 33636118022) rather than predicted: both `unix` x86_64 cells
 # failed inside the `mpy-cross` build, not the port's own.
+#
+# `-Wno-error=unterminated-string-initialization` -- gcc 15.1 rejects
+# `py/emitinlinethumb.c`'s register mnemonics (`{0, "r0\0"}`, ...), each a
+# 3-4 character string packed into a fixed 3-byte array with no room left
+# for the trailing NUL. Upstream's own fix landed in `v1.26.0`, bisected
+# exactly in [0082]: `v1.25.0` still fails, `v1.26.0` does not -- the same
+# boundary [0085] found for `arm_embedded`'s own xpack pin. Live-caught
+# here too, not just on `natmod_host`/`arm_embedded`: `manylinux_2_31_armv7l`
+# and `manylinux_2_41_mipsel`'s own published images carry gcc>=15.1 while
+# `manylinux_2_28_*` (AlmaLinux 8) does not, so `unix`'s own per-tag sweep
+# hit this on those two cells specifically, on `v1.20.0`/`v1.21.0`/`v1.22.0`
+# (0084's own sweep, run ids 33642989476-33643188693). Applied tag-wide
+# rather than per-cell: a suppressed warning that never fires on a cell
+# that does not hit it is a no-op, and `py/` is compiled by every port
+# alike (this dict's own header).
+_UNTERMINATED_STRING_INIT_TAGS = (
+    "v1.20.0",
+    "v1.21.0",
+    "v1.22.0",
+    "v1.22.1",
+    "v1.22.2",
+    "v1.23.0",
+    "v1.24.0",
+    "v1.24.1",
+    "v1.25.0",
+)
+
 TAG_CFLAGS: dict[str, tuple[str, ...]] = {
-    "v1.20.0": ("-Wno-error=dangling-pointer",),
+    tag: ("-Wno-error=unterminated-string-initialization",)
+    for tag in _UNTERMINATED_STRING_INIT_TAGS
 }
+TAG_CFLAGS["v1.20.0"] += ("-Wno-error=dangling-pointer",)
 
 
 def tag_cflags(tag: str) -> tuple[str, ...]:
