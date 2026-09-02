@@ -1,8 +1,8 @@
 name: cibuildmp
 description: "Installs and runs cibuildmp on the current runner"
 branding:
-  icon: cpu
-  color: blue
+  icon: package
+  color: yellow
 inputs:
   package-dir:
     description: 'Input directory, defaults to "."'
