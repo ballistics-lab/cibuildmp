@@ -590,6 +590,41 @@ glibc. This is the same asymmetry [0068] and [0082] have now landed on three tim
 under `ubuntu:24.04`->`26.04` was `natmod_host`, the *native* group, while every cross image
 crossed that bump untouched.
 
+### The resolution, run for real: libffi into the sysroot, and two package sets
+
+The two findings above (a compiler-free base and a standalone libffi being mutually exclusive
+under apt; the `out/lib64` mismatch) both dissolve if libffi is provisioned into the cached SDK's
+own sysroot instead of being rebuilt inside every build. Tested rather than assumed, same day,
+same host:
+
+- **A provisioning invocation** -- autotools allowed, because it runs once per toolchain, not once
+  per build -- builds `lib/libffi` with the Bootlin compiler at
+  `--prefix=<sdk>/x86_64-buildroot-linux-gnu/sysroot/usr`. **8 s** (plus 41 s of apt, also once).
+- **A build invocation** with the small set plus `pkg-config` and **no compiler at all**:
+  `command -v gcc` is empty, confirmed in the run. `PKG_CONFIG_LIBDIR` points at the sysroot, and
+  `pkg-config --cflags --libs libffi` answers with sysroot paths, not the host's `/usr`.
+- **`ports/unix` goes back to its own normal branch**: no `MICROPY_STANDALONE`, no `deplibs`, no
+  symlink. **8 s.** The binary's `.comment` reads `GCC: (Buildroot 2021.11-...) 14.3.0`, its
+  highest required symbol is `GLIBC_2.38`, and the smoke test passes with all three of upstream's
+  modules, C++ included.
+
+**So the standalone decision recorded above is superseded before it landed anywhere.** Keep
+`UNIX_ARCH_SETTINGS`'s `standalone` flag for `mipsel`, which needs it for its own reasons; `unix`
+does not adopt it. What replaces it is the provisioning step, and with it the auxiliary package
+list splits in two: **provisioning** (`autoconf`, `automake`, `libtool`, `libltdl-dev`,
+`pkg-config`, once per toolchain) and **build** (`ca-certificates`, `curl`, `xz-utils`/`bzip2`,
+`make`, `python3`, `python3-pyelftools`, `git`, `pkg-config` -- 25 s, and no compiler).
+
+**`lib` vs `lib64` also stops being a question on this path**, for a reason worth writing down
+rather than rediscovering: Buildroot's own sysroot already ships `usr/lib64 -> lib`, so the `.pc`
+file's `-L.../usr/lib/../lib64` resolves to the real directory whichever spelling libtool picks.
+
+**One thing a compiler-free base costs, named because its error message does not explain itself:**
+the image has no binutils either, so `strip` and `size` must come from the SDK
+(`CROSS_COMPILE`-prefixed) for `mpy-cross` as well as for the port. Without that the build stops
+at `make: strip: No such file or directory`, which reads like a missing package rather than the
+design working as intended.
+
 ### Weighed and rejected: `zig cc` instead of a per-identifier toolchain
 
 Proposed as a way to replace the whole `unix` toolchain story with one 47 MiB self-contained
