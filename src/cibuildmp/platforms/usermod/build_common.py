@@ -137,6 +137,7 @@ def container_mpy_cross(
     oci_platform: str | None = None,
     linux32: bool = False,
     timeout: float | None = None,
+    extra_cflags: tuple[str, ...] = (),
 ) -> Path:
     """Build `mpy-cross` **inside `image`** and return the binary, for the
     port build to pass as `MICROPY_MPYCROSS=`.
@@ -197,6 +198,14 @@ def container_mpy_cross(
             "-C",
             (mpy_dir / "mpy-cross").as_posix(),
             f"BUILD={build_dir.as_posix()}",
+            # `mpy-cross` compiles `py/` too, so a diagnostic that stops a
+            # port build stops this one first -- live-caught in CI
+            # (33636118022): `v1.20.0`'s `-Werror=dangling-pointer=` in
+            # `py/stackctrl.c` failed here, before the port's own make ever
+            # ran, while the row's `cflags_extra` was reaching only the
+            # port. Anything the caller needs relaxed for its own sources
+            # has to be relaxed for this build as well.
+            *([f"CFLAGS_EXTRA={' '.join(extra_cflags)}"] if extra_cflags else []),
             f"-j{os.cpu_count() or 1}",
         ],
         mounts=[mpy_dir],

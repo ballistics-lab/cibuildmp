@@ -905,6 +905,7 @@ def build_unix(
         mpy_dir,
         slug=f"unix-{opts.target}",
         image=docker_image,
+        extra_cflags=unix_extra_cflags(opts.target, opts.tag),
         oci_platform=oci_platform,
         linux32=linux32,
         timeout=timeout,
