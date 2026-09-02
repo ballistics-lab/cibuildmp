@@ -172,6 +172,32 @@ the one `unix` cell that cross-compiles rather than emulating.
 passing `skip: ""` to disable skipping silently keeps the defaults. That is why the fifteenth cell
 was absent, and it was visible only in the report, never in a job colour.
 
+**A per-tag sweep was dispatched at the end of this session and its results are not in yet.**
+Fifteen `test-platforms.yml` runs, one per MicroPython tag, each building that tag's own fifteen
+`unix` cells: run ids **33642989476 through 33643188693** (plus 33642497696, a recheck of
+`musllinux_1_2_ppc64le` alone). Each was dispatched with `keep_going=true`,
+`tolerate_failures=false`, `step_summary=true` -- the sweep wants every cell's outcome, wants a
+red job when one fails, and wants the summary rendered on the run page rather than only in an
+artifact.
+
+Collecting them needs no local state, which is the point:
+
+```bash
+gh run list --workflow=test-platforms.yml --limit 20 \
+  --json databaseId,status,conclusion,createdAt
+gh run download <id> -D reports/   # artifact is report-unix-<tag>
+```
+
+Each artifact is [0063]'s own report shape (`{"results": [{"identifier", "duration", "error"},
+...]}`), and the `error` field is the authority -- a green job can still contain failed cells
+under `--keep-going`.
+
+**What the sweep is actually asking**, so its result is read rather than merely collected: whether
+`TAG_CFLAGS` fixes `v1.20.0` on all fifteen cells (it was only ever proven on two x86_64 ones);
+whether any tag other than `v1.20.0` needs a relaxation on a real per-cell image rather than on
+the Bootlin toolchain this session tested them against; and whether
+`musllinux_1_2_ppc64le` fails on every tag or only the two [0044] marks.
+
 **Landed (all pushed, `575 passed`):**
 
 - `[usermod.unix]`'s 225 rows lost the `gcc` column entirely — the image fixes the compiler, so a
