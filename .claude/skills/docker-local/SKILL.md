@@ -82,6 +82,44 @@ window this shares across is out of this session's control. Treat a local
 own runners, no such shared limit) is the authoritative check when local
 Docker Hub pulls are stuck on this.
 
+**Check reachability before attempting a build that needs a new host, and ask the user to add
+whatever fails — don't guess, don't silently work around it, and don't declare the build
+"impossible here" without having asked.** Before a `docker build`/`docker run` that touches a
+host not already in section 5's table below, probe it directly first — plain `curl -sS -o
+/dev/null -w '%{http_code}\n' https://<host>/<a-real-path>` (a real path, not just the bare
+domain — some hosts 200 the root and still reject the actual resource path) is enough, cheaper
+than a full build. A 403/`Forbidden` (or a `recentRelayFailures` "connect_rejected" entry in the
+proxy status) means the host, not the Dockerfile or the network stack, is the blocker — tell the
+user exactly which domain(s) are missing and ask them to add it, the same way this skill's own
+table grew one incident at a time. Don't spend a session's budget rewriting a Dockerfile or
+inventing a workaround (a mirror, a vendored copy, a different registry) to route around a host
+that was simply never asked for.
+
+**A host enabled for this session is not automatically enabled for Docker's own network path —
+verify both, separately, before trusting either.** Confirmed live: after a user enabled
+`almalinux.org`/`*.almalinux.org` mid-session, a plain `curl` from this session's own shell
+reached `repo.almalinux.org` immediately (`HTTP 200`) — but the identical URL, requested from
+*inside* a running container (`docker run ... curl ...`, CA already trusted per section 4), kept
+returning `403` at the same moment. Two different enforcement points, not one — the session's own
+tool-call egress and whatever `dockerd`/container network path routes through evidently don't
+share a single allowlist state, or don't update it on the same schedule. **Never infer "it works
+in Docker" from a host-level `curl` succeeding, and never infer "it's still blocked" from a
+container-level 403 alone if the host just got enabled** — retest the container path directly
+(a scratch `docker run` with the CA installed, per section 4) rather than assuming either result
+carries over, and say so plainly if the two disagree rather than picking whichever answer is
+convenient.
+
+**When the container path is the one still blocked, `$HTTPS_PROXY/__agentproxy/status`'s own
+`recentRelayFailures` can come back empty even though the 403 is real** — confirmed live in the
+same incident: the container's `curl` returned a genuine `403`, and the very next status check
+showed `"recentRelayFailures": []`, nothing recorded. That means the block is happening at a
+layer *before* this agent-proxy's own relay logic even sees the request — some lower,
+docker/daemon-specific network policy, not the same allowlist the status endpoint reports on.
+Don't treat an empty `recentRelayFailures` as proof a container-level 403 isn't real or has
+resolved; trust the container's own curl exit code over the status endpoint for this specific
+path, and tell the user the container-level route needs its own fix, distinct from whatever they
+just enabled at the session level.
+
 ## 3. Plain HTTP needs nothing from the allowlist at all
 
 `apt-get update`/`install` inside a `RUN` step reaches

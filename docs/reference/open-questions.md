@@ -73,15 +73,19 @@ the same way [docs/0000-TRACKER.md](../0000-TRACKER.md) folds resolved
   `container_mpy_cross()` exists to prevent — just not yet hit for `qemu` —
   or a genuine difference in what that port needs, is **not established**.
   This was written down only in a source comment until now.
-- **Old tags vs. a modern host `gcc`.** Found while verifying **D13** live:
-  `v1.21.0` fails to build `mpy-cross` under a recent `gcc`
-  (`-Werror=unterminated-string-initialization` on upstream's own
-  `py/emitinlinethumb.c`/`emitinlinextensa.c`). `mpy-cross` is a host
-  build, so this is not a cross-toolchain problem the resolver can route
-  around. Unclear yet how far back tags stay buildable, or whether that
-  is worth a documented "known good" floor, a suggested
-  `CFLAGS=-Wno-error` escape hatch, or just something a user hits and
-  works around per-project.
+- ~~**Old tags vs. a modern host `gcc`.**~~ **Scoped exactly, not closed** — [0082].
+  Found while verifying **D13** live: `v1.21.0` fails to build `mpy-cross` under a
+  recent `gcc` (`-Werror=unterminated-string-initialization` on upstream's own
+  `py/emitinlinethumb.c`). Bisected live against this project's own real
+  `natmod_host` image (`ubuntu:26.04`, gcc **15.2.0** — not a hypothetical "recent"
+  compiler, the exact one every unpinned `x64` natmod/`windows` build runs today):
+  9 of 24 known tags fail (all of ABI 6.1/6.2, plus `v1.23.0`-`v1.25.0`), fixed
+  upstream between `v1.25.0` and `v1.26.0`. Confirmed to reach `windows`'s own
+  `container_mpy_cross()` too (identical native gcc, same image family), not
+  independently checked against `unix`/`webassembly`/`esp32`/`rp2`. The zero-config
+  default build is unaffected (newest ABI 6.3 tag is past the boundary). Still
+  open, per [0082]'s own "Not decided": whether to suppress the warning, pin an
+  older gcc, or just document the range as unsupported.
 - **Toolchain pinning vs. reproducibility.** Pinned tarball versions make
   builds reproducible but drift from what a contributor has on `PATH`. The
   **premise is gone** — [0050] deleted the resolver, and every build now runs
@@ -167,6 +171,8 @@ the same way [docs/0000-TRACKER.md](../0000-TRACKER.md) folds resolved
 [0044]: ../records/0044-unix-native-images-landed.md
 [0045]: ../records/0045-only-is-a-filter-not-a-forced-identifier.md
 [0046]: ../records/0046-pin-staleness-checker.md
+[0049]: ../records/0049-no-matrix-generation-archs-vocabulary.md
 [0050]: ../records/0050-natmod-is-docker-only.md
 [0052]: ../records/0052-config-is-a-tree-not-a-selector-matrix.md
 [0058]: ../records/0058-image-groups-are-toolchains-not-ports.md
+[0082]: ../records/0082-natmod-old-tags-fail-mpy-cross-under-gcc-15.md

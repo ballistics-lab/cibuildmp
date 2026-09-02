@@ -148,6 +148,8 @@ FOREIGN_PATHS = {
     "resources/pinned_docker_images.cfg",
     "src/mpbuild/board_database.py",  # mpbuild's own file, vendored from
     ".github/workflows/ports_windows.yml",  # MicroPython's own workflow
+    ".github/workflows/ports_esp32.yml",  # MicroPython's own workflow
+    "docs/develop/gettingstarted.rst",  # MicroPython's own docs
 }
 
 # Build outputs. Naming one is legitimate -- `action.yml` documents where

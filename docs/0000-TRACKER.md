@@ -55,6 +55,8 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### In progress / Proposed
 
+- [ ] [0083] replace `windows.Dockerfile`'s apt `gcc-mingw-w64` split with one fully prebuilt llvm-mingw toolchain
+- [ ] [0082] nine MicroPython tags fail `mpy-cross` under gcc 15, on every image whose native compiler is unpinned — bisected exactly
 - [ ] [0047] the run output works, but it is not cibuildwheel's
 - [ ] [0046] nothing notices when a pin goes stale, except container images
 - [ ] [0022] zephyr is a third selector axis, not a board-based port that just needs its boards added
@@ -244,3 +246,5 @@ record is added.
 [0079]: records/0079-collected-artifact-is-more-than-one-file.md
 [0080]: records/0080-windows-and-qemu-usermod-smoke-tests.md
 [0081]: records/0081-output-dir-gitignore.md
+[0082]: records/0082-natmod-old-tags-fail-mpy-cross-under-gcc-15.md
+[0083]: records/0083-windows-fully-prebuilt-mingw-toolchain.md
