@@ -248,10 +248,51 @@ here reflects the addendum's own decisions, not the shape this plan was first wr
    option (b), decided. `curl`, `ca-certificates`, `xz-utils`/`bzip2`, `make`, `python3`,
    `python3-pyelftools`, `git`, plus `cmake` only where the port needs it (`rp2`, per
    `arm_embedded.Dockerfile`'s own "cmake is here because rp2 needs it" precedent — do not carry
-   it in for `unix` alone). **No compiler.** Measure what this actually costs per invocation
-   while proving step 4, since that number is the only thing that would send this back to option
-   (a) (a published image), and nothing else about the design changes if it does.
-3. **The toolchain fetch, and it runs inside the container, not on the host.** Download,
+   it in for `unix` alone), plus the four `deplibs` needs (next item): `pkg-config`, `autoconf`,
+   `automake`, `libtool`, `libltdl-dev`. **No compiler.** Measure what this actually costs per
+   invocation while proving step 4, since that number is the only thing that would send this back
+   to option (a) (a published image), and nothing else about the design changes if it does.
+
+   `libltdl-dev` is not guessable and is here because D25 paid for it live:
+   `deplibs`' own `autogen.sh` fails with `possibly undefined macro:
+   LT_SYS_SYMBOL_USCORE` without it, and `autoconf`/`automake`/`libtool` between them ship no
+   `ltdl.m4` at all (`build_unix.py`'s own module docstring).
+3. **`unix` moves to `MICROPY_STANDALONE=1` on every arch, and `-static` does not come with
+   it.** A Bootlin SDK carries a matched libc sysroot and nothing else — no libffi — while
+   `ports/unix/Makefile` needs one either from `pkg-config` (the system) or from its own vendored
+   `lib/libffi` under `MICROPY_STANDALONE=1`. Taking it from apt would link a libffi built
+   against the *host's* glibc into the artifact, which is precisely the claim this record rests
+   on ("the output's libc floor comes entirely from the toolchain's own sysroot, never from the
+   host OS") quietly ceasing to be true. So the standalone path becomes the default for every
+   cell, not the exception it is today.
+
+   **This is a wider default, not new machinery.** `standalone` is already a per-arch flag in
+   `build_unix.py`'s own `UNIX_ARCH_SETTINGS`; `mipsel` sets it today for the same reason
+   generalised here — its own comment, "existed because no cross-usable libffi was available" —
+   and `run_unix_deplibs()` has been exercised live end to end, with a real custom C module.
+
+   **`LDFLAGS_EXTRA=-static` is a separate flag and stays behind.** The `mipsel` row happens to
+   set both, which makes them look like one decision; they are not. A statically-linked libffi is
+   a consequence of the toolchain having no system one. A fully static binary is a change to what
+   cibuildmp ships, and [0031] already notes that even a "static" binary reaches `dlopen`. Nothing
+   here argues for it, so nothing here should quietly deliver it.
+
+   **Two things this drags along.** The cost is per *build*, not per toolchain: `deplibs` writes
+   into `$(BUILD)/lib/libffi`, so libffi is rebuilt for every (tag, arch, libc) cell — measure it
+   in step 4 alongside the apt number. And `[usermod.unix]`'s own `pre_checkout` in
+   `build-platforms.toml` currently documents the opposite path (`apt install build-essential git
+   python3 pkg-config libffi-dev`) and has to be rewritten with this, documentation though it is
+   ([0052]).
+
+   **The optimisation this leaves on the table, named so it is not rediscovered as a problem:**
+   building libffi once *into the cached SDK's own sysroot* would return every arch to its normal
+   `pkg-config` path and charge the build once per toolchain rather than once per cell. It is not
+   chosen here because it makes the cache hold a *modified* SDK (the cache key then has to say
+   so) and because sysroot-aware `pkg-config` (`PKG_CONFIG_SYSROOT_DIR`/`PKG_CONFIG_LIBDIR`) is
+   exactly the plumbing that silently resolves to the host's `/usr` instead — the failure this
+   whole item exists to prevent. It is a cache-population change, not a design change, so it stays
+   available once there is a measured reason to want it.
+4. **The toolchain fetch, and it runs inside the container, not on the host.** Download,
    sha256-verify, extract, `relocate-sdk.sh`, marked done by a `.installed`-style file, all
    *into a host directory `dockerrun.run()` mounts at its own identical path* — the shape
    `build_esp32.py`'s own `_esp32_container_script()` already has, for the reason [0058] gives
@@ -260,7 +301,7 @@ here reflects the addendum's own decisions, not the shape this plan was first wr
    it must not assume that, since the `arm_embedded` family needs both in a later phase, and
    since `container_mpy_cross()` needs the *native* one on `PATH` before it can build `mpy-cross`
    at all now that the base ships no compiler.
-4. Prove it on one cell by hand, live, the way every claim in this record's own investigation was
+5. Prove it on one cell by hand, live, the way every claim in this record's own investigation was
    proven: fetch `x86-64--glibc--stable-2025.08-1` inside a bare `ubuntu:26.04`, build a real
    `ports/unix` (not just `mpy-cross`) for a *current* tag (`v1.29.0`) end to end, `examples/
    usercmodule`'s own C module included so `deplibs`/libffi linkage is exercised too, not just a
@@ -492,6 +533,105 @@ fleet explosion [0058] rejected in a different form.
 **The one real advantage of baking** — no download on a cold runner — is available without any of
 this, by caching `cache_root()` with `actions/cache` on top of the mounted-cache model. That is
 worth doing on its own merits, and it needs no image at all.
+
+### Phase 0 step 5, run for real: what the live proof actually produced
+
+Run 2026-09-02 on a real Docker host, exactly as the step above specifies -- a bare `ubuntu:26.04`,
+the auxiliary set by `apt` at invocation time, `x86-64--glibc--stable-2025.08-1` fetched from
+inside the container into a host-mounted cache, `ports/unix` at `v1.29.0` built with upstream's
+own `examples/usercmodule` (so `cexample`, `cppexample` and `subpackage`, i.e. C++ included).
+
+**It works, and the numbers Phase 0 asked for:**
+
+| step | cost |
+| --- | --- |
+| `apt`, build-only set (no compiler) | **23 s** |
+| `apt`, plus the autotools `deplibs` needs | 41-46 s |
+| toolchain fetch + `relocate-sdk.sh` | 38 s cold, 0 s warm (marker) |
+| `mpy-cross`, built by the Bootlin compiler | 4 s |
+| `deplibs` (standalone libffi) | **9 s** |
+
+The 9 s is the number that retires one of this record's own arguments: "the cost is per build, not
+per toolchain" is true and nearly free. What actually recommends building libffi into the cached
+SDK is therefore *not* time -- it is keeping autotools, and the compiler they drag in, out of the
+build container (below).
+
+**What the artifact proves.** `ELF 64-bit LSB pie executable, x86-64`; the smoke test runs, with
+all three modules importing. `libffi` is absent from `NEEDED`, so the standalone static link
+worked. The decisive check is not the floor number but the `.comment` section: it reads
+`GCC: (Buildroot ...)`, so the Bootlin toolchain produced this binary and the apt `gcc 15.2.0`
+sitting in the same image did not. Highest glibc symbol required: `GLIBC_2.38` -- below the
+sysroot's own 2.41 and well below the host's 2.43.
+
+**Two findings the run made that no amount of reading would have.**
+
+1. **"No compiler of any kind" and "standalone libffi in the build container" are mutually
+   exclusive under apt.** `libtool` hard-depends on `gcc | <c-compiler>`, so asking for the
+   autotools `deplibs` needs installs `gcc-15` (`4:15.2.0-5ubuntu1`) -- precisely the version
+   [0082] names as breaking nine tags. The build image cannot be compiler-free while it also
+   builds libffi from source. **This is what turns "build libffi into the cached sysroot" from an
+   optimisation into the resolution**: put autotools in the *provisioning* invocation, which runs
+   once per toolchain, and the build invocation keeps the 23-second compiler-free set.
+2. **`ports/unix`'s standalone path silently assumes a Debian/Ubuntu compiler.** Upstream hardcodes
+   `$(BUILD)/lib/libffi/out/lib/libffi.a`, but libtool installs by the compiler's own
+   `-print-multi-os-directory`: Ubuntu's multiarch-patched gcc answers `../lib`, a stock Buildroot
+   toolchain answers `../lib64`, so the link fails with `cannot find .../out/lib/libffi.a`. It is
+   arch-dependent -- 64-bit stock toolchains hit it, 32-bit ones do not, which is exactly why
+   `mipsel` has used this path for a year without meeting it. One symlink in `run_unix_deplibs()`
+   settles it ([0050]'s own "a FROM line and four symlinks" shape); building libffi into the
+   sysroot avoids the question entirely, since `pkg-config` then reports whatever path is real.
+
+**Why `mipsel` never had the compiler problem either, and why `unix` will.**
+`manylinux_2_41_mipsel` installs `build-essential`, `libtool` and `libltdl-dev` *explicitly* and
+is fine, because a stray host gcc emits x86-64 objects that cannot link into a MIPS32 ELF -- the
+architecture mismatch is a hard, self-enforcing barrier. `unix`'s native cells have no such
+barrier: the apt compiler's output links perfectly and the artifact silently acquires the host's
+glibc. This is the same asymmetry [0068] and [0082] have now landed on three times -- what broke
+under `ubuntu:24.04`->`26.04` was `natmod_host`, the *native* group, while every cross image
+crossed that bump untouched.
+
+### Weighed and rejected: `zig cc` instead of a per-identifier toolchain
+
+Proposed as a way to replace the whole `unix` toolchain story with one 47 MiB self-contained
+tarball, with the glibc floor as an explicit target parameter (`-target x86_64-linux-gnu.2.28`)
+rather than a fact derived from a release date. It is a serious proposal and it was tested, not
+argued away -- the "upstream never builds with clang" objection is simply false, as
+`toolchains.toml`'s own rows show: `ci_unix_clang_setup` gives 22 `ci-apt` clang facts for
+`usermod.unix`, with one ceiling (`clang >= 19`, `py/nlrx86`, fixed in v1.29.0).
+
+**What it delivered.** A real `aarch64` binary, cross-built from an x86-64 host with no compiler
+installed at all, whose highest required symbol is exactly the `GLIBC_2.28` that was asked for.
+On the axis this record had to concede -- the floor becoming derived rather than chosen -- zig
+genuinely wins.
+
+**What it cost, measured over 4 tags x 4 targets x 2 user modules (32 real builds): 5 passed.**
+Every passing cell was the native `x86_64`; every cross target failed. Six distinct
+incompatibilities, each found by running it:
+
+1. `zig cc -E` with more than one input file loses clang's own resource directory (`stddef.h`,
+   `stdint.h` not found). MicroPython preprocesses every source in one invocation to extract
+   qstrs, so this is hit on every build. Needs `-isystem <zig>/lib/include`.
+2. zig's linker rejects `-Map`/`--cref`, which `mpy-cross/Makefile` and `ports/unix/Makefile` add
+   unconditionally via `LDFLAGS_ARCH`.
+3. `zig cc -E` rejects the *versioned* triple outright (`version '.2.28' ... is invalid`) -- the
+   one feature zig is wanted for is rejected by the one step every build runs.
+4. `-print-multi-os-directory` is `unsupported option`; libffi's own `configure.ac`/`libtool.m4`
+   asks for it, so `MICROPY_STANDALONE` cannot configure.
+5. `zig cc -E` does not select the C++ driver for a `.cpp` input, where `gcc -E` does (both run
+   side by side to confirm). Since qstr extraction preprocesses C++ user-module sources through
+   `$(CPP)` = `$(CC) -E`, any C++ user module fails.
+6. `CROSS_COMPILE_HOST = --host=$(patsubst %-,%,$(CROSS_COMPILE))` -- passing `CC=` directly
+   leaves it empty, so libffi's configure runs in native mode and dies on "cannot run C compiled
+   programs".
+
+**A `<triple>-gcc` wrapper script fixes 3, 4 and 6** -- and that is the argument against it, not
+for it. The fix is to reconstruct a gcc-shaped driver around zig, which is what a Bootlin tarball
+already is. 5 is not fixed by it. And zig covers no bare-metal target, so it cannot be the
+uniform answer this record is about; it would be a second toolchain mechanism living beside the
+first, for one port.
+
+**For comparison, the Bootlin path needed exactly one workaround** (the `out/lib64` symlink above)
+and produced a binary that passes the smoke test. That is the whole of the decision.
 
 ### What this changes in the phased plan above
 
