@@ -128,12 +128,20 @@ the same way [docs/0000-TRACKER.md](../0000-TRACKER.md) folds resolved
   be under a minute.
   What is still open is the *decision*, not the number: cibuildwheel's
   answer is `CIBW_ARCHS=auto`, native-only by default with everything
-  else opt-in. cibuildmp cannot say that yet — usermod has no `--archs`
-  and no `auto`/`all`/`native` vocabulary at all ([0045]). And it has a
-  wrinkle upstream does not: a cell is (arch × libc), so a "native" arch
-  yields two cells, one of which is musl and therefore native for
-  *building* but not for running on a glibc host. That has to be decided
-  explicitly rather than inherited by analogy.
+  else opt-in. cibuildmp cannot say that yet, and the gap is wider than
+  it used to be: [0049] gave usermod an `--archs auto`/`native`/`all`
+  vocabulary, but [0052]'s later reversal (the "table-presence
+  activation... reverted" addendum, and `cli.py`'s own module docstring)
+  removed `--platform`/`--only`/`--enable`/`--archs` outright, for both
+  families — verified directly against `natmod/options.py` ("No `archs`
+  config key at all any more either") and `usermod/targets.py`, 2026-09-02.
+  Selection today is `build`/`skip` glob against the real identifier only,
+  with no host-relative keyword (`auto`/`native`/`all`) anywhere in
+  either family. And it has a wrinkle upstream does not: a cell is
+  (arch × libc), so a "native" arch yields two cells, one of which is
+  musl and therefore native for *building* but not for running on a
+  glibc host. That has to be decided explicitly rather than inherited by
+  analogy.
 
 - ~~**A real glibc-floor checker for `unix` (the `auditwheel`-equivalent
   PEP 600/656 work).**~~ **Built** ([0044]). `verify_unix_floor()` reads
@@ -160,4 +168,5 @@ the same way [docs/0000-TRACKER.md](../0000-TRACKER.md) folds resolved
 [0045]: ../records/0045-only-is-a-filter-not-a-forced-identifier.md
 [0046]: ../records/0046-pin-staleness-checker.md
 [0050]: ../records/0050-natmod-is-docker-only.md
+[0052]: ../records/0052-config-is-a-tree-not-a-selector-matrix.md
 [0058]: ../records/0058-image-groups-are-toolchains-not-ports.md
