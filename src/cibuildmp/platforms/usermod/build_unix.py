@@ -50,6 +50,29 @@ from typing import Literal
 from . import build_common
 from .build_common import UsermodBuildError, usermod_mounts
 
+# Needed only on `sources.fetch_micropython()`'s own clone path -- a tag
+# with no GitHub release tarball, which the tarball path's own vendoring
+# makes moot. Found live: `v1.22.1`/`v1.30.0-preview` (both real 404s
+# against `micropython-<ver>.tar.xz`, not just preview tags -- that
+# assumption was wrong) failed every one of `unix`'s 15 cells identically
+# on `mbedtls/platform.h` and `berkeley-db/db.h`. Confirmed against
+# upstream's own build, not just the failure text: `ports/unix/Makefile`
+# adds `lib/berkeley-db-1.xx` to `GIT_SUBMODULES` unconditionally, and
+# `extmod/extmod.mk`'s `MICROPY_SSL_MBEDTLS` branch (the `unix` standard
+# variant's default SSL backend) adds `lib/mbedtls` the same way -- both
+# true for every arch, unlike `lib/libffi` (only added under
+# `MICROPY_STANDALONE=1`, `mipsel`'s own arch-specific link mode --
+# `UnixArchSettings.standalone`), which stays out of this flat list on
+# purpose rather than threading that condition through here too.
+# `lib/micropython-lib` is a third universal one, added for every port by
+# `py/mkrules.mk` itself -- left out since nothing this project builds
+# today resolves a manifest package from it (a skipped-extraction notice,
+# not a build failure).
+UNIX_SUBMODULES: tuple[str, ...] = (
+    "lib/mbedtls",
+    "lib/berkeley-db-1.xx",
+)
+
 
 @dataclass(frozen=True)
 class UnixArchSettings:
