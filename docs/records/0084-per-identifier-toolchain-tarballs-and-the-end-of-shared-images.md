@@ -873,6 +873,61 @@ the image has no binutils either, so `strip` and `size` must come from the SDK
 at `make: strip: No such file or directory`, which reads like a missing package rather than the
 design working as intended.
 
+### The compiler constraint is a fact about the MicroPython tag, not about the port
+
+Proposed by the user as a hypothesis worth testing -- if the gcc a tag needs is the same in every
+port, a pile of separate problems collapses into one. Tested against the real table rather than
+argued, and it holds:
+
+- **18 of 24 tags: every port agrees**, on gcc major 14. Nine scopes carry a `gcc` row fact
+  (`natmod` plus eight `usermod` ports), and for every tag up to `v1.25.0` all nine say the same
+  thing.
+- **The six newest tags "disagree" only inside `natmod`**, and per *architecture* rather than per
+  port: its ARM arches pin xpack `arm-none-eabi` 15.2.1 while its RISC-V arches pin xpack
+  `riscv-none-elf` 14.3.0. Every one of the eight `usermod` scopes says 15 for those tags,
+  unanimously. So the split is a difference of *vendor product*, not of constraint.
+- **The boundary is exactly where a tag fact already says it is.** `toolchains.toml` carries
+  `scope = "any"`, `breaks-with >= 15.1`, whose own detail names
+  `-Wunterminated-string-literal` and the commit that fixed it "first in v1.26.0". `any` is
+  already the tag axis; the per-port columns restate it.
+
+**What follows, and it changes the model rather than the plan:**
+
+- **The `gcc` column in nine scopes restates one tag fact about a thousand times.** It is derived,
+  not observed -- which is why removing it from `usermod.unix` cost nothing (`4e222ab`), and why
+  the same is true of the rest.
+- **The 71 ceiling violations are one statement, not seven ports' worth**: the shared
+  `arm_embedded` image is pinned above the tag ceiling. One repin answers 70 of them; the
+  remaining one is `mimxrt`'s own `>= 13`, which no single shared pin can satisfy alongside the
+  others and which is therefore the one genuine per-row case in that family.
+- **`natmod` falls under the same check with no new machinery** -- and it needs to, because today
+  it is not checked at all. `toolchains.toml` has no `natmod*` scope (its scopes are `any`,
+  `mpy-cross`, `unix` and `usermod.*`), and `bin/refresh_toolchain_pins.py` iterates the scopes it
+  finds in the facts, so `real_rows()`'s own `scope.startswith("natmod")` branch never runs on a
+  default invocation. Its rows say 14.2.1 for old tags while `arm_embedded` ships 15.2.1, and
+  nothing compares the two.
+
+**The one distinction to keep**: same *constraint* is not same *version*. What a port may use is a
+tag fact; what it actually installs is whatever its toolchain vendor publishes near that ceiling,
+and those numbering schemes have nothing to do with each other.
+
+### Verified in CI: `v1.20.0` was broken on the published images, and the row flag fixes it
+
+Not a precaution. Two dispatches of `test-platforms.yml` against `v1.20.0-*linux*x86_64`:
+
+- **run 33636118022 -- both cells red.** `py/stackctrl.c`'s `-Werror=dangling-pointer=`, inside
+  `ghcr.io/ballistics-lab/manylinux_2_28_x86_64@sha256:1ad90a7...` and
+  `quay.io/pypa/musllinux_1_2_x86_64@sha256:8900a53...`. Our own published manylinux image already
+  carries `gcc-toolset-14`, so this tag has not been buildable on it.
+- **run 33636602839 -- both green**, after the fix.
+
+**What the first run caught that local work had not:** the failure is in `mpy-cross`, not in
+`ports/unix`. `mpy-cross` compiles `py/` too, so the diagnostic stops that build before the port's
+own make ever runs, while the row's `cflags_extra` was reaching only the port
+(`container_mpy_cross()` now takes the same tuple, `0f3038c`). That is also why the relaxation
+axis reaches [0082]'s nine tags for *every* port at once: they fail in the shared `mpy-cross`
+build, not in a port.
+
 ### Weighed and rejected: `zig cc` instead of a per-identifier toolchain
 
 Proposed as a way to replace the whole `unix` toolchain story with one 47 MiB self-contained
