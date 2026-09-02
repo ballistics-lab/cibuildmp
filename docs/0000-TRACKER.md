@@ -56,7 +56,6 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 ### In progress / Proposed
 
 - [ ] [0085] `arm_embedded` thins out: the toolchain version stops being the image's name and becomes a row fact
-- [ ] [0084] per-identifier toolchain tarballs (Bootlin, uniformly), the end of shared/floating compilers, and what it does to the identifier and to CI cost
 - [ ] [0083] replace `windows.Dockerfile`'s apt `gcc-mingw-w64` split with one fully prebuilt llvm-mingw toolchain
 - [ ] [0082] nine MicroPython tags fail `mpy-cross` under gcc 15, on every image whose native compiler is unpinned — bisected exactly
 - [ ] [0047] the run output works, but it is not cibuildwheel's
@@ -69,6 +68,7 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### Implemented
 
+- [x] [0084] unix's pypa image pin moves from the architecture to the row, and the end of shared/floating compilers
 - [x] [0068] docker Dependabot grouping, and what the first grouped bump exposed
 - [x] [0081] `output-dir` gets its own `.gitignore` the first time cibuildmp writes into it
 - [x] [0080] `windows` and `qemu` get real smoke tests, live-verified before being wired in

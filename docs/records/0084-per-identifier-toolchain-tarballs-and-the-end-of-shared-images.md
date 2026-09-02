@@ -1,12 +1,17 @@
-# 0084 — per-identifier toolchain tarballs (Bootlin, uniformly), the end of shared/floating compilers, and what it does to the identifier and to CI cost
+# 0084 — unix's pypa image pin moves from the architecture to the row, and the end of shared/floating compilers
 
-Status: Proposed — **the destination changed late on 2026-09-02 and the sections below are not
-all live.** The premise and the investigation stand; the *answer* they were pointing at (Bootlin
-uniformly, a toolchain tarball per identifier) is superseded by a much smaller one: keep pypa's
-own images, and move the image pin from the architecture to the row. Read "The destination,
-revised" first -- everything between it and the Addendum is kept as the account of how that answer
-was reached, not as a plan anyone should execute.
-Related: [0013], [0031], [0033], [0043], [0044], [0045], [0046], [0052], [0058], [0068], [0082], [0083]
+Status: Implemented — **the destination changed late on 2026-09-02, and the sections between
+"The destination, revised" and the first Addendum are the account of how that answer was reached,
+not a plan to execute.** The premise and the investigation stand; the *answer* they were pointing
+at (Bootlin uniformly, a toolchain tarball per identifier) is superseded by a much smaller one:
+keep pypa's own images, move the image pin from the architecture to the row. That smaller answer
+has landed and is live-verified across the full tag history (native and emulated) — see this
+record's own last two addenda for the complete landed scope and the bugs found verifying it.
+**Two real items are spun off, not closed here**: carrying `TAG_CFLAGS` into every port's own
+`mpy-cross` (today: `unix` only) and dropping the `gcc` column from the remaining nine
+non-`unix` scopes — both scoped, well-understood follow-ups affecting ports this record never
+touched, not gaps in `unix`'s own model. `arm_embedded` is [0085], already its own record.
+Related: [0013], [0031], [0033], [0043], [0044], [0045], [0046], [0052], [0058], [0068], [0082], [0083], [0085]
 
 ## The premise, and why it replaced the original ask
 
