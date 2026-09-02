@@ -85,6 +85,8 @@ DEFAULT_ARCHES = (
     "aarch64",  # usermod.unix aarch64
     "powerpc64le-power8",  # usermod.unix ppc64le; usermod.qemu POWERNV9
     "s390x-z13",  # usermod.unix s390x
+    "armv7-eabihf",  # usermod.unix armv7l -- hard-float, matching manylinux_2_31_armv7l
+    "riscv64-lp64d",  # usermod.unix riscv64 -- the RV64GC/double-float ABI those wheels mean
     "mips32el",  # the mipsel image record 0068 already pins a Bootlin tarball for
 )
 DEFAULT_LIBCS = ("glibc", "musl")

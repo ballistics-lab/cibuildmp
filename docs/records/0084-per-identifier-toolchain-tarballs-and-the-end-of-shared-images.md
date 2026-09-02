@@ -170,6 +170,16 @@ infrastructure rather than a `cibuildmp.toml` knob is unchanged by any of this.
    Three toolset values exist across the whole history (11, 12, 14), so this is a small table, not
    a per-row research project. `armv7l`/`riscv64` take the oldest available image with the
    fallback reasoning written next to the pin.
+
+   **One measurement already narrows this to a single open question.** Every supported `unix` tag
+   was built this session against gcc **14.3.0** (Bootlin's `2025.08-1`, before the destination
+   changed) in a compiler-free container: `v1.21.0` through `v1.29.0` all built and linked; only
+   **`v1.20.0` failed**, on `-Werror=dangling-pointer=` in `py/stackctrl.c`, during `mpy-cross`.
+   So under a gcc-14 image exactly one tag needs an older one. Whether even that is true depends
+   on a point release this record cannot read from a registry: `gcc-toolset-14` names a major, and
+   this session's own earlier tests found `14.2.x` clean where `14.3.0` broke. Running
+   `gcc --version` inside one current pypa image answers it, and it is the cheapest next step in
+   this list.
 2. **Move the key.** `[usermod.unix].images.<arch>` gives way to a per-row `image` field;
    `dockerrun.image_for()` resolves it for the row rather than for the architecture.
    `bin/refresh_usermod_boards.py`'s own `carry_forward()` already protects a per-row fact from
