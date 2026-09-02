@@ -1,7 +1,11 @@
 # 0084 — per-identifier toolchain tarballs (Bootlin, uniformly), the end of shared/floating compilers, and what it does to the identifier and to CI cost
 
-Status: Proposed — the architecture is settled through live investigation this session; nothing
-below is implemented yet.
+Status: Proposed — **the destination changed late on 2026-09-02 and the sections below are not
+all live.** The premise and the investigation stand; the *answer* they were pointing at (Bootlin
+uniformly, a toolchain tarball per identifier) is superseded by a much smaller one: keep pypa's
+own images, and move the image pin from the architecture to the row. Read "The destination,
+revised" first -- everything between it and the Addendum is kept as the account of how that answer
+was reached, not as a plan anyone should execute.
 Related: [0013], [0031], [0033], [0043], [0044], [0045], [0046], [0052], [0058], [0068], [0082], [0083]
 
 ## The premise, and why it replaced the original ask
@@ -59,6 +63,112 @@ overwritten:
    this was tested, because (5) removes the question entirely rather than answering it.
 5. **Bootlin, uniformly, for every toolchain this project needs — natmod and usermod, native and
    cross, glibc and musl alike.** The destination. See below.
+
+## The destination, revised: pypa stays, and the image pin moves from the architecture to the row
+
+**Proposed by the user after a full day of live investigation into the alternative, and it is
+smaller than everything below it.** The change is one key: `[usermod.unix].images` maps an
+*architecture* to an image group today; it becomes a per-row field instead, resolved for the
+`(tag, arch, libc)` triple the same way `gcc` and `idf_version` already are. Nothing else about
+the mechanism moves -- pull-only, digest-pinned, `image_for()` resolving, all unchanged ([0033]).
+
+**Why this is better than what the rest of this record argues for, on this project's own terms:**
+
+- **It answers the premise directly.** Upstream pinned whatever toolchain existed at release time;
+  pypa publishes a dated image per build, and those images stay pullable. Checked, not assumed:
+  `manylinux_2_28_x86_64` has **573 dated tags still active, back to 2022-05-30**, and the
+  compiler moves with the date -- `2022-05-30` carries `gcc-toolset-11`, `2023-02-09` carries
+  `12`, `2025-03-09` onward carries `14`. Read out of each image's own config blob through the
+  registry API, without pulling a layer.
+- **[0082] does not need fixing here, it does not arise.** No `manylinux_2_28` image carries gcc 15
+  at all; the ladder is 11, 12, 14. Three distinct values across four years, so a per-row pin has
+  three values to choose from, not twenty.
+- **The libc floor does not get worse -- the Bootlin plan made it worse.** `manylinux_2_28` means
+  glibc 2.28; Bootlin's oldest `x86-64` toolchain is glibc **2.34**, so the plan below would have
+  raised every `unix` consumer's floor while claiming to be more faithful.
+- **The identifier keeps its floor, so this record's own argued identifier change is withdrawn.**
+  The floor stays an independently published axis (pypa publishes several simultaneously), which
+  is exactly the condition under which [0043]/[0045] said it earns its place in the identifier.
+  `manylinux_2_28_x86_64` stays as it is.
+- **Six problems found live today simply do not exist on this path**: no vendored libffi, so no
+  autotools, so no `libtool`-pulls-in-`gcc-15`; no `out/lib64` mismatch; no `ffi_closure_alloc`
+  collision; no sysroot `pkg-config` plumbing. All six are documented below, and all six are
+  artefacts of leaving pypa, not of anything upstream does.
+- **It shrinks what CI has to prove, which was the whole cost argument.** A tag that names exactly
+  one image never has to be shown to work across a toolchain *range* -- the thing this session
+  spent a day on and which failed at `v1.20.0`. Build count is unchanged (225 `unix` cells stay
+  225); what disappears is the verification matrix and the maintenance of a toolchain story of
+  our own.
+
+**The one real gap, named here rather than discovered later: pypa's image history is not uniform.**
+Also checked directly:
+
+| image | oldest still-active dated tag |
+| --- | --- |
+| `manylinux_2_28_x86_64` | 2022-05-30 |
+| `manylinux_2_28_s390x` | 2022-09-03 |
+| `musllinux_1_2_x86_64` | 2023-07-29 |
+| `manylinux_2_31_armv7l` | **2025-02-08** |
+| `manylinux_2_39_riscv64` | **2025.07.20** |
+| `musllinux_1_2_riscv64` | **2025.07.20** |
+
+So "pin the image that was current when the tag shipped" is available for `x86_64`/`s390x` and
+not for `armv7l`/`riscv64`, whose images only exist from 2025. Those cells take the oldest
+available image, on the same reasoning this record already uses for Bootlin's own pre-2021.11 gap
+-- every incompatibility found this session broke in one direction only, a newer compiler
+rejecting older code. It is an argued fallback, not a verified one, and it should be written next
+to the pin rather than left to be rediscovered.
+
+**`mipsel` is the one cell this does not reach**, and that is already recorded: pypa publishes no
+mipsel image, PEP 600 defines no `manylinux_*_mipsel` tag, and [0043] documents the exception.
+It keeps its Bootlin tarball ([0068]), so what survives of the plan below is one cell of it rather
+than all fifteen.
+
+**Everything from here to the Addendum is superseded as a plan.** It is kept because it is the
+account of how this answer was reached: the premise it starts from is what rules out a universal
+pin, and the live failures it records are what make the case that leaving pypa costs more than
+staying.
+
+## The plan, revised — what actually gets done
+
+Decided with the revised destination, and deliberately much smaller than the phased plan further
+down.
+
+**`mipsel` is untouched.** Not migrated, not re-pinned, not re-argued: it keeps
+`docker/manylinux_2_41_mipsel.Dockerfile` and its Bootlin tarball exactly as [0068] left them.
+Everything below concerns the other fourteen `unix` cells.
+
+**No image of this project's own, for any of those fourteen.** They resolve to **pypa's own
+published image**, digest-pinned per row, and whatever the build needs on top is installed at run
+time -- the same call already argued in this record's own Addendum, now applied to pypa's images
+rather than to a generic Ubuntu base. So `docker/manylinux_2_28_*.Dockerfile`,
+`docker/musllinux_*.Dockerfile` and their `publish-docker-images.yml` cycle retire, and
+`resources/pinned_docker_images.toml` loses its `unix` entries; `resources/pinned_pypa_images.toml`
+stops being a mirror kept for reference and becomes the table builds actually resolve against.
+
+**The run-time install has two forms, not one**, and that is a fact about the base images rather
+than a complication we are adding: `manylinux` is AlmaLinux (`dnf install libffi-devel`, the exact
+line `docker/manylinux_2_28_x86_64.Dockerfile` carries today as its only layer) and `musllinux` is
+Alpine (`apk add`). Whichever it is, it stays internal to cibuildmp: cibuildwheel's own answer to
+the same gap is `before-all`, a user-configured hook, and [0028]'s call that a build image is
+infrastructure rather than a `cibuildmp.toml` knob is unchanged by any of this.
+
+**Steps, in order:**
+
+1. **Resolve the per-row image.** For each `(tag, arch, libc)`, the pypa dated tag whose compiler
+   matches what upstream's own CI used at that tag, subject to `toolchains.toml`'s own ceilings.
+   Three toolset values exist across the whole history (11, 12, 14), so this is a small table, not
+   a per-row research project. `armv7l`/`riscv64` take the oldest available image with the
+   fallback reasoning written next to the pin.
+2. **Move the key.** `[usermod.unix].images.<arch>` gives way to a per-row `image` field;
+   `dockerrun.image_for()` resolves it for the row rather than for the architecture.
+   `bin/refresh_usermod_boards.py`'s own `carry_forward()` already protects a per-row fact from
+   being dropped by a regeneration, so this needs no new machinery.
+3. **Install at run time** what the retired layer used to bake in, per base-image family.
+4. **Verify a boundary sample, not the matrix** -- one tag per distinct toolset value, both libc
+   families, plus one `armv7l`/`riscv64` cell to exercise the oldest-available fallback.
+5. **Retire the fourteen Dockerfiles and their pins** only once that is green, as a separate
+   commit from the cutover, so a revert is one config change.
 
 ## The destination: one toolchain vendor, self-contained tarballs, no shared/floating compiler anywhere
 
