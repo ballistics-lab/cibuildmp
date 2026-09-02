@@ -55,6 +55,7 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### In progress / Proposed
 
+- [ ] [0085] `arm_embedded` thins out: the toolchain version stops being the image's name and becomes a row fact
 - [ ] [0084] per-identifier toolchain tarballs (Bootlin, uniformly), the end of shared/floating compilers, and what it does to the identifier and to CI cost
 - [ ] [0083] replace `windows.Dockerfile`'s apt `gcc-mingw-w64` split with one fully prebuilt llvm-mingw toolchain
 - [ ] [0082] nine MicroPython tags fail `mpy-cross` under gcc 15, on every image whose native compiler is unpinned — bisected exactly
@@ -250,3 +251,4 @@ record is added.
 [0082]: records/0082-natmod-old-tags-fail-mpy-cross-under-gcc-15.md
 [0083]: records/0083-windows-fully-prebuilt-mingw-toolchain.md
 [0084]: records/0084-per-identifier-toolchain-tarballs-and-the-end-of-shared-images.md
+[0085]: records/0085-arm-embedded-thins-out-and-the-toolchain-version-becomes-a-row-fact.md
