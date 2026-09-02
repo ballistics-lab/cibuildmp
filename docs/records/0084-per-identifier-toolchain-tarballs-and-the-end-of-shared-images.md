@@ -138,6 +138,16 @@ down.
 `docker/manylinux_2_41_mipsel.Dockerfile` and its Bootlin tarball exactly as [0068] left them.
 Everything below concerns the other fourteen `unix` cells.
 
+*Possibly, later*: whether Buildroot's own Docker images could stand in for that one hand-built
+image. Not now, and two facts already gathered belong next to the idea so it is not re-researched
+from scratch. Buildroot's own published image (`registry.gitlab.com/buildroot.org/buildroot/base`,
+read from its `support/docker/Dockerfile`) is `debian:bookworm` plus `build-essential`, `g++` and,
+on amd64, `g++-multilib` -- it exists to *compile* toolchains, which needs a host compiler, so it
+is both large and carries exactly the stray native compiler this record spends a section warning
+about. And the toolchain in `manylinux_2_41_mipsel` is already Buildroot's own output: a Bootlin
+tarball is a Buildroot SDK. So the question is not "Buildroot or not" but whether an image
+someone else assembles beats the four lines that assemble this one.
+
 **No image of this project's own, for any of those fourteen.** They resolve to **pypa's own
 published image**, digest-pinned per row, and whatever the build needs on top is installed at run
 time -- the same call already argued in this record's own Addendum, now applied to pypa's images
