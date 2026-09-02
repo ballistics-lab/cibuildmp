@@ -56,6 +56,11 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 ### In progress / Proposed
 
 - [ ] [0085] `arm_embedded` thins out: the toolchain version stops being the image's name and becomes a row fact
+- [ ] [0086] a generic in-container tarball toolchain fetch, generalized out of `arm_embedded.Dockerfile`'s own build-time recipe
+- [ ] [0087] `arm_embedded`/`riscv_embedded` lose their baked cross toolchain; `toolchain_version` becomes a real, read field
+- [ ] [0088] `mimxrt`'s own `>= 13` ceiling gets its own `toolchain_version` row, once [0087] exists
+- [ ] [0089] `natmod`'s own `arm_embedded`/`riscv_embedded` rows get `toolchain_version` too
+- [ ] [0090] the checker stops reading a Dockerfile `ARG`, and [0058]'s own text gets its correction
 - [ ] [0083] replace `windows.Dockerfile`'s apt `gcc-mingw-w64` split with one fully prebuilt llvm-mingw toolchain
 - [ ] [0082] nine MicroPython tags fail `mpy-cross` under gcc 15, on every image whose native compiler is unpinned — bisected exactly
 - [ ] [0047] the run output works, but it is not cibuildwheel's
@@ -252,3 +257,8 @@ record is added.
 [0083]: records/0083-windows-fully-prebuilt-mingw-toolchain.md
 [0084]: records/0084-per-identifier-toolchain-tarballs-and-the-end-of-shared-images.md
 [0085]: records/0085-arm-embedded-thins-out-and-the-toolchain-version-becomes-a-row-fact.md
+[0086]: records/0086-generic-in-container-toolchain-tarball-fetch.md
+[0087]: records/0087-arm-riscv-embedded-thin-out-toolchain-version-lands.md
+[0088]: records/0088-mimxrt-own-floor.md
+[0089]: records/0089-natmod-arm-riscv-embedded-toolchain-version.md
+[0090]: records/0090-toolchain-pins-checker-and-0058-text-followup.md

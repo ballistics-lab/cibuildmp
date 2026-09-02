@@ -1,8 +1,16 @@
 # 0085 — `arm_embedded` thins out: the toolchain version stops being the image's name and becomes a row fact
 
 Status: Proposed — the constraint arithmetic and the sizes below are measured; nothing is
-implemented.
-Related: [0025], [0031], [0046], [0058], [0068], [0082], [0084]
+implemented. **Split into five implementation records** — [0086] (the generic in-container fetch
+mechanism this decision needs and none of this project's own code has yet), [0087] (the six
+ordinary `usermod` ports' own cutover — the main body of this decision, landing), [0088]
+(`mimxrt`'s own disjoint floor, named below as unsolved by the rest), [0089] (`natmod`'s own
+`arm_embedded`/`riscv_embedded` rows, named in [0084]'s own text as needing the same fix), and
+[0090] (the checker/docs follow-up: `refresh_toolchain_pins.py` no longer has a Dockerfile `ARG`
+to read, the board-scoped-floor problem named below, and this record's own [0058]-text
+correction). This record stays as the argument and the measurements; the five above are where the
+work actually happens.
+Related: [0025], [0031], [0046], [0058], [0068], [0082], [0084], [0086], [0087], [0088], [0089], [0090]
 
 ## The problem, counted rather than described
 
