@@ -67,32 +67,39 @@ def test_native_command_passes_an_empty_cross_compile():
         "BUILD=/gh/ws/usermod/build/x86_64",
         "CROSS_COMPILE=",
         "MICROPY_STANDALONE=1",
-        "LDFLAGS_EXTRA=-static",
         "USER_C_MODULES=/gh/ws/micropython/usermod",
         "FROZEN_MANIFEST=/gh/ws/a7p_manifest.py",
     ]
 
 
-def test_every_native_target_shares_that_shape():
+def test_every_native_manylinux_target_shares_that_shape():
     # aarch64, armv7l and i686 stay non-cross-compiling under the
     # native-image model (`MICROPY_FORCE_32BIT`, the old x86 row, is
-    # still gone -- each image's gcc already targets its own arch). But
-    # `MICROPY_STANDALONE` is back on every arch, `mipsel` included: see
-    # `UNIX_ARCH_SETTINGS`'s own header for why this project went back to
-    # a static `libffi` everywhere instead of trusting each image's own
-    # `libffi-dev`.
+    # still gone -- each image's gcc already targets its own arch).
+    # `MICROPY_STANDALONE` is universal, but `-static` is not
+    # (`UNIX_ARCH_SETTINGS`'s own header) -- a `manylinux` cell links
+    # ordinary dynamic glibc, same as any manylinux wheel.
     for target in (
         "manylinux_2_28_aarch64",
         "manylinux_2_31_armv7l",
         "manylinux_2_28_i686",
-        "musllinux_1_2_riscv64",
     ):
         command = unix_make_command(opts(target), Path("/gh/ws/mpy"))
 
         assert "CROSS_COMPILE=" in command
         assert "MICROPY_FORCE_32BIT=1" not in command
         assert "MICROPY_STANDALONE=1" in command
-        assert "LDFLAGS_EXTRA=-static" in command
+        assert "LDFLAGS_EXTRA=-static" not in command
+
+
+def test_musllinux_targets_stay_fully_static():
+    # musl's own static story has no dynamic-NSS leak (record 0031), so
+    # `-static` earns its keep there and stays -- `UNIX_ARCH_SETTINGS`'s
+    # own header.
+    command = unix_make_command(opts("musllinux_1_2_riscv64"), Path("/gh/ws/mpy"))
+
+    assert "MICROPY_STANDALONE=1" in command
+    assert "LDFLAGS_EXTRA=-static" in command
 
 
 def test_mipsel_is_the_one_target_that_still_cross_compiles():

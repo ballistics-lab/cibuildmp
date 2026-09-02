@@ -73,8 +73,15 @@ class UnixArchSettings:
 
     elf: tuple[int, int, int]
     cross_compile: str = ""
-    link_opts: tuple[str, ...] = ()
     standalone: bool = False
+    # True only for `mipsel`: the one arch with no native pypa image to
+    # resolve a dynamic `libc`/`libffi` floor from at all (a Bootlin
+    # cross-toolchain sysroot instead), so it has always had to link
+    # fully static, tag or no tag. Every other arch's own static-or-not
+    # now depends on which *tag* (`manylinux`/`musllinux`) is being
+    # built, not on the arch alone -- see `unix_make_command()`'s own
+    # `_use_static()`.
+    force_static: bool = False
 
 
 _ELFCLASS32, _ELFCLASS64 = 1, 2
@@ -123,53 +130,62 @@ _ELFDATA2LSB, _ELFDATA2MSB = 1, 2
 #     `MICROPY_STANDALONE` everywhere but `mipsel`, which has no image at
 #     all to resolve a system `libffi` from.
 #
-# **That second bullet is reversed below.** `STATIC_LINK_OPTS` now applies
-# to every arch, not just `mipsel` -- not because system `libffi` stopped
-# resolving, but because depending on it made the submodule list itself
-# arch-conditional (`lib/libffi` only on the clone path, only when
+# **That second bullet is half-reversed below, and half stands.**
+# `MICROPY_STANDALONE=1` (vendor and build `lib/libffi` from source) now
+# applies to every arch, not just `mipsel` -- not because system `libffi`
+# stopped resolving, but because depending on it made the submodule list
+# itself arch-conditional (`lib/libffi` only on the clone path, only when
 # `MICROPY_STANDALONE=1`) for one arch out of eight, and because it stops
 # this project depending on every published image happening to ship
 # `libffi-dev`/`libffi-devel` at all -- already a real gap once
 # (`manylinux_2_28_x86_64` measured with none, record 0084's own
-# baseline). The real cost, stated rather than hidden: `verify_unix_floor()`
-# reads `None` (see `_required_glibc()`'s own docstring) for a fully
-# static binary on *every* arch now, not just `mipsel` -- the glibc-floor
-# check that record 0043 built specifically so `manylinux_2_28` would not
-# be decorative goes uniformly silent. And every glibc (not musl) arch now
-# carries record 0031's own finding: `libffi`'s `dlopen()` and
-# `getaddrinfo()`'s own NSS backends still need the linking host's glibc
-# at runtime even from a "static" binary -- true today for `mipsel` alone,
-# now true for six more.
+# baseline).
+#
+# `LDFLAGS_EXTRA=-static` (the whole binary, not just libffi) did **not**
+# follow it everywhere, on reflection and against record 0084's own
+# already-argued position ("`LDFLAGS_EXTRA=-static` is a separate flag
+# and stays behind... a fully static binary is a change to what cibuildmp
+# ships"): `manylinux_2_28` isn't only a floor claim, it's a live, native
+# glibc userland whose whole *point* is that ordinary dynamic linking
+# against its own symbol versions is exactly what makes the artifact
+# portable, per PEP 600 -- the same mechanism every real manylinux wheel
+# already relies on, no static anything. Reaching for `-static` there
+# does not buy a cleaner artifact, it buys a linker error on any image
+# missing `glibc-static` (`libc.a`/`libm.a`/`libpthread.a`/`libdl.a`, not
+# shipped by pypa's own `manylinux_2_28_*` images, confirmed live) for a
+# guarantee that is *already* leaky on glibc regardless: record 0031's
+# own finding is that `libffi`'s `dlopen()` and `getaddrinfo()`'s own NSS
+# backends still reach out to the linking host's glibc at runtime even
+# from a "static" binary, so `-static` was never a complete escape from
+# the floor on a glibc target in the first place. It stays for `musl`
+# (musllinux, `force_static` below): musl's own static story has no such
+# leak -- no dynamic NSS, everything genuinely self-contained -- which is
+# exactly why Alpine/musl-based static binaries are a well-established
+# pattern and glibc ones are not. See `unix_make_command()`'s own
+# `_use_static()` for where this actually gets decided per build.
 #
 # Order is significant, not alphabetical: `targets.py`'s `_PORT_AXES`
 # derives its display/build order from the pin file and this table, so
 # reordering this literal reorders every `--dry-run` plan.
-STATIC_LINK_OPTS = ("MICROPY_STANDALONE=1", "LDFLAGS_EXTRA=-static")
-
 UNIX_ARCH_SETTINGS: dict[str, UnixArchSettings] = {
     "x86_64": UnixArchSettings(
         elf=(62, _ELFCLASS64, _ELFDATA2LSB),
-        link_opts=STATIC_LINK_OPTS,
         standalone=True,
     ),
     "i686": UnixArchSettings(
         elf=(3, _ELFCLASS32, _ELFDATA2LSB),
-        link_opts=STATIC_LINK_OPTS,
         standalone=True,
     ),
     "aarch64": UnixArchSettings(
         elf=(183, _ELFCLASS64, _ELFDATA2LSB),
-        link_opts=STATIC_LINK_OPTS,
         standalone=True,
     ),
     "armv7l": UnixArchSettings(
         elf=(40, _ELFCLASS32, _ELFDATA2LSB),
-        link_opts=STATIC_LINK_OPTS,
         standalone=True,
     ),
     "ppc64le": UnixArchSettings(
         elf=(21, _ELFCLASS64, _ELFDATA2LSB),
-        link_opts=STATIC_LINK_OPTS,
         standalone=True,
     ),
     # The one big-endian target in the matrix, and the reason
@@ -178,12 +194,10 @@ UNIX_ARCH_SETTINGS: dict[str, UnixArchSettings] = {
     # little-endian one share `EM_S390`.
     "s390x": UnixArchSettings(
         elf=(22, _ELFCLASS64, _ELFDATA2MSB),
-        link_opts=STATIC_LINK_OPTS,
         standalone=True,
     ),
     "riscv64": UnixArchSettings(
         elf=(243, _ELFCLASS64, _ELFDATA2LSB),
-        link_opts=STATIC_LINK_OPTS,
         standalone=True,
     ),
     # The documented exception to 0043 (its own open question, answered
@@ -213,8 +227,8 @@ UNIX_ARCH_SETTINGS: dict[str, UnixArchSettings] = {
     "mipsel": UnixArchSettings(
         elf=(8, _ELFCLASS32, _ELFDATA2LSB),
         cross_compile="mipsel-linux-gnu-",
-        link_opts=STATIC_LINK_OPTS,
         standalone=True,
+        force_static=True,
     ),
 }
 
@@ -356,10 +370,31 @@ def unix_arch_settings(target: str) -> UnixArchSettings:
     return UNIX_ARCH_SETTINGS[dockerrun.split_tag(target)[1]]
 
 
+def _use_static(target: str, settings: UnixArchSettings) -> bool:
+    """Whether this build should link fully static (`LDFLAGS_EXTRA=-static`),
+    as opposed to `MICROPY_STANDALONE=1` alone (a vendored, statically-linked
+    `libffi` inside an otherwise ordinary dynamic binary).
+
+    `musllinux` always does -- musl's own static story has no dynamic-NSS
+    leak, so `-static` there is a real, complete guarantee. `mipsel`
+    always does too, via `settings.force_static` -- it cross-compiles
+    against a Bootlin sysroot with no dynamic libc/libffi floor to link
+    against at all. Every other (`manylinux`) cell does not: see
+    `UNIX_ARCH_SETTINGS`'s own header for why `-static` was pulled back
+    off them.
+    """
+    return settings.force_static or target.startswith("musllinux_")
+
+
 def unix_make_command(
     opts: UnixBuildOptions, mpy_dir: Path, *, mpy_cross: Path | None = None
 ) -> list[str]:
     settings = unix_arch_settings(opts.target)
+    link_opts = (
+        ("MICROPY_STANDALONE=1", "LDFLAGS_EXTRA=-static")
+        if _use_static(opts.target, settings)
+        else ("MICROPY_STANDALONE=1",)
+    )
     return [
         "make",
         "-C",
@@ -378,7 +413,7 @@ def unix_make_command(
         # always does. See `container_mpy_cross()` for why the host's
         # own binary cannot be used here any more.
         *([f"MICROPY_MPYCROSS={mpy_cross.as_posix()}"] if mpy_cross else []),
-        *settings.link_opts,
+        *link_opts,
         f"USER_C_MODULES={opts.user_c_modules}",
         f"FROZEN_MANIFEST={opts.frozen_manifest}",
         *opts.extra_make_args,
@@ -502,10 +537,14 @@ def _required_glibc(binary: Path) -> tuple[int, int] | None:
     nothing new -- 0031 checked that specifically before recommending it.
 
     `None` covers two real cases, both legitimate: a fully static build
-    (every `unix` arch now links `-static` -- see `UNIX_ARCH_SETTINGS`'s
-    own header for why, and what it costs this exact check) and a musl
-    binary (musl does not use symbol versioning at all, which is why PEP
-    656 is a separate spec rather than manylinux with a different number).
+    (`mipsel`, and every `musllinux` cell -- see `UNIX_ARCH_SETTINGS`'s
+    own header for why `-static` stayed on those and only those) and a
+    musl binary (musl does not use symbol versioning at all, which is why
+    PEP 656 is a separate spec rather than manylinux with a different
+    number -- true for every `musllinux` cell regardless of `-static`).
+    Every `manylinux` cell links ordinary dynamic glibc now, so this
+    check reads a real `GLIBC_x.y` requirement for it again, the same way
+    it always did before `MICROPY_STANDALONE=1` went universal.
     """
     from elftools.common.exceptions import ELFError
     from elftools.elf.elffile import ELFFile
@@ -707,11 +746,13 @@ def repair_unix_binary(
     `auditwheel` cannot touch at all: a bare executable rather than a
     wheel.
 
-    A no-op whenever `_non_baseline_needed_libs()` finds nothing -- the
-    common case (every arch but the one this was written for links
-    nothing outside the floor's own baseline once `libffi` is handled),
-    and the only case for a statically-linked target (`mipsel`), which
-    never reaches a `docker run` here at all.
+    A no-op whenever `_non_baseline_needed_libs()` finds nothing -- every
+    target today, for two different reasons (`UNIX_ARCH_SETTINGS`'s own
+    header): `mipsel`/every `musllinux` cell link fully static and have
+    no `.dynamic` section to find anything in, and every `manylinux`
+    cell links `libffi.a` (`MICROPY_STANDALONE=1`) rather than a shared
+    `libffi.so`, so it was never a `DT_NEEDED` entry regardless of
+    `-static`. Neither case reaches a `docker run` here at all.
 
     Otherwise runs `ldd`/`patchelf` **inside `docker_image`**, the same
     image `binary` was just built in -- not on the host, which is the
@@ -797,13 +838,12 @@ def verify_unix_floor(target: str, binary: Path) -> None:
     inspection. `verify_unix_output()`'s architecture check still applies
     to every target either way.
 
-    **Now a no-op for every `manylinux` target too**, since
-    `UNIX_ARCH_SETTINGS`'s own `-static` link leaves `_required_glibc()`
-    nothing to read (`required is None`, below) on every arch, not just
-    `mipsel` -- the live `GLIBC_2.28` check this docstring describes was
-    real once and is not any more. Left in place rather than deleted: it
-    is still correct for a dynamically-linked binary, and still the
-    right check if any arch here is ever moved off `-static`.
+    **A no-op only for `mipsel` and every `musllinux` target now**
+    (`UNIX_ARCH_SETTINGS`'s own header) -- their `-static` link leaves
+    `_required_glibc()` nothing to read (`required is None`, below).
+    Every `manylinux` target links ordinary dynamic glibc again, so the
+    live `GLIBC_2.28`-style check this docstring describes is real once
+    more, not merely "still correct if it ever comes back" -- it did.
     """
     floor, _arch = _split_target(target)
     if not floor.startswith("manylinux_"):
@@ -925,11 +965,16 @@ def build_unix(
     `auditwheel repair`, for the one artifact type `auditwheel` itself
     cannot touch. See that function's own docstring for the full
     reasoning; a no-op for every target that needs nothing repaired --
-    every arch, now that `STATIC_LINK_OPTS` applies everywhere and a
-    fully static binary has no `.dynamic` section for
-    `_dynamic_needed_libs()` to find anything in. Left wired in rather
-    than removed: still correct for a dynamically-linked target, and
-    still the right step if any arch here ever moves off `-static`.
+    every arch today, but for two different reasons now that `-static`
+    is not universal (`UNIX_ARCH_SETTINGS`'s own header): `mipsel` and
+    every `musllinux` cell have no `.dynamic` section at all for
+    `_dynamic_needed_libs()` to find anything in, and every `manylinux`
+    cell links `libffi.a` (`MICROPY_STANDALONE=1`, unconditional) rather
+    than a shared `libffi.so`, so `libffi` was never a `DT_NEEDED` entry
+    to begin with, static binary or not. Left wired in rather than
+    removed: still correct for whatever a genuinely dynamically-linked
+    `libffi` would look like, and still the right step if that ever
+    happens again.
     """
     from ... import dockerrun
 
