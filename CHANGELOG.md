@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`unix` builds on `riscv64` failed outright on every tag through
+  `v1.23.0`** with `configure: error: "libffi has not been ported to
+  riscv64-unknown-linux-gnu."`: `lib/libffi`'s own submodule pin, on
+  those tags, points to `https://github.com/atgreen/libffi`, a
+  fork/mirror whose `configure.host` has no `riscv*` case at all
+  (`v1.24.0` moves the pin to the canonical `libffi/libffi`, which does
+  — filed upstream, but there is no fix to backport onto a tag that has
+  already shipped). `MICROPY_PY_FFI=0` for exactly this (tag, `riscv64`)
+  combination, and `deplibs` is skipped entirely rather than attempting
+  a build that cannot succeed.
+- **`unix` builds failed on `s390x`/`riscv64`, on multiple tags, with a
+  real GCC diagnostic in `ports/unix/main.c`**:
+  `error: variable 'path_remaining' might be clobbered by 'longjmp' or
+  'vfork' [-Werror=clobbered]`. The same diagnostic class record [0044]
+  found narrower (`mpy-cross`'s own `main.c`, `s390x`, `v1.28.0` only)
+  and descoped by identifier rather than suppressed — this sweep found
+  it in the *port's* `main.c` too, on multiple tags, on both
+  architectures, which is what moved it from "worth descoping two
+  identifiers for" to "worth suppressing at the architecture level" via
+  `-Wno-error=clobbered`, the same escalation `aarch64`'s own
+  `-Wno-error=array-bounds` entry already went through once.
 - **`unix`'s new `-Wno-error=<diagnostic>` gcc probe still failed
   `manylinux_2_41_mipsel` builds on every pre-`v1.26.0` tag**, the one
   case the probe was written for: it always probed the image's bare
@@ -1476,6 +1497,7 @@ than restarting (see the 0.3.0a1 entry). -->
 [0032]: docs/records/0032-unix-docker-default-and-webassembly-wiring.md
 [0038]: docs/records/0038-m5-adopt-in-three-repos.md
 [0043]: docs/records/0043-unix-adopts-cibuildwheel-native-image-model.md
+[0044]: docs/records/0044-unix-native-images-landed.md
 [0052]: docs/records/0052-config-is-a-tree-not-a-selector-matrix.md
 [0054]: docs/records/0054-usermod-example-from-upstream-usercmodule.md
 [0066]: docs/records/0066-extra-cmake-args.md

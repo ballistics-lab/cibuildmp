@@ -320,8 +320,27 @@ _MUSL_CFLAGS: tuple[str, ...] = ("-Wno-error=cpp",)
 # The varying thing is the backend, so the key is the architecture --
 # which also means `musllinux_1_2_aarch64` needed no new entry at all,
 # and neither will any future aarch64 floor.
+#
+# `s390x`/`riscv64` -- `-Wno-error=clobbered`. `ports/unix/main.c`'s own
+# `path_remaining` (real code, not a vendored library this time):
+#
+#   main.c:565:14: error: variable 'path_remaining' might be clobbered
+#   by 'longjmp' or 'vfork' [-Werror=clobbered]
+#
+# The same diagnostic class record [0044] already found in `mpy-cross`'s
+# own `main.c` (`parse_integer`, `s390x`, `v1.28.0` only, back when it
+# looked narrow enough to descope by identifier rather than suppress) --
+# real GCC output for how these two architectures' own register
+# allocation interacts with `setjmp`/`longjmp` around a `nlr_push()` call
+# site, not specific to one function or one tag. This sweep found it on
+# multiple tags on *both* architectures, in the *port's* `main.c` this
+# time, which is what moved it from "worth descoping two identifiers
+# for" to "worth suppressing at the architecture level" -- the same
+# escalation `aarch64`'s own entry above already went through once.
 _ARCH_CFLAGS: dict[str, tuple[str, ...]] = {
     "aarch64": ("-Wno-error=array-bounds",),
+    "s390x": ("-Wno-error=clobbered",),
+    "riscv64": ("-Wno-error=clobbered",),
 }
 
 # Genuine per-tag one-offs: a cell whose problem is neither its libc nor
@@ -335,6 +354,43 @@ _ARCH_CFLAGS: dict[str, tuple[str, ...]] = {
 # usually not been built at all (record 0044 is explicit about which
 # were), so expect these to grow as the remaining cells get a first run.
 UNIX_TARGET_CFLAGS: dict[str, tuple[str, ...]] = {}
+
+
+# `riscv64`'s own `lib/libffi` submodule pin, on every one of these tags,
+# points to `https://github.com/atgreen/libffi` (a fork/mirror whose
+# `configure.host` has no `riscv*` case at all -- verified directly by
+# fetching `.gitmodules` and `configure.host` at the pinned commit for
+# each), so `deplibs` hard-fails with `configure: error: "libffi has not
+# been ported to riscv64-unknown-linux-gnu."` on every one of them,
+# regardless of anything cibuildmp does. `v1.24.0` moves the pin to the
+# canonical `libffi/libffi` (tag `v3.4.6`), whose `configure.host` has a
+# real `riscv*-*)` case -- filed upstream
+# (micropython/micropython, not yet numbered), but nothing to wait on:
+# there is no fix to backport onto a tag that has already shipped.
+# `MICROPY_PY_FFI=0` for exactly these (tag, riscv64) pairs is the only
+# lever available short of patching the vendored submodule ourselves.
+_RISCV64_FFI_UNPORTED_TAGS = (
+    "v1.20.0",
+    "v1.21.0",
+    "v1.22.0",
+    "v1.22.1",
+    "v1.22.2",
+    "v1.23.0",
+)
+
+
+def _riscv64_ffi_unported(target: str, tag: str) -> bool:
+    """Whether this (target, tag) pair is the known-broken `riscv64` +
+    pre-`v1.24.0` combination -- see `_RISCV64_FFI_UNPORTED_TAGS`'s own
+    comment. Every other architecture's `lib/libffi` builds cleanly on
+    every tag cibuildmp covers; this is not a stand-in for a broader
+    per-tag capability check."""
+    from ... import dockerrun
+
+    return (
+        dockerrun.split_tag(target)[1] == "riscv64"
+        and tag in _RISCV64_FFI_UNPORTED_TAGS
+    )
 
 
 def unix_extra_cflags(target: str, tag: str = "") -> tuple[str, ...]:
@@ -429,6 +485,12 @@ def unix_make_command(
         # own binary cannot be used here any more.
         *([f"MICROPY_MPYCROSS={mpy_cross.as_posix()}"] if mpy_cross else []),
         *link_opts,
+        # `ports/unix/Makefile`'s own `MICROPY_STANDALONE` branch sits
+        # nested inside `ifeq ($(MICROPY_PY_FFI),1)`, so this is a no-op
+        # for every other cell -- `MICROPY_STANDALONE=1` above stays
+        # harmlessly unread rather than needing its own exclusion here.
+        # See `_riscv64_ffi_unported()`'s own comment for why.
+        *(["MICROPY_PY_FFI=0"] if _riscv64_ffi_unported(opts.target, opts.tag) else []),
         f"USER_C_MODULES={opts.user_c_modules}",
         f"FROZEN_MANIFEST={opts.frozen_manifest}",
         *opts.extra_make_args,
@@ -1015,7 +1077,12 @@ def build_unix(
     linux32 = dockerrun.needs_linux32("unix", opts.target)
     timeout = dockerrun.timeout_for("unix", opts.target)
 
-    if settings.standalone:
+    # `_riscv64_ffi_unported()`'s own comment: `deplibs`' entire job is
+    # building `lib/libffi`, which is a hard `configure: error` on these
+    # (tag, riscv64) pairs regardless of anything cibuildmp does --
+    # running it would just fail before `MICROPY_PY_FFI=0` below ever
+    # gets a chance to make it unnecessary.
+    if settings.standalone and not _riscv64_ffi_unported(opts.target, opts.tag):
         run_unix_deplibs(
             opts, mpy_dir, docker_image=docker_image, package_dir=package_dir
         )

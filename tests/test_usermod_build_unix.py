@@ -116,6 +116,62 @@ def test_musllinux_targets_stay_fully_static():
     assert "LDFLAGS_EXTRA=-static" in command
 
 
+def test_riscv64_arch_cflags_suppress_clobbered():
+    # main.c's own `path_remaining` -- a real GCC diagnostic tied to
+    # s390x/riscv64's own register allocation around setjmp/longjmp,
+    # found live on multiple tags on both architectures (record [0044]'s
+    # own earlier, narrower finding was mpy-cross's `main.c`, one tag).
+    from cibuildmp.platforms.usermod.build_unix import unix_extra_cflags
+
+    assert "-Wno-error=clobbered" in unix_extra_cflags("manylinux_2_39_riscv64")
+    assert "-Wno-error=clobbered" in unix_extra_cflags("musllinux_1_2_riscv64")
+    assert "-Wno-error=clobbered" in unix_extra_cflags("manylinux_2_28_s390x")
+    assert "-Wno-error=clobbered" not in unix_extra_cflags("manylinux_2_28_x86_64")
+
+
+def test_riscv64_ffi_disabled_only_for_the_broken_tags():
+    from cibuildmp.platforms.usermod.build_unix import _riscv64_ffi_unported
+
+    # lib/libffi's own atgreen/libffi pin (every tag through v1.23.0) has
+    # no riscv* case in configure.host at all -- verified directly
+    # against the pinned commit, not assumed.
+    assert _riscv64_ffi_unported("manylinux_2_39_riscv64", "v1.20.0")
+    assert _riscv64_ffi_unported("musllinux_1_2_riscv64", "v1.23.0")
+    # v1.24.0 moves the pin to the canonical libffi/libffi (v3.4.6),
+    # which does have one.
+    assert not _riscv64_ffi_unported("manylinux_2_39_riscv64", "v1.24.0")
+    # Every other architecture's libffi builds clean on every tag --
+    # this is not a stand-in for a broader per-tag capability check.
+    assert not _riscv64_ffi_unported("manylinux_2_28_x86_64", "v1.20.0")
+
+
+def test_riscv64_broken_tag_disables_ffi_and_skips_deplibs(monkeypatch, tmp_path):
+    _mock_unix_image(monkeypatch)
+    build_dir = tmp_path / "build-manylinux_2_39_riscv64"
+    build_dir.mkdir()
+    (build_dir / "micropython").write_bytes(fake_elf("manylinux_2_39_riscv64"))
+
+    calls = []
+    monkeypatch.setattr(
+        "cibuildmp.dockerrun.subprocess.run",
+        lambda cmd, **k: calls.append(cmd) or _fake_docker_run(cmd, **k),
+    )
+
+    build_unix_fn(
+        opts("manylinux_2_39_riscv64", build_dir=build_dir, tag="v1.20.0"),
+        tmp_path / "mpy",
+    )
+
+    # No `deplibs` call at all -- building lib/libffi on this (tag, arch)
+    # pair is a hard `configure: error` regardless of what cibuildmp
+    # does, so there is nothing for it to usefully attempt.
+    assert not any(
+        "deplibs" in (c[-1] if c[-3:-1] == ["sh", "-c"] else "") for c in calls
+    )
+    main_build = next(c for c in calls if "MICROPY_PY_FFI=0" in c)
+    assert "MICROPY_PY_FFI=0" in main_build
+
+
 def test_mipsel_is_the_one_target_that_still_cross_compiles():
     # 0043's documented exception -- no pypa image, no PEP 600 tag, no
     # Docker official image for 32-bit mipsel, so nothing to be native to.
