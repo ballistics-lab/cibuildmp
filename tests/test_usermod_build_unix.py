@@ -376,19 +376,18 @@ def test_unix_docker_image_mounts_mpy_dir_and_user_c_modules(monkeypatch, tmp_pa
 # ── unix_extra_cflags() -- four axes, and which one each rule is on ────
 
 
-def test_the_row_axis_carries_a_flag_a_whole_micropython_tag_needs():
-    """`v1.20.0` needs `-Wno-error=dangling-pointer` in every cell, which
-    none of the other three axes can say: they key on platform tag,
-    architecture and libc, and this one is a fact about the *release*
-    (record 0084). Measured, not predicted -- gcc 14 rejects
-    `py/stackctrl.c` on a tag that shipped before that diagnostic
-    existed."""
+def test_the_tag_axis_carries_a_flag_a_whole_micropython_release_needs():
+    """`v1.20.0` needs `-Wno-error=dangling-pointer` in every cell *and*
+    every port, which none of the other three axes can say: they key on
+    platform tag, architecture and libc (record 0084). Measured, not
+    predicted -- gcc 14 rejects `py/stackctrl.c` on a tag that shipped
+    before that diagnostic existed."""
     assert build_unix.unix_extra_cflags("manylinux_2_28_x86_64", "v1.20.0") == (
         "-Wno-error=dangling-pointer",
     )
 
 
-def test_the_row_axis_composes_with_the_libc_and_arch_rules():
+def test_the_tag_axis_composes_with_the_libc_and_arch_rules():
     # musl contributes `-Wno-error=cpp`, aarch64 `-Wno-error=array-bounds`,
     # and the row its own flag -- each from a different axis, none of them
     # repeating another.
@@ -399,7 +398,7 @@ def test_the_row_axis_composes_with_the_libc_and_arch_rules():
     )
 
 
-def test_no_other_tag_carries_a_row_flag():
+def test_no_other_tag_carries_a_relaxation():
     assert build_unix.unix_extra_cflags("manylinux_2_28_x86_64", "v1.29.0") == ()
 
 

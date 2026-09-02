@@ -6,6 +6,7 @@
 [![python versions]][PyPiUrl]
 [![pre-commit]][pre-commit-workflow]
 [![coverage]][CodecovUrl]
+![micropython-tag]
 
 > [!WARNING]
 > Pre-1.0.0 and still alpha software — the config schema and CLI can change
@@ -1321,6 +1322,9 @@ cibuildmp`/`pip install cibuildmp` instead pulls whatever's newest on
 PyPI unless you pin a version there too.
 
 <!-- REUSABLE LINKS -->
+
+[micropython-tag]:
+https://img.shields.io
 
 [license]:
 https://img.shields.io/github/license/ballistics-lab/cibuildmp

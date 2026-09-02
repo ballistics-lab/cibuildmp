@@ -129,6 +129,38 @@ def cmake_extra_args_env(
     return {var: " ".join(extra_cmake_args)}
 
 
+# `CFLAGS_EXTRA` a MicroPython *release* needs, whatever port is being
+# built. The fourth axis beside `build_unix.py`'s own libc, architecture
+# and platform-tag tables, and the only one of the four that is a fact
+# about the tag rather than about the cell.
+#
+# It lives here rather than in a `build-platforms.toml` row because the
+# code it protects is `py/`, which every port compiles twice -- once into
+# `mpy-cross` (below) and once into the port itself. A row in
+# `[usermod.unix]` cannot say that: `rp2` at the same tag hits the same
+# diagnostic in the same file. Record 0084 tried the row first and moved
+# it here; a per-row override can come back the day a tag needs different
+# treatment in different ports, which nothing does today.
+#
+# `v1.20.0` -- `-Wno-error=dangling-pointer`. gcc 14 reports
+# `py/stackctrl.c:32` storing `&stack_dummy` into
+# `mp_state_ctx.thread.stack_top`, which is exactly what
+# `mp_stack_ctrl_init()` is for: the address is used as a *limit*, never
+# dereferenced after return. Upstream later rewrote it; this project is
+# not going to hold a 2023 release to a 2025 diagnostic. Live-caught in
+# CI (run 33636118022) rather than predicted: both `unix` x86_64 cells
+# failed inside the `mpy-cross` build, not the port's own.
+TAG_CFLAGS: dict[str, tuple[str, ...]] = {
+    "v1.20.0": ("-Wno-error=dangling-pointer",),
+}
+
+
+def tag_cflags(tag: str) -> tuple[str, ...]:
+    """Every `CFLAGS_EXTRA` flag this MicroPython release needs, in any
+    port. Empty for a tag that needs none, and for no tag at all."""
+    return TAG_CFLAGS.get(tag, ())
+
+
 def container_mpy_cross(
     mpy_dir: Path,
     *,
