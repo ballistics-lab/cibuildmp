@@ -1,7 +1,7 @@
 # 0087 — `arm_embedded`/`riscv_embedded` lose their baked cross toolchain; `toolchain_version` becomes a real, read field
 
 Status: Proposed — blocked on [0086]; not implemented.
-Related: [0025], [0031], [0058], [0068], [0082], [0084], [0085], [0086]
+Related: [0025], [0031], [0058], [0068], [0082], [0084], [0085], [0086], [0091]
 
 ## What this is
 
@@ -39,10 +39,12 @@ That whole class of problem does not arise, and this record should not import it
   per-invocation apt cost is introduced here.
 - **`container_mpy_cross()` is untouched.** It resolves whatever `gcc` the image's own `PATH`
   finds — the image's native `build-essential` compiler, unaffected by moving the *cross* xpack
-  compiler out. Any gcc-15-vs-old-tags breakage this may still hit for these ports' own
-  `mpy-cross` builds is the same class [0082] already named and [0084] already scoped as its own
-  follow-up ("carry `TAG_CFLAGS` into every port's `mpy-cross`") — explicitly out of scope here,
-  not silently absorbed into this record.
+  compiler out. This record does **not** make old tags buildable on its own: `arm_embedded`'s
+  own native gcc is the same `ubuntu:26.04` `build-essential` [0084] measured as gcc 15.2.0 for
+  `natmod_host`, which [0082] already ties to nine failing pre-`v1.26.0` tags — and `mpy-cross`
+  fails on that native compiler *before* the row's own cross toolchain is ever invoked, the same
+  order [0084] found for `unix`. Closing that is [0091], entirely separate from and not
+  presupposed by this record's own boundary-sample verification.
 - **`riscv_embedded`'s own `riscv-none-elf-*` → `riscv64-unknown-elf-*` symlink step** stays,
   unaffected by where the tarball it symlinks now comes from.
 

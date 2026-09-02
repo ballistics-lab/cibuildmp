@@ -1,7 +1,7 @@
 # 0089 — `natmod`'s own `arm_embedded`/`riscv_embedded` rows get `toolchain_version` too
 
 Status: Proposed — blocked on [0086]/[0087]; not implemented.
-Related: [0082], [0084], [0085], [0086], [0087]
+Related: [0082], [0084], [0085], [0086], [0087], [0091]
 
 ## Why this is not covered by [0087] already
 
@@ -32,8 +32,21 @@ rename/re-read, not a re-derivation: the values are already right, only unread).
 21 `natmod.*` violations [0084] surfaced, on the same two images [0087] thins out, without a
 second mechanism.
 
+## What this does not fix, and why it looks like it should
+
+`natmod`'s arm/riscv cross arches build `mpy-cross` the same way every `arm_embedded`-family
+`usermod` port does: with `container_mpy_cross()`, against the image's own *native* compiler, not
+the row's cross toolchain this record wires up. That native compiler is `arm_embedded`/
+`riscv_embedded`'s `ubuntu:26.04` `build-essential` gcc — the exact one [0084] measured as
+15.2.0, and [0082] ties to nine failing pre-`v1.26.0` tags, on the same diagnostic already
+confirmed for `natmod_host`'s own `x64`/`x86`. So this record's own per-row `toolchain_version`
+does nothing about `natmod`'s pre-`v1.26.0` tags failing `mpy-cross` on this image family — that
+is [0091], not this record, and this record should not be read as closing [0082] for `natmod`'s
+arm/riscv rows just because it closes the checker's `image`/pin visibility for them.
+
 ## Ordering
 
 Depends on [0086] (the generic fetch) and benefits from [0087] landing first (proves the
 mechanism once, on `usermod`, before a second, differently-shaped build driver adopts it) — but
-does not depend on [0087]'s own code, only on [0086]'s.
+does not depend on [0087]'s own code, only on [0086]'s. Independent of [0091], which fixes a
+different failure on the same rows.

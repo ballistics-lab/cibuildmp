@@ -61,6 +61,7 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 - [ ] [0088] `mimxrt`'s own `>= 13` ceiling gets its own `toolchain_version` row, once [0087] exists
 - [ ] [0089] `natmod`'s own `arm_embedded`/`riscv_embedded` rows get `toolchain_version` too
 - [ ] [0090] the checker stops reading a Dockerfile `ARG`, and [0058]'s own text gets its correction
+- [ ] [0091] `TAG_CFLAGS` reaches every port's `mpy-cross`, not just `unix`'s
 - [ ] [0083] replace `windows.Dockerfile`'s apt `gcc-mingw-w64` split with one fully prebuilt llvm-mingw toolchain
 - [ ] [0082] nine MicroPython tags fail `mpy-cross` under gcc 15, on every image whose native compiler is unpinned — bisected exactly
 - [ ] [0047] the run output works, but it is not cibuildwheel's
@@ -262,3 +263,4 @@ record is added.
 [0088]: records/0088-mimxrt-own-floor.md
 [0089]: records/0089-natmod-arm-riscv-embedded-toolchain-version.md
 [0090]: records/0090-toolchain-pins-checker-and-0058-text-followup.md
+[0091]: records/0091-tag-cflags-into-every-ports-mpy-cross.md
