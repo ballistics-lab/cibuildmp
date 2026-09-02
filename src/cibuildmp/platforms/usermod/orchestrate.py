@@ -32,8 +32,8 @@ from . import manifests, portinfo
 from .build_common import UsermodBuildError
 from .build_esp32 import Esp32BuildOptions, build_esp32, esp32_companions
 from .build_qemu import QemuBuildOptions, build_qemu
-from .build_rp2 import RP2_SUBMODULES, Rp2BuildOptions, build_rp2
-from .build_unix import UNIX_SUBMODULES, UnixBuildOptions, build_unix, unix_companions
+from .build_rp2 import Rp2BuildOptions, build_rp2
+from .build_unix import UnixBuildOptions, build_unix, unix_companions
 from .build_webassembly import (
     WebassemblyBuildOptions,
     build_webassembly,
@@ -301,17 +301,15 @@ def _dest_name(
 # only stops building it for runs that will never look at it.
 _HOST_MPY_CROSS_PORTS = frozenset({"qemu"})
 
-# Every port whose build needs a `lib/` submodule `sources.fetch_micropython()`
-# does not already get for free -- only consulted on that function's own
-# clone path (a tag with no release tarball), since the tarball path vendors
-# every submodule for every port regardless. A tag lacking a tarball is not
-# only a preview tag or a `rp2`-only concern: `v1.22.1`/`v1.30.0-preview`
-# are both real, numbered releases with no tarball, and every port building
-# either one needs its own entry here or it clones with an empty `lib/`.
-_PORT_SUBMODULES: dict[str, tuple[str, ...]] = {
-    "rp2": RP2_SUBMODULES,
-    "unix": UNIX_SUBMODULES,
-}
+# Ports whose own `submodules` Makefile target `sources.fetch_micropython()`
+# cannot just run on the bare host -- only consulted on that function's own
+# clone path (a tag with no release tarball; the tarball path vendors every
+# submodule for every port regardless). `esp32` is the one port here: its
+# target shells out to `idf.py`, which needs the ESP-IDF environment its
+# own Docker image provides, not a bare `git`/`cmake` host, and it declares
+# no `GIT_SUBMODULES` against MicroPython's own `lib/` in the first place
+# (verified against `ports/esp32/Makefile`), so it never needed this step.
+_HOST_SUBMODULES_EXCLUDED_PORTS = frozenset({"esp32"})
 
 
 def build_one(
@@ -488,24 +486,21 @@ def build(
     try:
         for tag in build_tags:
             group = [t for t in targets if t.tag == tag]
-            # `_PORT_SUBMODULES` only ever matters on `fetch_micropython()`'s
-            # own clone path (a tag with no release tarball) -- the tarball
-            # path already vendors every lib/ submodule for every port. The
-            # union, not one port's own list: a tag can be building several
-            # ports at once, and a clone gets exactly one `git submodule
-            # update --init` for all of them.
-            group_submodules = list(
-                dict.fromkeys(
-                    submodule
-                    for port in dict.fromkeys(t.port for t in group)
-                    for submodule in _PORT_SUBMODULES.get(port, ())
-                )
-            )
+            # Only matters on `fetch_micropython()`'s own clone path (a tag
+            # with no release tarball) -- the tarball path already vendors
+            # every lib/ submodule for every port. Every port actually being
+            # built for this tag, not one port's own list: a clone runs each
+            # one's own `make submodules` in turn (`_clone()`'s own
+            # docstring). `esp32` excluded -- see
+            # `_HOST_SUBMODULES_EXCLUDED_PORTS`.
+            group_ports = [
+                p
+                for p in dict.fromkeys(t.port for t in group)
+                if p not in _HOST_SUBMODULES_EXCLUDED_PORTS
+            ]
             group_start = time.time()
             try:
-                mpy_dir = sources.fetch_micropython(
-                    tag, submodules=group_submodules or None
-                )
+                mpy_dir = sources.fetch_micropython(tag, ports=group_ports or None)
                 if any(t.port in _HOST_MPY_CROSS_PORTS for t in group):
                     sources.build_mpy_cross(mpy_dir, quiet=quiet)
             except _BUILD_ERRORS as exc:
