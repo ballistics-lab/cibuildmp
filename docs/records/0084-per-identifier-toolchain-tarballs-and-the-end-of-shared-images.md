@@ -275,10 +275,33 @@ infrastructure rather than a `cibuildmp.toml` knob is unchanged by any of this.
    **A pinned older image stays available as the fallback** for any future tag where a relaxation
    is not enough, in the four cells that have the history for it.
 
-2. **Move the key.** `[usermod.unix].images.<arch>` gives way to a per-row `image` field;
-   `dockerrun.image_for()` resolves it for the row rather than for the architecture.
-   `bin/refresh_usermod_boards.py`'s own `carry_forward()` already protects a per-row fact from
-   being dropped by a regeneration, so this needs no new machinery.
+2. **Move the key -- and what actually landed is narrower than this step first said.** The
+   per-row `image` field was written (225 rows, digest-pinned) and then **removed before
+   committing**: with every cell resolving to the same image, it duplicated `arch` in every row
+   for no information, and the one tag that needs different treatment turned out to need a *flag*
+   rather than a different image -- which is just as well, since `i686`/`armv7l`/`riscv64` have no
+   older image published to fall back to. `[usermod.unix].images.<arch>` therefore stays as it is.
+
+   **What landed instead** (commit `4e222ab`): the `gcc` column is gone from all 225 `unix` rows,
+   because the image fixes the compiler and a ceiling-derived pin has nothing left to decide; and
+   the 15 rows of `v1.20.0` carry `cflags_extra = "-Wno-error=dangling-pointer"`. That is a
+   **fourth axis** for `build_unix.py`'s own flag composition, and the reason it has to be a row
+   fact: the three tables already there key on platform tag, architecture and libc, while a
+   MicroPython *release* is none of those -- it needs the flag in every cell at once.
+   `unix_extra_cflags()` gained an optional `tag` and appends the row's flags after the other
+   three; a caller with no tag in hand still resolves the first three.
+
+   **One earlier claim in this record is wrong and is corrected here:** `-Wno-error=cpp` was
+   presented as a musl finding of this session. It is not new -- `build_unix.py`'s own
+   `_MUSL_CFLAGS` has carried it column-wide for some time, with a comment naming the same
+   `berkeley-db` -> `sys/cdefs.h` cause. The hand-run build needed it only because it bypassed
+   cibuildmp entirely. The row therefore carries the dangling-pointer flag alone, on both libc
+   columns.
+
+   `bin/refresh_usermod_boards.py`'s own `carry_forward()` protects the new per-row fact from
+   being dropped by a regeneration, and `tests/test_platform_row_facts.py`'s inventory lock caught
+   the migration exactly as intended -- it failed on the `gcc`/`cflags_extra` swap and on nothing
+   else, which is how it was verified that nothing outside the table read `gcc` for `unix`.
 3. **Install at run time** what the retired layer used to bake in, per base-image family.
 4. **Verify a boundary sample, not the matrix** -- one tag per distinct toolset value, both libc
    families, plus one `armv7l`/`riscv64` cell to exercise the oldest-available fallback.
