@@ -41,6 +41,18 @@ def fake_elf(target: str = "manylinux_2_28_x86_64") -> bytes:
     )
 
 
+def _fake_docker_run(cmd, **kwargs):
+    """A `dockerrun.subprocess.run` stand-in that behaves like the real
+    thing when `capture_output=True` -- `probe_supported_cflags()` reads
+    `.stdout` off whatever it gets back, and a real `subprocess.run` never
+    returns `None`. Every candidate "passes" (empty stdout, so
+    `probe_supported_cflags()` would normally drop it -- callers that care
+    about which flags survive stub this out themselves)."""
+    if kwargs.get("capture_output"):
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+    return None
+
+
 def opts(target: str = "manylinux_2_28_x86_64", **overrides) -> UnixBuildOptions:
     defaults = {
         "target": target,
@@ -307,7 +319,12 @@ def test_aarch64_builds_and_returns_binary_path(monkeypatch, tmp_path):
     build_dir.mkdir()
     (build_dir / "micropython").write_bytes(fake_elf("manylinux_2_28_aarch64"))
 
-    monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", lambda *a, **k: None)
+    # aarch64 carries a real `-Wno-error=array-bounds` candidate
+    # (`_ARCH_CFLAGS`), so `build_unix()` now probes it against this
+    # image's own gcc first -- a real `subprocess.run` always returns a
+    # `CompletedProcess`, never `None`, so the fake has to as well once
+    # `capture_output=True` is in play.
+    monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", _fake_docker_run)
 
     result = build_unix_fn(
         opts("manylinux_2_28_aarch64", build_dir=build_dir), tmp_path / "mpy"
@@ -346,28 +363,32 @@ def test_unix_docker_image_skips_host_toolchain_probe(monkeypatch, tmp_path):
     (build_dir / "micropython").write_bytes(fake_elf("manylinux_2_28_aarch64"))
 
     calls = []
-    monkeypatch.setattr(
-        "cibuildmp.dockerrun.subprocess.run",
-        lambda cmd, **k: calls.append(cmd) or None,
-    )
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return _fake_docker_run(cmd, **kwargs)
+
+    monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", fake_run)
 
     result = build_unix_fn(
         opts("manylinux_2_28_aarch64", build_dir=build_dir), tmp_path / "mpy"
     )
 
     assert result == build_dir / "micropython"
-    # Two calls now, not one: `standalone=True` on every arch (not just
-    # `mipsel` any more) means `run_unix_deplibs()` runs first, then the
-    # main build -- both against the same resolved image.
-    assert len(calls) == 2
+    # Three calls now: `run_unix_deplibs()` runs first (standalone=True on
+    # every arch), then aarch64's real `-Wno-error=array-bounds` candidate
+    # (`_ARCH_CFLAGS`) gets probed against this image's own gcc, then the
+    # main build -- all three against the same resolved image.
+    assert len(calls) == 3
     for docker_command in calls:
         assert docker_command[:3] == ["docker", "run", "--rm"]
         assert "manylinux_2_28_aarch64:local" in docker_command
-    # calls[0] (deplibs) is `sh -c "make ... && <fixup>"`; calls[1] (the
-    # main build) is a bare `make` argv -- see run_unix_deplibs()'s own
-    # docstring for why only deplibs needs the wrapper.
+    # calls[0] (deplibs) is `sh -c "make ... && <fixup>"`; calls[1] is the
+    # cflags probe; calls[2] (the main build) is a bare `make` argv -- see
+    # run_unix_deplibs()'s own docstring for why only deplibs needs the
+    # wrapper.
     assert "make" in calls[0][-1]
-    assert "make" in calls[1]
+    assert "make" in calls[2]
 
 
 def test_unix_docker_image_mounts_mpy_dir_and_user_c_modules(monkeypatch, tmp_path):

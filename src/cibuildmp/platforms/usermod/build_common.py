@@ -19,6 +19,7 @@ for every port, not just the one that surfaced it.
 from __future__ import annotations
 
 import os
+import shlex
 from pathlib import Path
 
 
@@ -188,6 +189,76 @@ def tag_cflags(tag: str) -> tuple[str, ...]:
     """Every `CFLAGS_EXTRA` flag this MicroPython release needs, in any
     port. Empty for a tag that needs none, and for no tag at all."""
     return TAG_CFLAGS.get(tag, ())
+
+
+def probe_supported_cflags(
+    candidates: tuple[str, ...],
+    *,
+    image: str,
+    oci_platform: str | None = None,
+    linux32: bool = False,
+    timeout: float | None = None,
+) -> tuple[str, ...]:
+    """Every `-Wno-error=<diagnostic>` in `candidates` this image's own
+    gcc actually recognizes, in the same order -- live-checked inside
+    `image` itself, not assumed from what a *different* image's gcc
+    happens to accept.
+
+    Found live, against a real `manylinux_2_28_i686` build once `unix`
+    stopped resolving to a cibuildmp-published image and started hitting
+    pypa's own per-arch gcc directly: `TAG_CFLAGS`'s own
+    `-Wno-error=unterminated-string-initialization` (a real gcc-15
+    diagnostic, [0082]) is not a harmless no-op on a gcc-14 image the way
+    its own comment assumed ("a suppressed warning that never fires on a
+    cell that does not hit it") -- gcc 14 does not recognize
+    `-Wunterminated-string-initialization` as a diagnostic name *at all*,
+    so `-Wno-error=` naming it is a hard `cc1: error: ... no option
+    '-Wunterminated-string-initialization'`, on every single translation
+    unit, not a warning quietly doing nothing. `manylinux_2_28`'s own
+    gcc ladder (11 -> 12 -> 14, record 0084's own addendum) never reaches
+    15 at all, so this was always going to happen the first time a
+    pre-`v1.26.0` tag actually built against that family's own real
+    compiler rather than a Bootlin/xpack one already known to be >=15.
+
+    No per-arch gcc-version table to keep in sync as a result: the
+    compiler itself is asked, once per (image, candidate list), the same
+    "let the tool that actually knows answer" principle CLAUDE.md's own
+    top rule already applies to reading cibuildwheel instead of guessing
+    at it. Empty `candidates` short-circuits with no container run at
+    all -- true for every `v1.26.0`-and-later, non-musl build, the common
+    case.
+    """
+    if not candidates:
+        return ()
+    from ... import dockerrun
+
+    # `dockerrun.run()` runs this with `check=True` -- a `;`-joined shell
+    # script's own exit status is whatever its *last* statement leaves
+    # behind, so without the trailing `; true` a probe would raise
+    # `CalledProcessError` (crashing the whole build, not just reporting
+    # one unsupported flag) purely because the *last* candidate in the
+    # list happened to be the one this gcc rejects, regardless of how
+    # every earlier candidate actually probed.
+    probe = (
+        "; ".join(
+            f'printf "" | gcc {shlex.quote(flag)} -x c -c -o /dev/null - '
+            f">/dev/null 2>&1 && echo {shlex.quote(flag)}"
+            for flag in candidates
+        )
+        + "; true"
+    )
+    output = dockerrun.run(
+        ["sh", "-c", probe],
+        mounts=[],
+        workdir=Path("/"),
+        image=image,
+        timeout=timeout,
+        oci_platform=oci_platform,
+        linux32=linux32,
+        capture_output=True,
+    )
+    supported = set((output or "").split())
+    return tuple(flag for flag in candidates if flag in supported)
 
 
 def container_mpy_cross(

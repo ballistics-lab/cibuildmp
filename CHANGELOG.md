@@ -27,6 +27,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   than a partial one glibc can't fully deliver anyway. `manylinux` cells
   link ordinary dynamic glibc again, the same mechanism every real
   manylinux wheel already relies on.
+- **`unix` builds on pre-`v1.26.0` tags failed outright on
+  `manylinux_2_28_{i686,aarch64,armv7l}`** (and any other cell whose real
+  gcc turned out older than assumed): `TAG_CFLAGS`'s own
+  `-Wno-error=unterminated-string-initialization` ([0082]) is a gcc-15
+  diagnostic name gcc 14 does not recognize at all, so naming it via
+  `-Wno-error=` was a hard `cc1: error`, not the harmless no-op its own
+  comment assumed — surfaced only once these cells started resolving to
+  bare pypa images with each arch's own real (and often older) gcc
+  instead of a cibuildmp-published image with a uniformly newer one.
+  Every `-Wno-error=<diagnostic>` candidate is now live-probed against
+  the target image's own gcc before use, keeping only the ones it
+  actually recognizes — no per-arch gcc-version table to keep in sync.
 
 ### Changed
 
@@ -1432,3 +1444,4 @@ than restarting (see the 0.3.0a1 entry). -->
 [0054]: docs/records/0054-usermod-example-from-upstream-usercmodule.md
 [0066]: docs/records/0066-extra-cmake-args.md
 [0069]: docs/records/0069-upstream-usercmodule-narrow-ci-slice.md
+[0082]: docs/records/0082-natmod-old-tags-fail-mpy-cross-under-gcc-15.md

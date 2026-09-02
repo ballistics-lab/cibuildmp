@@ -387,13 +387,30 @@ def _use_static(target: str, settings: UnixArchSettings) -> bool:
 
 
 def unix_make_command(
-    opts: UnixBuildOptions, mpy_dir: Path, *, mpy_cross: Path | None = None
+    opts: UnixBuildOptions,
+    mpy_dir: Path,
+    *,
+    mpy_cross: Path | None = None,
+    extra_cflags: tuple[str, ...] | None = None,
 ) -> list[str]:
+    """`extra_cflags`, when given, overrides `unix_extra_cflags()`'s own
+    raw candidate list -- `build_unix()` passes the already
+    `probe_supported_cflags()`-filtered set (a `-Wno-error=<diagnostic>`
+    this cell's own gcc does not recognize is a hard `cc1: error`, not a
+    no-op -- see that function's own docstring), so this stays the raw
+    candidates only for a caller (a test, a hand invocation) that has not
+    done that filtering itself.
+    """
     settings = unix_arch_settings(opts.target)
     link_opts = (
         ("MICROPY_STANDALONE=1", "LDFLAGS_EXTRA=-static")
         if _use_static(opts.target, settings)
         else ("MICROPY_STANDALONE=1",)
+    )
+    cflags = (
+        extra_cflags
+        if extra_cflags is not None
+        else unix_extra_cflags(opts.target, opts.tag)
     )
     return [
         "make",
@@ -402,11 +419,7 @@ def unix_make_command(
         f"VARIANT={opts.variant}",
         f"BUILD={opts.build_dir.as_posix()}",
         f"CROSS_COMPILE={settings.cross_compile}",
-        *(
-            [f"CFLAGS_EXTRA={' '.join(cflags)}"]
-            if (cflags := unix_extra_cflags(opts.target, opts.tag))
-            else []
-        ),
+        *([f"CFLAGS_EXTRA={' '.join(cflags)}"] if cflags else []),
         # py/mkenv.mk's own override (`MICROPY_MPYCROSS`, defaulting to
         # `$(TOP)/mpy-cross/build/mpy-cross`) -- passed only when the
         # caller built one inside this container, which `build_unix()`
@@ -1003,16 +1016,34 @@ def build_unix(
             opts, mpy_dir, docker_image=docker_image, package_dir=package_dir
         )
 
-    mpy_cross = build_common.container_mpy_cross(
-        mpy_dir,
-        slug=f"unix-{opts.target}",
+    # Probed once, against this cell's own real gcc, and reused for both
+    # calls below -- `unix_extra_cflags()`'s own candidates include
+    # `-Wno-error=<diagnostic>` entries a *different* image's gcc needed
+    # ([0082]'s own `unterminated-string-initialization`, gcc-15-only);
+    # naming an unrecognized diagnostic is a hard `cc1: error` on this
+    # image's gcc, not a no-op, so what actually reaches `make` here has
+    # to be what this specific image's compiler accepts, not the raw
+    # candidate list. See `probe_supported_cflags()`'s own docstring.
+    extra_cflags = build_common.probe_supported_cflags(
+        unix_extra_cflags(opts.target, opts.tag),
         image=docker_image,
-        extra_cflags=unix_extra_cflags(opts.target, opts.tag),
         oci_platform=oci_platform,
         linux32=linux32,
         timeout=timeout,
     )
-    command = unix_make_command(opts, mpy_dir, mpy_cross=mpy_cross)
+
+    mpy_cross = build_common.container_mpy_cross(
+        mpy_dir,
+        slug=f"unix-{opts.target}",
+        image=docker_image,
+        extra_cflags=extra_cflags,
+        oci_platform=oci_platform,
+        linux32=linux32,
+        timeout=timeout,
+    )
+    command = unix_make_command(
+        opts, mpy_dir, mpy_cross=mpy_cross, extra_cflags=extra_cflags
+    )
     dockerrun.run(
         command,
         mounts=usermod_mounts(
