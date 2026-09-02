@@ -1265,16 +1265,17 @@ regeneration cannot silently drop a hand-merged per-row fact.
 started, see below).
 
 **Verification status, as of this addendum:** native fully green (11 latest-patch tags × every
-native `unix` cell). Emulated: `ppc64le` fully green; `s390x` fully green; `riscv64` green after
-today's fixes, with the `../lib64/lp64d` fix's own final scoped re-confirmation the last thing
-still running as this is written — check the latest `test-all-platforms.yml` run before trusting
-that clause without re-verifying. `musllinux_1_2_ppc64le` (a real QEMU relocation gap, [0044],
+native `unix` cell, [33679538003]/[33681567696]). Emulated, all six cells now fully green across
+every one of the 11 tags: `ppc64le` (unaffected by anything above), `s390x` (fix 4), `riscv64`
+(fixes 1/3/4/5 together — the `../lib64/lp64d` fix's own scoped re-confirmation across all seven
+affected identifiers, [33692643570], is the run that closed this out). `musllinux_1_2_ppc64le` (a
+real QEMU relocation gap, [0044],
 unrelated to anything on this branch) stays descoped.
 
-**What is genuinely not done, unchanged by any of the above:** the three "Not started" items this
-record's own list already named (`arm_embedded`/[0085], `TAG_CFLAGS` into every port's own
-`mpy-cross` rather than `unix`'s alone, dropping the `gcc` column from the remaining nine scopes).
-Nothing in this branch's 43 commits touches any of the three.
+**What is genuinely not done, unchanged by any of the above:** the two items this record's own
+Status line now names as spun off (`TAG_CFLAGS` into every port's own `mpy-cross` rather than
+`unix`'s alone, dropping the `gcc` column from the remaining nine scopes), plus `arm_embedded`
+under its own record, [0085]. Nothing in this branch's 43 commits touches any of the three.
 
 ## Addendum, 2026-09-02 (third) — verifying item 5 live, on the full tag history, found five unrelated real bugs
 
@@ -1336,6 +1337,7 @@ as open as before this addendum.
 [12fe0fd]: https://github.com/ballistics-lab/cibuildmp/commit/12fe0fd
 [33679538003]: https://github.com/ballistics-lab/cibuildmp/actions/runs/33679538003
 [33681567696]: https://github.com/ballistics-lab/cibuildmp/actions/runs/33681567696
+[33692643570]: https://github.com/ballistics-lab/cibuildmp/actions/runs/33692643570
 
 [0013]: 0013-micropython-list-dedup-by-abi.md
 [0031]: 0031-unix-musllinux-libc-axis.md

@@ -300,11 +300,11 @@ jobs:
         with:
           submodules: recursive
 
-      - uses: ballistics-lab/cibuildmp/.github/actions/fetch-micropython@v0.6.1
+      - uses: ballistics-lab/cibuildmp/.github/actions/fetch-micropython@v0.6.2
         with:
           mpy_tag: v1.28.0
 
-      - uses: ballistics-lab/cibuildmp/.github/actions/build-natmod@v0.6.1
+      - uses: ballistics-lab/cibuildmp/.github/actions/build-natmod@v0.6.2
         with:
           arch: ${{ matrix.arch }}
           # natmod_dir: natmod              # default; a7p passes micropython/natmod
