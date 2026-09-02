@@ -135,6 +135,43 @@ Written as a handoff rather than as a decision: the sections below are the argum
 the state. Everything named here is in git; nothing depends on a local cache, a pulled image or a
 scratch directory.
 
+**The `unix` baseline, measured before touching anything** (run 33640288717, `v1.29.0` across
+every cell, bucketed): **14 cells built, 0 failed.** The fifteenth,
+`musllinux_1_2_ppc64le`, never ran -- it sits in `test-all-platforms.yml`'s own default skip as
+confirmed-live breakage, and [0044] records the cause precisely: `mpy-cross` builds fine inside
+the image and then fails *when run* under QEMU user-mode to freeze `argparse.py`. A QEMU limit,
+not a cibuildmp bug.
+
+**A prediction this session made and the run falsified.** `manylinux_2_31_armv7l` and
+`manylinux_2_39_riscv64` resolve straight to pypa's images with no layer of this project's own,
+and `manylinux_2_28_x86_64` was measured to ship no `libffi-devel` -- from which it seemed to
+follow that those two cells could not be building. They build, in 55s and 961s. Unpacking the
+image filesystem settles it: `manylinux_2_31_armv7l` carries libffi already. The five images this
+project publishes exist for the **AlmaLinux 8** family alone, not for manylinux generally, and
+step 5 below is scoped accordingly.
+
+**The emulated cells, now measured rather than estimated** -- the first time each landed in a
+single-cell bucket, which is what `bin/plan_test_matrix.py`'s own comment says had never happened:
+
+| cell | seconds |
+| --- | --- |
+| `manylinux_2_28_ppc64le` | 1037 |
+| `manylinux_2_39_riscv64` | 961 |
+| `musllinux_1_2_riscv64` | 888 |
+| `musllinux_1_2_s390x` | 872 |
+| `manylinux_2_28_s390x` | 812 |
+| every native or cross cell | 55-93 |
+
+`_EMULATED_UNIX_WEIGHT = 1050` was seeded from isolated runs at 800-1200s and is confirmed by
+these; the six emulated cells cost more than the other nine together, which is the concrete
+version of this record's own CI-cost argument. `manylinux_2_41_mipsel` at 67s is the tell: it is
+the one `unix` cell that cross-compiles rather than emulating.
+
+**One trap worth not repeating:** `test-all-platforms.yml` reads
+`${{ inputs.skip || '<defaults>' }}`, and an empty string is falsy in a GitHub expression -- so
+passing `skip: ""` to disable skipping silently keeps the defaults. That is why the fifteenth cell
+was absent, and it was visible only in the report, never in a job colour.
+
 **Landed (all pushed, `575 passed`):**
 
 - `[usermod.unix]`'s 225 rows lost the `gcc` column entirely — the image fixes the compiler, so a
