@@ -180,6 +180,25 @@ infrastructure rather than a `cibuildmp.toml` knob is unchanged by any of this.
    this session's own earlier tests found `14.2.x` clean where `14.3.0` broke. Running
    `gcc --version` inside one current pypa image answers it, and it is the cheapest next step in
    this list.
+   **The first cell is already resolved, by building it.** For `manylinux_2_28_x86_64` the answer
+   is **two images, not fifteen**, and the boundary is one tag wide:
+
+   | tag | image | evidence |
+   | --- | --- | --- |
+   | `v1.20.0` | a `gcc-toolset-12` image (`2024.06.09-3`) | fails the current image on `-Werror=dangling-pointer=` in `py/stackctrl.c` during `mpy-cross`; builds clean on 12.2.1, artifact needs only `GLIBC_2.25` |
+   | `v1.21.0` … `v1.29.0` | the current image | `v1.21.0` and `v1.29.0` built and linked live (floors `GLIBC_2.25` and `GLIBC_2.28`); `v1.22.0`-`v1.28.0` had already built under gcc **14.3.0**, newer than the image's own 14.2.1 |
+
+   **Corrected in passing, because this record earlier implied otherwise:** `gcc-toolset-14` ships
+   **14.2.1**, and the `-Wdangling-pointer` failure reproduces on it. The earlier note that
+   "14.2.x was clean" came from a different check and does not hold for `py/stackctrl.c` -- which
+   is why `v1.20.0` needs the older image rather than the table being uniform.
+
+   **Three facts about the image itself, read from inside it rather than assumed:** `gcc (GCC)
+   14.2.1 20250110 (Red Hat 14.2.1-11)`; `ldd (GNU libc) 2.28`, so the floor the identifier claims
+   is the floor the image has; and **`libffi-devel` is not installed** (`pkg-config` finds nothing
+   without it), which is exactly why the layer this project publishes today exists and what step 3
+   replaces.
+
 2. **Move the key.** `[usermod.unix].images.<arch>` gives way to a per-row `image` field;
    `dockerrun.image_for()` resolves it for the row rather than for the architecture.
    `bin/refresh_usermod_boards.py`'s own `carry_forward()` already protects a per-row fact from
