@@ -42,6 +42,7 @@ rather than assuming the pinned settings alone were enough.
 
 from __future__ import annotations
 
+import os
 import shlex
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -416,6 +417,7 @@ def unix_make_command(
         "make",
         "-C",
         _unix_dir(mpy_dir).as_posix(),
+        f"-j{os.cpu_count() or 1}",
         f"VARIANT={opts.variant}",
         f"BUILD={opts.build_dir.as_posix()}",
         f"CROSS_COMPILE={settings.cross_compile}",
@@ -479,6 +481,7 @@ def run_unix_deplibs(
         "make",
         "-C",
         _unix_dir(mpy_dir).as_posix(),
+        f"-j{os.cpu_count() or 1}",
         f"VARIANT={opts.variant}",
         f"BUILD={build_dir}",
         f"CROSS_COMPILE={settings.cross_compile}",

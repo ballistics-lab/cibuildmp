@@ -1,3 +1,4 @@
+import os
 import subprocess
 from pathlib import Path
 
@@ -75,6 +76,7 @@ def test_native_command_passes_an_empty_cross_compile():
         "make",
         "-C",
         "/gh/ws/mpy/ports/unix",
+        f"-j{os.cpu_count() or 1}",
         "VARIANT=standard",
         "BUILD=/gh/ws/usermod/build/x86_64",
         "CROSS_COMPILE=",

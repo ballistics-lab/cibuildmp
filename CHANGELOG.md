@@ -70,6 +70,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`unix`'s main port build and `deplibs` (libffi) step now build with
+  `-j<host cores>`**, matching the in-container `mpy-cross` build, which
+  has always used it. Both ran fully single-threaded before — a real,
+  live-measured 55.2s → 10.0s (~5.5x) on a 16-core host for a native
+  `manylinux_2_28_x86_64` build, identical output (`text`/`data`/`bss`
+  sizes unchanged). No change on the emulated cells' own effective
+  parallelism — QEMU user-mode's per-core overhead was not measured
+  here.
 - **`unix`'s five `manylinux_2_28_*` cells drop their own published
   `ghcr.io/ballistics-lab/...` image and resolve straight to pypa's own
   `quay.io/pypa/manylinux_2_28_*`.** The one layer those images ever
