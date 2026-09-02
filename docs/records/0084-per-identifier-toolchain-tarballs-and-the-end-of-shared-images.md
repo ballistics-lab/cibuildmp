@@ -186,7 +186,27 @@ infrastructure rather than a `cibuildmp.toml` knob is unchanged by any of this.
    | tag | image | evidence |
    | --- | --- | --- |
    | `v1.20.0` | a `gcc-toolset-12` image (`2024.06.09-3`) | fails the current image on `-Werror=dangling-pointer=` in `py/stackctrl.c` during `mpy-cross`; builds clean on 12.2.1, artifact needs only `GLIBC_2.25` |
-   | `v1.21.0` … `v1.29.0` | the current image | `v1.21.0` and `v1.29.0` built and linked live (floors `GLIBC_2.25` and `GLIBC_2.28`); `v1.22.0`-`v1.28.0` had already built under gcc **14.3.0**, newer than the image's own 14.2.1 |
+   | `v1.21.0` … `v1.30.0-preview` | the current image | `v1.21.0`, `v1.29.0` and `v1.30.0-preview` built and linked live (floors `GLIBC_2.25`, `2.28`, `2.28`); `v1.22.0`-`v1.28.0` had already built under gcc **14.3.0**, newer than the image's own 14.2.1 |
+
+   **All fifteen tags are accounted for, and exactly one needs the older image.** That is the
+   whole of this cell's table.
+
+   **Three failures on `v1.30.0-preview` along the way were the harness, not the tag**, and two of
+   them are requirements the mechanism inherits rather than incidents:
+
+   - A run-time `dnf install` needs root, but the build must not: leaving the container as root
+     puts root-owned directories into the mounted tree, and the next `fetch_micropython()` fails
+     with `Permission denied` somewhere else entirely. So the container starts as root, installs,
+     then drops to the caller's uid -- and **`HOME` has to move with it**. Without that, `git`
+     cannot read its config, writes warnings to stderr, and `makeversionhdr.py` folds them into
+     `MICROPY_GIT_TAG`, so the build dies on `missing terminating " character` in a *generated*
+     header, mentioning neither permissions nor `HOME`. `build_esp32.py` already sets `HOME`
+     explicitly for the same reason ([0058]'s own `--user` consequence); this raises that from one
+     port's workaround to a property of the shared mechanism.
+   - A preview tag has no release tarball, so it arrives by clone with no submodules, and
+     `unix` needs `lib/micropython-lib` to freeze its manifest (`Error: micropython-lib submodule
+     is not initialized`). `[usermod.unix]`'s own `post_checkout` already says
+     `make -C ports/unix submodules`; on the clone path it is not optional.
 
    **Corrected in passing, because this record earlier implied otherwise:** `gcc-toolset-14` ships
    **14.2.1**, and the `-Wdangling-pointer` failure reproduces on it. The earlier note that
