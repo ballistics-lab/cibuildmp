@@ -831,4 +831,21 @@ group — the nine cells that are actually green stay in CI, on every push, goin
 through one", but "nine of twelve run in CI today; three have a real, open, per-cell
 reason they don't."
 
+**Addendum, 2026-09-02 — the `s390x` clobbered diagnostic is fixed, not just descoped;
+`v1.28.0` was never the whole story.** A full historical sweep (0084's own, every
+`unix` platform tag × the 11 latest-patch MicroPython releases) found the same
+`-Werror=clobbered` diagnostic on multiple tags on `s390x`, and on `riscv64` too —
+in `ports/unix/main.c` this time, not `mpy-cross`'s own copy, so the "`v1.28.0`
+only, `v1.29.0`'s `main.c` diff avoids it" read above was correct for the one
+instance it was checking and wrong as a generalization: the real cause was never
+tag-specific, it was architecture-specific, and `v1.28.0` was just the one tag this
+record's own narrower two-tag check happened to catch it on. Fixed at the
+architecture level (`build_unix.py`'s own `_ARCH_CFLAGS["s390x"]`/`["riscv64"]` =
+`-Wno-error=clobbered`), the same escalation `aarch64`'s own `-Wno-error=array-bounds`
+entry already went through — see build_unix.py's own header comment for the full
+argument. `v1.28.0-manylinux_2_28_s390x` is out of `test-all-platforms.yml`'s own
+default skip list; `s390x` is green across every tag in the current matrix,
+confirmed live. `*musllinux_1_2_ppc64le` (the QEMU relocation gap, unrelated) is
+still skipped — nothing here touches it.
+
 [33220563659]: https://github.com/ballistics-lab/cibuildmp/actions/runs/33220563659

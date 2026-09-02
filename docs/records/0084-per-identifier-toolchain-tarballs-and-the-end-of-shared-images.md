@@ -1205,6 +1205,133 @@ argues for instead, both still stand for whatever gap turns out to be real on a 
 one just was not real to begin with, once `MICROPY_STANDALONE=1` closed it from a different
 direction.
 
+## Addendum, 2026-09-02 (second) — the full branch state against `main`, not just today's slice
+
+This branch carries 43 commits over `main` by now, spanning several sessions and this record's
+own multiple direction changes (Bootlin-uniformly, abandoned; pypa-stays-row-pin, landed). A
+session picking this up cold should not have to `git log` its way through all of them to know
+what is actually different. This section is that description, current as of this addendum —
+re-derive it from `git diff main...HEAD --stat` rather than trusting it verbatim once more commits
+land, the same caution CLAUDE.md's own top rule asks for everywhere else.
+
+**The `unix` compiler/toolchain model, end to end:**
+- `[usermod.unix]`'s `build-platforms.toml` rows lost the `gcc` column — the image fixes the
+  compiler now, so a ceiling-derived pin had nothing left to decide.
+- Per-tag gcc relaxations (`TAG_CFLAGS`, [0082]) reach both the port's own build and
+  `container_mpy_cross()` — a diagnostic that stops one stops the other first.
+- Per-architecture relaxations (`_ARCH_CFLAGS`): `aarch64` (`-Wno-error=array-bounds`), `s390x` and
+  `riscv64` (`-Wno-error=clobbered`, this addendum's own item 4 below).
+- Every `-Wno-error=<diagnostic>` candidate is **live-probed** against the actual compiler that
+  will use it (`build_common.probe_supported_cflags()`) before being trusted — replacing every
+  earlier version of this idea that predicted a gcc version instead of asking it, including this
+  addendum's own item 2 below, found the same way.
+
+**The Docker image fleet:** the five `docker/manylinux_2_28_*.Dockerfile` images and their
+`ghcr.io/ballistics-lab/...` publishes are deleted. Every `unix` cell but `mipsel` (no pypa image
+to begin with) resolves straight to `quay.io/pypa/<target>` — no cibuildmp layer at all, since
+`libffi-devel` (the one thing those five images ever added) stopped being read once
+`MICROPY_STANDALONE=1` went universal.
+
+**`libffi`/`deplibs` robustness**, the actual subject of this addendum's own "five bugs" list
+below: `MICROPY_STANDALONE=1` (vendor and build `lib/libffi` from source) applies to every `unix`
+arch now, not just `mipsel`; the RHEL `../lib64` symlink fixup generalizes to *any*
+`gcc -print-multi-os-directory` answer, queried live rather than predicted; `riscv64` gets
+`MICROPY_PY_FFI=0` on the tags whose vendored `libffi` genuinely cannot build there; the clone-path
+`make submodules` step actually fetches `lib/libffi` now (it silently didn't, for a tag with no
+release tarball).
+
+**CI infrastructure:** `bin/plan_test_matrix.py` buckets by image (not `(image, tag)`) to cut
+redundant Docker pulls, and partitions the six real-QEMU-execution `unix` cells into their own
+`emulated` bucket set, priced at their own measured weight rather than the shared default.
+`test-platforms.yml` gained `keep_going`/`tolerate_failures`/`step_summary` inputs. `unix`'s main
+build and `deplibs` step build with `-j<host cores>` now, matching `mpy-cross`'s own build (both
+ran fully single-threaded before).
+
+**Toolchain evidence tooling**, mostly unrelated to `unix` specifically: `resources/toolchains.toml`
+and `resources/bootlin.toml` left the installed wheel for `docs/reference/toolchain-facts/` — real
+data now, evidence rather than something loaded at runtime. `bin/fetch_bootlin_metadata.py` writes
+the Bootlin release catalogue; `bin/refresh_toolchain_pins.py` checks a row's own claimed compiler
+ceiling against it (and now knows about `natmod`'s own two cross scopes, not just `unix`'s);
+`bin/refresh_usermod_boards.py`/`refresh_natmod_archs.py` gained `carry_forward()` so a
+regeneration cannot silently drop a hand-merged per-row fact.
+
+**New records this branch adds:** [0082] (`natmod` old tags fail `mpy-cross` under gcc 15), [0083]
+(`windows` fully prebuilt MinGW toolchain), this one, and [0085] (`arm_embedded` thins out — not
+started, see below).
+
+**Verification status, as of this addendum:** native fully green (11 latest-patch tags × every
+native `unix` cell). Emulated: `ppc64le` fully green; `s390x` fully green; `riscv64` green after
+today's fixes, with the `../lib64/lp64d` fix's own final scoped re-confirmation the last thing
+still running as this is written — check the latest `test-all-platforms.yml` run before trusting
+that clause without re-verifying. `musllinux_1_2_ppc64le` (a real QEMU relocation gap, [0044],
+unrelated to anything on this branch) stays descoped.
+
+**What is genuinely not done, unchanged by any of the above:** the three "Not started" items this
+record's own list already named (`arm_embedded`/[0085], `TAG_CFLAGS` into every port's own
+`mpy-cross` rather than `unix`'s alone, dropping the `gcc` column from the remaining nine scopes).
+Nothing in this branch's 43 commits touches any of the three.
+
+## Addendum, 2026-09-02 (third) — verifying item 5 live, on the full tag history, found five unrelated real bugs
+
+The previous addendum closed item 5 (pypa stays, `MICROPY_STANDALONE=1` universal) on the
+strength of the manylinux vendoring change alone. Actually running the resulting matrix — every
+`unix` platform tag × the 11 latest-patch MicroPython releases, native and emulated, dispatched
+separately (`plan_test_matrix.py`'s own `emulated` bucket partition, [12fe0fd]) — surfaced five
+real, independent bugs the manylinux-only verification never exercised. None of them are on this
+record's own "Not started" list (items 1-3 below, unchanged); all five are fixed, and every one
+was live-verified against the real image before being called done, the same discipline this
+record's own earlier addenda already used:
+
+1. **The clone-path `make submodules` step never fetched `lib/libffi`.** `ports/unix/Makefile`'s
+   own `GIT_SUBMODULES += lib/libffi` sits behind `ifeq ($(MICROPY_STANDALONE),1)`, and
+   `sources._clone()` ran `make -C ports/<port> submodules` with no `MICROPY_STANDALONE=1` —
+   silently computing a different, incomplete submodule list than the real build (which always
+   sets it now) needs. Only reachable on a tag with no release tarball (`v1.30.0-preview` in this
+   sweep); every tag with one vendors every submodule via the tarball itself, which is why nine
+   sessions of manylinux-only testing never hit it. `sources.py`.
+2. **`probe_supported_cflags()`'s own gcc probe (this record's item 5 machinery) checked the wrong
+   compiler for `mipsel`.** It always probed an image's bare `gcc`, correct for every native pypa
+   image but wrong for `mipsel`'s Bootlin cross-toolchain: the real build compiler is
+   `mipsel-linux-gnu-gcc` (gcc 14.3.0), a different, older binary than whatever bare `gcc` resolves
+   to inside the same image. The probe's own false-positive verdict let a gcc-15-only flag back
+   into `CFLAGS_EXTRA`, and the real cross-compiler rejected it — disproving this project's own
+   prior assumption that every Bootlin/xpack toolchain here was already gcc >=15. Now probes the
+   actual compiler each build step uses. `build_common.py`.
+3. **`riscv64` fails `deplibs` outright on every tag through `v1.23.0`.** `lib/libffi`'s own
+   submodule pin, on those tags, points to `https://github.com/atgreen/libffi`, a fork whose
+   `configure.host` has no `riscv*` case at all — `v1.24.0` moves the pin to the canonical
+   `libffi/libffi` (`v3.4.6`), which does. Filed upstream; nothing to backport onto a tag that has
+   already shipped. `MICROPY_PY_FFI=0` for exactly this (tag, `riscv64`) combination.
+   `build_unix.py`'s own `_riscv64_ffi_unported()`.
+4. **`s390x`/`riscv64` fail a real `-Werror=clobbered` diagnostic in `ports/unix/main.c`, on
+   multiple tags, on both architectures.** [0044] found a narrower instance of this (`mpy-cross`'s
+   own `main.c`, `s390x`, `v1.28.0` only) and descoped it by identifier; this sweep found it broad
+   enough to suppress at the architecture level instead (`_ARCH_CFLAGS`), the same escalation
+   `aarch64`'s own `-Wno-error=array-bounds` entry already went through — see [0044]'s own
+   2026-09-02 addendum.
+5. **`riscv64`'s `deplibs` symlink fixup (the RHEL `../lib64` one, this record's earlier addendum)
+   only checked one hardcoded path.** `riscv64`'s own image answers `../lib64/lp64d` from
+   `gcc -print-multi-os-directory` — its own ABI-variant subdirectory, one level deeper than the
+   RHEL case the fixup was first written against. The fixup now runs
+   `$(CC) -print-multi-os-directory` live, with the same compiler `deplibs` itself just used,
+   instead of a value predicted in advance.
+
+**Current sweep status.** Native: fully green (11 tags × 9 native cells, [33679538003]/[33681567696]).
+Emulated: `ppc64le` fully green; `s390x` fully green after fix 4; `riscv64` green after fixes 1/3/4/5,
+final scoped re-confirmation of the fix-5 tags in progress as this addendum is written — check
+`test-all-platforms.yml`'s own latest scheduled/dispatched run before trusting that last clause
+without re-verifying, the same caution this file's own top rule asks for everywhere else.
+`musllinux_1_2_ppc64le` (QEMU relocation gap, [0044], unrelated to anything above) is still
+descoped.
+
+**Not evidence that items 1-3 below are any closer to done.** Every fix above was found *while
+verifying* item 5, not while working any of the three "Not started" items — they remain exactly
+as open as before this addendum.
+
+[12fe0fd]: https://github.com/ballistics-lab/cibuildmp/commit/12fe0fd
+[33679538003]: https://github.com/ballistics-lab/cibuildmp/actions/runs/33679538003
+[33681567696]: https://github.com/ballistics-lab/cibuildmp/actions/runs/33681567696
+
 [0013]: 0013-micropython-list-dedup-by-abi.md
 [0031]: 0031-unix-musllinux-libc-axis.md
 [0033]: 0033-cibuildmp-never-builds-docker-image-itself.md

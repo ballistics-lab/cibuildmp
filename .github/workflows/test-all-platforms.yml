@@ -78,12 +78,18 @@ jobs:
         env:
           CIBMP_BUILD_INPUT: ${{ inputs.build || 'v1.29.0-* v1.28.0-* mpy6.3-v1.29.0-* mpy6.3-v1.28.0-*' }}
           # `v1.28.0-qemu-NETDUINO2`: this project's own long-standing
-          # default skip. `*musllinux_1_2_ppc64le`/
-          # `v1.28.0-manylinux_2_28_s390x`: real, confirmed-live breakage
-          # in unix's own emulated-everywhere cells, not the native/
-          # emulated axis alone -- see docs/records/0044's own 2026-08-29
-          # addendum.
-          CIBMP_SKIP_INPUT: ${{ inputs.skip || 'v1.28.0-qemu-NETDUINO2 *musllinux_1_2_ppc64le v1.28.0-manylinux_2_28_s390x' }}
+          # default skip. `*musllinux_1_2_ppc64le`: real, confirmed-live
+          # breakage in unix's own emulated-everywhere cells, not the
+          # native/emulated axis alone -- see docs/records/0044's own
+          # 2026-08-29 addendum. `v1.28.0-manylinux_2_28_s390x` (0044's
+          # own other entry, a real `-Werror=clobbered` diagnostic) is
+          # gone from this list: 0084's own 2026-09-02 addendum found the
+          # same diagnostic on multiple tags on both `s390x` and
+          # `riscv64`, in `ports/unix/main.c` this time rather than
+          # `mpy-cross`'s own copy, and suppressed it at the architecture
+          # level (`_ARCH_CFLAGS`) instead of by identifier -- confirmed
+          # live, s390x fully green across every tag in this matrix.
+          CIBMP_SKIP_INPUT: ${{ inputs.skip || 'v1.28.0-qemu-NETDUINO2 *musllinux_1_2_ppc64le' }}
           CIBMP_MAX_BUCKETS: ${{ inputs.max-buckets || '20' }}
         run: |
           set -euo pipefail

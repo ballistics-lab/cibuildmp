@@ -1029,7 +1029,7 @@ scheduled `test-all-platforms.yml` run since.
   <td>
 
   ✅[^emulatedci]<br>
-  ⚠️[^s390xclobbered]<br>
+  ✅[^emulatedci]<br>
   ✅[^emulatedci]
 
   </td>
@@ -1171,9 +1171,7 @@ scheduled `test-all-platforms.yml` run since.
 
 [^cross]: The one target that still cross-compiles: pypa publishes no mipsel image and there's no Docker official image for 32-bit mipsel, so there's nothing to be native to. Its toolchain is a pinned Bootlin tarball (`mips32el--glibc--stable-2025.08-1`, gcc 14.3.0, glibc 2.41-70, URL + sha256), not an apt cross-compiler: Debian 13 "Trixie" dropped the mipsel port and Ubuntu's archive lost `gcc-mipsel-linux-gnu`/`libc6-dev-mipsel-cross` with it. That is also why this cell is `manylinux_2_41_mipsel` and was `manylinux_2_39_mipsel` until 2026-09-01 — `2_39` was apt's cross-glibc version, and a real PEP 600 tag must not keep claiming a floor its image no longer has (record 0068).
 
-[^emulatedci]: `ppc64le`/`s390x`/`riscv64`, both libcs — native to no runner GitHub offers, so still QEMU-emulated, but no longer untested: `test-all-platforms.yml`'s own `unix-emulated` entry gives all six a real `test-emulated` CI leg on its weekly schedule (or manual dispatch) now (nine of the twelve (cell, tag) pairs green; the other three are the two ⚠️ rows below). Point `CIBMP_UNIX_<TARGET>_DOCKER_IMAGE` at a locally-built image, or an emulated one, to work on one of these locally. Record 0044's own 2026-08-29 addendum.
-
-[^s390xclobbered]: `v1.28.0` only — `v1.29.0` of the identical cell is the ✅ above it. `mpy-cross`'s own `main.c` fails a real GCC `-Werror=clobbered` diagnostic specific to s390x's own register allocation around a `longjmp` call site (`parse_integer()`'s locals); `v1.29.0`'s `main.c` does not trip it. Skipped by exact identifier (`v1.28.0-manylinux_2_28_s390x`) in `test-all-platforms.yml` until fixed — not a QEMU/emulation problem, a real compile-time diagnostic. Record 0044's own 2026-08-29 addendum.
+[^emulatedci]: `ppc64le`/`s390x`/`riscv64`, both libcs — native to no runner GitHub offers, so still QEMU-emulated, but no longer untested: `test-all-platforms.yml`'s own `unix-emulated` entry gives all six a real `test-emulated` CI leg on its weekly schedule (or manual dispatch) now (eleven of the twelve (cell, tag) pairs green; the other one is the ⚠️ row below). Point `CIBMP_UNIX_<TARGET>_DOCKER_IMAGE` at a locally-built image, or an emulated one, to work on one of these locally. Record 0044's own 2026-08-29 addendum; `s390x`'s own real `-Werror=clobbered` diagnostic (this footnote's own ⚠️ row until 2026-09-02) is fixed and confirmed green across every tag — record 0084's own 2026-09-02 addendum.
 
 [^ppc64lerelocation]: Both tags. `mpy-cross` builds cleanly inside the image; it fails when QEMU actually *executes* it to freeze `argparse.py`: `Error relocating .../mpy-cross: unsupported relocation type 4/5`. A real gap in QEMU's own ppc64le user-mode emulation of this PIE binary's relocations, not a cibuildmp or MicroPython bug — the `manylinux_2_28_ppc64le` cell above, same emulator, is unaffected. Skipped by glob (`*musllinux_1_2_ppc64le`) in `test-all-platforms.yml` until fixed. Record 0044's own 2026-08-29 addendum.
 
