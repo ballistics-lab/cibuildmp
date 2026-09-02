@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`unix` builds failed outright on every clone-path tag that needs
+  `lib/libffi`** (no release tarball, e.g. `v1.30.0-preview`) with
+  `make: *** No rule to make target '../../lib/libffi/autogen.sh'`:
+  `ports/unix/Makefile`'s own `GIT_SUBMODULES += lib/libffi` sits behind
+  `ifeq ($(MICROPY_STANDALONE),1)`, and the `make submodules` step this
+  project runs on the clone path never passed that variable, so it
+  silently computed a *different*, incomplete submodule list than the
+  real build (which always sets `MICROPY_STANDALONE=1`) needs — the
+  submodule was simply never checked out. Live-caught on a full sweep
+  across every `unix` cell: `v1.20.0` through `v1.29.0` all have release
+  tarballs and were unaffected; only `v1.30.0-preview` takes the clone
+  path in that range, and every one of its `deplibs`-needing arches
+  failed the same way.
 - **`unix`'s clone path (a MicroPython tag with no release tarball, e.g.
   `v1.22.1`/`v1.30.0-preview`) now fetches each port's own `lib/`
   submodules by running that port's own `make submodules` — the command

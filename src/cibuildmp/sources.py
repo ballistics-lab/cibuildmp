@@ -233,7 +233,27 @@ def _clone(
             if not quiet:
                 print(f"  MicroPython {tag}: make -C ports/{port} submodules")
             subprocess.run(
-                ["make", "-C", str(dest / "ports" / port), "submodules"],
+                # `MICROPY_STANDALONE=1`: `unix`'s own `GIT_SUBMODULES +=
+                # lib/libffi` (ports/unix/Makefile) sits behind
+                # `ifeq ($(MICROPY_STANDALONE),1)` -- without it here,
+                # `make submodules` computes a *different*, incomplete
+                # `GIT_SUBMODULES` than the real build needs, silently
+                # skipping lib/libffi. Found live: a clone-path tag with
+                # no release tarball (v1.30.0-preview) failed deplibs with
+                # `No rule to make target '../../lib/libffi/autogen.sh'`
+                # -- the submodule was simply never checked out.
+                # `build_unix()` always passes `MICROPY_STANDALONE=1` now
+                # (every unix target, not just the ones that need static
+                # linking), so this matches the real build rather than
+                # guessing at it. A no-op for every other port -- none
+                # references this variable at all.
+                [
+                    "make",
+                    "-C",
+                    str(dest / "ports" / port),
+                    "MICROPY_STANDALONE=1",
+                    "submodules",
+                ],
                 check=True,
                 capture_output=quiet,
             )
