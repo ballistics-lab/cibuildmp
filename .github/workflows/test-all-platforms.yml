@@ -115,6 +115,14 @@ jobs:
       label: ${{ matrix.label }}
       build: ${{ matrix.build }}
       runner: ${{ matrix.runner }}
+      # The full matrix is the one caller that needs all three the other
+      # way round: a bucket keeps going after a failure, stays green so
+      # `aggregate-results` below is what renders it, and writes no step
+      # summary of its own -- twenty buckets each writing one is noise, and
+      # the aggregate job already renders the whole run.
+      keep_going: true
+      tolerate_failures: true
+      step_summary: false
 
   # No single job can render this: a matrix job's own outputs only ever
   # keep the *last* leg to finish, and `test-platforms.yml`'s own
