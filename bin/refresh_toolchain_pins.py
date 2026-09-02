@@ -176,7 +176,29 @@ def real_rows(build_platforms: dict, scope: str) -> list[tuple[str, str]]:
     carries a row for -- never a synthesised tag range, so a port that
     starts later than `[tags]`'s own floor (`nrf` at `v1.18`, `qemu` at
     `v1.24.0`) is never asked about a tag it never shipped a row for."""
-    if scope == "unix" or scope.startswith("natmod"):
+    if scope.startswith("natmod."):
+        # natmod is not an upstream port -- it has no `ports_<port>.yml` of
+        # its own for `refresh_toolchains.py` to read, so `toolchains.toml`
+        # carries no fact row whose `scope` is ever this exact string. What
+        # still applies is every `any`/`mpy-cross` threshold (`resolve_row`
+        # matches those regardless of `scope`), which is the real
+        # compiler-family constraint natmod's own cross-compiled arches hit.
+        # Passing this string through as `real_scope` -- rather than folding
+        # natmod into the `unix` scope the way this used to -- is what keeps
+        # a genuinely port-specific fact (`usermod.rp2`'s pico-sdk
+        # workaround) from leaking into an arch natmod builds itself.
+        image = scope.removeprefix("natmod.")
+        section = build_platforms["natmod"]
+        images = section["images"]
+        tags = sorted(
+            {
+                r["tag"]
+                for r in section["identifiers"]
+                if images.get(r["arch"]) == image and "gcc" in r
+            }
+        )
+        return [(t, scope) for t in tags]
+    if scope == "unix":
         section = build_platforms["natmod"]
         tags = sorted({r["tag"] for r in section["identifiers"]})
         return [(t, "unix") for t in tags]
@@ -192,7 +214,10 @@ def image_for(build_platforms: dict, port: str) -> str | None:
     """The `image` a usermod port's own build actually runs in -- several
     ports share one (`rp2`/`samd`/`nrf`/`stm32`/`mimxrt` all resolve to
     `arm_embedded`, record 0058), so the Dockerfile to check is never the
-    port's own name."""
+    port's own name. A `natmod.<image>` scope names its image directly --
+    natmod has no per-port indirection to resolve it through."""
+    if port.startswith("natmod."):
+        return port.removeprefix("natmod.")
     return build_platforms.get("usermod", {}).get(port, {}).get("image")
 
 
@@ -220,11 +245,20 @@ def main(argv: list[str] | None = None) -> int:
     facts = _load_toml(FACTS / "toolchains.toml")["toolchains"]["requirements"]
     build_platforms = _load_toml(RESOURCES / "build-platforms.toml")
 
+    # natmod contributes no `toolchains.toml` fact rows of its own (it is
+    # not an upstream port `refresh_toolchains.py` can read a workflow for),
+    # so its scopes never appear in `facts` -- added here from the one
+    # thing that does exist for it: `build-platforms.toml`'s own image map,
+    # narrowed to images `DOCKERFILE_PIN` actually knows how to check.
+    natmod_images = set(build_platforms["natmod"]["images"].values()) & set(
+        DOCKERFILE_PIN
+    )
     scopes = (
         [args.scope]
         if args.scope
         else sorted(
             {r["scope"] for r in facts if r["scope"] not in ("any", "mpy-cross")}
+            | {f"natmod.{image}" for image in natmod_images}
         )
     )
 

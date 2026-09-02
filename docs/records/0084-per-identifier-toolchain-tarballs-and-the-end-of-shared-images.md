@@ -237,9 +237,7 @@ the Bootlin toolchain this session tested them against; and whether
    this is also how [0082]'s nine tags get answered for every port at once.
 3. **Drop the `gcc` column from the remaining nine scopes.** It restates a tag fact about a
    thousand times; removing it from `unix` cost nothing.
-4. **Teach the checker about `natmod`.** `toolchains.toml` has no `natmod*` scope, so
-   `refresh_toolchain_pins.py` never checks it: its rows say 14.2.1 while `arm_embedded` ships
-   15.2.1, and nothing compares them.
+4. ~~Teach the checker about `natmod`.~~ **Done this session** -- see below.
 5. **Run-time `dnf install libffi-devel` for the five `manylinux_2_28_*` cells**, which is the
    only reason those images are published at all. Seven `musllinux` cells need nothing --
    verified: pypa's Alpine images ship `libffi-dev` already, which is why they run on pypa's
@@ -252,6 +250,28 @@ the Bootlin toolchain this session tested them against; and whether
   generated header. Both halves cost an hour here.
 - `--keep-going` plus `continue-on-error` means a green run can contain red cells. The per-bucket
   JSON report artifact is the authority, never the job colour.
+
+**Item 4 done this session: the checker now knows about `natmod`.** `refresh_toolchain_pins.py`'s
+`real_rows()` used to fold every `natmod` row -- x86/x64 host arches and the arm/riscv cross arches
+alike -- into the `unix` scope, and `image_for()` had no case for a `natmod.*` scope at all, so
+`image` resolved to `None` and `--check` silently skipped every one of them. `natmod`'s own
+`arch -> image` map already says which of its rows build in `arm_embedded`/`riscv_embedded` (the
+only two images `DOCKERFILE_PIN` knows how to check); `main()` now seeds those as
+`natmod.arm_embedded`/`natmod.riscv_embedded` scopes even though `toolchains.toml` carries no fact
+row for either name, and `real_rows()`/`image_for()` resolve them straight off that map instead of
+through the unrelated `unix` scope. No new `toolchains.toml` rows were needed for this: the
+`any`/`mpy-cross` thresholds `resolve_row()` already matches regardless of `scope` are exactly the
+constraint `natmod`'s cross arches hit.
+
+`--check` goes from 71 problems to **92**: 18 new `natmod.arm_embedded` rows (every pre-`v1.26.0`
+tag) and 3 new `natmod.riscv_embedded` rows (`v1.24.0`-`v1.25.0`). `natmod`'s own `gcc` column
+already recorded the correct `14.2.1-1.1`/`15.2.1-1.1` split -- nobody had touched it since it
+predates this record -- but nothing had ever compared that claim to what `arm_embedded`/
+`riscv_embedded` actually ship, so it was silently wrong on every one of those rows. Not fixed
+here -- `natmod`'s `gcc` field is read by nothing in `src/cibuildmp` today, same as `unix`'s was
+before `4e222ab` -- so this is visibility only. [0085]'s own `toolchain_version` model is the real
+fix, and it should cover `natmod`'s rows too when it lands, not just the seven `usermod` ports its
+own table names.
 
 ## The plan, revised — what actually gets done
 
