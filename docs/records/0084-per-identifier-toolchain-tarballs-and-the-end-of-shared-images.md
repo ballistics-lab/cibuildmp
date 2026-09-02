@@ -219,6 +219,62 @@ infrastructure rather than a `cibuildmp.toml` knob is unchanged by any of this.
    without it), which is exactly why the layer this project publishes today exists and what step 3
    replaces.
 
+   **Then the ladders were read for every other cell, and they made the table simpler still --
+   by first making it impossible.** Read from the registry without pulling a layer:
+
+   | cell | dated tags | ladder |
+   | --- | --- | --- |
+   | `x86_64`, `aarch64`, `ppc64le` | 563-573, from 2022-05-30 | `gcc-toolset-11` -> `12` -> `14` |
+   | `s390x` | 531, from 2022-09-03 | same |
+   | **`i686`** | **173, only from 2025-06-17** | **`14` only** |
+   | `armv7l` | 242, from 2025-02-08 | (2025 onward) |
+   | `riscv64` | 141, from 2025.07.20 | (2025 onward) |
+
+   So `i686`, `armv7l` and `riscv64` have **no older image to pin at all** -- and `gcc-toolset-14`
+   is exactly what `v1.20.0` fails on. "Take the oldest available" does not save those cells;
+   there is no available image that works.
+
+   **What saves them is cheaper than an image, and it was verified rather than assumed:**
+   `CFLAGS_EXTRA=-Wno-error=dangling-pointer` builds `v1.20.0` on the *current* image, `mpy-cross`
+   and the full port, artifact floor `GLIBC_2.25`. The same diagnostic fires identically on
+   `musllinux` (Alpine 3.22.5, gcc **14.2.0**), so the boundary is a property of the compiler
+   version, not of the distribution.
+
+   **musl needs one more, and it is a weaker claim than the first**: `-Wno-error=cpp`, because
+   `lib/berkeley-db-1.xx/PORT/include/db.h` -- a vendored third-party header, not MicroPython's own
+   code -- raises `#warning usage of non-standard #include <sys/cdefs.h> is deprecated`. With both,
+   `v1.20.0` builds on the current `musllinux_1_2_x86_64`. So the per-row fact is a short list of
+   named relaxations, not a single flag, and the list is per (tag, libc) rather than per tag.
+
+   **That collapses the design one step further than the pin did.** Every cell takes **one image,
+   the current one**, for all fifteen tags; what varies per row is not a pinned date but a named
+   relaxation for the one tag that needs it. Three things follow:
+
+   - the `i686`/`armv7l`/`riscv64` gap closes by disappearing, rather than by an argued fallback;
+   - nothing depends on pypa keeping four-year-old dated tags pullable -- `i686` already proves
+     they do not always exist, so a design resting on them was resting on an accident;
+   - it is closer to upstream's own position than pinning would be: MicroPython later fixed
+     `py/stackctrl.c` itself, so this does not work around a compiler defect, it declines to hold
+     a 2023 tag to a diagnostic that did not exist when it shipped.
+
+   **The digest pin stays, and this is the correction to the paragraph above.** "Every cell takes
+   the current image" is about *which* image a row names, not about whether the row names one:
+   without a per-row digest, the compiler moves under rows that were already verified, which is
+   precisely what this record's own premise forbids. So each row pins a digest even while every
+   row today pins the *same* digest -- the relaxation removes the need for an *older* image in the
+   cells that have none, it does not remove the pin.
+
+   **And the floor is verified on the artifact, never trusted from the image name.** Measured this
+   session: `v1.20.0` produces a binary needing `GLIBC_2.25`, `v1.29.0` one needing `GLIBC_2.28`.
+   The requirement rises with the code and the toolchain while the image name stays
+   `manylinux_2_28` -- so a future image whose headers push a build past 2.28 would leave the
+   identifier claiming a floor the artifact no longer meets, silently. `verify_unix_floor()`
+   ([0044]) already reads the real binary's own `GLIBC_x.y` requirement; under this design it stops
+   being a safety net and becomes the gate.
+
+   **A pinned older image stays available as the fallback** for any future tag where a relaxation
+   is not enough, in the four cells that have the history for it.
+
 2. **Move the key.** `[usermod.unix].images.<arch>` gives way to a per-row `image` field;
    `dockerrun.image_for()` resolves it for the row rather than for the architecture.
    `bin/refresh_usermod_boards.py`'s own `carry_forward()` already protects a per-row fact from
