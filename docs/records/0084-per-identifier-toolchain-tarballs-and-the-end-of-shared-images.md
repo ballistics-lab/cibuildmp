@@ -430,6 +430,53 @@ is purely cibuildmp's own mechanics.
 confirmed live incidents. It is an open question, not a verified fact, which is exactly why it
 belongs in Phase 1 as a checklist item (added there) rather than being silently treated as safe.
 
+### Weighed and rejected: vendor our own image, but bake every Bootlin release into it
+
+Raised directly after the decision above ("maybe vendor our own after all, but bake *all* the
+versions in at once — a `bootlin-musllinux.Dockerfile`?"), and answered by measuring rather than
+estimating, since the whole question is a size question. Measured live, 2026-09-02, against
+`toolchains.bootlin.com` itself:
+
+- **One toolchain is 450 MiB on disk.** `x86-64--glibc--stable-2025.08-1` is 89 MiB compressed and
+  **450 MiB extracted** — downloaded and unpacked, not inferred (ratio 5.06x).
+- **There are seven stable releases per (arch, libc)**, not one or two: `2021.11-5`, `2022.08-1`,
+  `2023.08-1`, `2023.11-1`, `2024.02-1`, `2024.05-1`, `2025.08-1`. The older four are `.tar.bz2`
+  and are *larger* compressed than the newer `.tar.xz` ones (133-155 MiB against 82-88), so they
+  do not extract any smaller.
+- **For `x86-64` alone, glibc + musl, all seven releases each: 1 690 MiB compressed** (893 glibc,
+  797 musl), roughly **6.3 GB extracted**.
+
+What that makes each proposed shape:
+
+| shape | contents | size |
+| --- | --- | --- |
+| one image per libc, all arches, all releases (the proposal as put) | 5 arches x 7 releases | **~16 GB** |
+| one image per (arch, libc), i.e. today's fifteen cells | 7 releases each | ~3.2 GB each, **~47 GB** published |
+| for comparison: the largest image this project has today | `riscv_embedded` | 2.06 GB |
+| for comparison: the monolithic `natmod.Dockerfile` [0058] split up *because of its size* | | 4.09 GB |
+
+So the cheapest baked variant is four times the thing [0058] already judged too big and broke
+apart.
+
+**Size is not even the decisive argument.** Baking reintroduces exactly the artifact the decision
+above removes: adding a tag, or correcting one row's release, becomes a rebuild and a repin of a
+multi-gigabyte image instead of a one-line config change, and [0046]'s own "nothing notices when
+a pin goes stale" comes back with it. Every job also pulls the whole image to use one 450 MiB
+toolchain out of it, where the mounted cache costs 89 MiB on a cold runner and nothing on a warm
+one.
+
+**And it is premature in a way the numbers alone do not show.** `unix` has 225 identifiers across
+15 tags, and *which* Bootlin releases they actually need is what Phase 1 exists to determine.
+An image baked before that answer exists is wrong the moment the answer arrives.
+
+**The obvious middle ground fails for a reason already recorded:** baking exactly the one release
+each identifier needs means one image per identifier — 70+ of them for `unix` alone, the same
+fleet explosion [0058] rejected in a different form.
+
+**The one real advantage of baking** — no download on a cold runner — is available without any of
+this, by caching `cache_root()` with `actions/cache` on top of the mounted-cache model. That is
+worth doing on its own merits, and it needs no image at all.
+
 ### What this changes in the phased plan above
 
 - **Phase 0 step 1 is no longer "write the real `docker/<generic-base>.Dockerfile`."** Under this
