@@ -229,6 +229,38 @@ def test_deplibs_command_shape(monkeypatch):
     assert "MICROPY_STANDALONE=1" in script
 
 
+def test_deplibs_fixup_queries_the_real_multi_os_directory(monkeypatch):
+    # Not hardcoded to `lib64`: `gcc -print-multi-os-directory` was
+    # `../lib64` on every RHEL-family image this fixup was first written
+    # against, but riscv64's own image answers `../lib64/lp64d` (its own
+    # ABI-variant subdirectory) -- found live once a tag whose libffi
+    # pin actually supports riscv64 reached this step, and a fixup that
+    # only checked for `out/lib64/libffi.a` missed it entirely. The
+    # script asks the compiler that will actually be used, not one
+    # value predicted in advance.
+    # riscv64 is non-native on this (x86_64) test host, so dockerrun.run()
+    # would otherwise start a real emulation probe first -- irrelevant to
+    # what this test checks (record 0043's own probe, its own coverage
+    # in test_usermod_dockerrun.py).
+    monkeypatch.setattr("cibuildmp.dockerrun._probe_platform", lambda *a, **k: "")
+    calls = []
+    monkeypatch.setattr(
+        "cibuildmp.dockerrun.subprocess.run",
+        lambda cmd, **k: calls.append(cmd),
+    )
+
+    run_unix_deplibs(
+        opts("manylinux_2_39_riscv64"),
+        Path("/gh/ws/mpy"),
+        docker_image=_FAKE_UNIX_IMAGE,
+    )
+
+    script = calls[0][-1]
+    assert "gcc -print-multi-os-directory" in script
+    assert "multi_os_dir" in script
+    assert "lib64" not in script  # no hardcoded fallback value anywhere
+
+
 def test_every_upstream_arch_plus_mipsel_has_settings():
     # cibuildwheel's own seven, under its own names (0043 step 4), plus
     # cibuildmp's own mipsel. `x64`/`x86`/`armhf` are gone as spellings.

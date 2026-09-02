@@ -524,21 +524,33 @@ def run_unix_deplibs(
 
     Followed by a symlink fixup, not baked into upstream's own recipe:
     `lib/libffi/configure.ac` installs to `$(toolexeclibdir)`, which is
-    `${libdir}/$(gcc -print-multi-os-directory)` -- `../lib64` on a
+    `${libdir}/$(gcc -print-multi-os-directory)` -- a relative path
+    fragment (from `out/lib`, autoconf's own `libdir` under
+    `--prefix=$$PWD/out`) that names wherever *this* compiler's own
+    multiarch convention actually puts things, while
+    `ports/unix/Makefile`'s own `LIBFFI_LDFLAGS` unconditionally expects
+    `out/lib/libffi.a`. Queried live with the same `$(CC)` deplibs
+    itself just built with, not hardcoded to one value: `../lib64` on a
     RHEL-family host (`manylinux_2_28_{x86_64,aarch64,ppc64le,s390x,
-    i686}`, confirmed live against the real image), landing libffi.a at
-    `out/lib64/libffi.a` while `ports/unix/Makefile`'s own
-    `LIBFFI_LDFLAGS` unconditionally expects `out/lib/libffi.a` --
-    `../lib` on Debian/Alpine hosts (`musllinux_1_2_x86_64`, same live
-    check), which normalizes right back to `out/lib`, matching upstream
-    and needing no fixup at all. `deplibs` has no hook to pass
-    `--libdir=`/`--disable-multi-os-directory` through to libffi's own
-    `configure` (`$(TOP)/lib/libffi/configure ... --prefix=$$PWD/out`,
-    no other args, hardcoded in `ports/unix/Makefile`), so this is the
-    only lever available short of patching that submodule.
+    i686}`), `../lib64/lp64d` on `riscv64` (its own ABI-variant
+    subdirectory -- one level deeper than the RHEL case, found live once
+    a tag whose `lib/libffi` pin actually supports `riscv64` reached this
+    step at all, see `_riscv64_ffi_unported()`), `../lib` on
+    Debian/Alpine hosts (`musllinux_1_2_x86_64`), which normalizes right
+    back to `out/lib` and needs no fixup at all. A single hardcoded
+    `../lib64` check (this function's own first version) is exactly the
+    kind of per-arch table this project keeps finding reasons not to
+    maintain -- see `probe_supported_cflags()`'s identical reasoning for
+    live-asking the compiler instead of predicting its answer.
+    `deplibs` has no hook to pass `--libdir=`/`--disable-multi-os-directory`
+    through to libffi's own `configure` (`$(TOP)/lib/libffi/configure
+    ... --prefix=$$PWD/out`, no other args, hardcoded in
+    `ports/unix/Makefile`), so this is the only lever available short of
+    patching that submodule.
     """
     settings = unix_arch_settings(opts.target)
     build_dir = opts.build_dir.as_posix()
+    compiler = f"{settings.cross_compile}gcc"
     make_command = [
         "make",
         "-C",
@@ -552,10 +564,11 @@ def run_unix_deplibs(
     ]
     libffi_out = f"{build_dir}/lib/libffi/out"
     fixup = (
+        f"multi_os_dir=$({shlex.quote(compiler)} -print-multi-os-directory) && "
         f"[ -e {shlex.quote(libffi_out)}/lib/libffi.a ] || "
-        f"[ ! -e {shlex.quote(libffi_out)}/lib64/libffi.a ] || "
+        f'[ ! -e {shlex.quote(libffi_out)}/lib/"$multi_os_dir"/libffi.a ] || '
         f"{{ mkdir -p {shlex.quote(libffi_out)}/lib && "
-        f"ln -sf ../lib64/libffi.a {shlex.quote(libffi_out)}/lib/libffi.a; }}"
+        f'ln -sf "$multi_os_dir/libffi.a" {shlex.quote(libffi_out)}/lib/libffi.a; }}'
     )
     command = [
         "sh",

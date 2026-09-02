@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`unix` builds on `riscv64` (any tag whose `lib/libffi` pin actually
+  supports it, `v1.24.0`+) failed at the final link with `ld: cannot
+  find .../lib/libffi/out/lib/libffi.a`**, the same class of bug the
+  RHEL `../lib64` fixup already covered — `deplibs`' own symlink fixup
+  only ever checked one hardcoded path
+  (`out/lib64/libffi.a`), but `riscv64`'s own `gcc -print-multi-os-directory`
+  answers `../lib64/lp64d` (its own ABI-variant subdirectory), one level
+  deeper than the RHEL case. The fixup now queries the real value live
+  with the same compiler `deplibs` itself just used, instead of a value
+  predicted in advance — live-verified against the real
+  `manylinux_2_39_riscv64` image end to end (a full build, real link,
+  real binary).
 - **`unix` builds on `riscv64` failed outright on every tag through
   `v1.23.0`** with `configure: error: "libffi has not been ported to
   riscv64-unknown-linux-gnu."`: `lib/libffi`'s own submodule pin, on
