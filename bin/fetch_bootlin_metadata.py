@@ -2,7 +2,7 @@
 
 """Print Bootlin's own toolchain release metadata as TOML.
 
-    bin/fetch_bootlin_metadata.py                  # rewrites resources/bootlin.toml
+    bin/fetch_bootlin_metadata.py                  # rewrites the facts table
     bin/fetch_bootlin_metadata.py --stdout         # print instead, review before writing
     bin/fetch_bootlin_metadata.py --arch x86-64 --flavour stable --stdout
     bin/fetch_bootlin_metadata.py --sizes          # adds size_bytes, one HEAD per tarball
@@ -35,7 +35,7 @@ both published by Bootlin next to the tarball itself:
 deliberate.** "Use stable only" is a *policy* -- and an argued one, since
 `bleeding-edge`'s sole exclusive offering at the top of the ladder is
 gcc 15.1.0, which is precisely the version every `breaks-with` row in
-`resources/toolchains.toml` names as breaking MicroPython before v1.26.0.
+`docs/reference/toolchain-facts/toolchains.toml` names as breaking MicroPython before v1.26.0.
 A policy is not evidence, and a table that silently omitted what was
 rejected could not be used to re-check the argument later. `uclibc` is
 excluded by default because nothing here targets it -- pass `--libc
@@ -71,7 +71,7 @@ BASE = "https://toolchains.bootlin.com/downloads/releases/toolchains"
 # `bin/refresh_docs.py`'s own rewrite-in-place shape is the right one.
 # `--stdout` is still there for the case where a diff is wanted first.
 DEFAULT_OUTPUT = (
-    Path(__file__).resolve().parent.parent / "src/cibuildmp/resources/bootlin.toml"
+    Path(__file__).resolve().parent.parent / "docs/reference/toolchain-facts/bootlin.toml"
 )
 
 # Every architecture this project has a real target for, and why. Bootlin

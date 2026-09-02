@@ -13,9 +13,16 @@ being a one-off by living here.
 
 from __future__ import annotations
 
-from cibuildmp import resources
+import tomllib
+from pathlib import Path
 
-RELEASES = resources.bootlin_releases()["bootlin"]["releases"]
+# Evidence under `docs/reference/`, not a packaged resource -- nothing in
+# `src/cibuildmp` loads it, so it is read by path here.
+FACTS = (
+    Path(__file__).resolve().parent.parent / "docs" / "reference" / "toolchain-facts"
+)
+with (FACTS / "bootlin.toml").open("rb") as _handle:
+    RELEASES = tomllib.load(_handle)["bootlin"]["releases"]
 
 
 def test_table_is_not_empty():

@@ -5,7 +5,7 @@ that would fill a new `toolchain` column in `build-platforms.toml`'s own
 `identifiers`, the same way `idf_version` already is a per-row fact for
 `esp32`.
 
-Third stage of the pipeline `resources/toolchains.toml`'s own header
+Third stage of the pipeline `docs/reference/toolchain-facts/toolchains.toml`'s own header
 already describes: `[tags]` names a MicroPython release ->
 `refresh_natmod_archs.py`/`refresh_usermod_boards.py` walk it into
 `build-platforms.toml`'s real `(tag, scope, arch/board)` rows ->
@@ -67,7 +67,7 @@ whatever a Dockerfile currently pins for that row's own image -- exit
 nonzero and name every row outside its own window, so this class of drift
 fails a build instead of shipping silently the way it did here.
 
-Needs `resources/toolchains.toml` already generated (`bin/refresh_toolchains.py`)
+Needs `docs/reference/toolchain-facts/toolchains.toml` already generated (`bin/refresh_toolchains.py`)
 and current -- this script trusts it, it does not regenerate it.
 """
 
@@ -81,6 +81,10 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 RESOURCES = REPO / "src" / "cibuildmp" / "resources"
+# The compiler-fact table is evidence, not a packaged resource: nothing in
+# `src/cibuildmp` loads it at runtime, and its own header has always said so.
+# It lives under `docs/reference/` for that reason.
+FACTS = REPO / "docs" / "reference" / "toolchain-facts"
 
 # The currently-shared, image-level pins this script's own `--check` can
 # compare a resolved window against until a real `toolchain` column exists
@@ -213,7 +217,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    facts = _load_toml(RESOURCES / "toolchains.toml")["toolchains"]["requirements"]
+    facts = _load_toml(FACTS / "toolchains.toml")["toolchains"]["requirements"]
     build_platforms = _load_toml(RESOURCES / "build-platforms.toml")
 
     scopes = (
