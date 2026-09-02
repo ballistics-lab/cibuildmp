@@ -2,11 +2,11 @@
 
 [![SWUbanner]][SWUBadge]
 [![license]][license-url]
+![micropython-tag]
 [![pypi version]][PyPiUrl]
 [![python versions]][PyPiUrl]
 [![pre-commit]][pre-commit-workflow]
 [![coverage]][CodecovUrl]
-![micropython-tag]
 
 > [!WARNING]
 > Pre-1.0.0 and still alpha software — the config schema and CLI can change
@@ -1324,7 +1324,7 @@ PyPI unless you pin a version there too.
 <!-- REUSABLE LINKS -->
 
 [micropython-tag]:
-https://img.shields.io
+https://img.shields.io/badge/v1.20.0%2B-orange?logo=micropython&label=micropython
 
 [license]:
 https://img.shields.io/github/license/ballistics-lab/cibuildmp
