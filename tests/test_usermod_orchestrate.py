@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -433,9 +434,13 @@ def test_build_groups_by_tag_and_fetches_once_per_group(tmp_path, monkeypatch):
         # unix_make_command() always carries its own `BUILD=<build_dir>`
         # entry -- read it back rather than hardcoding one, since this
         # test runs the same command shape against two different
-        # mpy_dirs (one per tag).
-        build_arg = next(a for a in cmd if a.startswith("BUILD="))
-        build_dir = Path(build_arg.removeprefix("BUILD="))
+        # mpy_dirs (one per tag). Two different shapes reach here now:
+        # the main build's own bare argv, and run_unix_deplibs()'s own
+        # `sh -c "make ... BUILD=... && <fixup>"` (its own docstring) --
+        # a regex over the joined command covers both.
+        match = re.search(r"BUILD=(\S+)", " ".join(cmd))
+        assert match
+        build_dir = Path(match.group(1))
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
 

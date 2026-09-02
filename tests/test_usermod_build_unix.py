@@ -143,8 +143,13 @@ def test_deplibs_command_shape(monkeypatch):
         opts("manylinux_2_41_mipsel"), Path("/gh/ws/mpy"), docker_image=_FAKE_UNIX_IMAGE
     )
 
-    assert calls[0][-1] == "deplibs"
-    assert "MICROPY_STANDALONE=1" in calls[0]
+    # Wrapped in `sh -c` now, not a bare argv: the fixup that follows
+    # `make ... deplibs` (see run_unix_deplibs()'s own docstring) has to
+    # run in the same container invocation.
+    assert calls[0][-3:-1] == ["sh", "-c"]
+    script = calls[0][-1]
+    assert "deplibs" in script
+    assert "MICROPY_STANDALONE=1" in script
 
 
 def test_every_upstream_arch_plus_mipsel_has_settings():
@@ -221,7 +226,8 @@ def test_mipsel_runs_deplibs_before_build(monkeypatch, tmp_path, arch):
 
     build_unix_fn(opts(arch, build_dir=build_dir), tmp_path / "mpy")
 
-    assert run_calls[0][-1] == "deplibs"
+    assert run_calls[0][-3:-1] == ["sh", "-c"]
+    assert "deplibs" in run_calls[0][-1]
     assert any("USER_C_MODULES" in arg for arg in run_calls[1])
 
 
@@ -350,7 +356,11 @@ def test_unix_docker_image_skips_host_toolchain_probe(monkeypatch, tmp_path):
     for docker_command in calls:
         assert docker_command[:3] == ["docker", "run", "--rm"]
         assert "manylinux_2_28_aarch64:local" in docker_command
-        assert "make" in docker_command
+    # calls[0] (deplibs) is `sh -c "make ... && <fixup>"`; calls[1] (the
+    # main build) is a bare `make` argv -- see run_unix_deplibs()'s own
+    # docstring for why only deplibs needs the wrapper.
+    assert "make" in calls[0][-1]
+    assert "make" in calls[1]
 
 
 def test_unix_docker_image_mounts_mpy_dir_and_user_c_modules(monkeypatch, tmp_path):

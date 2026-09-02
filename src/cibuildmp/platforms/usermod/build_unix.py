@@ -409,17 +409,45 @@ def run_unix_deplibs(
     `pkg-config` resolving `-lffi`; it comes back for all eight so the
     submodule list and the link mode stop being arch-conditional facts.
     See `UNIX_ARCH_SETTINGS`'s own header for the full argument and cost.
+
+    Followed by a symlink fixup, not baked into upstream's own recipe:
+    `lib/libffi/configure.ac` installs to `$(toolexeclibdir)`, which is
+    `${libdir}/$(gcc -print-multi-os-directory)` -- `../lib64` on a
+    RHEL-family host (`manylinux_2_28_{x86_64,aarch64,ppc64le,s390x,
+    i686}`, confirmed live against the real image), landing libffi.a at
+    `out/lib64/libffi.a` while `ports/unix/Makefile`'s own
+    `LIBFFI_LDFLAGS` unconditionally expects `out/lib/libffi.a` --
+    `../lib` on Debian/Alpine hosts (`musllinux_1_2_x86_64`, same live
+    check), which normalizes right back to `out/lib`, matching upstream
+    and needing no fixup at all. `deplibs` has no hook to pass
+    `--libdir=`/`--disable-multi-os-directory` through to libffi's own
+    `configure` (`$(TOP)/lib/libffi/configure ... --prefix=$$PWD/out`,
+    no other args, hardcoded in `ports/unix/Makefile`), so this is the
+    only lever available short of patching that submodule.
     """
     settings = unix_arch_settings(opts.target)
-    command = [
+    build_dir = opts.build_dir.as_posix()
+    make_command = [
         "make",
         "-C",
         _unix_dir(mpy_dir).as_posix(),
         f"VARIANT={opts.variant}",
-        f"BUILD={opts.build_dir.as_posix()}",
+        f"BUILD={build_dir}",
         f"CROSS_COMPILE={settings.cross_compile}",
         "MICROPY_STANDALONE=1",
         "deplibs",
+    ]
+    libffi_out = f"{build_dir}/lib/libffi/out"
+    fixup = (
+        f"[ -e {shlex.quote(libffi_out)}/lib/libffi.a ] || "
+        f"[ ! -e {shlex.quote(libffi_out)}/lib64/libffi.a ] || "
+        f"{{ mkdir -p {shlex.quote(libffi_out)}/lib && "
+        f"ln -sf ../lib64/libffi.a {shlex.quote(libffi_out)}/lib/libffi.a; }}"
+    )
+    command = [
+        "sh",
+        "-c",
+        shlex.join(make_command) + " && " + fixup,
     ]
     from ... import dockerrun
 
