@@ -152,8 +152,24 @@ tarball URL+sha256) lives *beside* the identifier in the same row, the same way 
 `pre_checkout` already do for `esp32` — it was never a candidate for the identifier string itself.
 
 **One real, argued change: the glibc/musl floor number drops out of `usermod.unix`'s own
-identifier** (`v1.29.0-manylinux_2_28-x86_64` → `v1.29.0-manylinux-x86_64`), decided directly in
-conversation, not assumed. The floor axis was only *independently selectable* because pypa
+identifier**, decided directly in conversation, not assumed. Written against the real strings in
+`build-platforms.toml` rather than approximated, because the first draft of this paragraph
+spelled them a third way that exists nowhere:
+
+| | today | under this record |
+| --- | --- | --- |
+| `arch` | `manylinux_2_28_x86_64` | `manylinux-x86_64` |
+| | `musllinux_1_2_x86_64` | `musllinux-x86_64` |
+| `identifier` (`{tag}-{arch}`) | `v1.20.0-manylinux_2_28_x86_64` | `v1.20.0-manylinux-x86_64` |
+
+**The hyphen is upstream's own spelling, not a departure from it**, which is why it was chosen
+over `manylinux_x86_64`: cibuildwheel names this exact (family, architecture) pair
+`manylinux-x86_64-image` in its own options, a fact `dockerrun.py`'s own comment already cites.
+It costs two things, both named here rather than discovered later. `split_tag()` finds the
+architecture by the suffix `f"_{arch}"`, which `manylinux-x86_64` no longer ends with, so that
+rule has to change with this. And the string stops being PEP 600-shaped -- `build_unix.py`'s own
+comment observes that `manylinux_2_28_x86_64` is a real platform tag -- which it can afford to
+be, since once the floor is gone it is no longer making a PEP 600 claim at all. The floor axis was only *independently selectable* because pypa
 publishes several floors simultaneously for any given release, unrelated to which floor a
 toolchain choice implies — cibuildwheel's own real manylinux model, [0043]'s own stated
 inspiration. **Bootlin does not have that shape**: one release date bundles one specific glibc
