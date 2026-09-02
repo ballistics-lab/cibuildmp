@@ -31,10 +31,10 @@ by group name). That digest is the same value
 pinned digest" step; this script exists so a maintainer can recover it
 afterwards -- or fill in a whole freshly-published matrix at once -- rather
 than copying digests out of a job summary by hand. A group name that is
-itself a unix platform tag with no `ghcr.io/...` image (nine cells add
-nothing over pypa's own base, so they were never published at all) is
-mirrored straight from `pinned_pypa_images.toml`'s matching cell instead of
-queried on GHCR.
+itself a unix platform tag with no `ghcr.io/...` image (fourteen of
+`unix`'s own fifteen cells add nothing over pypa's own base -- every one
+but `mipsel` -- so they were never published at all) is mirrored straight
+from `pinned_pypa_images.toml`'s matching cell instead of queried on GHCR.
 
 Neither table is rewritten by CI. Record 0033: cibuildmp never builds one
 of these images itself and never repoints its own pins on its own; a pin
@@ -221,14 +221,16 @@ def update_images(*, check: bool) -> int:
     for name, reference in data.get("image_group", {}).items():
         pypa_reference = _pypa_mirror(name, pypa)
         # A cell whose current reference is not `ghcr.io/...` has no
-        # cibuildmp-published image behind it at all: nine `unix` cells
-        # (`armv7l`'s `manylinux_2_31`, `riscv64`'s `manylinux_2_39`, every
-        # `musllinux_1_2` floor) were verified to be a bare `FROM` and
-        # nothing else, so their own Dockerfile and GHCR package were
+        # cibuildmp-published image behind it at all: fourteen `unix`
+        # cells (`armv7l`'s `manylinux_2_31`, `riscv64`'s `manylinux_2_39`,
+        # every `musllinux_1_2` floor, and -- once `MICROPY_STANDALONE=1`
+        # went universal and `libffi-devel` stopped being read -- every
+        # `manylinux_2_28_*` floor too) were verified to be a bare `FROM`
+        # and nothing else, so their own Dockerfile and GHCR package were
         # deleted rather than kept as an idle copy -- their pin here is
         # just `pinned_pypa_images.toml`'s own cell, mirrored. Asking GHCR
         # about a package that was never published would only ever print
-        # "not published yet" for these nine, forever.
+        # "not published yet" for these fourteen, forever.
         if pypa_reference is not None and not reference.startswith("ghcr.io/"):
             if pypa_reference == reference:
                 continue

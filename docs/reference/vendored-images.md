@@ -57,15 +57,24 @@ about that requires cibuildmp code to change.
 keyed.** The group name *is* a real PEP 600/656 platform tag
 (`manylinux_2_28_x86_64`, not a private spelling), because [0031]/[0043]
 decided the floor belongs in the name, not buried in a `FROM` line nobody
-checks. Fifteen cells total, but **only five have a real cibuildmp-published
-layer** — the rest are a bare mirror of the pypa base, verified to need
-nothing added, so their own Dockerfile and GHCR package were deleted rather
-than kept as an idle copy:
+checks. Fifteen cells total, but **only `mipsel` has a real
+cibuildmp-published layer** — every other one is a bare mirror of the pypa
+base, verified to need nothing added, so their own Dockerfile and GHCR
+package were deleted rather than kept as an idle copy. The five
+`manylinux_2_28_*` cells used to be the exception (`docker/manylinux_2_28_*.Dockerfile`
+adding `libffi-devel` on top, the one thing `pkg-config --libs libffi`
+needed to resolve on a stock image): that stopped mattering once
+`MICROPY_STANDALONE=1` went universal for `unix` — `ports/unix/Makefile`
+now always builds `lib/libffi` from source and never reaches
+`pkg-config` at all, so `libffi-devel` was never read by anything.
+Live-verified against a bare `quay.io/pypa/manylinux_2_28_x86_64` with no
+`libffi-devel` installed: a real `ports/unix` build, `deplibs` included,
+still succeeds end to end.
 
 | Cell | Reference | Has its own `ghcr.io/ballistics-lab/...` layer? |
 | --- | --- | --- |
-| `manylinux_2_28_x86_64` / `_i686` / `_aarch64` / `_ppc64le` / `_s390x` | thin layer over pypa | ✅ (adds `libffi-dev` etc.) |
-| `manylinux_2_31_armv7l`, `manylinux_2_39_riscv64` | pypa's own image, unmodified | ❌ — pinned reference points straight at `quay.io/pypa/...` |
+| `manylinux_2_28_x86_64` / `_i686` / `_aarch64` / `_ppc64le` / `_s390x` | pypa's own image, unmodified | ❌ — pinned reference points straight at `quay.io/pypa/...` |
+| `manylinux_2_31_armv7l`, `manylinux_2_39_riscv64` | pypa's own image, unmodified | ❌ — same |
 | `musllinux_1_2_*` (all seven arches) | pypa's own image, unmodified | ❌ — same |
 | `manylinux_2_41_mipsel` | cibuildmp's own, cross-compiling | ✅ — but see below |
 

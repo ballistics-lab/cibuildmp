@@ -101,26 +101,23 @@ jobs:
       contents: read
       packages: write
     strategy:
-      # fail-fast off: three of these (aarch64, ppc64le, s390x) are
-      # emulated builds of unrelated architectures, and one arch's base
-      # going missing upstream should not cancel the other cells that are
-      # fine.
+      # fail-fast off: one arch's base going missing upstream should not
+      # cancel the other cells that are fine.
       fail-fast: false
       matrix:
         include:
           # Only the cells that actually add a cibuildmp layer on top of
           # pypa's own base get built and published here. `armv7l`'s
-          # `manylinux_2_31`, `riscv64`'s `manylinux_2_39`, and every
-          # `musllinux_1_2` cell (all seven arches) were verified to be a
-          # bare `FROM` and nothing else -- their Dockerfiles are deleted,
-          # and `resources/pinned_docker_images.toml` points those nine
+          # `manylinux_2_31`, `riscv64`'s `manylinux_2_39`, every
+          # `musllinux_1_2` cell (all seven arches), and -- once
+          # `MICROPY_STANDALONE=1` went universal for `unix` and the
+          # `libffi-devel` layer stopped being read by anything, verified
+          # live against a bare pypa image -- the five `manylinux_2_28_*`
+          # cells too, were all verified to need nothing over a bare
+          # `FROM`. Their Dockerfiles are deleted, and
+          # `resources/pinned_docker_images.toml` points all fourteen
           # cells straight at `pinned_pypa_images.toml`'s own digest
           # instead of a `ghcr.io/ballistics-lab/...` copy of it.
-          - { image: manylinux_2_28_x86_64, platform: linux/amd64 }
-          - { image: manylinux_2_28_i686, platform: linux/386 }
-          - { image: manylinux_2_28_aarch64, platform: linux/arm64 }
-          - { image: manylinux_2_28_ppc64le, platform: linux/ppc64le }
-          - { image: manylinux_2_28_s390x, platform: linux/s390x }
           # mipsel is the one `unix` cell that is still a cross-compile,
           # so its platform is the amd64 *host*, not its build target --
           # there is no 32-bit mipsel image to be native to (record 0043's
@@ -148,13 +145,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Required, not optional: every non-amd64 entry above runs foreign
-      # binaries at image-build time (`dnf install` inside an arm64 or
-      # s390x base). cibuildmp itself never installs emulation -- parity
-      # with cibuildwheel, which pushes exactly this onto the caller --
-      # so the workflow that needs it sets it up for itself.
-      - uses: docker/setup-qemu-action@v4
-
+      # No `docker/setup-qemu-action` here any more: every remaining
+      # matrix entry is `linux/amd64` (the five `manylinux_2_28_*` rows
+      # were the only non-amd64 ones, and they're gone -- see the matrix's
+      # own comment). Re-add it if a future group ever needs foreign
+      # binaries at image-build time again; it is not defensive scaffolding
+      # kept for a case nothing here hits any more.
       - uses: docker/setup-buildx-action@v4
 
       - uses: docker/login-action@v4

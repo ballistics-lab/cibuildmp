@@ -76,9 +76,11 @@ container rather than baking them into six images, so those come from your
 one that shares this machine's filesystem.** Every path is bind-mounted
 into the container at its identical host path, so a remote or
 VM-isolated daemon that cannot see your working tree will not work.
-It never builds an image itself — it pulls pre-built, pinned images
-(`ghcr.io/ballistics-lab/<target>`) and launches sibling containers, one
-per target, the same way cibuildwheel's own container runtime does. That
+It never builds an image itself — it pulls pre-built, pinned images (most
+are pypa's own `quay.io/pypa/<target>` directly; the handful cibuildmp
+adds a thin layer to publish as `ghcr.io/ballistics-lab/<target>`) and
+launches sibling containers, one per target, the same way cibuildwheel's
+own container runtime does. That
 covers natmod (five of the six toolchain-group images cover all ten
 arches — see [`docs/reference/vendored-images.md`](docs/reference/vendored-images.md))
 and every usermod port, `esp32` included — only the ESP-IDF `git clone` itself
@@ -1165,7 +1167,7 @@ scheduled `test-all-platforms.yml` run since.
 </tbody>
 </table>
 
-[^native]: Nothing to provision. The image is `ghcr.io/ballistics-lab/<target>`, a thin layer over pypa's own `quay.io/pypa/<target>` (the same images cibuildwheel builds wheels in), carrying a native compiler for that architecture. Non-native targets run emulated. The binary is checked against its target's real platform tag after every build.
+[^native]: Nothing to provision. The image is pypa's own `quay.io/pypa/<target>` directly (the same images cibuildwheel builds wheels in), no cibuildmp layer at all — a build never needed the `libffi-devel` that used to be the one thing added on top, once `MICROPY_STANDALONE=1`/vendored `libffi` went universal for every `unix` cell. Carries a native compiler for that architecture; non-native targets run emulated. The binary is checked against its target's real platform tag after every build.
 
 [^cross]: The one target that still cross-compiles: pypa publishes no mipsel image and there's no Docker official image for 32-bit mipsel, so there's nothing to be native to. Its toolchain is a pinned Bootlin tarball (`mips32el--glibc--stable-2025.08-1`, gcc 14.3.0, glibc 2.41-70, URL + sha256), not an apt cross-compiler: Debian 13 "Trixie" dropped the mipsel port and Ubuntu's archive lost `gcc-mipsel-linux-gnu`/`libc6-dev-mipsel-cross` with it. That is also why this cell is `manylinux_2_41_mipsel` and was `manylinux_2_39_mipsel` until 2026-09-01 — `2_39` was apt's cross-glibc version, and a real PEP 600 tag must not keep claiming a floor its image no longer has (record 0068).
 

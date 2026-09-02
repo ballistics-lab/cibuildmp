@@ -238,10 +238,9 @@ the Bootlin toolchain this session tested them against; and whether
 3. **Drop the `gcc` column from the remaining nine scopes.** It restates a tag fact about a
    thousand times; removing it from `unix` cost nothing.
 4. ~~Teach the checker about `natmod`.~~ **Done this session** -- see below.
-5. **Run-time `dnf install libffi-devel` for the five `manylinux_2_28_*` cells**, which is the
-   only reason those images are published at all. Seven `musllinux` cells need nothing --
-   verified: pypa's Alpine images ship `libffi-dev` already, which is why they run on pypa's
-   image directly.
+5. ~~Run-time `dnf install libffi-devel` for the five `manylinux_2_28_*` cells.~~ **Done this
+   session, and smaller than planned: no run-time install needed at all** -- see the Addendum
+   below.
 
 **Two facts a fresh session should not have to rediscover:**
 
@@ -1131,6 +1130,80 @@ and produced a binary that passes the smoke test. That is the whole of the decis
   from the same mounted cache before that call — which is this record's own "two independent
   toolchain facts per row" landing in code rather than in a table. Keep an apt `build-essential`
   for convenience instead and [0082] is reintroduced on day one, for every tag it names.
+
+## Addendum, 2026-09-02 — item 5 landed, and turned out smaller than planned
+
+**"Run-time `dnf install libffi-devel` for the five `manylinux_2_28_*` cells"** (the "Not started"
+list above) shipped, but not as written: it needs no run-time install at all, on any cell.
+
+Two things converged to make the layer itself pointless, not just movable. First, `unix` moved to
+`MICROPY_STANDALONE=1` on every arch this session (record 0043's own `libffi-dev` reliance
+reversed) — `ports/unix/Makefile`'s own `ifeq ($(MICROPY_PY_FFI),1) ifeq ($(MICROPY_STANDALONE),1)`
+branch is the only one a cibuildmp build ever reaches now, and that branch builds `lib/libffi`
+from source; it never calls `pkg-config --cflags/libs libffi`. `libffi-devel` — the one thing
+`docker/manylinux_2_28_*.Dockerfile` ever added, and the whole reason those five images were
+published — stops being read by anything. Live-verified against a bare `quay.io/pypa/
+manylinux_2_28_x86_64` (`rpm -q libffi-devel`: not installed; `pkg-config --exists libffi`: fails,
+as expected): a real `ports/unix` build, `deplibs` and the main link both, still succeeds end to
+end and produces a running binary.
+
+Second, `MICROPY_STANDALONE=1` everywhere surfaced two more real bugs, both fixed, both live-
+verified against the actual published image rather than assumed:
+
+- **`lib/libffi/configure.ac`'s own `toolexeclibdir`** (`${libdir}/$(gcc -print-multi-os-directory)`)
+  installs `libffi.a` to `out/lib64/` on a RHEL-family host (`gcc -print-multi-os-directory` prints
+  `../lib64` there, confirmed live) while `ports/unix/Makefile`'s own `LIBFFI_LDFLAGS`
+  unconditionally expects `out/lib/libffi.a`. `musllinux_1_2_x86_64` prints `../lib`, which
+  normalizes back to `lib` and needs nothing. `deplibs` has no hook to pass `--libdir=` through to
+  libffi's own `configure` (hardcoded in the port's own Makefile), so `run_unix_deplibs()` now runs
+  the `make ... deplibs` step through `sh -c` with a symlink fixup appended.
+- **`LDFLAGS_EXTRA=-static`, bundled with `MICROPY_STANDALONE=1` into one `STATIC_LINK_OPTS` pair
+  applied to every arch earlier this session, is not one decision and this record already said
+  so** ("`LDFLAGS_EXTRA=-static` is a separate flag and stays behind", Phase 0 step 3, above) —
+  reversed back apart. A `manylinux_2_28` image is a live, native glibc userland; PEP 600's own
+  portability guarantee is *ordinary dynamic linking* against its symbol versions, the same
+  mechanism every real manylinux wheel already uses, and reaching for `-static` on top of that
+  bought nothing but a linker error (`cannot find -lm/-lpthread/-ldl/-lc`) on every
+  `manylinux_2_28_*` cell — none of the five images ship `glibc-static`, confirmed live — for a
+  guarantee record 0031 already documents as leaky on glibc regardless (`dlopen`/NSS still reach
+  the *linking host's* glibc at runtime, static binary or not — the exact warning a real build
+  prints for `modsocket.c`/`modffi.c`). `-static` stays on `musllinux` (no such leak — musl's own
+  static story is genuinely complete, which is why Alpine/musl static binaries are a well-
+  established pattern) and on `mipsel` (a Bootlin cross sysroot with no dynamic floor to link
+  against in the first place, unrelated to which tag is being built).
+
+**What actually landed** (all three commits live-verified against the real
+`ghcr.io/ballistics-lab/manylinux_2_28_x86_64` and, for the last one, the bare
+`quay.io/pypa/manylinux_2_28_x86_64` underneath it, not merely unit-tested):
+
+- `sources.fetch_micropython()`'s clone path takes a `ports: list[str]` argument now, running each
+  named port's own `make submodules` instead of a cibuildmp-maintained `RP2_SUBMODULES`/
+  `UNIX_SUBMODULES` path list — the same "don't duplicate what the port's own Makefile already
+  knows" argument this record already makes about toolchain versions, applied one layer over.
+  `esp32` stays excluded (its own `submodules` target shells out to `idf.py`, needs the ESP-IDF
+  environment, and declares no `GIT_SUBMODULES` of its own against `lib/` in the first place).
+  natmod's own `micropython_submodules` config knob is untouched — user-supplied arbitrary paths
+  for a module natmod itself does not own, with no port Makefile to delegate to.
+- `run_unix_deplibs()` runs through `sh -c` with the `out/lib64` symlink fixup appended.
+- `UNIX_ARCH_SETTINGS` drops the combined `STATIC_LINK_OPTS`; `unix_make_command()`'s own
+  `_use_static()` decides per build (`musllinux_*` or `UnixArchSettings.force_static`, `mipsel`
+  alone) rather than per arch alone.
+- **All fourteen non-`mipsel` `unix` cells now resolve straight to `pinned_pypa_images.toml`'s own
+  digest**, joining the nine that already did (`resources/pinned_docker_images.toml`'s own header
+  comment, `bin/update_docker.py`'s `_pypa_mirror()` — already general enough that the five joining
+  needed no code change, only data). `docker/manylinux_2_28_{x86_64,aarch64,ppc64le,s390x,
+  i686}.Dockerfile` and their five `publish-docker-images.yml` matrix rows are deleted, not kept
+  idle. `mipsel` is now the *only* `unix` cell — and the only image in the whole matrix outside the
+  six toolchain groups/`windows`/`webassembly`/`esp_idf_base` — with a `ghcr.io/ballistics-lab/...`
+  layer of its own.
+
+**One more thing this incidentally proved**, worth stating since Phase 0-2 of the plan above still
+assumes it needs proving: **item 5's own "run-time install" framing was the wrong shape for this
+specific gap**, not wrong in general. The broader Bootlin-tarball-per-identifier destination this
+record argues against, and the "pypa stays, install what's missing at run time" destination it
+argues for instead, both still stand for whatever gap turns out to be real on a future tag. This
+one just was not real to begin with, once `MICROPY_STANDALONE=1` closed it from a different
+direction.
 
 [0013]: 0013-micropython-list-dedup-by-abi.md
 [0031]: 0031-unix-musllinux-libc-axis.md

@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`unix`'s clone path (a MicroPython tag with no release tarball, e.g.
+  `v1.22.1`/`v1.30.0-preview`) now fetches each port's own `lib/`
+  submodules by running that port's own `make submodules` — the command
+  its own README documents — instead of a cibuildmp-maintained list of
+  submodule paths that could drift from what `GIT_SUBMODULES` in that
+  port's own Makefile actually lists.
+- **`unix` linking failed on `manylinux_2_28_{x86_64,aarch64,ppc64le,
+  s390x,i686}`** with `libffi.a: No such file or directory`: `lib/libffi`'s
+  own `configure` installs to a `../lib64`-offset path on these
+  RHEL-family hosts, which `ports/unix/Makefile` never looks in. Fixed
+  with a symlink fixup after `deplibs`.
+- **`unix`'s full static link (`LDFLAGS_EXTRA=-static`) applied to every
+  arch failed outright on the same five `manylinux_2_28_*` cells**,
+  missing `glibc-static`. Pulled back to `musllinux`/`mipsel` only, where
+  it is a real, complete guarantee (musl has no dynamic-NSS leak) rather
+  than a partial one glibc can't fully deliver anyway. `manylinux` cells
+  link ordinary dynamic glibc again, the same mechanism every real
+  manylinux wheel already relies on.
+
+### Changed
+
+- **`unix`'s five `manylinux_2_28_*` cells drop their own published
+  `ghcr.io/ballistics-lab/...` image and resolve straight to pypa's own
+  `quay.io/pypa/manylinux_2_28_*`.** The one layer those images ever
+  added (`libffi-devel`) stopped being read by anything once
+  `MICROPY_STANDALONE=1` went universal for `unix` — the build always
+  takes the "vendor `lib/libffi` from source" branch now, never
+  `pkg-config`. Fourteen of `unix`'s fifteen cells now resolve to a bare
+  pypa image with no cibuildmp layer at all; only `mipsel` (no pypa image
+  to begin with) still publishes one.
+
 ## [0.6.1] - 2026-09-01
 
 ### Fixed
