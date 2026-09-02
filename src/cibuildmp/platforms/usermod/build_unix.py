@@ -199,6 +199,10 @@ class UnixBuildOptions:
     build_dir: Path
     variant: str = "standard"
     extra_make_args: tuple[str, ...] = ()
+    # The MicroPython release being built. Defaulted so every existing
+    # caller and fixture keeps working; only `_row_cflags()` reads it, and
+    # only to find this row's own `cflags_extra`.
+    tag: str = ""
 
 
 def _unix_dir(mpy_dir: Path) -> Path:
@@ -270,10 +274,43 @@ _ARCH_CFLAGS: dict[str, tuple[str, ...]] = {
 UNIX_TARGET_CFLAGS: dict[str, tuple[str, ...]] = {}
 
 
-def unix_extra_cflags(target: str) -> tuple[str, ...]:
+def _row_cflags(target: str, tag: str) -> tuple[str, ...]:
+    """`cflags_extra` off this `(tag, target)` row of
+    `build-platforms.toml`, split into flags.
+
+    The fourth axis, and the one the three tables above cannot express:
+    they are keyed by platform tag, architecture and libc, while a
+    MicroPython *release* can need a flag across every cell at once.
+    `v1.20.0` is the live case -- gcc 14 raises
+    `-Werror=dangling-pointer=` on `py/stackctrl.c`, a diagnostic that did
+    not exist when that tag shipped and that upstream later fixed in its
+    own source. Declining to hold a 2023 release to a 2025 diagnostic is
+    not the same as working around a compiler defect, which is why this
+    is a recorded per-row fact rather than a blanket `-Wno-error`.
+
+    Kept in the table rather than in a dict here because it is a fact
+    about a tag, and every other per-tag fact this project has
+    (`idf_version`, the toolchain pins) already lives in the row --
+    record 0084.
+    """
+    from ... import resources
+
+    if not tag:
+        return ()
+    for row in resources.build_platforms_data()["usermod"]["unix"]["identifiers"]:
+        if row.get("tag") == tag and row.get("arch") == target:
+            return tuple(str(row.get("cflags_extra", "")).split())
+    return ()
+
+
+def unix_extra_cflags(target: str, tag: str = "") -> tuple[str, ...]:
     """Every `CFLAGS_EXTRA` flag this cell needs: the libc-wide rule, the
-    per-architecture one, and any per-tag one-off. Empty for a cell that
-    needs none."""
+    per-architecture one, any per-tag one-off, and whatever this exact
+    `(tag, target)` row asks for. Empty for a cell that needs none.
+
+    `tag` defaults to empty so a caller that genuinely has no MicroPython
+    version in hand still resolves the other three axes rather than
+    raising -- the row axis simply contributes nothing."""
     from ... import dockerrun
 
     floor, arch = dockerrun.split_tag(target)
@@ -282,6 +319,7 @@ def unix_extra_cflags(target: str) -> tuple[str, ...]:
         *libc_flags,
         *_ARCH_CFLAGS.get(arch, ()),
         *UNIX_TARGET_CFLAGS.get(target, ()),
+        *_row_cflags(target, tag),
     )
 
 
@@ -312,7 +350,7 @@ def unix_make_command(
         f"CROSS_COMPILE={settings.cross_compile}",
         *(
             [f"CFLAGS_EXTRA={' '.join(cflags)}"]
-            if (cflags := unix_extra_cflags(opts.target))
+            if (cflags := unix_extra_cflags(opts.target, opts.tag))
             else []
         ),
         # py/mkenv.mk's own override (`MICROPY_MPYCROSS`, defaulting to

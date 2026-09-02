@@ -64,7 +64,12 @@ HAND_MERGED = {
     ("usermod", "rp2"): {"gcc": 374},
     ("usermod", "samd"): {"gcc": 211},
     ("usermod", "stm32"): {"gcc": 1016},
-    ("usermod", "unix"): {"gcc": 225},
+    # `unix` migrated off `gcc` (record 0084): the image fixes the compiler,
+    # so a ceiling-derived pin has nothing left to decide. What replaces it is
+    # narrower -- `cflags_extra`, on the 15 rows of the one tag that needs a
+    # relaxation, because gcc 14 raises a diagnostic that did not exist when
+    # `v1.20.0` shipped. Partial coverage here is the point, not a gap.
+    ("usermod", "unix"): {"cflags_extra": 15},
     ("usermod", "windows"): {"gcc": 45},
 }
 

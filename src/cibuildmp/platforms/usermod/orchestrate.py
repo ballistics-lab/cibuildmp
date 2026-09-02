@@ -180,6 +180,7 @@ def _port_build_options(
             # itself stays one field on the target, so only the name of
             # the parameter it feeds changes here.
             target=target.arch,
+            tag=target.tag,
             user_c_modules=resolved_user_c_modules,
             frozen_manifest=frozen_manifest,
             build_dir=_resolved_build_dir(mpy_dir, port, identifier),

@@ -373,7 +373,43 @@ def test_unix_docker_image_mounts_mpy_dir_and_user_c_modules(monkeypatch, tmp_pa
 # target -- unix has no bare-host fallback left to fall back to (D30).
 
 
-# ── unix_extra_cflags() -- three axes, and which one each rule is on ────
+# ── unix_extra_cflags() -- four axes, and which one each rule is on ────
+
+
+def test_the_row_axis_carries_a_flag_a_whole_micropython_tag_needs():
+    """`v1.20.0` needs `-Wno-error=dangling-pointer` in every cell, which
+    none of the other three axes can say: they key on platform tag,
+    architecture and libc, and this one is a fact about the *release*
+    (record 0084). Measured, not predicted -- gcc 14 rejects
+    `py/stackctrl.c` on a tag that shipped before that diagnostic
+    existed."""
+    assert build_unix.unix_extra_cflags("manylinux_2_28_x86_64", "v1.20.0") == (
+        "-Wno-error=dangling-pointer",
+    )
+
+
+def test_the_row_axis_composes_with_the_libc_and_arch_rules():
+    # musl contributes `-Wno-error=cpp`, aarch64 `-Wno-error=array-bounds`,
+    # and the row its own flag -- each from a different axis, none of them
+    # repeating another.
+    assert build_unix.unix_extra_cflags("musllinux_1_2_aarch64", "v1.20.0") == (
+        "-Wno-error=cpp",
+        "-Wno-error=array-bounds",
+        "-Wno-error=dangling-pointer",
+    )
+
+
+def test_no_other_tag_carries_a_row_flag():
+    assert build_unix.unix_extra_cflags("manylinux_2_28_x86_64", "v1.29.0") == ()
+
+
+def test_omitting_the_tag_still_resolves_the_other_three_axes():
+    # A caller with no MicroPython version in hand must not lose the libc
+    # and architecture rules.
+    assert build_unix.unix_extra_cflags("musllinux_1_2_aarch64") == (
+        "-Wno-error=cpp",
+        "-Wno-error=array-bounds",
+    )
 
 
 def test_the_musl_rule_covers_the_whole_musllinux_column():
