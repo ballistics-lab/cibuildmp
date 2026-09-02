@@ -55,6 +55,7 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### In progress / Proposed
 
+- [ ] [0084] per-identifier toolchain tarballs (Bootlin, uniformly), the end of shared/floating compilers, and what it does to the identifier and to CI cost
 - [ ] [0083] replace `windows.Dockerfile`'s apt `gcc-mingw-w64` split with one fully prebuilt llvm-mingw toolchain
 - [ ] [0082] nine MicroPython tags fail `mpy-cross` under gcc 15, on every image whose native compiler is unpinned — bisected exactly
 - [ ] [0047] the run output works, but it is not cibuildwheel's
@@ -248,3 +249,4 @@ record is added.
 [0081]: records/0081-output-dir-gitignore.md
 [0082]: records/0082-natmod-old-tags-fail-mpy-cross-under-gcc-15.md
 [0083]: records/0083-windows-fully-prebuilt-mingw-toolchain.md
+[0084]: records/0084-per-identifier-toolchain-tarballs-and-the-end-of-shared-images.md
