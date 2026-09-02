@@ -586,10 +586,18 @@ def run(
     oci_platform: str | None = None,
     linux32: bool = False,
     env: dict[str, str] | None = None,
-) -> None:
+    capture_output: bool = False,
+) -> str | None:
     """Run `command` inside `image`, as a sibling container -- not nested
     inside one `cibuildmp` itself is already running in (D26's own "why
     sibling containers, not Docker-in-Docker" reasoning).
+
+    `capture_output` (default `False`, matching every existing caller's
+    own fire-and-forget use): when `True`, returns the container's own
+    stdout as text instead of letting it stream straight to this
+    process's own -- `build_common.probe_supported_cflags()`'s own
+    caller, which needs the *answer* back on the host, not just the exit
+    code `check=True` already turns into `UsermodBuildError`.
 
     Each of `mounts` is bind-mounted at its own identical host path, so
     `command` (already built for a bare-host invocation) needs no
@@ -690,7 +698,14 @@ def run(
         docker_command += ["-e", f"{key}={value}"]
     docker_command += ["-w", workdir.as_posix(), image, *command]
     try:
-        subprocess.run(docker_command, check=True, timeout=timeout)
+        result = subprocess.run(
+            docker_command,
+            check=True,
+            timeout=timeout,
+            capture_output=capture_output,
+            text=capture_output,
+        )
+        return result.stdout if capture_output else None
     except subprocess.TimeoutExpired as exc:
         # See this function's own docstring for why a plain kill of the
         # `docker run` CLI (subprocess's own default TimeoutExpired

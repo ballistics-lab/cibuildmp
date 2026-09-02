@@ -492,6 +492,62 @@ def test_run_forwards_the_resolved_timeout(monkeypatch, tmp_path):
     assert calls[0][1].get("timeout") == 45.0
 
 
+def test_run_returns_none_by_default(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        dockerrun.subprocess,
+        "run",
+        lambda cmd, **k: dockerrun.subprocess.CompletedProcess(cmd, 0),
+    )
+
+    result = dockerrun.run(
+        ["make"], mounts=[tmp_path], workdir=tmp_path, image="img:local"
+    )
+
+    assert result is None
+
+
+def test_run_returns_stdout_when_capture_output_is_set(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        dockerrun.subprocess,
+        "run",
+        lambda cmd, **k: dockerrun.subprocess.CompletedProcess(
+            cmd, 0, stdout="hello\n"
+        ),
+    )
+
+    result = dockerrun.run(
+        ["make"],
+        mounts=[tmp_path],
+        workdir=tmp_path,
+        image="img:local",
+        capture_output=True,
+    )
+
+    assert result == "hello\n"
+
+
+def test_run_passes_capture_output_and_text_through(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(
+        dockerrun.subprocess,
+        "run",
+        lambda cmd, **k: (
+            calls.append(k) or dockerrun.subprocess.CompletedProcess(cmd, 0, stdout="")
+        ),
+    )
+
+    dockerrun.run(
+        ["make"],
+        mounts=[tmp_path],
+        workdir=tmp_path,
+        image="img:local",
+        capture_output=True,
+    )
+
+    assert calls[0]["capture_output"] is True
+    assert calls[0]["text"] is True
+
+
 def test_run_kills_the_container_on_timeout(monkeypatch, tmp_path):
     import subprocess as sp
 

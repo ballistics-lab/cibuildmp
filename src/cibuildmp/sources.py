@@ -121,14 +121,23 @@ def fetch_micropython(
     root: Path | None = None,
     *,
     submodules: list[str] | None = None,
+    ports: list[str] | None = None,
     force: bool = False,
     quiet: bool = False,
 ) -> Path:
     """Return a MicroPython checkout at `tag`, fetching it if needed.
 
-    `submodules` only ever matters on the clone path: the release tarball
-    already vendors every one of them, which is the whole reason it is
-    preferred. See _clone().
+    `submodules`/`ports` only ever matter on the clone path: the release
+    tarball already vendors every port's own `lib/` submodules, which is
+    the whole reason it is preferred. See _clone() -- two different
+    inputs for two different callers, not one generalised into the other:
+    `submodules` is natmod's own public `micropython_submodules` config
+    knob (raw `lib/` paths a *user's* own native module needs, which no
+    port Makefile has any reason to know about), initialised with a plain
+    `git submodule update --init`; `ports` is usermod's -- port names
+    whose own `make submodules` (the command each one's own README
+    documents) `_clone()` runs, so this project never has to keep its own
+    copy of what a port's `GIT_SUBMODULES` currently lists.
 
     `quiet=False` (the default) prints progress -- download percentage,
     "extracting", "cached at <dest>" -- to stdout, not stderr. A caller that
@@ -145,7 +154,7 @@ def fetch_micropython(
     dest, was_cached = cached_dir(
         micropython_dir(tag, root),
         lambda staging: _fetch_into(
-            tag, staging, submodules=submodules or [], quiet=quiet
+            tag, staging, submodules=submodules or [], ports=ports or [], quiet=quiet
         ),
         force=force,
     )
@@ -154,7 +163,9 @@ def fetch_micropython(
     return dest
 
 
-def _fetch_into(tag: str, staging: Path, *, submodules: list[str], quiet: bool) -> Path:
+def _fetch_into(
+    tag: str, staging: Path, *, submodules: list[str], ports: list[str], quiet: bool
+) -> Path:
     """Populate `staging` and return the directory holding the source tree."""
     url = RELEASE_TARBALL.format(tag=tag, ver=tag.removeprefix("v"))
     archive = staging / "micropython.tar.xz"
@@ -168,7 +179,7 @@ def _fetch_into(tag: str, staging: Path, *, submodules: list[str], quiet: bool) 
         # v1.28.0 and v1.25.0 have one, v1.29.0-preview does not.
         if not quiet:
             print(f"  MicroPython {tag}: no release tarball, cloning instead")
-        return _clone(tag, staging, submodules=submodules, quiet=quiet)
+        return _clone(tag, staging, submodules=submodules, ports=ports, quiet=quiet)
 
     if not quiet:
         print(f"  MicroPython {tag}: extracting")
@@ -177,16 +188,31 @@ def _fetch_into(tag: str, staging: Path, *, submodules: list[str], quiet: bool) 
     return sole_directory(staging, f"the {tag} tarball")
 
 
-def _clone(tag: str, staging: Path, *, submodules: list[str], quiet: bool) -> Path:
-    """Shallow-clone the tag, initialising only the requested submodules.
+def _clone(
+    tag: str, staging: Path, *, submodules: list[str], ports: list[str], quiet: bool
+) -> Path:
+    """Shallow-clone the tag, then fetch whatever `lib/` submodules the
+    caller asked for: `submodules` (raw paths, natmod's own
+    `micropython_submodules` knob) via a plain `git submodule update
+    --init`, and each named port in `ports` (usermod) via that port's own
+    `make submodules` target -- the command its own README documents.
 
     This is where the tarball and the clone genuinely differ: a release
     tarball vendors every lib/ submodule, a --depth 1 clone vendors none.
-    Most natmods need none either -- py/ and tools/mpy_ld.py are in-tree,
-    and so are the parts of lib/ that are not submodules -- but "most" is
-    not "all": upstream's own examples/natmod/btree builds against
-    $(MPY_DIR)/lib/berkeley-db-1.xx, which is one. Hence the option, and
-    hence the same input existing on the clone-micropython action.
+    `ports` delegates to each port's own target rather than this project
+    keeping its own list of submodule paths: that list is upstream's to
+    maintain (a port's own `GIT_SUBMODULES` additions, in its own
+    Makefile), not something that stays in sync here only because someone
+    remembered to update it too, and it is free to vary tag to tag the
+    same way everything else upstream does.
+
+    `esp32` is deliberately excluded from `ports` by every usermod caller:
+    its own `submodules` target is `idf.py -D UPDATE_SUBMODULES=1
+    reconfigure`, which manages ESP-IDF's own components, needs the
+    ESP-IDF environment to run at all, and cannot run against a bare host
+    clone -- and, unlike every port here, it declares no `GIT_SUBMODULES`
+    of its own against MicroPython's own `lib/` in the first place, so it
+    never needed this step regardless.
     """
     dest = staging / "micropython"
     command = ["git", "clone", "--depth", "1", "--branch", tag, GIT_URL, str(dest)]
@@ -200,6 +226,34 @@ def _clone(tag: str, staging: Path, *, submodules: list[str], quiet: bool) -> Pa
             subprocess.run(
                 ["git", "submodule", "update", "--init", "--depth", "1", *submodules],
                 cwd=dest,
+                check=True,
+                capture_output=quiet,
+            )
+        for port in ports:
+            if not quiet:
+                print(f"  MicroPython {tag}: make -C ports/{port} submodules")
+            subprocess.run(
+                # `MICROPY_STANDALONE=1`: `unix`'s own `GIT_SUBMODULES +=
+                # lib/libffi` (ports/unix/Makefile) sits behind
+                # `ifeq ($(MICROPY_STANDALONE),1)` -- without it here,
+                # `make submodules` computes a *different*, incomplete
+                # `GIT_SUBMODULES` than the real build needs, silently
+                # skipping lib/libffi. Found live: a clone-path tag with
+                # no release tarball (v1.30.0-preview) failed deplibs with
+                # `No rule to make target '../../lib/libffi/autogen.sh'`
+                # -- the submodule was simply never checked out.
+                # `build_unix()` always passes `MICROPY_STANDALONE=1` now
+                # (every unix target, not just the ones that need static
+                # linking), so this matches the real build rather than
+                # guessing at it. A no-op for every other port -- none
+                # references this variable at all.
+                [
+                    "make",
+                    "-C",
+                    str(dest / "ports" / port),
+                    "MICROPY_STANDALONE=1",
+                    "submodules",
+                ],
                 check=True,
                 capture_output=quiet,
             )

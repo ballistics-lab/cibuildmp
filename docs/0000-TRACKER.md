@@ -55,6 +55,9 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### In progress / Proposed
 
+- [ ] [0085] `arm_embedded` thins out: the toolchain version stops being the image's name and becomes a row fact
+- [ ] [0083] replace `windows.Dockerfile`'s apt `gcc-mingw-w64` split with one fully prebuilt llvm-mingw toolchain
+- [ ] [0082] nine MicroPython tags fail `mpy-cross` under gcc 15, on every image whose native compiler is unpinned — bisected exactly
 - [ ] [0047] the run output works, but it is not cibuildwheel's
 - [ ] [0046] nothing notices when a pin goes stale, except container images
 - [ ] [0022] zephyr is a third selector axis, not a board-based port that just needs its boards added
@@ -65,6 +68,7 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### Implemented
 
+- [x] [0084] unix's pypa image pin moves from the architecture to the row, and the end of shared/floating compilers
 - [x] [0068] docker Dependabot grouping, and what the first grouped bump exposed
 - [x] [0081] `output-dir` gets its own `.gitignore` the first time cibuildmp writes into it
 - [x] [0080] `windows` and `qemu` get real smoke tests, live-verified before being wired in
@@ -244,3 +248,7 @@ record is added.
 [0079]: records/0079-collected-artifact-is-more-than-one-file.md
 [0080]: records/0080-windows-and-qemu-usermod-smoke-tests.md
 [0081]: records/0081-output-dir-gitignore.md
+[0082]: records/0082-natmod-old-tags-fail-mpy-cross-under-gcc-15.md
+[0083]: records/0083-windows-fully-prebuilt-mingw-toolchain.md
+[0084]: records/0084-per-identifier-toolchain-tarballs-and-the-end-of-shared-images.md
+[0085]: records/0085-arm-embedded-thins-out-and-the-toolchain-version-becomes-a-row-fact.md

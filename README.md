@@ -2,6 +2,7 @@
 
 [![SWUbanner]][SWUBadge]
 [![license]][license-url]
+![micropython-tag]
 [![pypi version]][PyPiUrl]
 [![python versions]][PyPiUrl]
 [![pre-commit]][pre-commit-workflow]
@@ -75,9 +76,11 @@ container rather than baking them into six images, so those come from your
 one that shares this machine's filesystem.** Every path is bind-mounted
 into the container at its identical host path, so a remote or
 VM-isolated daemon that cannot see your working tree will not work.
-It never builds an image itself — it pulls pre-built, pinned images
-(`ghcr.io/ballistics-lab/<target>`) and launches sibling containers, one
-per target, the same way cibuildwheel's own container runtime does. That
+It never builds an image itself — it pulls pre-built, pinned images (most
+are pypa's own `quay.io/pypa/<target>` directly; the handful cibuildmp
+adds a thin layer to publish as `ghcr.io/ballistics-lab/<target>`) and
+launches sibling containers, one per target, the same way cibuildwheel's
+own container runtime does. That
 covers natmod (five of the six toolchain-group images cover all ten
 arches — see [`docs/reference/vendored-images.md`](docs/reference/vendored-images.md))
 and every usermod port, `esp32` included — only the ESP-IDF `git clone` itself
@@ -106,7 +109,7 @@ On CI, use the action instead of installing the CLI yourself — it already
 runs on a bare runner with the runner's own Docker daemon reachable:
 
 ```yaml
-- uses: ballistics-lab/cibuildmp@v0.6.1
+- uses: ballistics-lab/cibuildmp@v0.6.2
   with:
     build: "mpy6.3-* v1.29.0-manylinux_2_28_x86_64"
 ```
@@ -161,7 +164,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ballistics-lab/cibuildmp@v0.6.1
+      - uses: ballistics-lab/cibuildmp@v0.6.2
         with:
           build: "mpy6.3-v1.29.0-*"
       - uses: actions/upload-artifact@v4
@@ -1026,7 +1029,7 @@ scheduled `test-all-platforms.yml` run since.
   <td>
 
   ✅[^emulatedci]<br>
-  ⚠️[^s390xclobbered]<br>
+  ✅[^emulatedci]<br>
   ✅[^emulatedci]
 
   </td>
@@ -1164,13 +1167,11 @@ scheduled `test-all-platforms.yml` run since.
 </tbody>
 </table>
 
-[^native]: Nothing to provision. The image is `ghcr.io/ballistics-lab/<target>`, a thin layer over pypa's own `quay.io/pypa/<target>` (the same images cibuildwheel builds wheels in), carrying a native compiler for that architecture. Non-native targets run emulated. The binary is checked against its target's real platform tag after every build.
+[^native]: Nothing to provision. The image is pypa's own `quay.io/pypa/<target>` directly (the same images cibuildwheel builds wheels in), no cibuildmp layer at all — a build never needed the `libffi-devel` that used to be the one thing added on top, once `MICROPY_STANDALONE=1`/vendored `libffi` went universal for every `unix` cell. Carries a native compiler for that architecture; non-native targets run emulated. The binary is checked against its target's real platform tag after every build. Green across every one of the 11 latest-patch MicroPython releases, not one — `test-all-platforms.yml`'s own native sweep, record 0084's own 2026-09-02 addendum.
 
-[^cross]: The one target that still cross-compiles: pypa publishes no mipsel image and there's no Docker official image for 32-bit mipsel, so there's nothing to be native to. Its toolchain is a pinned Bootlin tarball (`mips32el--glibc--stable-2025.08-1`, gcc 14.3.0, glibc 2.41-70, URL + sha256), not an apt cross-compiler: Debian 13 "Trixie" dropped the mipsel port and Ubuntu's archive lost `gcc-mipsel-linux-gnu`/`libc6-dev-mipsel-cross` with it. That is also why this cell is `manylinux_2_41_mipsel` and was `manylinux_2_39_mipsel` until 2026-09-01 — `2_39` was apt's cross-glibc version, and a real PEP 600 tag must not keep claiming a floor its image no longer has (record 0068).
+[^cross]: The one target that still cross-compiles: pypa publishes no mipsel image and there's no Docker official image for 32-bit mipsel, so there's nothing to be native to. Its toolchain is a pinned Bootlin tarball (`mips32el--glibc--stable-2025.08-1`, gcc 14.3.0, glibc 2.41-70, URL + sha256), not an apt cross-compiler: Debian 13 "Trixie" dropped the mipsel port and Ubuntu's archive lost `gcc-mipsel-linux-gnu`/`libc6-dev-mipsel-cross` with it. That is also why this cell is `manylinux_2_41_mipsel` and was `manylinux_2_39_mipsel` until 2026-09-01 — `2_39` was apt's cross-glibc version, and a real PEP 600 tag must not keep claiming a floor its image no longer has (record 0068). Its own real bug, found the same full-history sweep as the emulated cells' own: the live gcc-diagnostic probe checked the image's bare `gcc`, not the `mipsel-linux-gnu-gcc` (14.3.0, older) the build actually uses — a false-positive verdict let a gcc-15-only flag back into a gcc-14 compile on every pre-`v1.26.0` tag. Fixed by probing the actual compiler each build step uses; record 0084's own 2026-09-02 addendum.
 
-[^emulatedci]: `ppc64le`/`s390x`/`riscv64`, both libcs — native to no runner GitHub offers, so still QEMU-emulated, but no longer untested: `test-all-platforms.yml`'s own `unix-emulated` entry gives all six a real `test-emulated` CI leg on its weekly schedule (or manual dispatch) now (nine of the twelve (cell, tag) pairs green; the other three are the two ⚠️ rows below). Point `CIBMP_UNIX_<TARGET>_DOCKER_IMAGE` at a locally-built image, or an emulated one, to work on one of these locally. Record 0044's own 2026-08-29 addendum.
-
-[^s390xclobbered]: `v1.28.0` only — `v1.29.0` of the identical cell is the ✅ above it. `mpy-cross`'s own `main.c` fails a real GCC `-Werror=clobbered` diagnostic specific to s390x's own register allocation around a `longjmp` call site (`parse_integer()`'s locals); `v1.29.0`'s `main.c` does not trip it. Skipped by exact identifier (`v1.28.0-manylinux_2_28_s390x`) in `test-all-platforms.yml` until fixed — not a QEMU/emulation problem, a real compile-time diagnostic. Record 0044's own 2026-08-29 addendum.
+[^emulatedci]: `ppc64le`/`s390x`/`riscv64`, both libcs — native to no runner GitHub offers, so still QEMU-emulated, but no longer untested: `test-all-platforms.yml`'s own `unix-emulated` entry gives all six a real `test-emulated` CI leg on its weekly schedule (or manual dispatch) now, and its own bucket planner (`bin/plan_test_matrix.py`) partitions them into a dedicated `emulated` job set rather than sharing a runner with the fast native cells. Green across every one of the 11 latest-patch MicroPython releases now, not spot-checked against one — a full historical sweep (record 0084's own 2026-09-02 addendum) is what found and fixed the real bugs the narrower checks this footnote used to cite never reached: a `riscv64` `lib/libffi` fork with no `riscv*` support at all on pre-`v1.24.0` tags, a `deplibs` symlink fixup that only checked one hardcoded multiarch path, and the real `s390x`/`riscv64` `-Werror=clobbered` diagnostic this footnote's own ⚠️ row named until 2026-09-02. The one remaining ⚠️ row below (musllinux `ppc64le`) is unrelated to any of that — a real QEMU relocation gap, not a compile-time bug. Point `CIBMP_UNIX_<TARGET>_DOCKER_IMAGE` at a locally-built image, or an emulated one, to work on one of these locally. Record 0044's own 2026-08-29 addendum.
 
 [^ppc64lerelocation]: Both tags. `mpy-cross` builds cleanly inside the image; it fails when QEMU actually *executes* it to freeze `argparse.py`: `Error relocating .../mpy-cross: unsupported relocation type 4/5`. A real gap in QEMU's own ppc64le user-mode emulation of this PIE binary's relocations, not a cibuildmp or MicroPython bug — the `manylinux_2_28_ppc64le` cell above, same emulator, is unaffected. Skipped by glob (`*musllinux_1_2_ppc64le`) in `test-all-platforms.yml` until fixed. Record 0044's own 2026-08-29 addendum.
 
@@ -1321,6 +1322,9 @@ cibuildmp`/`pip install cibuildmp` instead pulls whatever's newest on
 PyPI unless you pin a version there too.
 
 <!-- REUSABLE LINKS -->
+
+[micropython-tag]:
+https://img.shields.io/badge/v1.20.0%2B-orange?logo=micropython&label=micropython
 
 [license]:
 https://img.shields.io/github/license/ballistics-lab/cibuildmp

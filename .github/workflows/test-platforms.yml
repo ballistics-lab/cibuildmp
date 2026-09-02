@@ -44,6 +44,27 @@ on:
         required: false
         type: string
         default: ubuntu-latest
+      # Three knobs, all defaulting to how a *direct* dispatch should
+      # behave: stop at the first failure, go red when one happens, and
+      # write the run summary. `test-all-platforms.yml` is the only caller
+      # that wants the opposite on all three, and it passes them
+      # explicitly -- so the tolerant behaviour is opted into by the one
+      # place that needs it rather than inherited by everything.
+      keep_going:
+        description: "Keep building after a target fails, instead of stopping at the first"
+        required: false
+        type: boolean
+        default: false
+      tolerate_failures:
+        description: "Let the job stay green when a target fails -- only the full matrix wants this, since aggregate-results is what renders the failure there"
+        required: false
+        type: boolean
+        default: false
+      step_summary:
+        description: "Write cibuildmp's own run summary into this job's step summary"
+        required: false
+        type: boolean
+        default: true
   # Kept alongside `workflow_call`, deliberately -- lets a maintainer
   # dispatch this file directly against one target set (e.g. just a
   # handful of rp2 boards) without going through the full plan/aggregate
@@ -71,6 +92,27 @@ on:
           - ubuntu-latest
           - ubuntu-24.04-arm
         default: ubuntu-latest
+      # Three knobs, all defaulting to how a *direct* dispatch should
+      # behave: stop at the first failure, go red when one happens, and
+      # write the run summary. `test-all-platforms.yml` is the only caller
+      # that wants the opposite on all three, and it passes them
+      # explicitly -- so the tolerant behaviour is opted into by the one
+      # place that needs it rather than inherited by everything.
+      keep_going:
+        description: "Keep building after a target fails, instead of stopping at the first"
+        required: false
+        type: boolean
+        default: false
+      tolerate_failures:
+        description: "Let the job stay green when a target fails -- only the full matrix wants this, since aggregate-results is what renders the failure there"
+        required: false
+        type: boolean
+        default: false
+      step_summary:
+        description: "Write cibuildmp's own run summary into this job's step summary"
+        required: false
+        type: boolean
+        default: true
 
 jobs:
   build:
@@ -82,7 +124,12 @@ jobs:
     # failure would turn this whole job -- and by extension the run --
     # red, which is exactly what `--keep-going`'s own report exists to
     # make unnecessary.
-    continue-on-error: true
+    # An expression rather than a literal, and defaulting to `false`: a
+    # direct dispatch should go red when a target fails. Only the full
+    # matrix passes `true`, because there a bucket's own red would hide
+    # nothing that `aggregate-results` does not already render, while
+    # turning every run red for an expected failure.
+    continue-on-error: ${{ inputs.tolerate_failures }}
     # Job-level, not set on the `uses: ./` step itself -- a composite
     # action's own inner steps are only guaranteed to see `env:` declared
     # at job/workflow level, not on the specific step that calls `uses:`.
@@ -131,7 +178,7 @@ jobs:
       # Disables cibuildmp's own native per-target GitHub step summary
       # (stepsummary.py) -- every bucket writing its own table would
       # bury aggregate-results's own single combined one.
-      CIBMP_DISABLE_GITHUB_STEP_SUMMARY: "1"
+      CIBMP_DISABLE_GITHUB_STEP_SUMMARY: ${{ inputs.step_summary && '' || '1' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -151,7 +198,7 @@ jobs:
           package-dir: examples/template
           build: ${{ inputs.build }}
           skip: ${{ inputs.skip }}
-          keep-going: "1"
+          keep-going: ${{ inputs.keep_going && '1' || '' }}
 
       - name: Upload report
         if: always()

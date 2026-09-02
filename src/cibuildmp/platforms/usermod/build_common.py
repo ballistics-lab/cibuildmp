@@ -19,6 +19,7 @@ for every port, not just the one that surfaced it.
 from __future__ import annotations
 
 import os
+import shlex
 from pathlib import Path
 
 
@@ -129,6 +130,155 @@ def cmake_extra_args_env(
     return {var: " ".join(extra_cmake_args)}
 
 
+# `CFLAGS_EXTRA` a MicroPython *release* needs, whatever port is being
+# built. The fourth axis beside `build_unix.py`'s own libc, architecture
+# and platform-tag tables, and the only one of the four that is a fact
+# about the tag rather than about the cell.
+#
+# It lives here rather than in a `build-platforms.toml` row because the
+# code it protects is `py/`, which every port compiles twice -- once into
+# `mpy-cross` (below) and once into the port itself. A row in
+# `[usermod.unix]` cannot say that: `rp2` at the same tag hits the same
+# diagnostic in the same file. Record 0084 tried the row first and moved
+# it here; a per-row override can come back the day a tag needs different
+# treatment in different ports, which nothing does today.
+#
+# `v1.20.0` -- `-Wno-error=dangling-pointer`. gcc 14 reports
+# `py/stackctrl.c:32` storing `&stack_dummy` into
+# `mp_state_ctx.thread.stack_top`, which is exactly what
+# `mp_stack_ctrl_init()` is for: the address is used as a *limit*, never
+# dereferenced after return. Upstream later rewrote it; this project is
+# not going to hold a 2023 release to a 2025 diagnostic. Live-caught in
+# CI (run 33636118022) rather than predicted: both `unix` x86_64 cells
+# failed inside the `mpy-cross` build, not the port's own.
+#
+# `-Wno-error=unterminated-string-initialization` -- gcc 15.1 rejects
+# `py/emitinlinethumb.c`'s register mnemonics (`{0, "r0\0"}`, ...), each a
+# 3-4 character string packed into a fixed 3-byte array with no room left
+# for the trailing NUL. Upstream's own fix landed in `v1.26.0`, bisected
+# exactly in [0082]: `v1.25.0` still fails, `v1.26.0` does not -- the same
+# boundary [0085] found for `arm_embedded`'s own xpack pin. Live-caught
+# here too, not just on `natmod_host`/`arm_embedded`: `manylinux_2_31_armv7l`
+# and `manylinux_2_41_mipsel`'s own published images carry gcc>=15.1 while
+# `manylinux_2_28_*` (AlmaLinux 8) does not, so `unix`'s own per-tag sweep
+# hit this on those two cells specifically, on `v1.20.0`/`v1.21.0`/`v1.22.0`
+# (0084's own sweep, run ids 33642989476-33643188693). Applied tag-wide
+# rather than per-cell: a suppressed warning that never fires on a cell
+# that does not hit it is a no-op, and `py/` is compiled by every port
+# alike (this dict's own header).
+_UNTERMINATED_STRING_INIT_TAGS = (
+    "v1.20.0",
+    "v1.21.0",
+    "v1.22.0",
+    "v1.22.1",
+    "v1.22.2",
+    "v1.23.0",
+    "v1.24.0",
+    "v1.24.1",
+    "v1.25.0",
+)
+
+TAG_CFLAGS: dict[str, tuple[str, ...]] = {
+    tag: ("-Wno-error=unterminated-string-initialization",)
+    for tag in _UNTERMINATED_STRING_INIT_TAGS
+}
+TAG_CFLAGS["v1.20.0"] += ("-Wno-error=dangling-pointer",)
+
+
+def tag_cflags(tag: str) -> tuple[str, ...]:
+    """Every `CFLAGS_EXTRA` flag this MicroPython release needs, in any
+    port. Empty for a tag that needs none, and for no tag at all."""
+    return TAG_CFLAGS.get(tag, ())
+
+
+def probe_supported_cflags(
+    candidates: tuple[str, ...],
+    *,
+    image: str,
+    compiler: str = "gcc",
+    oci_platform: str | None = None,
+    linux32: bool = False,
+    timeout: float | None = None,
+) -> tuple[str, ...]:
+    """Every `-Wno-error=<diagnostic>` in `candidates` this image's own
+    `compiler` actually recognizes, in the same order -- live-checked
+    inside `image` itself, not assumed from what a *different* image's
+    gcc happens to accept.
+
+    Found live, against a real `manylinux_2_28_i686` build once `unix`
+    stopped resolving to a cibuildmp-published image and started hitting
+    pypa's own per-arch gcc directly: `TAG_CFLAGS`'s own
+    `-Wno-error=unterminated-string-initialization` (a real gcc-15
+    diagnostic, [0082]) is not a harmless no-op on a gcc-14 image the way
+    its own comment assumed ("a suppressed warning that never fires on a
+    cell that does not hit it") -- gcc 14 does not recognize
+    `-Wunterminated-string-initialization` as a diagnostic name *at all*,
+    so `-Wno-error=` naming it is a hard `cc1: error: ... no option
+    '-Wunterminated-string-initialization'`, on every single translation
+    unit, not a warning quietly doing nothing. `manylinux_2_28`'s own
+    gcc ladder (11 -> 12 -> 14, record 0084's own addendum) never reaches
+    15 at all, so this was always going to happen the first time a
+    pre-`v1.26.0` tag actually built against that family's own real
+    compiler.
+
+    `compiler` defaults to the bare `gcc` every native pypa image runs
+    the real build with, but that default is wrong for `mipsel` -- its
+    image is a Bootlin cross-toolchain, so the compiler the real build
+    actually invokes is `mipsel-linux-gnu-gcc`
+    (`UnixArchSettings.cross_compile + "gcc"`), a *different, older*
+    binary than whatever bare `gcc` resolves to inside that same image
+    (its own build tooling, native to the image's host arch). Found
+    live: the first version of this function always probed bare `gcc`,
+    which on the `manylinux_2_41_mipsel` image happily accepted
+    `-Wno-error=unterminated-string-initialization` -- disproving this
+    docstring's own prior claim that every Bootlin/xpack toolchain here
+    was already known to be gcc >=15 -- while the real
+    `mipsel-linux-gnu-gcc` (gcc 14.3.0) rejected it exactly as any other
+    gcc-14 compiler would, and the build failed regardless of the
+    (wrongly-probed) filtered result.
+
+    No per-arch gcc-version table to keep in sync as a result: the
+    compiler itself is asked, once per (image, compiler, candidate
+    list), the same "let the tool that actually knows answer" principle
+    CLAUDE.md's own top rule already applies to reading cibuildwheel
+    instead of guessing at it. Empty `candidates` short-circuits with no
+    container run at all -- true for every `v1.26.0`-and-later, non-musl
+    build, the common case.
+    """
+    if not candidates:
+        return ()
+    from ... import dockerrun
+
+    # `dockerrun.run()` runs this with `check=True` -- a `;`-joined shell
+    # script's own exit status is whatever its *last* statement leaves
+    # behind, so without the trailing `; true` a probe would raise
+    # `CalledProcessError` (crashing the whole build, not just reporting
+    # one unsupported flag) purely because the *last* candidate in the
+    # list happened to be the one this gcc rejects, regardless of how
+    # every earlier candidate actually probed.
+    quoted_compiler = shlex.quote(compiler)
+    probe = (
+        "; ".join(
+            f'printf "" | {quoted_compiler} {shlex.quote(flag)} -x c -c -o /dev/null - '
+            f">/dev/null 2>&1 && echo {shlex.quote(flag)}"
+            for flag in candidates
+        )
+        + "; true"
+    )
+    output = dockerrun.run(
+        ["sh", "-c", probe],
+        mounts=[],
+        workdir=Path("/"),
+        image=image,
+        timeout=timeout,
+        oci_platform=oci_platform,
+        linux32=linux32,
+        capture_output=True,
+    )
+    supported = set((output or "").split())
+    return tuple(flag for flag in candidates if flag in supported)
+
+
 def container_mpy_cross(
     mpy_dir: Path,
     *,
@@ -137,6 +287,7 @@ def container_mpy_cross(
     oci_platform: str | None = None,
     linux32: bool = False,
     timeout: float | None = None,
+    extra_cflags: tuple[str, ...] = (),
 ) -> Path:
     """Build `mpy-cross` **inside `image`** and return the binary, for the
     port build to pass as `MICROPY_MPYCROSS=`.
@@ -197,6 +348,14 @@ def container_mpy_cross(
             "-C",
             (mpy_dir / "mpy-cross").as_posix(),
             f"BUILD={build_dir.as_posix()}",
+            # `mpy-cross` compiles `py/` too, so a diagnostic that stops a
+            # port build stops this one first -- live-caught in CI
+            # (33636118022): `v1.20.0`'s `-Werror=dangling-pointer=` in
+            # `py/stackctrl.c` failed here, before the port's own make ever
+            # ran, while the row's `cflags_extra` was reaching only the
+            # port. Anything the caller needs relaxed for its own sources
+            # has to be relaxed for this build as well.
+            *([f"CFLAGS_EXTRA={' '.join(extra_cflags)}"] if extra_cflags else []),
             f"-j{os.cpu_count() or 1}",
         ],
         mounts=[mpy_dir],

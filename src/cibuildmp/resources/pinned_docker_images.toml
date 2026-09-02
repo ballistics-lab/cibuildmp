@@ -44,12 +44,20 @@
 # `unix`'s own group names reuse **pypa's own names**, with no
 # `cibuildmp-` prefix and no private dialect:
 #
-#   pypa base    quay.io/pypa/manylinux_2_28_x86_64
-#   cibuildmp    ghcr.io/ballistics-lab/manylinux_2_28_x86_64
-#   Dockerfile   docker/manylinux_2_28_x86_64.Dockerfile
-#   identifier   v1.29.0-manylinux_2_28_x86_64   (no `unix-` segment --
+#   pypa base    quay.io/pypa/manylinux_2_41_mipsel  (this one isn't real --
+#                                                     see the `mipsel` entry
+#                                                     below, its own real
+#                                                     base is `ubuntu:26.04`)
+#   cibuildmp    ghcr.io/ballistics-lab/manylinux_2_41_mipsel
+#   Dockerfile   docker/manylinux_2_41_mipsel.Dockerfile
+#   identifier   v1.29.0-manylinux_2_41_mipsel   (no `unix-` segment --
 #                                                 unix/windows/webassembly
 #                                                 identifiers are {tag}-{arch})
+#
+# `mipsel` is the *only* one of the fifteen with a cibuildmp-published
+# image left, for the reason its own entry below gives -- every other
+# cell resolves straight to a `quay.io/pypa/...` reference, no
+# `ghcr.io/ballistics-lab/...` layer at all.
 #
 # `<floor>_<arch>` is a real PEP 600 / PEP 656 platform tag, which is the
 # whole point: record 0031 recorded that "manylinux" here used to mean
@@ -88,41 +96,55 @@
 # fact, so `dockerrun.run()`'s `--pull missing` never has to guess
 # whether a locally-cached image is stale.
 #
-# ── Nine `unix` cells point straight at pypa, no cibuildmp layer at all ─
+# ── Every `unix` cell but `mipsel` points straight at pypa, no cibuildmp
+#    layer at all ───────────────────────────────────────────────────────
 #
-# Not every `unix` cell needs a `ghcr.io/ballistics-lab/...` image:
 # `armv7l`'s `manylinux_2_31`, `riscv64`'s `manylinux_2_39`, and every
-# `musllinux_1_2` cell (all seven arches) never got the `libffi-devel`
-# layer the `manylinux_2_28` cells need -- verified by diffing each
-# `docker/*.Dockerfile` against a bare `FROM`: those nine files were
-# byte-for-byte a `FROM` line and nothing else, so publishing, pulling
-# and caching a second copy of an image cibuildmp adds nothing to was
-# pure overhead. Their value here is copied verbatim from
-# `pinned_pypa_images.toml`'s own matching `[<arch>]` `<floor>` cell (a
-# `quay.io/pypa/...` reference, not `ghcr.io/...`) -- `image_for()` does
-# not care which registry a group name resolves to. `bin/update_docker.py
-# --images` mirrors these nine straight from `pinned_pypa_images.toml`
-# instead of querying GHCR, since there is no cibuildmp-published image
-# to query. Their own Dockerfiles and `publish-docker-images.yml` matrix
+# `musllinux_1_2` cell (all seven arches) never got a `libffi-devel`
+# layer at all -- verified by diffing each `docker/*.Dockerfile` against
+# a bare `FROM`: those nine files were byte-for-byte a `FROM` line and
+# nothing else, so publishing, pulling and caching a second copy of an
+# image cibuildmp adds nothing to was pure overhead.
+#
+# The five `manylinux_2_28_*` cells joined them once `MICROPY_STANDALONE=1`
+# went universal for `unix` (see `build_unix.py`'s own `UNIX_ARCH_SETTINGS`
+# header): `ports/unix/Makefile` now always takes the "build `lib/libffi`
+# from source" branch and never reaches `pkg-config --cflags/libs libffi`,
+# so `libffi-devel` -- the one layer `docker/manylinux_2_28_*.Dockerfile`
+# ever added, and the only reason those five images were published at
+# all -- stops being read by anything. Live-verified against a bare
+# `quay.io/pypa/manylinux_2_28_x86_64` (no `libffi-devel` installed,
+# `pkg-config --exists libffi` failing as expected): a real `ports/unix`
+# build, `deplibs` included, still succeeds end to end.
+#
+# So all fourteen non-`mipsel` cells now share the same shape. Every
+# value here is copied verbatim from `pinned_pypa_images.toml`'s own
+# matching `[<arch>]` `<floor>` cell (a `quay.io/pypa/...` reference, not
+# `ghcr.io/...`) -- `image_for()` does not care which registry a group
+# name resolves to. `bin/update_docker.py --images` mirrors any group
+# whose current value is not a `ghcr.io/...` reference straight from
+# `pinned_pypa_images.toml` instead of querying GHCR for it, already
+# general enough that the five joining this rule needed no code change,
+# only data. Their own Dockerfiles and `publish-docker-images.yml` matrix
 # rows are deleted, not kept idle -- a Dockerfile that is only ever `FROM
 # <x>` is not a build step, it is a second name for `<x>`.
 
 [image_group]
 
 # ── unix -- one native image per (arch, libc floor), identity-keyed ────
-manylinux_2_28_x86_64 = "ghcr.io/ballistics-lab/manylinux_2_28_x86_64@sha256:1ad90a73ed0dce39d0c59694d87b417a1018303c8c8bc45408b895278615875e"
+manylinux_2_28_x86_64 = "quay.io/pypa/manylinux_2_28_x86_64@sha256:94c816d38ad56d2dc1df2f28007d18d306b0f5d05096c6f6b9141345df504d3e"
 musllinux_1_2_x86_64 = "quay.io/pypa/musllinux_1_2_x86_64@sha256:8900a53ed236d85edd6868387b3e3327c45774156519ad492fe8b1c2a434d1dc"
 
-manylinux_2_28_i686 = "ghcr.io/ballistics-lab/manylinux_2_28_i686@sha256:833f6a528ebacdaa6504b1996e6cf2e022d6488171b897bc932ac4ad4f9eed4f"
+manylinux_2_28_i686 = "quay.io/pypa/manylinux_2_28_i686@sha256:bce1c1f15a59f9b4aa3e8a82aab777f0dc987213dcae66609d25651c277e86c5"
 musllinux_1_2_i686 = "quay.io/pypa/musllinux_1_2_i686@sha256:e9029eacb01a207fc991eed8abccf55f653900b4b83068e37fb0ea201176a64a"
 
-manylinux_2_28_aarch64 = "ghcr.io/ballistics-lab/manylinux_2_28_aarch64@sha256:813e623f31e5fc711d9b445ee864abd4acec8c0c0f498b466f151a92f0b3a4fe"
+manylinux_2_28_aarch64 = "quay.io/pypa/manylinux_2_28_aarch64@sha256:45ea412cfbd2cc5e51323cecab614ea8e4e5522b4d4f668946c54056b40152f6"
 musllinux_1_2_aarch64 = "quay.io/pypa/musllinux_1_2_aarch64@sha256:ab0391c77648e2b15d37e3e5b8c3d43a0c4a1ca0fb3ab2f60d252be3474d2975"
 
-manylinux_2_28_ppc64le = "ghcr.io/ballistics-lab/manylinux_2_28_ppc64le@sha256:fd9ebcc5ff2aa63ac54edfedd06ab7265965814ad57d9f247c1825205c789b9f"
+manylinux_2_28_ppc64le = "quay.io/pypa/manylinux_2_28_ppc64le@sha256:c30b4161aaab2ad55d56e12d52e2cae1e5f1d981194e7db4d9d57ac2516807b4"
 musllinux_1_2_ppc64le = "quay.io/pypa/musllinux_1_2_ppc64le@sha256:e745f8e8e8c7c8e02e6379502d0b73f7cc4fd95283e011a78063292740f3cf42"
 
-manylinux_2_28_s390x = "ghcr.io/ballistics-lab/manylinux_2_28_s390x@sha256:53df7d9c279db406d9807676b36c0b9dc1696bfc5bc97e715990c5bf4c3c997b"
+manylinux_2_28_s390x = "quay.io/pypa/manylinux_2_28_s390x@sha256:2ff3207ba86c8fef999eb2e1139a612501501493f3fd47bbc8a71199a29e9de4"
 musllinux_1_2_s390x = "quay.io/pypa/musllinux_1_2_s390x@sha256:411d3d433dde4b3a9fce85122f7080110e2ec3543ca6c22578acb4a61c38cc14"
 
 # armv7l's manylinux line starts at `_2_31` upstream (Ubuntu 20.04/apt,

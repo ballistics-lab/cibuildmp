@@ -1,5 +1,7 @@
 import io
+import subprocess
 import tarfile
+import urllib.error
 from pathlib import Path
 
 import pytest
@@ -97,6 +99,87 @@ def test_incomplete_checkout_is_not_reused(tmp_path, monkeypatch):
 
     assert not (mpy_dir / "junk").exists()
     assert (mpy_dir / STAMP).exists()
+
+
+def _fake_404(url, dest, *, quiet):
+    raise urllib.error.HTTPError(url, 404, "not found", None, None)
+
+
+def test_clone_path_runs_git_submodule_update_for_raw_paths(tmp_path, monkeypatch):
+    """`submodules=` (natmod's own `micropython_submodules` knob, arbitrary
+    user-supplied paths) still goes through a plain `git submodule update
+    --init`, not any port's own `make submodules` -- natmod is not a port
+    and has no such target to delegate to."""
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        if command[:2] == ["git", "clone"]:
+            fake_checkout(Path(command[-1]))
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(sources, "download_file", _fake_404)
+    monkeypatch.setattr(sources.subprocess, "run", fake_run)
+
+    sources.fetch_micropython(
+        "v1.30.0-preview", tmp_path, submodules=["lib/berkeley-db-1.xx"], quiet=True
+    )
+
+    assert calls[0][:2] == ["git", "clone"]
+    assert calls[1] == [
+        "git",
+        "submodule",
+        "update",
+        "--init",
+        "--depth",
+        "1",
+        "lib/berkeley-db-1.xx",
+    ]
+
+
+def test_clone_path_runs_each_ports_own_make_submodules(tmp_path, monkeypatch):
+    """`ports=` (usermod's) delegates to each named port's own `make
+    submodules` target -- the command that port's own README documents --
+    rather than this project keeping its own list of submodule paths."""
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        if command[:2] == ["git", "clone"]:
+            fake_checkout(Path(command[-1]))
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(sources, "download_file", _fake_404)
+    monkeypatch.setattr(sources.subprocess, "run", fake_run)
+
+    sources.fetch_micropython(
+        "v1.30.0-preview", tmp_path, ports=["unix", "rp2"], quiet=True
+    )
+
+    make_calls = [c for c in calls if c[0] == "make"]
+    assert len(make_calls) == 2
+    assert make_calls[0][:2] == ["make", "-C"]
+    assert make_calls[0][-1] == "submodules"
+    assert Path(make_calls[0][2]).name == "unix"
+    assert Path(make_calls[1][2]).name == "rp2"
+
+
+def test_clone_path_with_no_submodules_or_ports_runs_only_clone(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        if command[:2] == ["git", "clone"]:
+            fake_checkout(Path(command[-1]))
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(sources, "download_file", _fake_404)
+    monkeypatch.setattr(sources.subprocess, "run", fake_run)
+
+    sources.fetch_micropython("v1.30.0-preview", tmp_path, quiet=True)
+
+    assert len(calls) == 1
+    assert calls[0][:2] == ["git", "clone"]
 
 
 def test_failed_fetch_leaves_no_cache_entry(tmp_path, monkeypatch):

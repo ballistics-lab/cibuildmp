@@ -1,3 +1,4 @@
+import os
 import subprocess
 from pathlib import Path
 
@@ -41,6 +42,18 @@ def fake_elf(target: str = "manylinux_2_28_x86_64") -> bytes:
     )
 
 
+def _fake_docker_run(cmd, **kwargs):
+    """A `dockerrun.subprocess.run` stand-in that behaves like the real
+    thing when `capture_output=True` -- `probe_supported_cflags()` reads
+    `.stdout` off whatever it gets back, and a real `subprocess.run` never
+    returns `None`. Every candidate "passes" (empty stdout, so
+    `probe_supported_cflags()` would normally drop it -- callers that care
+    about which flags survive stub this out themselves)."""
+    if kwargs.get("capture_output"):
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+    return None
+
+
 def opts(target: str = "manylinux_2_28_x86_64", **overrides) -> UnixBuildOptions:
     defaults = {
         "target": target,
@@ -63,30 +76,100 @@ def test_native_command_passes_an_empty_cross_compile():
         "make",
         "-C",
         "/gh/ws/mpy/ports/unix",
+        f"-j{os.cpu_count() or 1}",
         "VARIANT=standard",
         "BUILD=/gh/ws/usermod/build/x86_64",
         "CROSS_COMPILE=",
+        "MICROPY_STANDALONE=1",
         "USER_C_MODULES=/gh/ws/micropython/usermod",
         "FROZEN_MANIFEST=/gh/ws/a7p_manifest.py",
     ]
 
 
-def test_every_native_target_shares_that_shape():
-    # The point of the native-image model: aarch64, armv7l and i686 stop
-    # being special cases. `MICROPY_FORCE_32BIT` (the old x86 row) and
-    # `MICROPY_STANDALONE` (the old armhf row) are both gone -- their
-    # images provide a native compiler and a resolvable libffi.
+def test_every_native_manylinux_target_shares_that_shape():
+    # aarch64, armv7l and i686 stay non-cross-compiling under the
+    # native-image model (`MICROPY_FORCE_32BIT`, the old x86 row, is
+    # still gone -- each image's gcc already targets its own arch).
+    # `MICROPY_STANDALONE` is universal, but `-static` is not
+    # (`UNIX_ARCH_SETTINGS`'s own header) -- a `manylinux` cell links
+    # ordinary dynamic glibc, same as any manylinux wheel.
     for target in (
         "manylinux_2_28_aarch64",
         "manylinux_2_31_armv7l",
         "manylinux_2_28_i686",
-        "musllinux_1_2_riscv64",
     ):
         command = unix_make_command(opts(target), Path("/gh/ws/mpy"))
 
         assert "CROSS_COMPILE=" in command
         assert "MICROPY_FORCE_32BIT=1" not in command
-        assert "MICROPY_STANDALONE=1" not in command
+        assert "MICROPY_STANDALONE=1" in command
+        assert "LDFLAGS_EXTRA=-static" not in command
+
+
+def test_musllinux_targets_stay_fully_static():
+    # musl's own static story has no dynamic-NSS leak (record 0031), so
+    # `-static` earns its keep there and stays -- `UNIX_ARCH_SETTINGS`'s
+    # own header.
+    command = unix_make_command(opts("musllinux_1_2_riscv64"), Path("/gh/ws/mpy"))
+
+    assert "MICROPY_STANDALONE=1" in command
+    assert "LDFLAGS_EXTRA=-static" in command
+
+
+def test_riscv64_arch_cflags_suppress_clobbered():
+    # main.c's own `path_remaining` -- a real GCC diagnostic tied to
+    # s390x/riscv64's own register allocation around setjmp/longjmp,
+    # found live on multiple tags on both architectures (record [0044]'s
+    # own earlier, narrower finding was mpy-cross's `main.c`, one tag).
+    from cibuildmp.platforms.usermod.build_unix import unix_extra_cflags
+
+    assert "-Wno-error=clobbered" in unix_extra_cflags("manylinux_2_39_riscv64")
+    assert "-Wno-error=clobbered" in unix_extra_cflags("musllinux_1_2_riscv64")
+    assert "-Wno-error=clobbered" in unix_extra_cflags("manylinux_2_28_s390x")
+    assert "-Wno-error=clobbered" not in unix_extra_cflags("manylinux_2_28_x86_64")
+
+
+def test_riscv64_ffi_disabled_only_for_the_broken_tags():
+    from cibuildmp.platforms.usermod.build_unix import _riscv64_ffi_unported
+
+    # lib/libffi's own atgreen/libffi pin (every tag through v1.23.0) has
+    # no riscv* case in configure.host at all -- verified directly
+    # against the pinned commit, not assumed.
+    assert _riscv64_ffi_unported("manylinux_2_39_riscv64", "v1.20.0")
+    assert _riscv64_ffi_unported("musllinux_1_2_riscv64", "v1.23.0")
+    # v1.24.0 moves the pin to the canonical libffi/libffi (v3.4.6),
+    # which does have one.
+    assert not _riscv64_ffi_unported("manylinux_2_39_riscv64", "v1.24.0")
+    # Every other architecture's libffi builds clean on every tag --
+    # this is not a stand-in for a broader per-tag capability check.
+    assert not _riscv64_ffi_unported("manylinux_2_28_x86_64", "v1.20.0")
+
+
+def test_riscv64_broken_tag_disables_ffi_and_skips_deplibs(monkeypatch, tmp_path):
+    _mock_unix_image(monkeypatch)
+    build_dir = tmp_path / "build-manylinux_2_39_riscv64"
+    build_dir.mkdir()
+    (build_dir / "micropython").write_bytes(fake_elf("manylinux_2_39_riscv64"))
+
+    calls = []
+    monkeypatch.setattr(
+        "cibuildmp.dockerrun.subprocess.run",
+        lambda cmd, **k: calls.append(cmd) or _fake_docker_run(cmd, **k),
+    )
+
+    build_unix_fn(
+        opts("manylinux_2_39_riscv64", build_dir=build_dir, tag="v1.20.0"),
+        tmp_path / "mpy",
+    )
+
+    # No `deplibs` call at all -- building lib/libffi on this (tag, arch)
+    # pair is a hard `configure: error` regardless of what cibuildmp
+    # does, so there is nothing for it to usefully attempt.
+    assert not any(
+        "deplibs" in (c[-1] if c[-3:-1] == ["sh", "-c"] else "") for c in calls
+    )
+    main_build = next(c for c in calls if "MICROPY_PY_FFI=0" in c)
+    assert "MICROPY_PY_FFI=0" in main_build
 
 
 def test_mipsel_is_the_one_target_that_still_cross_compiles():
@@ -137,8 +220,45 @@ def test_deplibs_command_shape(monkeypatch):
         opts("manylinux_2_41_mipsel"), Path("/gh/ws/mpy"), docker_image=_FAKE_UNIX_IMAGE
     )
 
-    assert calls[0][-1] == "deplibs"
-    assert "MICROPY_STANDALONE=1" in calls[0]
+    # Wrapped in `sh -c` now, not a bare argv: the fixup that follows
+    # `make ... deplibs` (see run_unix_deplibs()'s own docstring) has to
+    # run in the same container invocation.
+    assert calls[0][-3:-1] == ["sh", "-c"]
+    script = calls[0][-1]
+    assert "deplibs" in script
+    assert "MICROPY_STANDALONE=1" in script
+
+
+def test_deplibs_fixup_queries_the_real_multi_os_directory(monkeypatch):
+    # Not hardcoded to `lib64`: `gcc -print-multi-os-directory` was
+    # `../lib64` on every RHEL-family image this fixup was first written
+    # against, but riscv64's own image answers `../lib64/lp64d` (its own
+    # ABI-variant subdirectory) -- found live once a tag whose libffi
+    # pin actually supports riscv64 reached this step, and a fixup that
+    # only checked for `out/lib64/libffi.a` missed it entirely. The
+    # script asks the compiler that will actually be used, not one
+    # value predicted in advance.
+    # riscv64 is non-native on this (x86_64) test host, so dockerrun.run()
+    # would otherwise start a real emulation probe first -- irrelevant to
+    # what this test checks (record 0043's own probe, its own coverage
+    # in test_usermod_dockerrun.py).
+    monkeypatch.setattr("cibuildmp.dockerrun._probe_platform", lambda *a, **k: "")
+    calls = []
+    monkeypatch.setattr(
+        "cibuildmp.dockerrun.subprocess.run",
+        lambda cmd, **k: calls.append(cmd),
+    )
+
+    run_unix_deplibs(
+        opts("manylinux_2_39_riscv64"),
+        Path("/gh/ws/mpy"),
+        docker_image=_FAKE_UNIX_IMAGE,
+    )
+
+    script = calls[0][-1]
+    assert "gcc -print-multi-os-directory" in script
+    assert "multi_os_dir" in script
+    assert "lib64" not in script  # no hardcoded fallback value anywhere
 
 
 def test_every_upstream_arch_plus_mipsel_has_settings():
@@ -215,7 +335,8 @@ def test_mipsel_runs_deplibs_before_build(monkeypatch, tmp_path, arch):
 
     build_unix_fn(opts(arch, build_dir=build_dir), tmp_path / "mpy")
 
-    assert run_calls[0][-1] == "deplibs"
+    assert run_calls[0][-3:-1] == ["sh", "-c"]
+    assert "deplibs" in run_calls[0][-1]
     assert any("USER_C_MODULES" in arg for arg in run_calls[1])
 
 
@@ -230,6 +351,44 @@ def test_mipsel_builds_and_returns_binary_path(monkeypatch, tmp_path, arch):
     result = build_unix_fn(opts(arch, build_dir=build_dir), tmp_path / "mpy")
 
     assert result == build_dir / "micropython"
+
+
+def test_mipsel_probes_its_cross_compiler_not_the_images_native_gcc(
+    monkeypatch, tmp_path
+):
+    # mipsel's own image is a Bootlin cross-toolchain: the real build
+    # uses `mipsel-linux-gnu-gcc`, a different (and, found live, older --
+    # gcc 14.3.0) binary than whatever bare `gcc` resolves to inside that
+    # same image (its own native build tooling). A tag from
+    # TAG_CFLAGS (v1.20.0) is needed here -- mipsel's own _ARCH_CFLAGS
+    # entry is empty, so with no tag at all there would be nothing to
+    # probe and this bug would stay invisible.
+    _mock_unix_image(monkeypatch)
+    build_dir = tmp_path / "build-manylinux_2_41_mipsel"
+    build_dir.mkdir()
+    (build_dir / "micropython").write_bytes(fake_elf("manylinux_2_41_mipsel"))
+
+    calls = []
+    monkeypatch.setattr(
+        "cibuildmp.dockerrun.subprocess.run",
+        lambda cmd, **k: calls.append(cmd) or _fake_docker_run(cmd, **k),
+    )
+
+    build_unix_fn(
+        opts("manylinux_2_41_mipsel", build_dir=build_dir, tag="v1.20.0"),
+        tmp_path / "mpy",
+    )
+
+    probe_scripts = [
+        c[-1] for c in calls if c[-3:-1] == ["sh", "-c"] and "gcc" in c[-1]
+    ]
+    assert any(script.startswith('printf "" | gcc ') for script in probe_scripts), (
+        probe_scripts
+    )
+    assert any(
+        script.startswith('printf "" | mipsel-linux-gnu-gcc ')
+        for script in probe_scripts
+    ), probe_scripts
 
 
 def test_x86_64_builds_and_returns_binary_path(tmp_path, monkeypatch):
@@ -272,12 +431,14 @@ def test_aarch64_no_longer_cross_compiles():
     # cross toolchain in an amd64 image, plus a ports.ubuntu.com mirror
     # rewrite). That whole setup encoded "the host is x86_64" as a
     # constant, which is false on an arm64 runner -- so the image is
-    # native now and the prefix is empty.
+    # native now and the prefix is empty. `MICROPY_STANDALONE=1` is back
+    # (every arch's own `UnixArchSettings`, not a cross-compile artifact
+    # -- see that table's own header), so it is not what distinguishes
+    # aarch64 from mipsel any more; `CROSS_COMPILE=` being empty is.
     command = unix_make_command(opts("manylinux_2_28_aarch64"), Path("/gh/ws/mpy"))
 
     assert "CROSS_COMPILE=" in command
     assert "CROSS_COMPILE=aarch64-linux-gnu-" not in command
-    assert "MICROPY_STANDALONE=1" not in command
 
 
 def test_aarch64_builds_and_returns_binary_path(monkeypatch, tmp_path):
@@ -286,7 +447,12 @@ def test_aarch64_builds_and_returns_binary_path(monkeypatch, tmp_path):
     build_dir.mkdir()
     (build_dir / "micropython").write_bytes(fake_elf("manylinux_2_28_aarch64"))
 
-    monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", lambda *a, **k: None)
+    # aarch64 carries a real `-Wno-error=array-bounds` candidate
+    # (`_ARCH_CFLAGS`), so `build_unix()` now probes it against this
+    # image's own gcc first -- a real `subprocess.run` always returns a
+    # `CompletedProcess`, never `None`, so the fake has to as well once
+    # `capture_output=True` is in play.
+    monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", _fake_docker_run)
 
     result = build_unix_fn(
         opts("manylinux_2_28_aarch64", build_dir=build_dir), tmp_path / "mpy"
@@ -325,21 +491,32 @@ def test_unix_docker_image_skips_host_toolchain_probe(monkeypatch, tmp_path):
     (build_dir / "micropython").write_bytes(fake_elf("manylinux_2_28_aarch64"))
 
     calls = []
-    monkeypatch.setattr(
-        "cibuildmp.dockerrun.subprocess.run",
-        lambda cmd, **k: calls.append(cmd) or None,
-    )
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return _fake_docker_run(cmd, **kwargs)
+
+    monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", fake_run)
 
     result = build_unix_fn(
         opts("manylinux_2_28_aarch64", build_dir=build_dir), tmp_path / "mpy"
     )
 
     assert result == build_dir / "micropython"
-    assert len(calls) == 1
-    docker_command = calls[0]
-    assert docker_command[:3] == ["docker", "run", "--rm"]
-    assert "manylinux_2_28_aarch64:local" in docker_command
-    assert "make" in docker_command
+    # Three calls now: `run_unix_deplibs()` runs first (standalone=True on
+    # every arch), then aarch64's real `-Wno-error=array-bounds` candidate
+    # (`_ARCH_CFLAGS`) gets probed against this image's own gcc, then the
+    # main build -- all three against the same resolved image.
+    assert len(calls) == 3
+    for docker_command in calls:
+        assert docker_command[:3] == ["docker", "run", "--rm"]
+        assert "manylinux_2_28_aarch64:local" in docker_command
+    # calls[0] (deplibs) is `sh -c "make ... && <fixup>"`; calls[1] is the
+    # cflags probe; calls[2] (the main build) is a bare `make` argv -- see
+    # run_unix_deplibs()'s own docstring for why only deplibs needs the
+    # wrapper.
+    assert "make" in calls[0][-1]
+    assert "make" in calls[2]
 
 
 def test_unix_docker_image_mounts_mpy_dir_and_user_c_modules(monkeypatch, tmp_path):
@@ -373,7 +550,47 @@ def test_unix_docker_image_mounts_mpy_dir_and_user_c_modules(monkeypatch, tmp_pa
 # target -- unix has no bare-host fallback left to fall back to (D30).
 
 
-# ── unix_extra_cflags() -- three axes, and which one each rule is on ────
+# ── unix_extra_cflags() -- four axes, and which one each rule is on ────
+
+
+def test_the_tag_axis_carries_a_flag_a_whole_micropython_release_needs():
+    """`v1.20.0` needs `-Wno-error=dangling-pointer` in every cell *and*
+    every port, which none of the other three axes can say: they key on
+    platform tag, architecture and libc (record 0084). Measured, not
+    predicted -- gcc 14 rejects `py/stackctrl.c` on a tag that shipped
+    before that diagnostic existed. It also carries
+    `-Wno-error=unterminated-string-initialization`, same shape, a
+    different gcc-15 diagnostic every tag before `v1.26.0` shares
+    ([0082]/[0085]; live-caught here on `v1.20.0`'s own sweep)."""
+    assert build_unix.unix_extra_cflags("manylinux_2_28_x86_64", "v1.20.0") == (
+        "-Wno-error=unterminated-string-initialization",
+        "-Wno-error=dangling-pointer",
+    )
+
+
+def test_the_tag_axis_composes_with_the_libc_and_arch_rules():
+    # musl contributes `-Wno-error=cpp`, aarch64 `-Wno-error=array-bounds`,
+    # and the tag axis its own two flags -- each from a different axis,
+    # none of them repeating another.
+    assert build_unix.unix_extra_cflags("musllinux_1_2_aarch64", "v1.20.0") == (
+        "-Wno-error=cpp",
+        "-Wno-error=array-bounds",
+        "-Wno-error=unterminated-string-initialization",
+        "-Wno-error=dangling-pointer",
+    )
+
+
+def test_no_other_tag_carries_a_relaxation():
+    assert build_unix.unix_extra_cflags("manylinux_2_28_x86_64", "v1.29.0") == ()
+
+
+def test_omitting_the_tag_still_resolves_the_other_three_axes():
+    # A caller with no MicroPython version in hand must not lose the libc
+    # and architecture rules.
+    assert build_unix.unix_extra_cflags("musllinux_1_2_aarch64") == (
+        "-Wno-error=cpp",
+        "-Wno-error=array-bounds",
+    )
 
 
 def test_the_musl_rule_covers_the_whole_musllinux_column():
@@ -595,10 +812,11 @@ def test_build_unix_calls_repair_when_libffi_is_needed(monkeypatch, tmp_path):
 
     build_unix_fn(opts(build_dir=build_dir), tmp_path / "mpy")
 
-    # One dockerrun.run() call for the main build, one for the repair --
-    # only the second one runs patchelf.
-    assert len(calls) == 2
-    assert "patchelf" in calls[1][-1]
+    # Three dockerrun.run() calls now: deplibs first (`standalone=True` on
+    # every arch, this one included), then the main build, then the
+    # repair -- only the last one runs patchelf.
+    assert len(calls) == 3
+    assert "patchelf" in calls[-1][-1]
 
 
 def test_build_unix_skips_repair_when_nothing_non_baseline(monkeypatch, tmp_path):
@@ -617,4 +835,5 @@ def test_build_unix_skips_repair_when_nothing_non_baseline(monkeypatch, tmp_path
 
     build_unix_fn(opts(build_dir=build_dir), tmp_path / "mpy")
 
-    assert len(calls) == 1
+    # deplibs, then the main build -- no repair call, and no third one.
+    assert len(calls) == 2

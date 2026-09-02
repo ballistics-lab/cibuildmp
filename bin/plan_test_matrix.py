@@ -127,7 +127,8 @@ class _Entry:
     identifier: str
     weight: float
     runner: str
-    group: tuple[str | None, str]  # (image, tag) -- batching's own unit
+    emulated: bool
+    group: str | tuple[None, str]  # batching's own unit -- see `_group_for()`
 
 
 def _image_short_name(image: str | None) -> str | None:
@@ -136,13 +137,17 @@ def _image_short_name(image: str | None) -> str | None:
     return image.rsplit("/", 1)[-1].split("@", 1)[0]
 
 
+def _is_emulated(identifier: str) -> bool:
+    return identifier.endswith(_EMULATED_UNIX_SUFFIXES)
+
+
 def _weight_for(port: str, image: str | None, identifier: str) -> float:
     if port in _PORT_WEIGHTS:
         return _PORT_WEIGHTS[port]
     name = _image_short_name(image)
     if name in _WEIGHTS:
         return _WEIGHTS[name]
-    if identifier.endswith(_EMULATED_UNIX_SUFFIXES):
+    if _is_emulated(identifier):
         return _EMULATED_UNIX_WEIGHT
     return _DEFAULT_WEIGHT
 
@@ -151,6 +156,26 @@ def _runner_for(port: str, identifier: str) -> str:
     if port == "unix" and identifier.endswith(_ARM64_UNIX_SUFFIXES):
         return "ubuntu-24.04-arm"
     return "ubuntu-latest"
+
+
+def _group_for(image: str | None, tag: str) -> str | tuple[None, str]:
+    """The batching unit `_pack_one_runner()` never splits across buckets
+    except when oversized: every identifier sharing one **image**, across
+    every tag, not `(image, tag)` -- a Docker pull is a runner-local,
+    per-*bucket* cost (`--pull missing` only ever finds a cached layer from
+    an earlier `docker run` in the *same* job), so two buckets both
+    touching `manylinux_2_28_x86_64` -- one for `v1.28.0`, one for
+    `v1.29.0` -- pay for that pull twice over the run, for no reason: the
+    image itself does not change per tag, only the MicroPython checkout
+    bind-mounted into it does. Grouping by image alone means a given image
+    lands in the fewest buckets its own total weight actually requires,
+    across every tag it appears in, not one bucket per tag it happens to
+    share a runner-slot with. A target with no image resolved yet (a
+    declared-but-unpublished cell) keeps the old `(None, tag)` shape --
+    there is no image to co-locate for it, and it will fail its own build
+    regardless of which bucket it lands in.
+    """
+    return image if image is not None else (None, tag)
 
 
 def resolve_entries(
@@ -189,7 +214,8 @@ def resolve_entries(
                     identifier=target.identifier,
                     weight=_weight_for(port, image, target.identifier),
                     runner=_runner_for(port, target.identifier),
-                    group=(image, target.tag),
+                    emulated=_is_emulated(target.identifier),
+                    group=_group_for(image, target.tag),
                 )
             )
     return entries
@@ -198,8 +224,8 @@ def resolve_entries(
 def _pack_one_runner(entries: list[_Entry], n_buckets: int) -> list[list[_Entry]]:
     """LPT bin-packing (largest-first, into the currently lightest bucket)
     over chunks, not individual entries -- a "chunk" is every entry sharing
-    one `(image, tag)` (`_Entry.group`), in first-appearance order, so
-    batching an oversized port never scatters it across buckets one
+    one image (`_Entry.group`, see `_group_for()`), in first-appearance
+    order, so batching an oversized port never scatters it across buckets one
     identifier at a time and losing the point of batching (a shared
     MicroPython checkout/mpy-cross/image pull per group, [0063]'s own
     keep_going docstring) -- weight alone cannot stand in for this: most
@@ -214,7 +240,7 @@ def _pack_one_runner(entries: list[_Entry], n_buckets: int) -> list[list[_Entry]
     total = sum(e.weight for e in entries) or 1.0
     target = total / n_buckets
 
-    chunk_by_group: dict[tuple[str | None, str], list[_Entry]] = {}
+    chunk_by_group: dict[str | tuple[None, str], list[_Entry]] = {}
     for entry in entries:
         chunk_by_group.setdefault(entry.group, []).append(entry)
     chunks = list(chunk_by_group.values())
@@ -242,45 +268,64 @@ def _pack_one_runner(entries: list[_Entry], n_buckets: int) -> list[list[_Entry]
 
 
 def make_buckets(entries: list[_Entry], max_buckets: int) -> list[dict[str, object]]:
-    """Partition by runner first -- a job has exactly one `runs-on`, so an
-    arm64-native identifier and an amd64-native one can never share a
-    bucket -- then split `max_buckets` across runners proportionally to
-    each one's own share of total estimated weight (never fewer than one
-    bucket for a non-empty runner, never more than `max_buckets` total).
+    """Partition by `(runner, emulated)` first -- a job has exactly one
+    `runs-on`, so an arm64-native identifier and an amd64-native one can
+    never share a bucket, the same reason `emulated` sits beside it now:
+    unix's own six real-QEMU-execution cells (`_EMULATED_UNIX_WEIGHT`,
+    ~15-20 real minutes each) are 20-40x heavier than a native cell on the
+    same runner, and mixing one emulated identifier into an otherwise-fast
+    native bucket makes that whole bucket, and everything waiting on the
+    same runner slot behind it, only as fast as its slowest member --
+    exactly the "one job barely moving while dozens of others finish"
+    shape a real run measured before bucketing existed at all (this
+    module's own docstring). Splitting them into their own partition lets
+    a native-only dispatch (`--skip '*_ppc64le *_s390x *_riscv64'`, the
+    exact three suffixes `_EMULATED_UNIX_SUFFIXES` names) report back in
+    minutes without waiting on a partition that was always going to take
+    tens of minutes regardless of how many buckets it gets. `max_buckets`
+    still splits proportionally across whichever partitions are actually
+    present, by total estimated weight (never fewer than one bucket for a
+    non-empty partition, never more than `max_buckets` total).
     """
-    by_runner: dict[str, list[_Entry]] = {}
+    by_partition: dict[tuple[str, bool], list[_Entry]] = {}
     for e in entries:
-        by_runner.setdefault(e.runner, []).append(e)
+        by_partition.setdefault((e.runner, e.emulated), []).append(e)
 
     total_weight = sum(e.weight for e in entries) or 1.0
-    runners = sorted(by_runner, key=lambda r: -sum(e.weight for e in by_runner[r]))
+    partitions = sorted(
+        by_partition, key=lambda p: -sum(e.weight for e in by_partition[p])
+    )
     counts = {
-        r: max(
-            1, round(sum(e.weight for e in by_runner[r]) / total_weight * max_buckets)
+        p: max(
+            1,
+            round(sum(e.weight for e in by_partition[p]) / total_weight * max_buckets),
         )
-        for r in runners
+        for p in partitions
     }
     while sum(counts.values()) > max_buckets:
-        r = max(counts, key=lambda r: counts[r])
-        counts[r] -= 1
+        p = max(counts, key=lambda p: counts[p])
+        counts[p] -= 1
     while sum(counts.values()) < max_buckets and any(
-        counts[r] < len(by_runner[r]) for r in runners
+        counts[p] < len(by_partition[p]) for p in partitions
     ):
-        r = max(
-            (r for r in runners if counts[r] < len(by_runner[r])),
-            key=lambda r: sum(e.weight for e in by_runner[r]) / counts[r],
+        p = max(
+            (p for p in partitions if counts[p] < len(by_partition[p])),
+            key=lambda p: sum(e.weight for e in by_partition[p]) / counts[p],
         )
-        counts[r] += 1
+        counts[p] += 1
 
     result: list[dict[str, object]] = []
-    for r in runners:
-        packed = _pack_one_runner(by_runner[r], counts[r])
+    for r, emulated in partitions:
+        packed = _pack_one_runner(by_partition[(r, emulated)], counts[(r, emulated)])
         width = len(str(len(packed)))
-        runner_label = "arm64" if r == "ubuntu-24.04-arm" else "amd64"
+        if emulated:
+            partition_label = "emulated"
+        else:
+            partition_label = "arm64" if r == "ubuntu-24.04-arm" else "amd64"
         for index, bucket in enumerate(packed, 1):
             result.append(
                 {
-                    "label": f"{runner_label}-{index:0{width}}",
+                    "label": f"{partition_label}-{index:0{width}}",
                     "runner": r,
                     "build": " ".join(e.identifier for e in bucket),
                     "estimated_seconds": round(sum(e.weight for e in bucket)),

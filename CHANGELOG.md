@@ -7,6 +7,122 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-09-03
+
+### Fixed
+
+- **`unix` builds on `riscv64` (any tag whose `lib/libffi` pin actually
+  supports it, `v1.24.0`+) failed at the final link with `ld: cannot
+  find .../lib/libffi/out/lib/libffi.a`**, the same class of bug the
+  RHEL `../lib64` fixup already covered — `deplibs`' own symlink fixup
+  only ever checked one hardcoded path
+  (`out/lib64/libffi.a`), but `riscv64`'s own `gcc -print-multi-os-directory`
+  answers `../lib64/lp64d` (its own ABI-variant subdirectory), one level
+  deeper than the RHEL case. The fixup now queries the real value live
+  with the same compiler `deplibs` itself just used, instead of a value
+  predicted in advance — live-verified against the real
+  `manylinux_2_39_riscv64` image end to end (a full build, real link,
+  real binary).
+- **`unix` builds on `riscv64` failed outright on every tag through
+  `v1.23.0`** with `configure: error: "libffi has not been ported to
+  riscv64-unknown-linux-gnu."`: `lib/libffi`'s own submodule pin, on
+  those tags, points to `https://github.com/atgreen/libffi`, a
+  fork/mirror whose `configure.host` has no `riscv*` case at all
+  (`v1.24.0` moves the pin to the canonical `libffi/libffi`, which does
+  — filed upstream, but there is no fix to backport onto a tag that has
+  already shipped). `MICROPY_PY_FFI=0` for exactly this (tag, `riscv64`)
+  combination, and `deplibs` is skipped entirely rather than attempting
+  a build that cannot succeed.
+- **`unix` builds failed on `s390x`/`riscv64`, on multiple tags, with a
+  real GCC diagnostic in `ports/unix/main.c`**:
+  `error: variable 'path_remaining' might be clobbered by 'longjmp' or
+  'vfork' [-Werror=clobbered]`. The same diagnostic class record [0044]
+  found narrower (`mpy-cross`'s own `main.c`, `s390x`, `v1.28.0` only)
+  and descoped by identifier rather than suppressed — this sweep found
+  it in the *port's* `main.c` too, on multiple tags, on both
+  architectures, which is what moved it from "worth descoping two
+  identifiers for" to "worth suppressing at the architecture level" via
+  `-Wno-error=clobbered`, the same escalation `aarch64`'s own
+  `-Wno-error=array-bounds` entry already went through once.
+- **`unix`'s new `-Wno-error=<diagnostic>` gcc probe still failed
+  `manylinux_2_41_mipsel` builds on every pre-`v1.26.0` tag**, the one
+  case the probe was written for: it always probed the image's bare
+  `gcc`, but `mipsel`'s own image is a Bootlin cross-toolchain where the
+  real build compiler is `mipsel-linux-gnu-gcc` (gcc 14.3.0) — a
+  different, older binary than whatever bare `gcc` resolves to inside
+  that same image. The probe's own false-positive verdict (from the
+  native image gcc, disproving this project's own prior assumption that
+  every Bootlin/xpack toolchain here was already gcc >=15) let
+  `-Wno-error=unterminated-string-initialization` back into
+  `CFLAGS_EXTRA`, and the real cross-compiler rejected it exactly as any
+  other gcc-14 would. Fixed by probing the actual compiler each build
+  step uses: bare `gcc` for the in-container `mpy-cross` build (a host
+  tool, never cross-compiled), `{cross_compile}gcc` for the main port
+  build — identical for every arch but `mipsel`.
+- **`unix` builds failed outright on every clone-path tag that needs
+  `lib/libffi`** (no release tarball, e.g. `v1.30.0-preview`) with
+  `make: *** No rule to make target '../../lib/libffi/autogen.sh'`:
+  `ports/unix/Makefile`'s own `GIT_SUBMODULES += lib/libffi` sits behind
+  `ifeq ($(MICROPY_STANDALONE),1)`, and the `make submodules` step this
+  project runs on the clone path never passed that variable, so it
+  silently computed a *different*, incomplete submodule list than the
+  real build (which always sets `MICROPY_STANDALONE=1`) needs — the
+  submodule was simply never checked out. Live-caught on a full sweep
+  across every `unix` cell: `v1.20.0` through `v1.29.0` all have release
+  tarballs and were unaffected; only `v1.30.0-preview` takes the clone
+  path in that range, and every one of its `deplibs`-needing arches
+  failed the same way.
+- **`unix`'s clone path (a MicroPython tag with no release tarball, e.g.
+  `v1.22.1`/`v1.30.0-preview`) now fetches each port's own `lib/`
+  submodules by running that port's own `make submodules` — the command
+  its own README documents — instead of a cibuildmp-maintained list of
+  submodule paths that could drift from what `GIT_SUBMODULES` in that
+  port's own Makefile actually lists.
+- **`unix` linking failed on `manylinux_2_28_{x86_64,aarch64,ppc64le,
+  s390x,i686}`** with `libffi.a: No such file or directory`: `lib/libffi`'s
+  own `configure` installs to a `../lib64`-offset path on these
+  RHEL-family hosts, which `ports/unix/Makefile` never looks in. Fixed
+  with a symlink fixup after `deplibs`.
+- **`unix`'s full static link (`LDFLAGS_EXTRA=-static`) applied to every
+  arch failed outright on the same five `manylinux_2_28_*` cells**,
+  missing `glibc-static`. Pulled back to `musllinux`/`mipsel` only, where
+  it is a real, complete guarantee (musl has no dynamic-NSS leak) rather
+  than a partial one glibc can't fully deliver anyway. `manylinux` cells
+  link ordinary dynamic glibc again, the same mechanism every real
+  manylinux wheel already relies on.
+- **`unix` builds on pre-`v1.26.0` tags failed outright on
+  `manylinux_2_28_{i686,aarch64,armv7l}`** (and any other cell whose real
+  gcc turned out older than assumed): `TAG_CFLAGS`'s own
+  `-Wno-error=unterminated-string-initialization` ([0082]) is a gcc-15
+  diagnostic name gcc 14 does not recognize at all, so naming it via
+  `-Wno-error=` was a hard `cc1: error`, not the harmless no-op its own
+  comment assumed — surfaced only once these cells started resolving to
+  bare pypa images with each arch's own real (and often older) gcc
+  instead of a cibuildmp-published image with a uniformly newer one.
+  Every `-Wno-error=<diagnostic>` candidate is now live-probed against
+  the target image's own gcc before use, keeping only the ones it
+  actually recognizes — no per-arch gcc-version table to keep in sync.
+
+### Changed
+
+- **`unix`'s main port build and `deplibs` (libffi) step now build with
+  `-j<host cores>`**, matching the in-container `mpy-cross` build, which
+  has always used it. Both ran fully single-threaded before — a real,
+  live-measured 55.2s → 10.0s (~5.5x) on a 16-core host for a native
+  `manylinux_2_28_x86_64` build, identical output (`text`/`data`/`bss`
+  sizes unchanged). No change on the emulated cells' own effective
+  parallelism — QEMU user-mode's per-core overhead was not measured
+  here.
+- **`unix`'s five `manylinux_2_28_*` cells drop their own published
+  `ghcr.io/ballistics-lab/...` image and resolve straight to pypa's own
+  `quay.io/pypa/manylinux_2_28_*`.** The one layer those images ever
+  added (`libffi-devel`) stopped being read by anything once
+  `MICROPY_STANDALONE=1` went universal for `unix` — the build always
+  takes the "vendor `lib/libffi` from source" branch now, never
+  `pkg-config`. Fourteen of `unix`'s fifteen cells now resolve to a bare
+  pypa image with no cibuildmp layer at all; only `mipsel` (no pypa image
+  to begin with) still publishes one.
+
 ## [0.6.1] - 2026-09-01
 
 ### Fixed
@@ -1379,7 +1495,8 @@ ballistics-lab/micropython-native-ci, but both tags exist here too, so every
 link resolves inside this repository -- the version line continues rather
 than restarting (see the 0.3.0a1 entry). -->
 
-[Unreleased]: https://github.com/ballistics-lab/cibuildmp/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/ballistics-lab/cibuildmp/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/ballistics-lab/cibuildmp/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/ballistics-lab/cibuildmp/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/ballistics-lab/cibuildmp/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/ballistics-lab/cibuildmp/compare/v0.4.2...v0.5.0
@@ -1395,7 +1512,9 @@ than restarting (see the 0.3.0a1 entry). -->
 [0032]: docs/records/0032-unix-docker-default-and-webassembly-wiring.md
 [0038]: docs/records/0038-m5-adopt-in-three-repos.md
 [0043]: docs/records/0043-unix-adopts-cibuildwheel-native-image-model.md
+[0044]: docs/records/0044-unix-native-images-landed.md
 [0052]: docs/records/0052-config-is-a-tree-not-a-selector-matrix.md
 [0054]: docs/records/0054-usermod-example-from-upstream-usercmodule.md
 [0066]: docs/records/0066-extra-cmake-args.md
 [0069]: docs/records/0069-upstream-usercmodule-narrow-ci-slice.md
+[0082]: docs/records/0082-natmod-old-tags-fail-mpy-cross-under-gcc-15.md

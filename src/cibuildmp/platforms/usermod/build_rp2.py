@@ -19,30 +19,6 @@ from pathlib import Path
 from . import build_common
 from .build_common import UsermodBuildError, usermod_mounts
 
-# `sources.fetch_micropython()`'s own `submodules=` -- only ever consulted
-# on its clone path (a preview tag with no published release tarball); the
-# tarball path already vendors every lib/ submodule, which is the whole
-# reason it is preferred (see that function's own docstring). Live-caught:
-# `make ... submodules` run unconditionally inside the container failed
-# with "fatal: not a git repository" against a real tarball checkout --
-# `ports/rp2/py/mkrules.mk`'s `submodules` target is a bare `git submodule
-# update`, which cannot run at all outside a real git checkout. Five, not
-# just `lib/pico-sdk` itself: the old host-based
-# `.github/actions/build-usermod-rp2040/action.yml` (this driver's own
-# reference) notes `ports/rp2/CMakeLists.txt` redirects
-# `PICO_TINYUSB_PATH`/`PICO_LWIP_PATH`/`PICO_BTSTACK_PATH`/
-# `PICO_CYW43_DRIVER_PATH` at MicroPython's own top-level `lib/<name>`
-# rather than at pico-sdk's own nested (and, on the clone path, never
-# initialised) copies -- confirmed present as real top-level `lib/`
-# directories in a genuine v1.29.0 tarball checkout.
-RP2_SUBMODULES: tuple[str, ...] = (
-    "lib/pico-sdk",
-    "lib/tinyusb",
-    "lib/lwip",
-    "lib/btstack",
-    "lib/cyw43-driver",
-)
-
 
 @dataclass(frozen=True)
 class Rp2BuildOptions:
@@ -87,12 +63,17 @@ def build_rp2(
     No provisioning step runs inside the container at all:
     `sources.fetch_micropython()` already resolved every submodule this
     port needs before `mpy_dir` ever reaches here -- vendored for free on
-    its normal tarball path, `git submodule update --init`'d explicitly
-    on its clone path (`orchestrate.build()` threads `RP2_SUBMODULES`
-    into `submodules=` for exactly this). Running `ports/rp2`'s own
-    `make ... submodules` target here instead was the first thing tried
-    and failed live: it is a bare `git submodule update`, which cannot
-    run at all against a tarball checkout ("fatal: not a git repository").
+    its normal tarball path, or (on its clone path -- a tag with no
+    published release tarball) by running `ports/rp2`'s own `make
+    submodules` target itself right after the clone (`orchestrate.build()`
+    passes `ports=` for exactly this), the same command
+    `ports/rp2/README.md` documents. That target is `git submodule
+    update --init` for `lib/pico-sdk` followed by a `cmake
+    -DUPDATE_SUBMODULES=1` step covering pico-sdk's own nested
+    tinyusb/lwip/btstack/cyw43-driver -- both host-runnable (git and
+    cmake only), unlike `esp32`'s own `submodules` target (`idf.py`,
+    container-only), which is why `orchestrate.py` excludes that one port
+    from the same call.
 
     Live-verified 2026-08-29: a real `examples/template` build against
     `v1.29.0-rp2-RPI_PICO` producing a genuine, correctly-sized

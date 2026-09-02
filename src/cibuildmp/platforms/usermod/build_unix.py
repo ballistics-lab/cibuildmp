@@ -42,6 +42,7 @@ rather than assuming the pinned settings alone were enough.
 
 from __future__ import annotations
 
+import os
 import shlex
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -73,8 +74,15 @@ class UnixArchSettings:
 
     elf: tuple[int, int, int]
     cross_compile: str = ""
-    link_opts: tuple[str, ...] = ()
     standalone: bool = False
+    # True only for `mipsel`: the one arch with no native pypa image to
+    # resolve a dynamic `libc`/`libffi` floor from at all (a Bootlin
+    # cross-toolchain sysroot instead), so it has always had to link
+    # fully static, tag or no tag. Every other arch's own static-or-not
+    # now depends on which *tag* (`manylinux`/`musllinux`) is being
+    # built, not on the arch alone -- see `unix_make_command()`'s own
+    # `_use_static()`.
+    force_static: bool = False
 
 
 _ELFCLASS32, _ELFCLASS64 = 1, 2
@@ -119,25 +127,80 @@ _ELFDATA2LSB, _ELFDATA2MSB = 1, 2
 #     the vendored one -- which in turn is why `libltdl-dev` had to be
 #     installed for `autogen.sh` (D25's sixth bug). `pkg-config --libs
 #     libffi` resolves to `-lffi` inside `manylinux_2_31_armv7l`,
-#     checked directly by running it in the real image, so armv7l joins
-#     every other native arch on the plain dynamic path. Only `mipsel`
-#     still needs it.
+#     checked directly by running it in the real image, so 0043 dropped
+#     `MICROPY_STANDALONE` everywhere but `mipsel`, which has no image at
+#     all to resolve a system `libffi` from.
+#
+# **That second bullet is half-reversed below, and half stands.**
+# `MICROPY_STANDALONE=1` (vendor and build `lib/libffi` from source) now
+# applies to every arch, not just `mipsel` -- not because system `libffi`
+# stopped resolving, but because depending on it made the submodule list
+# itself arch-conditional (`lib/libffi` only on the clone path, only when
+# `MICROPY_STANDALONE=1`) for one arch out of eight, and because it stops
+# this project depending on every published image happening to ship
+# `libffi-dev`/`libffi-devel` at all -- already a real gap once
+# (`manylinux_2_28_x86_64` measured with none, record 0084's own
+# baseline).
+#
+# `LDFLAGS_EXTRA=-static` (the whole binary, not just libffi) did **not**
+# follow it everywhere, on reflection and against record 0084's own
+# already-argued position ("`LDFLAGS_EXTRA=-static` is a separate flag
+# and stays behind... a fully static binary is a change to what cibuildmp
+# ships"): `manylinux_2_28` isn't only a floor claim, it's a live, native
+# glibc userland whose whole *point* is that ordinary dynamic linking
+# against its own symbol versions is exactly what makes the artifact
+# portable, per PEP 600 -- the same mechanism every real manylinux wheel
+# already relies on, no static anything. Reaching for `-static` there
+# does not buy a cleaner artifact, it buys a linker error on any image
+# missing `glibc-static` (`libc.a`/`libm.a`/`libpthread.a`/`libdl.a`, not
+# shipped by pypa's own `manylinux_2_28_*` images, confirmed live) for a
+# guarantee that is *already* leaky on glibc regardless: record 0031's
+# own finding is that `libffi`'s `dlopen()` and `getaddrinfo()`'s own NSS
+# backends still reach out to the linking host's glibc at runtime even
+# from a "static" binary, so `-static` was never a complete escape from
+# the floor on a glibc target in the first place. It stays for `musl`
+# (musllinux, `force_static` below): musl's own static story has no such
+# leak -- no dynamic NSS, everything genuinely self-contained -- which is
+# exactly why Alpine/musl-based static binaries are a well-established
+# pattern and glibc ones are not. See `unix_make_command()`'s own
+# `_use_static()` for where this actually gets decided per build.
 #
 # Order is significant, not alphabetical: `targets.py`'s `_PORT_AXES`
 # derives its display/build order from the pin file and this table, so
 # reordering this literal reorders every `--dry-run` plan.
 UNIX_ARCH_SETTINGS: dict[str, UnixArchSettings] = {
-    "x86_64": UnixArchSettings(elf=(62, _ELFCLASS64, _ELFDATA2LSB)),
-    "i686": UnixArchSettings(elf=(3, _ELFCLASS32, _ELFDATA2LSB)),
-    "aarch64": UnixArchSettings(elf=(183, _ELFCLASS64, _ELFDATA2LSB)),
-    "armv7l": UnixArchSettings(elf=(40, _ELFCLASS32, _ELFDATA2LSB)),
-    "ppc64le": UnixArchSettings(elf=(21, _ELFCLASS64, _ELFDATA2LSB)),
+    "x86_64": UnixArchSettings(
+        elf=(62, _ELFCLASS64, _ELFDATA2LSB),
+        standalone=True,
+    ),
+    "i686": UnixArchSettings(
+        elf=(3, _ELFCLASS32, _ELFDATA2LSB),
+        standalone=True,
+    ),
+    "aarch64": UnixArchSettings(
+        elf=(183, _ELFCLASS64, _ELFDATA2LSB),
+        standalone=True,
+    ),
+    "armv7l": UnixArchSettings(
+        elf=(40, _ELFCLASS32, _ELFDATA2LSB),
+        standalone=True,
+    ),
+    "ppc64le": UnixArchSettings(
+        elf=(21, _ELFCLASS64, _ELFDATA2LSB),
+        standalone=True,
+    ),
     # The one big-endian target in the matrix, and the reason
     # `verify_unix_output()` checks `EI_DATA` at all rather than
     # `e_machine` alone: a big-endian s390x ELF and a hypothetical
     # little-endian one share `EM_S390`.
-    "s390x": UnixArchSettings(elf=(22, _ELFCLASS64, _ELFDATA2MSB)),
-    "riscv64": UnixArchSettings(elf=(243, _ELFCLASS64, _ELFDATA2LSB)),
+    "s390x": UnixArchSettings(
+        elf=(22, _ELFCLASS64, _ELFDATA2MSB),
+        standalone=True,
+    ),
+    "riscv64": UnixArchSettings(
+        elf=(243, _ELFCLASS64, _ELFDATA2LSB),
+        standalone=True,
+    ),
     # The documented exception to 0043 (its own open question, answered
     # as "keep it, and say plainly that it is different"): pypa publishes
     # no mipsel image, PEP 600 defines no `manylinux_*_mipsel` tag, and
@@ -165,8 +228,8 @@ UNIX_ARCH_SETTINGS: dict[str, UnixArchSettings] = {
     "mipsel": UnixArchSettings(
         elf=(8, _ELFCLASS32, _ELFDATA2LSB),
         cross_compile="mipsel-linux-gnu-",
-        link_opts=("MICROPY_STANDALONE=1", "LDFLAGS_EXTRA=-static"),
         standalone=True,
+        force_static=True,
     ),
 }
 
@@ -199,6 +262,10 @@ class UnixBuildOptions:
     build_dir: Path
     variant: str = "standard"
     extra_make_args: tuple[str, ...] = ()
+    # The MicroPython release being built. Defaulted so every existing
+    # caller and fixture keeps working; only `_row_cflags()` reads it, and
+    # only to find this row's own `cflags_extra`.
+    tag: str = ""
 
 
 def _unix_dir(mpy_dir: Path) -> Path:
@@ -253,8 +320,27 @@ _MUSL_CFLAGS: tuple[str, ...] = ("-Wno-error=cpp",)
 # The varying thing is the backend, so the key is the architecture --
 # which also means `musllinux_1_2_aarch64` needed no new entry at all,
 # and neither will any future aarch64 floor.
+#
+# `s390x`/`riscv64` -- `-Wno-error=clobbered`. `ports/unix/main.c`'s own
+# `path_remaining` (real code, not a vendored library this time):
+#
+#   main.c:565:14: error: variable 'path_remaining' might be clobbered
+#   by 'longjmp' or 'vfork' [-Werror=clobbered]
+#
+# The same diagnostic class record [0044] already found in `mpy-cross`'s
+# own `main.c` (`parse_integer`, `s390x`, `v1.28.0` only, back when it
+# looked narrow enough to descope by identifier rather than suppress) --
+# real GCC output for how these two architectures' own register
+# allocation interacts with `setjmp`/`longjmp` around a `nlr_push()` call
+# site, not specific to one function or one tag. This sweep found it on
+# multiple tags on *both* architectures, in the *port's* `main.c` this
+# time, which is what moved it from "worth descoping two identifiers
+# for" to "worth suppressing at the architecture level" -- the same
+# escalation `aarch64`'s own entry above already went through once.
 _ARCH_CFLAGS: dict[str, tuple[str, ...]] = {
     "aarch64": ("-Wno-error=array-bounds",),
+    "s390x": ("-Wno-error=clobbered",),
+    "riscv64": ("-Wno-error=clobbered",),
 }
 
 # Genuine per-tag one-offs: a cell whose problem is neither its libc nor
@@ -270,10 +356,51 @@ _ARCH_CFLAGS: dict[str, tuple[str, ...]] = {
 UNIX_TARGET_CFLAGS: dict[str, tuple[str, ...]] = {}
 
 
-def unix_extra_cflags(target: str) -> tuple[str, ...]:
+# `riscv64`'s own `lib/libffi` submodule pin, on every one of these tags,
+# points to `https://github.com/atgreen/libffi` (a fork/mirror whose
+# `configure.host` has no `riscv*` case at all -- verified directly by
+# fetching `.gitmodules` and `configure.host` at the pinned commit for
+# each), so `deplibs` hard-fails with `configure: error: "libffi has not
+# been ported to riscv64-unknown-linux-gnu."` on every one of them,
+# regardless of anything cibuildmp does. `v1.24.0` moves the pin to the
+# canonical `libffi/libffi` (tag `v3.4.6`), whose `configure.host` has a
+# real `riscv*-*)` case -- filed upstream
+# (micropython/micropython, not yet numbered), but nothing to wait on:
+# there is no fix to backport onto a tag that has already shipped.
+# `MICROPY_PY_FFI=0` for exactly these (tag, riscv64) pairs is the only
+# lever available short of patching the vendored submodule ourselves.
+_RISCV64_FFI_UNPORTED_TAGS = (
+    "v1.20.0",
+    "v1.21.0",
+    "v1.22.0",
+    "v1.22.1",
+    "v1.22.2",
+    "v1.23.0",
+)
+
+
+def _riscv64_ffi_unported(target: str, tag: str) -> bool:
+    """Whether this (target, tag) pair is the known-broken `riscv64` +
+    pre-`v1.24.0` combination -- see `_RISCV64_FFI_UNPORTED_TAGS`'s own
+    comment. Every other architecture's `lib/libffi` builds cleanly on
+    every tag cibuildmp covers; this is not a stand-in for a broader
+    per-tag capability check."""
+    from ... import dockerrun
+
+    return (
+        dockerrun.split_tag(target)[1] == "riscv64"
+        and tag in _RISCV64_FFI_UNPORTED_TAGS
+    )
+
+
+def unix_extra_cflags(target: str, tag: str = "") -> tuple[str, ...]:
     """Every `CFLAGS_EXTRA` flag this cell needs: the libc-wide rule, the
-    per-architecture one, and any per-tag one-off. Empty for a cell that
-    needs none."""
+    per-architecture one, any per-tag one-off, and whatever this
+    MicroPython release needs in every port (`build_common.tag_cflags()`). Empty for a cell that needs none.
+
+    `tag` defaults to empty so a caller that genuinely has no MicroPython
+    version in hand still resolves the other three axes rather than
+    raising -- the tag axis simply contributes nothing."""
     from ... import dockerrun
 
     floor, arch = dockerrun.split_tag(target)
@@ -282,6 +409,7 @@ def unix_extra_cflags(target: str) -> tuple[str, ...]:
         *libc_flags,
         *_ARCH_CFLAGS.get(arch, ()),
         *UNIX_TARGET_CFLAGS.get(target, ()),
+        *build_common.tag_cflags(tag),
     )
 
 
@@ -299,29 +427,70 @@ def unix_arch_settings(target: str) -> UnixArchSettings:
     return UNIX_ARCH_SETTINGS[dockerrun.split_tag(target)[1]]
 
 
+def _use_static(target: str, settings: UnixArchSettings) -> bool:
+    """Whether this build should link fully static (`LDFLAGS_EXTRA=-static`),
+    as opposed to `MICROPY_STANDALONE=1` alone (a vendored, statically-linked
+    `libffi` inside an otherwise ordinary dynamic binary).
+
+    `musllinux` always does -- musl's own static story has no dynamic-NSS
+    leak, so `-static` there is a real, complete guarantee. `mipsel`
+    always does too, via `settings.force_static` -- it cross-compiles
+    against a Bootlin sysroot with no dynamic libc/libffi floor to link
+    against at all. Every other (`manylinux`) cell does not: see
+    `UNIX_ARCH_SETTINGS`'s own header for why `-static` was pulled back
+    off them.
+    """
+    return settings.force_static or target.startswith("musllinux_")
+
+
 def unix_make_command(
-    opts: UnixBuildOptions, mpy_dir: Path, *, mpy_cross: Path | None = None
+    opts: UnixBuildOptions,
+    mpy_dir: Path,
+    *,
+    mpy_cross: Path | None = None,
+    extra_cflags: tuple[str, ...] | None = None,
 ) -> list[str]:
+    """`extra_cflags`, when given, overrides `unix_extra_cflags()`'s own
+    raw candidate list -- `build_unix()` passes the already
+    `probe_supported_cflags()`-filtered set (a `-Wno-error=<diagnostic>`
+    this cell's own gcc does not recognize is a hard `cc1: error`, not a
+    no-op -- see that function's own docstring), so this stays the raw
+    candidates only for a caller (a test, a hand invocation) that has not
+    done that filtering itself.
+    """
     settings = unix_arch_settings(opts.target)
+    link_opts = (
+        ("MICROPY_STANDALONE=1", "LDFLAGS_EXTRA=-static")
+        if _use_static(opts.target, settings)
+        else ("MICROPY_STANDALONE=1",)
+    )
+    cflags = (
+        extra_cflags
+        if extra_cflags is not None
+        else unix_extra_cflags(opts.target, opts.tag)
+    )
     return [
         "make",
         "-C",
         _unix_dir(mpy_dir).as_posix(),
+        f"-j{os.cpu_count() or 1}",
         f"VARIANT={opts.variant}",
         f"BUILD={opts.build_dir.as_posix()}",
         f"CROSS_COMPILE={settings.cross_compile}",
-        *(
-            [f"CFLAGS_EXTRA={' '.join(cflags)}"]
-            if (cflags := unix_extra_cflags(opts.target))
-            else []
-        ),
+        *([f"CFLAGS_EXTRA={' '.join(cflags)}"] if cflags else []),
         # py/mkenv.mk's own override (`MICROPY_MPYCROSS`, defaulting to
         # `$(TOP)/mpy-cross/build/mpy-cross`) -- passed only when the
         # caller built one inside this container, which `build_unix()`
         # always does. See `container_mpy_cross()` for why the host's
         # own binary cannot be used here any more.
         *([f"MICROPY_MPYCROSS={mpy_cross.as_posix()}"] if mpy_cross else []),
-        *settings.link_opts,
+        *link_opts,
+        # `ports/unix/Makefile`'s own `MICROPY_STANDALONE` branch sits
+        # nested inside `ifeq ($(MICROPY_PY_FFI),1)`, so this is a no-op
+        # for every other cell -- `MICROPY_STANDALONE=1` above stays
+        # harmlessly unread rather than needing its own exclusion here.
+        # See `_riscv64_ffi_unported()`'s own comment for why.
+        *(["MICROPY_PY_FFI=0"] if _riscv64_ffi_unported(opts.target, opts.tag) else []),
         f"USER_C_MODULES={opts.user_c_modules}",
         f"FROZEN_MANIFEST={opts.frozen_manifest}",
         *opts.extra_make_args,
@@ -346,24 +515,65 @@ def run_unix_deplibs(
     called -- `build_unix()` itself raises before ever reaching here if
     `ensure_image()` returned `None`.
 
-    Only `manylinux_2_41_mipsel` still reaches this at all. Every other
-    architecture builds natively in an image whose own `pkg-config`
-    resolves `-lffi` (verified by running it inside the real
-    `manylinux_2_28_x86_64` / `manylinux_2_31_armv7l` / `musllinux_1_2_*`
-    images), so record 0043 dropped the whole `MICROPY_STANDALONE`
-    static-libffi path for them along with the cross toolchains it
-    existed to work around.
+    Every arch reaches this now (`standalone=True` on every
+    `UnixArchSettings` row) -- record 0043 dropped this step for every
+    arch but `mipsel` on the strength of each native image's own
+    `pkg-config` resolving `-lffi`; it comes back for all eight so the
+    submodule list and the link mode stop being arch-conditional facts.
+    See `UNIX_ARCH_SETTINGS`'s own header for the full argument and cost.
+
+    Followed by a symlink fixup, not baked into upstream's own recipe:
+    `lib/libffi/configure.ac` installs to `$(toolexeclibdir)`, which is
+    `${libdir}/$(gcc -print-multi-os-directory)` -- a relative path
+    fragment (from `out/lib`, autoconf's own `libdir` under
+    `--prefix=$$PWD/out`) that names wherever *this* compiler's own
+    multiarch convention actually puts things, while
+    `ports/unix/Makefile`'s own `LIBFFI_LDFLAGS` unconditionally expects
+    `out/lib/libffi.a`. Queried live with the same `$(CC)` deplibs
+    itself just built with, not hardcoded to one value: `../lib64` on a
+    RHEL-family host (`manylinux_2_28_{x86_64,aarch64,ppc64le,s390x,
+    i686}`), `../lib64/lp64d` on `riscv64` (its own ABI-variant
+    subdirectory -- one level deeper than the RHEL case, found live once
+    a tag whose `lib/libffi` pin actually supports `riscv64` reached this
+    step at all, see `_riscv64_ffi_unported()`), `../lib` on
+    Debian/Alpine hosts (`musllinux_1_2_x86_64`), which normalizes right
+    back to `out/lib` and needs no fixup at all. A single hardcoded
+    `../lib64` check (this function's own first version) is exactly the
+    kind of per-arch table this project keeps finding reasons not to
+    maintain -- see `probe_supported_cflags()`'s identical reasoning for
+    live-asking the compiler instead of predicting its answer.
+    `deplibs` has no hook to pass `--libdir=`/`--disable-multi-os-directory`
+    through to libffi's own `configure` (`$(TOP)/lib/libffi/configure
+    ... --prefix=$$PWD/out`, no other args, hardcoded in
+    `ports/unix/Makefile`), so this is the only lever available short of
+    patching that submodule.
     """
     settings = unix_arch_settings(opts.target)
-    command = [
+    build_dir = opts.build_dir.as_posix()
+    compiler = f"{settings.cross_compile}gcc"
+    make_command = [
         "make",
         "-C",
         _unix_dir(mpy_dir).as_posix(),
+        f"-j{os.cpu_count() or 1}",
         f"VARIANT={opts.variant}",
-        f"BUILD={opts.build_dir.as_posix()}",
+        f"BUILD={build_dir}",
         f"CROSS_COMPILE={settings.cross_compile}",
         "MICROPY_STANDALONE=1",
         "deplibs",
+    ]
+    libffi_out = f"{build_dir}/lib/libffi/out"
+    fixup = (
+        f"multi_os_dir=$({shlex.quote(compiler)} -print-multi-os-directory) && "
+        f"[ -e {shlex.quote(libffi_out)}/lib/libffi.a ] || "
+        f'[ ! -e {shlex.quote(libffi_out)}/lib/"$multi_os_dir"/libffi.a ] || '
+        f"{{ mkdir -p {shlex.quote(libffi_out)}/lib && "
+        f'ln -sf "$multi_os_dir/libffi.a" {shlex.quote(libffi_out)}/lib/libffi.a; }}'
+    )
+    command = [
+        "sh",
+        "-c",
+        shlex.join(make_command) + " && " + fixup,
     ]
     from ... import dockerrun
 
@@ -418,10 +628,14 @@ def _required_glibc(binary: Path) -> tuple[int, int] | None:
     nothing new -- 0031 checked that specifically before recommending it.
 
     `None` covers two real cases, both legitimate: a fully static build
-    (`manylinux_2_41_mipsel`, whose `-static` link leaves no version
-    requirements to read) and a musl binary (musl does not use symbol
-    versioning at all, which is why PEP 656 is a separate spec rather
-    than manylinux with a different number).
+    (`mipsel`, and every `musllinux` cell -- see `UNIX_ARCH_SETTINGS`'s
+    own header for why `-static` stayed on those and only those) and a
+    musl binary (musl does not use symbol versioning at all, which is why
+    PEP 656 is a separate spec rather than manylinux with a different
+    number -- true for every `musllinux` cell regardless of `-static`).
+    Every `manylinux` cell links ordinary dynamic glibc now, so this
+    check reads a real `GLIBC_x.y` requirement for it again, the same way
+    it always did before `MICROPY_STANDALONE=1` went universal.
     """
     from elftools.common.exceptions import ELFError
     from elftools.elf.elffile import ELFFile
@@ -623,11 +837,13 @@ def repair_unix_binary(
     `auditwheel` cannot touch at all: a bare executable rather than a
     wheel.
 
-    A no-op whenever `_non_baseline_needed_libs()` finds nothing -- the
-    common case (every arch but the one this was written for links
-    nothing outside the floor's own baseline once `libffi` is handled),
-    and the only case for a statically-linked target (`mipsel`), which
-    never reaches a `docker run` here at all.
+    A no-op whenever `_non_baseline_needed_libs()` finds nothing -- every
+    target today, for two different reasons (`UNIX_ARCH_SETTINGS`'s own
+    header): `mipsel`/every `musllinux` cell link fully static and have
+    no `.dynamic` section to find anything in, and every `manylinux`
+    cell links `libffi.a` (`MICROPY_STANDALONE=1`) rather than a shared
+    `libffi.so`, so it was never a `DT_NEEDED` entry regardless of
+    `-static`. Neither case reaches a `docker run` here at all.
 
     Otherwise runs `ldd`/`patchelf` **inside `docker_image`**, the same
     image `binary` was just built in -- not on the host, which is the
@@ -712,6 +928,13 @@ def verify_unix_floor(target: str, binary: Path) -> None:
     comes from the pinned `musllinux_1_2_<arch>` base rather than from
     inspection. `verify_unix_output()`'s architecture check still applies
     to every target either way.
+
+    **A no-op only for `mipsel` and every `musllinux` target now**
+    (`UNIX_ARCH_SETTINGS`'s own header) -- their `-static` link leaves
+    `_required_glibc()` nothing to read (`required is None`, below).
+    Every `manylinux` target links ordinary dynamic glibc again, so the
+    live `GLIBC_2.28`-style check this docstring describes is real once
+    more, not merely "still correct if it ever comes back" -- it did.
     """
     floor, _arch = _split_target(target)
     if not floor.startswith("manylinux_"):
@@ -832,9 +1055,17 @@ def build_unix(
     at that directory with `patchelf --set-rpath` -- this project's own
     `auditwheel repair`, for the one artifact type `auditwheel` itself
     cannot touch. See that function's own docstring for the full
-    reasoning; a no-op for every target that needs nothing repaired,
-    which today is every architecture except the dynamically-linked ones
-    that pull in `libffi`.
+    reasoning; a no-op for every target that needs nothing repaired --
+    every arch today, but for two different reasons now that `-static`
+    is not universal (`UNIX_ARCH_SETTINGS`'s own header): `mipsel` and
+    every `musllinux` cell have no `.dynamic` section at all for
+    `_dynamic_needed_libs()` to find anything in, and every `manylinux`
+    cell links `libffi.a` (`MICROPY_STANDALONE=1`, unconditional) rather
+    than a shared `libffi.so`, so `libffi` was never a `DT_NEEDED` entry
+    to begin with, static binary or not. Left wired in rather than
+    removed: still correct for whatever a genuinely dynamically-linked
+    `libffi` would look like, and still the right step if that ever
+    happens again.
     """
     from ... import dockerrun
 
@@ -854,24 +1085,74 @@ def build_unix(
             f"into resources/pinned_docker_images.toml"
         )
 
+    settings = unix_arch_settings(opts.target)
     oci_platform = dockerrun.platform_for("unix", opts.target)
     linux32 = dockerrun.needs_linux32("unix", opts.target)
     timeout = dockerrun.timeout_for("unix", opts.target)
 
-    if unix_arch_settings(opts.target).standalone:
+    # `_riscv64_ffi_unported()`'s own comment: `deplibs`' entire job is
+    # building `lib/libffi`, which is a hard `configure: error` on these
+    # (tag, riscv64) pairs regardless of anything cibuildmp does --
+    # running it would just fail before `MICROPY_PY_FFI=0` below ever
+    # gets a chance to make it unnecessary.
+    if settings.standalone and not _riscv64_ffi_unported(opts.target, opts.tag):
         run_unix_deplibs(
             opts, mpy_dir, docker_image=docker_image, package_dir=package_dir
         )
 
-    mpy_cross = build_common.container_mpy_cross(
-        mpy_dir,
-        slug=f"unix-{opts.target}",
+    # `unix_extra_cflags()`'s own candidates include `-Wno-error=
+    # <diagnostic>` entries a *different* image's gcc needed ([0082]'s
+    # own `unterminated-string-initialization`, gcc-15-only); naming an
+    # unrecognized diagnostic is a hard `cc1: error`, not a no-op, so
+    # what actually reaches `make` here has to be what the compiler that
+    # runs it accepts, not the raw candidate list. See
+    # `probe_supported_cflags()`'s own docstring.
+    #
+    # Two separate probes, not one shared between them: `mpy_cross`
+    # below always builds with this image's own native `gcc` (a host
+    # tool -- mpy-cross emits target-independent bytecode, so it is
+    # never cross-compiled), while the main build below uses whatever
+    # `settings.cross_compile` names. Identical for every arch but
+    # `mipsel` (empty prefix, so both probe the same bare `gcc`), but
+    # `mipsel`'s own image is a Bootlin cross-toolchain where those two
+    # are genuinely different, and older, gcc's -- found live, sharing
+    # one probe's result silently carried the native image gcc's
+    # (>=15) verdict on `-Wno-error=unterminated-string-initialization`
+    # into `mipsel-linux-gnu-gcc` (14.3.0), which does not accept it,
+    # and the build failed exactly the way an unprobed flag would have.
+    candidates = unix_extra_cflags(opts.target, opts.tag)
+    mpy_cross_cflags = build_common.probe_supported_cflags(
+        candidates,
         image=docker_image,
         oci_platform=oci_platform,
         linux32=linux32,
         timeout=timeout,
     )
-    command = unix_make_command(opts, mpy_dir, mpy_cross=mpy_cross)
+    build_cflags = (
+        mpy_cross_cflags
+        if not settings.cross_compile
+        else build_common.probe_supported_cflags(
+            candidates,
+            image=docker_image,
+            compiler=f"{settings.cross_compile}gcc",
+            oci_platform=oci_platform,
+            linux32=linux32,
+            timeout=timeout,
+        )
+    )
+
+    mpy_cross = build_common.container_mpy_cross(
+        mpy_dir,
+        slug=f"unix-{opts.target}",
+        image=docker_image,
+        extra_cflags=mpy_cross_cflags,
+        oci_platform=oci_platform,
+        linux32=linux32,
+        timeout=timeout,
+    )
+    command = unix_make_command(
+        opts, mpy_dir, mpy_cross=mpy_cross, extra_cflags=build_cflags
+    )
     dockerrun.run(
         command,
         mounts=usermod_mounts(

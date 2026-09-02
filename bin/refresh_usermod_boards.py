@@ -73,9 +73,75 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 
 from cibuildmp.platforms.usermod.boards import BoardDatabaseError, Database
+
+# The rows in `resources/build-platforms.toml` are not all produced here.
+# `gcc` (nine usermod scopes plus natmod), `idf_version` (esp32) and
+# `toolchain_version` (alif) are per-row facts merged in by hand from
+# `bin/refresh_toolchain_pins.py`, which by the pipeline's own stated
+# convention "reads both files; it writes neither". So a plain
+# regeneration of a section prints only the keys below and silently drops
+# every one of those -- 374 `gcc` values for `rp2` alone -- and nothing
+# would notice: no refresh script runs in CI, in the tests, or in
+# pre-commit. Hence carrying them forward here, unconditionally.
+#
+# Unconditional, and not behind an opt-in flag, because a flag nobody
+# remembers to pass is a description of the bug rather than a fix for it.
+# `--no-merge` is the deliberate reset, for when a hand-merged fact is
+# meant to disappear.
+MERGE_SOURCE = (
+    Path(__file__).resolve().parent.parent
+    / "src"
+    / "cibuildmp"
+    / "resources"
+    / "build-platforms.toml"
+)
+
+
+def carry_forward(
+    rows: list[dict], section: tuple[str, ...], source: Path
+) -> list[dict]:
+    """Re-attach per-row keys the existing table has and this script does
+    not produce, matched by `identifier` (verified unique within every
+    section, natmod's included). Generated values always win; only keys
+    absent from the generated row are taken. Reports what it carried to
+    stderr, so a silent carry is as visible as a silent loss would be.
+    """
+    try:
+        with source.open("rb") as handle:
+            data = tomllib.load(handle)
+    except OSError as exc:
+        print(f"!! --merge: cannot read {source}: {exc}", file=sys.stderr)
+        return rows
+    for key in section:
+        data = data.get(key) or {}
+    existing = {row["identifier"]: row for row in data.get("identifiers") or []}
+    if not existing:
+        print(
+            f"!! --merge: {'.'.join(section)} has no rows in {source.name}",
+            file=sys.stderr,
+        )
+        return rows
+
+    carried: dict[str, int] = {}
+    for row in rows:
+        previous = existing.get(row["identifier"])
+        if not previous:
+            continue
+        for key, value in previous.items():
+            if key not in row:
+                row[key] = value
+                carried[key] = carried.get(key, 0) + 1
+    if carried:
+        summary = ", ".join(f"{key} x{count}" for key, count in sorted(carried.items()))
+        print(f"carried forward from {source.name}: {summary}", file=sys.stderr)
+    else:
+        print(f"carried forward from {source.name}: nothing", file=sys.stderr)
+    return rows
+
 
 REPO_URL = "https://github.com/micropython/micropython"
 
@@ -235,6 +301,18 @@ def main() -> int:
         "tags", nargs="+", help="MicroPython tags to walk, e.g. v1.20.0 v1.29.0"
     )
     parser.add_argument(
+        "--no-merge",
+        action="store_true",
+        help="print only this script's own keys, dropping hand-merged per-row facts",
+    )
+    parser.add_argument(
+        "--merge-from",
+        type=Path,
+        default=MERGE_SOURCE,
+        metavar="PATH",
+        help=f"default: {MERGE_SOURCE}",
+    )
+    parser.add_argument(
         "--workdir",
         type=Path,
         default=None,
@@ -270,6 +348,8 @@ def main() -> int:
     for tag, info in tags.items():
         print(f'"{tag}" = {_inline_row(info)}')
     print()
+    if not args.no_merge:
+        rows = carry_forward(rows, ("usermod", args.port), args.merge_from)
     print(f"[usermod.{args.port}]")
     print("identifiers = [")
     for row in rows:
