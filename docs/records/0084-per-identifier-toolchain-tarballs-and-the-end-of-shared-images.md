@@ -109,13 +109,23 @@ image `unix` builds inside stops needing to *be* AlmaLinux 8/Alpine at all; it o
 able to *run* Bootlin's own host tool binaries and provide `make`/`python3`/`git`/`cmake`/
 `pyelftools`.
 
-**The fleet collapses from 17 `docker/*.Dockerfile` files toward roughly 3:**
+**The fleet collapses from 17 `docker/*.Dockerfile` files to two of this project's own** —
+and the third entry below is deliberately not one of them:
 
-- **One generic base** (Ubuntu, for apt's own breadth covering every port's auxiliary tool need)
-  — serves natmod (every arch), every `usermod` port on `arm_embedded`/`riscv_embedded` today,
-  and all of `unix` (5 arches × glibc/musl), each fetching its own Bootlin tarball per identifier
-  at build time, cached by version (mirroring `usermod/espidf.py`'s own `cache_root()`-keyed
-  pattern — not a new mechanism, the existing one generalized).
+- **No generic base *image* at all, decided directly in conversation** — the official
+  `ubuntu:26.04` tag, unmodified, pulled straight from Docker Hub. No `docker/*.Dockerfile` of
+  this project's own, no `publish-docker-images.yml` entry, no digest for anyone to repin. This
+  is [0033]'s own "cibuildmp never builds a Docker image itself" carried to its end — not merely
+  "we do not build it", but "there is no intermediate artifact to publish", which is only
+  available *because* no toolchain is baked in any more. It serves natmod (every arch), every
+  `usermod` port on `arm_embedded`/`riscv_embedded` today, and all of `unix` (5 arches ×
+  glibc/musl). Two different things are provisioned into it, and they are **not** the same
+  mechanism — see the addendum below, which is where the whole of this bullet was decided:
+  the **toolchain** arrives as a Bootlin tarball fetched into a host-mounted cache, per
+  identifier, once per version; the **small auxiliary set** (`curl`, `ca-certificates`,
+  `xz-utils`/`bzip2`, `make`, `python3`, `python3-pyelftools`, `git`, and `cmake` where the port
+  needs it — no compiler of any kind) is a plain `apt-get install` on **every** invocation,
+  accepted for now and revisited if it proves too slow in practice.
 - **`esp_idf_base`** — unchanged. ESP-IDF's own toolchain is a whole versioned tool set
   (compiler + `esptool` + ROM ELFs + components, resolved together by IDF's own `idf_tools.py`),
   not a single compiler a tarball pin can stand in for. Explicitly out of scope for this record,
@@ -210,21 +220,32 @@ across all 5 arches, the cross-libc-from-a-glibc-host proof already done), and i
 whose current pypa-based mechanism this record argues should disappear entirely rather than
 merely gain a sibling, so proving it first retires a whole subsystem rather than adding one.
 
-**Phase 0 — generic base image, real for the first time, proven on nothing yet.**
-1. Write the real `docker/<generic-base>.Dockerfile` — no toolchain baked in, only what every
-   fetch step and every port's own build needs on top of a bare shell (`curl`, `xz-utils`/
-   `bzip2` for Bootlin's own `.tar.xz`/`.tar.bz2`, `make`, `python3`, `python3-pyelftools`,
-   `git`; `cmake` only if a later phase's port needs it, per `arm_embedded.Dockerfile`'s own
-   existing "cmake is here because rp2 needs it, nothing else does" precedent — don't carry it
-   into the generic image for `unix` alone).
-2. Implement the fetch mechanism this record's own "Not decided" section named: download,
-   sha256-verify, `relocate-sdk.sh`, cache-by-version, mirroring `usermod/espidf.py`'s own
-   `fetch_esp_idf()`/`cache_root()` shape closely enough that whoever reads both recognizes the
-   pattern. One function, two toolchain kinds it can fetch (native, cross) — `unix` only ever
-   needs the native one, but the function should not assume that, since natmod/`arm_embedded`
-   family both need the cross case in a later phase.
-3. Prove it on one cell by hand, live, the way every claim in this record's own investigation
-   was proven: fetch `x86-64--glibc--stable-2025.08-1` inside the new base image, build a real
+**Phase 0 — the base image and the two provisioning steps, proven on nothing yet.** Every step
+here reflects the addendum's own decisions, not the shape this plan was first written in.
+1. **No `docker/*.Dockerfile` is written.** The base is the official `ubuntu:26.04`, unmodified
+   and unpublished. What has to be decided instead is where its *reference* lives so the rest of
+   the code can resolve it the way `dockerrun.image_for()` resolves every other one today — and
+   whether that reference stays digest-pinned in `resources/pinned_docker_images.toml` (pinning
+   and publishing are separate; keeping the pin costs nothing this decision removes, and
+   [0068] is twice the record of what a floating base tag does).
+2. **Auxiliary packages: a plain `apt-get install` inside the container, every invocation** —
+   option (b), decided. `curl`, `ca-certificates`, `xz-utils`/`bzip2`, `make`, `python3`,
+   `python3-pyelftools`, `git`, plus `cmake` only where the port needs it (`rp2`, per
+   `arm_embedded.Dockerfile`'s own "cmake is here because rp2 needs it" precedent — do not carry
+   it in for `unix` alone). **No compiler.** Measure what this actually costs per invocation
+   while proving step 4, since that number is the only thing that would send this back to option
+   (a) (a published image), and nothing else about the design changes if it does.
+3. **The toolchain fetch, and it runs inside the container, not on the host.** Download,
+   sha256-verify, extract, `relocate-sdk.sh`, marked done by a `.installed`-style file, all
+   *into a host directory `dockerrun.run()` mounts at its own identical path* — the shape
+   `build_esp32.py`'s own `_esp32_container_script()` already has, for the reason [0058] gives
+   ("the cache must be populated from inside the container, not on the host"). One mechanism,
+   two toolchain kinds it can fetch (native, cross): `unix` only ever needs the native one, but
+   it must not assume that, since the `arm_embedded` family needs both in a later phase, and
+   since `container_mpy_cross()` needs the *native* one on `PATH` before it can build `mpy-cross`
+   at all now that the base ships no compiler.
+4. Prove it on one cell by hand, live, the way every claim in this record's own investigation was
+   proven: fetch `x86-64--glibc--stable-2025.08-1` inside a bare `ubuntu:26.04`, build a real
    `ports/unix` (not just `mpy-cross`) for a *current* tag (`v1.29.0`) end to end, `examples/
    usercmodule`'s own C module included so `deplibs`/libffi linkage is exercised too, not just a
    trivial build.
@@ -247,10 +268,20 @@ merely gain a sibling, so proving it first retires a whole subsystem rather than
    `v1.20.0`-shaped `-Wdangling-pointer` case if it reaches `unix` at all — confirm live rather
    than assume it does or doesn't) — not the full 15-cell-per-arch matrix, a boundary sample,
    per this record's own CI-cost argument.
+5. **For every tool the MicroPython build can see, not only the compiler, decide whether its
+   version matters** — the checklist the addendum's own risk tiering argues for, rather than
+   assuming the auxiliary set is safe because it has never visibly broken. `python3` (it runs
+   upstream's own `makeqstrdefs.py`/`mpy-tool.py`/`makeversionhdr.py`, which change per tag) and
+   `cmake` (`rp2` only; policy changes, against a `pico-sdk` version the tag itself pins) are the
+   two priority candidates. If either turns out to matter per tag, it becomes a per-row fact
+   beside the toolchain reference, the same shape everything else in this record already takes.
 
 **Phase 2 — cut `unix` over, keep pypa reachable until it's proven safe to remove.**
-1. `dockerrun.image_for()`/`build_unix.py` point at the new generic image + fetch mechanism for
-   `unix` only; every other port's own resolution is untouched.
+1. `dockerrun.image_for()`/`build_unix.py` resolve `unix` to the bare `ubuntu:26.04` reference
+   plus the apt step and the in-container toolchain fetch; every other port's own resolution is
+   untouched. This is also where `image_for()` first has to answer a reference that this project
+   does not publish, which is new — every entry it resolves today is one of this repo's own
+   images.
 2. `resources/pinned_pypa_images.toml` stays in the repo, unused by `unix`, until this phase is
    confirmed stable in real CI — deleting it is a separate, later commit, not bundled with the
    cutover, so a revert is one config change rather than a file resurrection.
@@ -273,30 +304,148 @@ informed by whatever phase 0-2 turned out to cost in practice rather than estima
 
 ## Not decided here
 
-- **The exact `pre_checkout`-shaped fetch mechanism.** Sketched by analogy to `usermod/espidf.py`'s
-  own `fetch_esp_idf()`/`cache_root()` pattern in conversation, not designed or implemented.
-  Needs: a generic native+cross tarball fetcher (unlike ESP-IDF's own bespoke installer, this is
-  the *same* mechanism — download, sha256-verify, extract, cache by version — for every port),
-  wired into whichever of `build_common.py`/`orchestrate.py`/a new module owns it.
+- **The exact fetch mechanism.** *Where* it runs is decided (inside the container, into a
+  host-mounted cache — see the addendum); what it looks like is not designed or implemented.
+  Needs: one generic native+cross tarball fetcher (unlike ESP-IDF's own bespoke installer, this
+  is the *same* mechanism — download, sha256-verify, extract, `relocate-sdk.sh`, mark, cache by
+  version — for every port), and a decision about which module owns the host half of it (the
+  `mkdir` and the `mounts=` entry, `build_esp32.py`'s own shape) versus the script half.
 - **The `x86-64` pre-2021.11 fallback and the `s390x` musl pre-2024.05 fallback** — argued safe
   above (newer-breaks-older, never the reverse), not independently verified live the way every
   other claim in this record was.
-- **The generic base image's own real Dockerfile** — not written. Needs every auxiliary tool
-  every currently-separate image installs (rp2's own `cmake`, `pyelftools`, `curl`/`xz-utils` for
-  the fetch step itself) reconciled into one file, and a real build+fetch+link verified live the
-  way this record's own Bootlin-musl proof was, before it replaces anything real.
+- **Two things left over from deciding there is no image of this project's own.** First, where
+  the `ubuntu:26.04` reference lives for `dockerrun.image_for()` to resolve, and whether it stays
+  digest-pinned in `resources/pinned_docker_images.toml` — pinning and publishing are separate,
+  and [0068] is twice the record of a floating base tag moving underneath this project. Second,
+  what a per-invocation `apt-get install` actually costs in real CI, which is the one measurement
+  that would send the auxiliary set back to option (a), a published image. Neither blocks Phase
+  0; both should come out of it with a number or an answer rather than an assumption.
 - **The usermod provenance sidecar's own exact shape** — named as required above, not designed.
 - **Migration order and blast radius** — seventeen Dockerfiles, `resources/pinned_docker_images.toml`,
   `resources/pinned_pypa_images.toml` (removed entirely once `unix` no longer uses pypa),
   `dockerrun.image_for()`'s own resolution logic, every doc naming a current image group
   (`docs/reference/vendored-images.md`'s own generated table, [0077]/[0078]'s docs-drift
   machinery), and every test fixture referencing a `manylinux_2_28_*`/`musllinux_1_2_*`
-  identifier. Not sequenced here — the user's own next step is a single reference port (`rp2`)
-  built and verified end-to-end against the generic-base-plus-Bootlin-fetch shape before any of
-  this is generalized or any existing Dockerfile is touched for real.
+  identifier. **Superseded in part by the phased plan above, which was written after this
+  paragraph and decides what it left open**: `unix` goes first, not the `rp2` reference port this
+  sentence originally named, and nothing existing is touched until Phase 2. What still stands
+  here is the inventory — the list of everything a full migration eventually has to reach.
 - **[0083]'s own windows-fully-prebuilt-mingw proposal** — not superseded, but now a special case
   of this record's own broader shape (llvm-mingw is itself exactly the kind of self-contained,
   per-arch tarball this record generalizes to everywhere) rather than a separate one-off decision.
+
+## Addendum — no image of this project's own, and the two provisioning mechanisms that are not one mechanism
+
+**Recorded after the fact, and this is why it is worth the words.** Everything below was decided
+in conversation in the same session as the body above, and was lost before it reached a file: the
+session's own transcript was deleted, and its last edit to this record (the fleet bullet, since
+restored above) was never committed. It is reconstructed from the user's own screenshots of that
+exchange plus the mechanism already in the tree. One pass of "it is decided, it will get written
+down" has already failed here once; that is the argument for recording even the parts that feel
+obvious.
+
+**The question, asked directly:** must cibuildmp publish a Docker image of its own for this at
+all, or can it run the official `ubuntu` image and install what it needs — `python3`, `curl`, the
+rest — at run time rather than vendoring them into an image?
+
+**The answer, and why it follows rather than being a new preference:** it is [0033]'s own rule
+("cibuildmp never builds a Docker image itself; it only resolves a reference and pulls it") taken
+to its end. Once no toolchain is baked into an image — exactly what the body argues for, every
+compiler a per-identifier Bootlin tarball — the base holds nothing cibuildmp itself must produce,
+and so **stops needing to be published at all**, not merely stops being built locally. A whole
+level of [0046]'s own problem then disappears rather than being watched more carefully: no
+Dockerfile of this project's own for it, no `publish-docker-images.yml` cycle, no digest-repin
+PR, so there is no pin here that can go stale unnoticed because there is no pin.
+
+**What the base then needs:** `curl`, `ca-certificates`, `xz-utils`/`bzip2` (Bootlin ships both),
+`make`, `python3`, `python3-pyelftools`, `git`, and `cmake` only where a port needs it (`rp2`).
+**No compiler of any kind.** That is the load-bearing half: the compiler was the single source of
+every instability this project has chased — [0068]'s `ubuntu:24.04`->`26.04` breaking
+`natmod_host`'s multilib pairing and `ppc64le_linux`'s long-double link, [0082]'s nine tags
+failing `mpy-cross` under gcc 15, and this session's own `gcc-14`/`gcc-13` point-release drift.
+
+### The correction that mattered most: the mounted cache is the toolchain's, and only the toolchain's
+
+Stated first as though one mechanism covered both halves, and corrected in the same exchange
+after re-reading `usermod/espidf.py`. Written out because the wrong version of it is an easy
+mistake to make twice, and because the body's own fleet bullet made it once already (citing
+`fetch_esp_idf()`, the `git clone` — i.e. *source* — for a pattern that is about binaries).
+
+**Nothing is passed from host into container as a ready-made binary. The direction is the
+opposite one:**
+
+1. `dockerrun.run()` mounts an **empty (or already-populated-by-an-earlier-run) host directory**
+   into the container at a specific path (`tools_dir = cache_root()/esp-idf/<version>/tools/...`).
+2. Inside the container, the shell script itself does the `curl`/install **into that mounted
+   path**.
+3. Because it is a bind mount and not a container layer, what was downloaded **stays on the
+   host's disk** after the container exits.
+4. The next run sees the marker file (`.installed`) in that same mounted directory and **skips
+   the download**.
+
+So it is **caching of the toolchain itself**, nothing to do with apt packages, and not
+"projecting host binaries into a container" — which also means it keeps [0058]'s own rule intact
+("the cache must be populated from inside the container, not on the host"), the rule that exists
+because a binary resolved against the host's glibc is exactly the `GLIBC_x.y not found` failure
+`build_common.container_mpy_cross()`'s own docstring documents hitting for real.
+
+**`python3`/`make`/`curl`/`git` are a separate question, and that mechanism does not answer it.**
+apt writes into `/var/lib/dpkg` and system paths, not into one clean directory the way a tarball
+does, so the same mount trick does not cache it. Two options, and they were named as such:
+
+- **(a)** bake them into a **published image** of this project's own — one build-time `apt
+  install`, fast, but an artifact to maintain and publish again.
+- **(b)** `apt install` **on every invocation** in a bare `ubuntu:26.04` — nothing published, at
+  the cost of network and time per invocation.
+
+**Decided: (b), to start with** ("можемо для початку спробувати b"). The trade is practical, not
+architectural — both work and both are consistent with [0033]; (a) is faster and one more thing
+to maintain, (b) is less to maintain and slightly slower per invocation. If (b) proves too slow
+in real CI, (a) is the fallback, and moving between them changes no design decision in this
+record.
+
+### Not every auxiliary tool carries the same risk, and two of them are not obviously safe
+
+Raised in the same exchange, and it is the part most likely to be assumed away by a future
+session: the tools above were sorted by whether the tool touches MicroPython's own build logic or
+is purely cibuildmp's own mechanics.
+
+- **Real risk, the same category as gcc — it touches the MicroPython build directly.**
+  `python3` runs upstream's *own* scripts (`makeqstrdefs.py`, `mpy-tool.py`,
+  `makeversionhdr.py`, qstr generation). Those scripts change with the tag: an old one may rely
+  on old Python syntax or behaviour, a newer one may require a newer Python. Structurally this is
+  the same risk class as the compiler — it simply has not been tested live yet. `cmake` (`rp2`
+  only) is the second: cmake releases carry real policy behaviour changes, and `pico-sdk`, whose
+  version is pinned to the tag through MicroPython's own submodule, may demand a minimum cmake
+  version that does not match what the current Ubuntu ships.
+- **Low but not zero.** `make`, `git` — stable for years, but that is an assumption, not a
+  verified fact, and it should be written down as an assumption.
+- **Practically zero — purely cibuildmp's own mechanics, never MicroPython's build logic.**
+  `curl`, `ca-certificates`, `xz-utils`/`bzip2` only download and unpack tarballs;
+  `python3-pyelftools` is cibuildmp's own dependency, not an upstream requirement (the same fact
+  [0012] already recorded for `pyelftools`/`ar`).
+
+**Stated honestly rather than folded into the recommendation: there is no evidence that
+`python3`/`cmake` drift has ever actually broken a tag here** — unlike gcc, which has three
+confirmed live incidents. It is an open question, not a verified fact, which is exactly why it
+belongs in Phase 1 as a checklist item (added there) rather than being silently treated as safe.
+
+### What this changes in the phased plan above
+
+- **Phase 0 step 1 is no longer "write the real `docker/<generic-base>.Dockerfile`."** Under this
+  decision there is no Dockerfile of this project's own to write; the base is an upstream
+  `ubuntu:26.04` reference plus a run-time provisioning step.
+- **Phase 0 step 2 cannot be wired where that step puts it.** It says "wired into whichever of
+  `build_common.py`/`orchestrate.py`" — host-side — while [0058] and `container_mpy_cross()`'s
+  own docstring both document why a *binary* toolchain fetched on the host and used inside a
+  container is the failure this project has already hit. The fetch runs **inside** the container,
+  writing into the host-mounted cache, the way `_esp32_container_script()` already does.
+- **One consequence the conversation did not reach, and it decides whether a compiler-free base
+  works in practice.** `container_mpy_cross()` builds `mpy-cross` with the *image's own* native
+  compiler. With no compiler in the base, the native Bootlin toolchain must already be on `PATH`
+  from the same mounted cache before that call — which is this record's own "two independent
+  toolchain facts per row" landing in code rather than in a table. Keep an apt `build-essential`
+  for convenience instead and [0082] is reintroduced on day one, for every tag it names.
 
 [0013]: 0013-micropython-list-dedup-by-abi.md
 [0031]: 0031-unix-musllinux-libc-axis.md
