@@ -129,6 +129,55 @@ account of how this answer was reached: the premise it starts from is what rules
 pin, and the live failures it records are what make the case that leaving pypa costs more than
 staying.
 
+## Where this stands, 2026-09-02 — what landed, and what the next session starts from
+
+Written as a handoff rather than as a decision: the sections below are the argument, this one is
+the state. Everything named here is in git; nothing depends on a local cache, a pulled image or a
+scratch directory.
+
+**Landed (all pushed, `575 passed`):**
+
+- `[usermod.unix]`'s 225 rows lost the `gcc` column entirely — the image fixes the compiler, so a
+  ceiling-derived pin had nothing left to decide (`4e222ab`).
+- The one relaxation a MicroPython release needs lives in `build_common.TAG_CFLAGS`, keyed by tag
+  (`41e7732`), and reaches `container_mpy_cross()` as well as the port's own make (`0f3038c`) --
+  the CI failure that forced the second of those is recorded above.
+- `resources/toolchains.toml` and `resources/bootlin.toml` left the wheel for
+  `docs/reference/toolchain-facts/` (`cb9132e`): evidence, never loaded at runtime.
+- `bin/fetch_bootlin_metadata.py` writes the Bootlin catalogue (419 releases, every arch this
+  project could target, with url/sha256/size and the versions inside each).
+- `bin/refresh_usermod_boards.py`/`refresh_natmod_archs.py` gained `carry_forward()`, so a
+  regeneration can no longer silently drop a hand-merged per-row fact -- which it could, and
+  nothing checked.
+- `test-platforms.yml` gained `keep_going`/`tolerate_failures`/`step_summary` inputs
+  (`c0079e3`), defaulting to how a *direct* dispatch should behave; `test-all-platforms.yml`
+  opts into the tolerant behaviour explicitly.
+
+**Not started, in the order that gets the most for the least:**
+
+1. **`arm_embedded`** — [0085] has the whole argument and the measurements. 70 of 71 live ceiling
+   violations, and the answer is not a repin.
+2. **Carry `TAG_CFLAGS` into every port's `mpy-cross`.** It is wired through `unix` only today, so
+   the other eight ports still meet the same diagnostic on the same shared `py/` sources -- and
+   this is also how [0082]'s nine tags get answered for every port at once.
+3. **Drop the `gcc` column from the remaining nine scopes.** It restates a tag fact about a
+   thousand times; removing it from `unix` cost nothing.
+4. **Teach the checker about `natmod`.** `toolchains.toml` has no `natmod*` scope, so
+   `refresh_toolchain_pins.py` never checks it: its rows say 14.2.1 while `arm_embedded` ships
+   15.2.1, and nothing compares them.
+5. **Run-time `dnf install libffi-devel` for the five `manylinux_2_28_*` cells**, which is the
+   only reason those images are published at all. Seven `musllinux` cells need nothing --
+   verified: pypa's Alpine images ship `libffi-dev` already, which is why they run on pypa's
+   image directly.
+
+**Two facts a fresh session should not have to rediscover:**
+
+- A run-time install needs root and the build must not run as root, and **`HOME` has to move with
+  the uid** -- otherwise `git`'s stderr lands inside `MICROPY_GIT_TAG` and the build dies on a
+  generated header. Both halves cost an hour here.
+- `--keep-going` plus `continue-on-error` means a green run can contain red cells. The per-bucket
+  JSON report artifact is the authority, never the job colour.
+
 ## The plan, revised — what actually gets done
 
 Decided with the revised destination, and deliberately much smaller than the phased plan further
