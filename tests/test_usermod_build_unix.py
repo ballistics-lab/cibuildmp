@@ -263,6 +263,44 @@ def test_mipsel_builds_and_returns_binary_path(monkeypatch, tmp_path, arch):
     assert result == build_dir / "micropython"
 
 
+def test_mipsel_probes_its_cross_compiler_not_the_images_native_gcc(
+    monkeypatch, tmp_path
+):
+    # mipsel's own image is a Bootlin cross-toolchain: the real build
+    # uses `mipsel-linux-gnu-gcc`, a different (and, found live, older --
+    # gcc 14.3.0) binary than whatever bare `gcc` resolves to inside that
+    # same image (its own native build tooling). A tag from
+    # TAG_CFLAGS (v1.20.0) is needed here -- mipsel's own _ARCH_CFLAGS
+    # entry is empty, so with no tag at all there would be nothing to
+    # probe and this bug would stay invisible.
+    _mock_unix_image(monkeypatch)
+    build_dir = tmp_path / "build-manylinux_2_41_mipsel"
+    build_dir.mkdir()
+    (build_dir / "micropython").write_bytes(fake_elf("manylinux_2_41_mipsel"))
+
+    calls = []
+    monkeypatch.setattr(
+        "cibuildmp.dockerrun.subprocess.run",
+        lambda cmd, **k: calls.append(cmd) or _fake_docker_run(cmd, **k),
+    )
+
+    build_unix_fn(
+        opts("manylinux_2_41_mipsel", build_dir=build_dir, tag="v1.20.0"),
+        tmp_path / "mpy",
+    )
+
+    probe_scripts = [
+        c[-1] for c in calls if c[-3:-1] == ["sh", "-c"] and "gcc" in c[-1]
+    ]
+    assert any(script.startswith('printf "" | gcc ') for script in probe_scripts), (
+        probe_scripts
+    )
+    assert any(
+        script.startswith('printf "" | mipsel-linux-gnu-gcc ')
+        for script in probe_scripts
+    ), probe_scripts
+
+
 def test_x86_64_builds_and_returns_binary_path(tmp_path, monkeypatch):
     _mock_unix_image(monkeypatch)
     build_dir = tmp_path / "build-x86_64"

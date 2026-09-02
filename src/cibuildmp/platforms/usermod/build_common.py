@@ -195,14 +195,15 @@ def probe_supported_cflags(
     candidates: tuple[str, ...],
     *,
     image: str,
+    compiler: str = "gcc",
     oci_platform: str | None = None,
     linux32: bool = False,
     timeout: float | None = None,
 ) -> tuple[str, ...]:
     """Every `-Wno-error=<diagnostic>` in `candidates` this image's own
-    gcc actually recognizes, in the same order -- live-checked inside
-    `image` itself, not assumed from what a *different* image's gcc
-    happens to accept.
+    `compiler` actually recognizes, in the same order -- live-checked
+    inside `image` itself, not assumed from what a *different* image's
+    gcc happens to accept.
 
     Found live, against a real `manylinux_2_28_i686` build once `unix`
     stopped resolving to a cibuildmp-published image and started hitting
@@ -218,15 +219,31 @@ def probe_supported_cflags(
     gcc ladder (11 -> 12 -> 14, record 0084's own addendum) never reaches
     15 at all, so this was always going to happen the first time a
     pre-`v1.26.0` tag actually built against that family's own real
-    compiler rather than a Bootlin/xpack one already known to be >=15.
+    compiler.
+
+    `compiler` defaults to the bare `gcc` every native pypa image runs
+    the real build with, but that default is wrong for `mipsel` -- its
+    image is a Bootlin cross-toolchain, so the compiler the real build
+    actually invokes is `mipsel-linux-gnu-gcc`
+    (`UnixArchSettings.cross_compile + "gcc"`), a *different, older*
+    binary than whatever bare `gcc` resolves to inside that same image
+    (its own build tooling, native to the image's host arch). Found
+    live: the first version of this function always probed bare `gcc`,
+    which on the `manylinux_2_41_mipsel` image happily accepted
+    `-Wno-error=unterminated-string-initialization` -- disproving this
+    docstring's own prior claim that every Bootlin/xpack toolchain here
+    was already known to be gcc >=15 -- while the real
+    `mipsel-linux-gnu-gcc` (gcc 14.3.0) rejected it exactly as any other
+    gcc-14 compiler would, and the build failed regardless of the
+    (wrongly-probed) filtered result.
 
     No per-arch gcc-version table to keep in sync as a result: the
-    compiler itself is asked, once per (image, candidate list), the same
-    "let the tool that actually knows answer" principle CLAUDE.md's own
-    top rule already applies to reading cibuildwheel instead of guessing
-    at it. Empty `candidates` short-circuits with no container run at
-    all -- true for every `v1.26.0`-and-later, non-musl build, the common
-    case.
+    compiler itself is asked, once per (image, compiler, candidate
+    list), the same "let the tool that actually knows answer" principle
+    CLAUDE.md's own top rule already applies to reading cibuildwheel
+    instead of guessing at it. Empty `candidates` short-circuits with no
+    container run at all -- true for every `v1.26.0`-and-later, non-musl
+    build, the common case.
     """
     if not candidates:
         return ()
@@ -239,9 +256,10 @@ def probe_supported_cflags(
     # one unsupported flag) purely because the *last* candidate in the
     # list happened to be the one this gcc rejects, regardless of how
     # every earlier candidate actually probed.
+    quoted_compiler = shlex.quote(compiler)
     probe = (
         "; ".join(
-            f'printf "" | gcc {shlex.quote(flag)} -x c -c -o /dev/null - '
+            f'printf "" | {quoted_compiler} {shlex.quote(flag)} -x c -c -o /dev/null - '
             f">/dev/null 2>&1 && echo {shlex.quote(flag)}"
             for flag in candidates
         )

@@ -1007,42 +1007,68 @@ def build_unix(
             f"into resources/pinned_docker_images.toml"
         )
 
+    settings = unix_arch_settings(opts.target)
     oci_platform = dockerrun.platform_for("unix", opts.target)
     linux32 = dockerrun.needs_linux32("unix", opts.target)
     timeout = dockerrun.timeout_for("unix", opts.target)
 
-    if unix_arch_settings(opts.target).standalone:
+    if settings.standalone:
         run_unix_deplibs(
             opts, mpy_dir, docker_image=docker_image, package_dir=package_dir
         )
 
-    # Probed once, against this cell's own real gcc, and reused for both
-    # calls below -- `unix_extra_cflags()`'s own candidates include
-    # `-Wno-error=<diagnostic>` entries a *different* image's gcc needed
-    # ([0082]'s own `unterminated-string-initialization`, gcc-15-only);
-    # naming an unrecognized diagnostic is a hard `cc1: error` on this
-    # image's gcc, not a no-op, so what actually reaches `make` here has
-    # to be what this specific image's compiler accepts, not the raw
-    # candidate list. See `probe_supported_cflags()`'s own docstring.
-    extra_cflags = build_common.probe_supported_cflags(
-        unix_extra_cflags(opts.target, opts.tag),
+    # `unix_extra_cflags()`'s own candidates include `-Wno-error=
+    # <diagnostic>` entries a *different* image's gcc needed ([0082]'s
+    # own `unterminated-string-initialization`, gcc-15-only); naming an
+    # unrecognized diagnostic is a hard `cc1: error`, not a no-op, so
+    # what actually reaches `make` here has to be what the compiler that
+    # runs it accepts, not the raw candidate list. See
+    # `probe_supported_cflags()`'s own docstring.
+    #
+    # Two separate probes, not one shared between them: `mpy_cross`
+    # below always builds with this image's own native `gcc` (a host
+    # tool -- mpy-cross emits target-independent bytecode, so it is
+    # never cross-compiled), while the main build below uses whatever
+    # `settings.cross_compile` names. Identical for every arch but
+    # `mipsel` (empty prefix, so both probe the same bare `gcc`), but
+    # `mipsel`'s own image is a Bootlin cross-toolchain where those two
+    # are genuinely different, and older, gcc's -- found live, sharing
+    # one probe's result silently carried the native image gcc's
+    # (>=15) verdict on `-Wno-error=unterminated-string-initialization`
+    # into `mipsel-linux-gnu-gcc` (14.3.0), which does not accept it,
+    # and the build failed exactly the way an unprobed flag would have.
+    candidates = unix_extra_cflags(opts.target, opts.tag)
+    mpy_cross_cflags = build_common.probe_supported_cflags(
+        candidates,
         image=docker_image,
         oci_platform=oci_platform,
         linux32=linux32,
         timeout=timeout,
+    )
+    build_cflags = (
+        mpy_cross_cflags
+        if not settings.cross_compile
+        else build_common.probe_supported_cflags(
+            candidates,
+            image=docker_image,
+            compiler=f"{settings.cross_compile}gcc",
+            oci_platform=oci_platform,
+            linux32=linux32,
+            timeout=timeout,
+        )
     )
 
     mpy_cross = build_common.container_mpy_cross(
         mpy_dir,
         slug=f"unix-{opts.target}",
         image=docker_image,
-        extra_cflags=extra_cflags,
+        extra_cflags=mpy_cross_cflags,
         oci_platform=oci_platform,
         linux32=linux32,
         timeout=timeout,
     )
     command = unix_make_command(
-        opts, mpy_dir, mpy_cross=mpy_cross, extra_cflags=extra_cflags
+        opts, mpy_dir, mpy_cross=mpy_cross, extra_cflags=build_cflags
     )
     dockerrun.run(
         command,

@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`unix`'s new `-Wno-error=<diagnostic>` gcc probe still failed
+  `manylinux_2_41_mipsel` builds on every pre-`v1.26.0` tag**, the one
+  case the probe was written for: it always probed the image's bare
+  `gcc`, but `mipsel`'s own image is a Bootlin cross-toolchain where the
+  real build compiler is `mipsel-linux-gnu-gcc` (gcc 14.3.0) — a
+  different, older binary than whatever bare `gcc` resolves to inside
+  that same image. The probe's own false-positive verdict (from the
+  native image gcc, disproving this project's own prior assumption that
+  every Bootlin/xpack toolchain here was already gcc >=15) let
+  `-Wno-error=unterminated-string-initialization` back into
+  `CFLAGS_EXTRA`, and the real cross-compiler rejected it exactly as any
+  other gcc-14 would. Fixed by probing the actual compiler each build
+  step uses: bare `gcc` for the in-container `mpy-cross` build (a host
+  tool, never cross-compiled), `{cross_compile}gcc` for the main port
+  build — identical for every arch but `mipsel`.
 - **`unix` builds failed outright on every clone-path tag that needs
   `lib/libffi`** (no release tarball, e.g. `v1.30.0-preview`) with
   `make: *** No rule to make target '../../lib/libffi/autogen.sh'`:
