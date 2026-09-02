@@ -142,6 +142,18 @@ confirmed-live breakage, and [0044] records the cause precisely: `mpy-cross` bui
 the image and then fails *when run* under QEMU user-mode to freeze `argparse.py`. A QEMU limit,
 not a cibuildmp bug.
 
+**Rechecked this session (run 33642497696) and still broken, with the cause narrowed.** The
+failure is `Error relocating .../mpy-cross: unsupported relocation type`, which is **musl's own
+dynamic loader**, raised when the freshly built `mpy-cross` is executed under `qemu-ppc64le` to
+compile `argparse.py` -- 526s of emulation to get there. The narrowing matters: this is not "ppc64le
+under QEMU does not work". `manylinux_2_28_ppc64le` is green on the same architecture under the
+same emulation (1037s) in the same sweep. It is musl's loader and QEMU's ppc64le relocation
+support specifically, which is why exactly one of the two ppc64le cells fails.
+
+That also makes it the first thing this session ran through the new
+`tolerate_failures=false` input: the same failure would have produced a green run before, and
+produced a red one here.
+
 **A prediction this session made and the run falsified.** `manylinux_2_31_armv7l` and
 `manylinux_2_39_riscv64` resolve straight to pypa's images with no layer of this project's own,
 and `manylinux_2_28_x86_64` was measured to ship no `libffi-devel` -- from which it seemed to
