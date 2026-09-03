@@ -58,9 +58,7 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 - [ ] [0095] `cache_root()` is not one cache: fetched source persists, build state dies with the container
 - [ ] [0085] `arm_embedded` thins out: the toolchain version stops being the image's name and becomes a row fact
 - [ ] [0094] Arm's own GNU toolchain registry is the third choice [0085] said did not exist
-- [ ] [0087] `arm_embedded`/`riscv_embedded` lose their baked cross toolchain; `toolchain_version` becomes a real, read field
 - [ ] [0088] `mimxrt`'s own `>= 13` ceiling gets its own `toolchain_version` row, once [0087] exists
-- [ ] [0089] `natmod`'s own `arm_embedded`/`riscv_embedded` rows get `toolchain_version` too
 - [ ] [0090] the checker stops reading a Dockerfile `ARG`, and [0058]'s own text gets its correction
 - [ ] [0083] replace `windows.Dockerfile`'s apt `gcc-mingw-w64` split with one fully prebuilt llvm-mingw toolchain
 - [ ] [0047] the run output works, but it is not cibuildwheel's
@@ -73,6 +71,8 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### Implemented
 
+- [x] [0089] `natmod`'s own `arm_embedded`/`riscv_embedded` rows get `toolchain_version` too
+- [x] [0087] `arm_embedded`/`riscv_embedded` lose their baked cross toolchain; `toolchain_version` becomes a real, read field
 - [x] [0086] a generic in-container tarball toolchain fetch, generalized out of `arm_embedded.Dockerfile`'s own build-time recipe
 - [x] [0093] the nine ABI 5/6 tags had never built, and none of the three reasons was the gcc 15 diagnostic
 - [x] [0082] nine MicroPython tags fail `mpy-cross` under gcc 15, on every image whose native compiler is unpinned — bisected exactly

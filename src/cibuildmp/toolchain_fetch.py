@@ -44,6 +44,37 @@ class ToolchainFetchError(Exception):
     pass
 
 
+# The one real cross-compiler product each of these two toolchain-group
+# images provides (record 0058's own "image groups are toolchains, not
+# ports" design -- each image is keyed to exactly one compiler family).
+# Shared between `usermod/targets.py` and `natmod/targets.py` rather than
+# each keeping its own copy: both need the same `image -> cross` fact to
+# turn a row's own `image`/`images` field into the key this module's own
+# `resolve_pin()`/`toolchain_dir()` take. Not read off a row's own
+# `cross` field -- that field is a Makefile grep
+# (`parse_cross_compile()`/`parse_cross_prefixes()`) and is `None`
+# wherever a port's own Makefile has no `CROSS_COMPILE` line to find
+# (`rp2`'s CMake wrapper, confirmed directly), even though the image it
+# runs in hosts exactly the toolchain named here regardless.
+IMAGE_CROSS_PREFIX: dict[str, str] = {
+    "arm_embedded": "arm-none-eabi-",
+    "riscv_embedded": "riscv64-unknown-elf-",
+}
+
+# Where the canonical `cross` prefix above differs from what the fetched
+# tarball's own binaries are actually named -- only `riscv_embedded`
+# today: xpack ships `riscv-none-elf-*`, but `py/dynruntime.mk`/
+# `ports/qemu` want `riscv64-unknown-elf-*`
+# (`riscv_embedded.Dockerfile`'s own former build-time symlink loop, now
+# `rename_prefix_script()` run at container time instead). Nothing for
+# `arm_embedded`: xpack's own `arm-none-eabi-*` binaries already match
+# the canonical prefix exactly, so no caller needs to consult this for
+# it.
+CROSS_RENAME_FROM: dict[str, str] = {
+    "riscv64-unknown-elf-": "riscv-none-elf-",
+}
+
+
 def resolve_pin(cross: str, version: str) -> tuple[str, str]:
     """The `(url, sha256)` `resources/pinned_toolchains.toml` records for
     this `(cross, toolchain_version)` pair.
@@ -116,12 +147,17 @@ def resolve_toolchain(
     today, since the directory must exist and be writable before the
     container that mounts it starts.
 
-    Returns `(dest, script)`: `dest` is both the eventual `PATH` entry
-    (joined with the toolchain's own `bin/`) and the path a caller must
-    mount into its container; `script` is the shell text to run ahead of
-    the real build command, in the same `bash -c` invocation --
-    `fetch_script()`'s own docstring has the full shape
-    (`dockerrun.run(["bash", "-c", f"{script}\\n{command}"], mounts=[dest, ...], ...)`).
+    Returns `(dest, script)`: `dest` is the eventual `PATH` entry (joined
+    with the toolchain's own `bin/`) once fetched; `script` is the shell
+    text to run ahead of the real build command, in the same `bash -c`
+    invocation. **The caller mounts `dest.parent`, not `dest` itself** --
+    `fetch_script()`'s own docstring already states the precondition, and
+    getting it backwards is a live, found-for-real failure, not a
+    theoretical one: `dest` does not exist on the host until the script
+    runs, so mounting it directly leaves Docker to synthesize every path
+    component up to it *inside the container*, root-owned, and the
+    script's own first `mkdir -p` then fails outright
+    (`dockerrun.run(["bash", "-c", f"{script}\\n{command}"], mounts=[dest.parent, ...], ...)`).
 
     Still does not touch `dockerrun.py` or wire any port's own build
     driver -- see this module's own docstring for what remains
@@ -197,4 +233,34 @@ if [ ! -e {marker} ]; then
     rm -rf {dest_q}
     mv {staging_q} {dest_q}
 fi
+"""
+
+
+def rename_prefix_script(bin_dir: Path, old_prefix: str, new_prefix: str) -> str:
+    """Shell text: symlink every `{old_prefix}*` tool already in `bin_dir`
+    to a `{new_prefix}*` name, in the same directory.
+
+    What `riscv_embedded.Dockerfile`'s own build-time `for` loop already
+    does (xpack's real `riscv-none-elf-*` binaries -> the
+    `riscv64-unknown-elf-*` names `py/dynruntime.mk`/`ports/qemu` actually
+    invoke) -- moved to container-run time because the tarball is no
+    longer extracted at image-build time, and `dockerrun.run()` always
+    runs as the host's own non-root uid ([0087]'s own finding): the
+    original loop wrote its symlinks into a root-owned `/usr/local/bin`,
+    which a runtime fetch cannot do. Writing them into `bin_dir` itself
+    instead needs no new mount or `PATH` entry beyond the one the fetched
+    toolchain's own `bin/` already needs.
+
+    Idempotent (`ln -sf`) and cheap enough to run on every invocation,
+    warm cache or not -- gating it behind `fetch_script()`'s own marker
+    would only add a second thing to get right for no real cost saved.
+    Append this after `fetch_script()`'s own output in the same `bash -c`
+    script, not a separate `dockerrun.run()` call.
+    """
+    bin_q = shlex.quote(bin_dir.as_posix())
+    return f"""\
+for src in {bin_q}/{old_prefix}*; do
+    tool="${{src##*/{old_prefix}}}"
+    ln -sf "$src" {bin_q}/"{new_prefix}${{tool}}"
+done
 """

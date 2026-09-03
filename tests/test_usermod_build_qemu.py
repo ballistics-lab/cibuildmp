@@ -16,6 +16,11 @@ def qemu_opts(**overrides) -> QemuBuildOptions:
         "user_c_modules": "/gh/ws/micropython/usermod",
         "frozen_manifest": "/gh/ws/a7p_manifest.py",
         "build_dir": Path("/gh/ws/usermod/build/armv7m"),
+        # A real tag with a real, pinned toolchain_version for both
+        # arm_embedded and riscv_embedded -- since [0087], build_qemu()
+        # needs one to resolve which cross compiler to fetch
+        # (targets.qemu_toolchain()) for every board but POWERNV9.
+        "tag": "v1.29.0",
     }
     defaults.update(overrides)
     return QemuBuildOptions(**defaults)
@@ -50,7 +55,11 @@ def test_qemu_runs_in_its_own_image(monkeypatch, tmp_path):
     build_dir.mkdir()
     (build_dir / "firmware.elf").write_bytes(b"\x7fELF")
 
-    build_qemu(qemu_opts(build_dir=build_dir), tmp_path / "mpy")
+    build_qemu(
+        qemu_opts(build_dir=build_dir),
+        tmp_path / "mpy",
+        toolchain_root=tmp_path / "toolchains",
+    )
 
     assert calls[0]["image"] == "qemu:test"
     # An amd64 image cross-compiling to bare metal, which no Linux
@@ -67,7 +76,11 @@ def test_qemu_builds_and_returns_firmware_path(monkeypatch, tmp_path):
     monkeypatch.setattr(dockerrun, "ensure_image", lambda *a, **k: "qemu:test")
     monkeypatch.setattr(dockerrun, "run", lambda *a, **k: None)
 
-    result = build_qemu(qemu_opts(build_dir=build_dir), tmp_path / "mpy")
+    result = build_qemu(
+        qemu_opts(build_dir=build_dir),
+        tmp_path / "mpy",
+        toolchain_root=tmp_path / "toolchains",
+    )
 
     assert result == build_dir / "firmware.elf"
 
@@ -80,7 +93,11 @@ def test_qemu_missing_firmware_after_success_is_an_error(monkeypatch, tmp_path):
     monkeypatch.setattr(dockerrun, "run", lambda *a, **k: None)
 
     with pytest.raises(UsermodBuildError, match="build reported success but"):
-        build_qemu(qemu_opts(build_dir=build_dir), tmp_path / "mpy")
+        build_qemu(
+            qemu_opts(build_dir=build_dir),
+            tmp_path / "mpy",
+            toolchain_root=tmp_path / "toolchains",
+        )
 
 
 def test_qemu_build_failure_surfaces(monkeypatch, tmp_path):
@@ -94,12 +111,64 @@ def test_qemu_build_failure_surfaces(monkeypatch, tmp_path):
     )
 
     with pytest.raises(UsermodBuildError, match="failed with exit code"):
-        build_qemu(qemu_opts(build_dir=tmp_path / "build-armv7m"), tmp_path / "mpy")
+        build_qemu(
+            qemu_opts(build_dir=tmp_path / "build-armv7m"),
+            tmp_path / "mpy",
+            toolchain_root=tmp_path / "toolchains",
+        )
 
 
 def test_qemu_unsupported_board_rejected(tmp_path):
     with pytest.raises(UsermodBuildError, match="not supported yet"):
         build_qemu(qemu_opts(board="MIMXRT1050_EVK"), tmp_path / "mpy")
+
+
+def test_qemu_no_tag_raises_a_clear_error_before_touching_docker(monkeypatch, tmp_path):
+    # [0087]: with arm_embedded/riscv_embedded no longer baking a cross
+    # compiler, a real tag is required to resolve which one to fetch --
+    # this must fail before ever calling docker.
+    calls = []
+    monkeypatch.setattr(
+        dockerrun, "ensure_image", lambda *a, **k: calls.append(a) or "qemu:test"
+    )
+
+    with pytest.raises(UsermodBuildError, match="real MicroPython tag"):
+        build_qemu(
+            qemu_opts(tag=""),
+            tmp_path / "mpy",
+            toolchain_root=tmp_path / "toolchains",
+        )
+
+    assert calls == []
+
+
+def test_qemu_fetches_its_own_toolchain_and_puts_it_on_path(monkeypatch, tmp_path):
+    # [0086]/[0087]: arm_embedded no longer bakes a cross compiler --
+    # build_qemu() must fetch it at container time and prepend it onto
+    # PATH, mounting the cache directory it lands in.
+    monkeypatch.setattr(dockerrun, "ensure_image", lambda *a, **k: "qemu:test")
+    calls = []
+    monkeypatch.setattr(
+        dockerrun, "run", lambda command, **kw: calls.append((command, kw))
+    )
+    build_dir = tmp_path / "build-MPS2_AN385"
+    build_dir.mkdir()
+    (build_dir / "firmware.elf").write_bytes(b"\x7fELF")
+    toolchain_root = tmp_path / "toolchains"
+
+    build_qemu(
+        qemu_opts(build_dir=build_dir), tmp_path / "mpy", toolchain_root=toolchain_root
+    )
+
+    command, kwargs = calls[0]
+    assert command[:2] == ["bash", "-c"]
+    script = command[2]
+    expected_dir = (
+        toolchain_root / "toolchains" / "arm-none-eabi-" / "cross" / "15.2.1-1.1"
+    )
+    assert expected_dir.parent.is_dir()  # created host-side
+    assert expected_dir.parent in kwargs["mounts"]
+    assert f'export PATH="{(expected_dir / "bin").as_posix()}:$PATH"' in script
 
 
 @pytest.mark.parametrize(
@@ -133,9 +202,19 @@ def test_qemu_uses_its_boards_own_cross_prefix(
     build_dir.mkdir()
     (build_dir / "firmware.elf").write_bytes(b"\x7fELF")
 
-    build_qemu(qemu_opts(board=board, build_dir=build_dir), tmp_path / "mpy")
+    build_qemu(
+        qemu_opts(board=board, build_dir=build_dir),
+        tmp_path / "mpy",
+        toolchain_root=tmp_path / "toolchains",
+    )
 
-    assert f"CROSS_COMPILE={expected_cross}" in commands[0]
+    # POWERNV9 needs no fetch (its own ppc64le_linux image still bakes
+    # its toolchain, record 0025) -- plain command, unwrapped. Every
+    # other board's command is now a bash -c script: fetch, PATH export,
+    # then the real make invocation.
+    command = commands[0]
+    haystack = command[-1] if command[:2] == ["bash", "-c"] else command
+    assert f"CROSS_COMPILE={expected_cross}" in haystack
 
 
 def test_qemu_riscv_command_carries_the_riscv_prefix(tmp_path):

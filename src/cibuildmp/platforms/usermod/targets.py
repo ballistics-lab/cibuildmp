@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ...resources import build_platforms_data
+from ...toolchain_fetch import IMAGE_CROSS_PREFIX
 
 # The six ports with a real `build_<port>()` driver in
 # usermod/build_<port>.py --
@@ -106,6 +107,59 @@ def esp32_idf_info(tag: str, board: str) -> tuple[str, str]:
     class of caller `UsermodTarget.identifier`'s own docstring already
     covers for the identifier lookup."""
     return _ESP32_IDF_INFO_BY_TAG_BOARD[(tag, board)]
+
+
+# Toolchain-fetch wiring ([0086]/[0087]): `toolchain_fetch.IMAGE_CROSS_PREFIX`
+# is the shared `image -> cross` fact (see its own comment for why it is
+# not read off a row's own `cross` field -- `None` on every `rp2` row).
+
+# tag -> the version `build-platforms.toml`'s own `gcc` field already
+# carries for every `rp2` row at that tag -- real today ([0084]'s own
+# live compiler check), even though nothing read it before this. Not
+# keyed by board: checked directly, every board of an
+# `arm_embedded`-family port shares one value at a given tag (see
+# `pinned_toolchains.toml`'s own header).
+_RP2_TOOLCHAIN_VERSION_BY_TAG: dict[str, str] = {
+    row["tag"]: row["gcc"] for row in _USERMOD_ROWS["rp2"] if row.get("gcc")
+}
+
+
+def rp2_toolchain(tag: str) -> tuple[str, str]:
+    """`(cross, version)` -- what `build_rp2()` passes to
+    `toolchain_fetch.resolve_toolchain()` to fetch `rp2`'s own cross
+    compiler at `tag`. `KeyError` for a tag this table has never walked,
+    the same class of caller error `esp32_idf_info()`'s own docstring
+    already covers."""
+    return IMAGE_CROSS_PREFIX["arm_embedded"], _RP2_TOOLCHAIN_VERSION_BY_TAG[tag]
+
+
+def qemu_toolchain(tag: str, cross: str) -> tuple[str, str] | None:
+    """`(cross, version)` for `qemu`'s own cross toolchain at `tag`, given
+    `cross` (`build_qemu.QEMU_BOARD_CROSS[board]`) -- `None` when `cross`
+    names a toolchain outside [0086]'s own two fetched images
+    (`powerpc64le-linux-gnu-`, `ppc64le_linux`'s own baked Bootlin
+    tarball, record 0025 -- untouched by [0087]/[0089]).
+
+    `[usermod.qemu]`'s own rows carry no `gcc`/`toolchain_version` fact of
+    their own to read (checked directly) -- `arm-none-eabi-` reuses
+    `rp2`'s own already-correct column instead, and `riscv64-unknown-elf-`
+    reuses `natmod`'s (`rv32imc`/`rv64imc`, whichever this table has a row
+    for at `tag`), because both are the exact same shared image and the
+    exact same shared window ([0085]'s own "seventy rows are one fact"),
+    not a second, qemu-specific fact to keep in step with the first.
+    `KeyError` for a `(cross, tag)` neither table has ever walked.
+    """
+    if cross == IMAGE_CROSS_PREFIX["arm_embedded"]:
+        return cross, _RP2_TOOLCHAIN_VERSION_BY_TAG[tag]
+    if cross == IMAGE_CROSS_PREFIX["riscv_embedded"]:
+        from ..natmod.targets import _NATMOD_TOOLCHAIN_VERSION_BY_TAG_ARCH
+
+        for arch in ("rv32imc", "rv64imc"):
+            version = _NATMOD_TOOLCHAIN_VERSION_BY_TAG_ARCH.get((tag, arch))
+            if version:
+                return cross, version
+        raise KeyError((cross, tag))
+    return None
 
 
 class UnknownPortError(ValueError):

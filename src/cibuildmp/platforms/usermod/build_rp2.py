@@ -13,10 +13,12 @@ this file's own split from a single `build.py`.
 
 from __future__ import annotations
 
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import build_common
+from ... import toolchain_fetch
+from . import build_common, targets
 from .build_common import UsermodBuildError, usermod_mounts
 
 
@@ -91,13 +93,24 @@ def build_rp2(
     "firmware.uf2"` -- the port's own unmodified default build directory,
     since nothing here overrides `BUILD=`.
 
-    `toolchain_root`/`quiet` are accepted only for the same call shape
-    every `build_<port>()` shares (`orchestrate.py`'s `build_one()`
-    passes them uniformly); neither is used on this Docker-only path.
-    `package_dir`, when given, is bind-mounted alongside `USER_C_MODULES`
-    itself -- see `build_common.usermod_mounts()`.
+    `toolchain_root`/`quiet`: `toolchain_root` is no longer a no-op --
+    since [0087], `arm_embedded.Dockerfile` no longer bakes a cross
+    compiler, so `rp2`'s own real one ([0086]/`targets.rp2_toolchain()`)
+    is fetched at container time into `toolchain_root` (or
+    `sources.cache_root()` when omitted), the same cache directory
+    `espidf.fetch_esp_idf()` already keys off for `esp32`. `quiet` is
+    still accepted only for the shared `build_<port>()` call shape and
+    still unused here. `package_dir`, when given, is bind-mounted
+    alongside `USER_C_MODULES` itself -- see
+    `build_common.usermod_mounts()`.
     """
     from ... import dockerrun
+
+    if not opts.tag:
+        raise UsermodBuildError(
+            "rp2: a real MicroPython tag is required to resolve which "
+            "cross toolchain to fetch (targets.rp2_toolchain()) -- got none"
+        )
 
     docker_image = dockerrun.ensure_image("rp2")
     if docker_image is None:
@@ -119,16 +132,48 @@ def build_rp2(
         extra_cflags=build_common.tag_cflags(opts.tag),
     )
 
-    command = rp2_make_command(opts, mpy_dir, mpy_cross=mpy_cross)
+    cross, version = targets.rp2_toolchain(opts.tag)
+    toolchain_dir, fetch = toolchain_fetch.resolve_toolchain(
+        cross, version, root=toolchain_root
+    )
+    make_command = rp2_make_command(opts, mpy_dir, mpy_cross=mpy_cross)
+    # One `bash -c` script, not a separate `dockerrun.run()` call for the
+    # fetch: there is nothing to hand back to a second one, and the point
+    # is that the toolchain's own `bin/` is on `PATH` before `make` runs,
+    # in the same container invocation ([0086]'s own `fetch_script()`
+    # docstring). `export PATH=` here, not `env=`, because `dockerrun.run()`'s
+    # `env=` only ever sets `-e KEY=VALUE` (replace, not append) -- it has
+    # no way to prepend onto the image's own existing `$PATH`.
+    script = (
+        f"{fetch}"
+        f'export PATH="{(toolchain_dir / "bin").as_posix()}:$PATH"\n'
+        f"{shlex.join(make_command)}\n"
+    )
+
     dockerrun.run(
-        command,
+        ["bash", "-c", script],
         # Same directory-level mount `build_esp32()` uses (`.parent`, not
         # the bare `.cmake` file) -- see that function's own comment for
         # the sibling-manifest bug this avoids. `package_dir`, when given,
         # is appended on top -- see `build_common.usermod_mounts()`.
-        mounts=usermod_mounts(
-            mpy_dir, Path(opts.user_c_modules).parent, package_dir=package_dir
-        ),
+        # `toolchain_dir.parent`, not `toolchain_dir` itself -- found live,
+        # not assumed: `toolchain_dir` (the fetched cache's own version
+        # directory) does not exist on the host until the script above
+        # creates it, so mounting it directly leaves Docker to synthesize
+        # every missing path component up to it *inside the container's
+        # own filesystem*, root-owned, since only the exact bind-mounted
+        # leaf inode is backed by the host at all -- the very first
+        # `mkdir -p` the fetch script runs then fails with a bare "mkdir:
+        # Permission denied", before curl is ever reached. Mounting the
+        # parent (`resolve_toolchain()` already creates it host-side,
+        # host-owned) gives the container a real, already-owned directory
+        # to stage and `mv` into instead.
+        mounts=[
+            *usermod_mounts(
+                mpy_dir, Path(opts.user_c_modules).parent, package_dir=package_dir
+            ),
+            toolchain_dir.parent,
+        ],
         workdir=rp2_dir,
         image=docker_image,
         timeout=timeout,

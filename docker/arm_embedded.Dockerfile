@@ -14,43 +14,41 @@
 # before one is added -- its CPython set, auditwheel and glibc floor buy
 # a bare-metal `.elf` nothing at all.
 #
+# **No cross compiler baked in any more (record 0087).** [0085] found a
+# single shared pin cannot satisfy every tag's own floor/ceiling window
+# ("seventy rows are one fact", and that one fact is wrong for most of
+# them) -- `rp2`'s own `toolchain_version` (`build-platforms.toml`'s own
+# per-row `gcc` field, resolved through `targets.rp2_toolchain()`) is
+# fetched into a host-mounted cache at container-run time instead
+# (`toolchain_fetch.py`, record 0086), verified there against
+# `resources/pinned_toolchains.toml`'s own sha256, the same "populate the
+# cache from inside the container" rule `esp_idf_base.Dockerfile` already
+# states. `PATH` is therefore no longer a baked `ENV` line -- each build
+# passes it per-run, once the fetch has landed.
+#
 # Build: docker build -t cibuildmp-arm_embedded -f docker/arm_embedded.Dockerfile .
 # Use:   CIBMP_..._DOCKER_IMAGE=cibuildmp-arm_embedded cibuildmp ...
 FROM ubuntu:26.04
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# The pin, as named build args rather than buried in the RUN below:
-# `bin/update_docker.py` can rewrite an ARG line, and record 0058 leaves
-# moving these into `resources/` open -- a `--build-arg` is the seam that
-# makes that a data change rather than a Dockerfile edit.
-ARG TOOLCHAIN_URL="https://github.com/xpack-dev-tools/arm-none-eabi-gcc-xpack/releases/download/v15.2.1-1.1/xpack-arm-none-eabi-gcc-15.2.1-1.1-linux-x64.tar.gz"
-ARG TOOLCHAIN_SHA256="da6a49ad4003944b823c6c93702a8787c922ab34bd7e918ec0eaf6933a9b1ff6"
-
-RUN set -eux; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates curl xz-utils; \
-    rm -rf /var/lib/apt/lists/*; \
-    mkdir -p /opt/toolchains/arm-none-eabi; \
-    curl -fsSL -o /tmp/tc.tar "$TOOLCHAIN_URL"; \
-    # Verified, not merely fetched: a third-party tarball every build then
-    # runs a compiler out of. "It downloaded" and "it is the artifact that
-    # was pinned" are different claims.
-    echo "$TOOLCHAIN_SHA256  /tmp/tc.tar" | sha256sum -c -; \
-    # --strip-components=1: each tarball has one versioned top-level
-    # directory, and flattening it keeps PATH free of version numbers, so
-    # a bump is one ARG and no other edit.
-    tar -xf /tmp/tc.tar --strip-components=1 -C /opt/toolchains/arm-none-eabi; \
-    rm -f /tmp/tc.tar
-
-# The build environment MicroPython's own makefiles need, and nothing
-# else. `python3-pyelftools` is `mpy_ld.py`'s only third-party import
-# (record 0012's addendum -- the `ar` it used to name alongside is not
-# imported by anything, at any tag). Its own layer, last, so adding to it
-# never invalidates the toolchain above.
+# The build environment MicroPython's own makefiles need, plus
+# `curl`/`ca-certificates`/`xz-utils` for the runtime toolchain fetch
+# above (record 0086's own `fetch_script()` needs `curl` and `tar`;
+# `xz-utils` covers a future `.tar.xz` pin the same way it already did
+# when this layer still extracted one at build time). One layer, not two:
+# unlike the old baked-toolchain split (toolchain first so adding a dev
+# package never invalidated the expensive download), nothing here is
+# expensive enough any more to protect from cache invalidation by staying
+# in its own `RUN`. `python3-pyelftools` is `mpy_ld.py`'s only
+# third-party import (record 0012's addendum -- the `ar` it used to name
+# alongside is not imported by anything, at any tag).
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        xz-utils \
         build-essential \
         git \
         python3 \
@@ -68,9 +66,7 @@ RUN set -eux; \
 # What is deliberately NOT installed: `gcc-arm-none-eabi`,
 # `libnewlib-arm-none-eabi` and `libstdc++-arm-none-eabi-newlib`, which
 # the `build-usermod-rp2040` composite action apt-installs. Checked
-# inside a real image rather than assumed: the xpack toolchain above
-# already ships `arm-none-eabi/lib/libstdc++.a`, the full C++ header set
-# under `include/c++/15.2.1/`, and newlib's own `libc.a`. Installing the
-# apt ones would put a second, older arm-none-eabi on PATH.
-
-ENV PATH="${PATH}:/opt/toolchains/arm-none-eabi/bin"
+# inside a real image rather than assumed: the xpack toolchain this image
+# fetches at run time already ships `arm-none-eabi/lib/libstdc++.a`, a
+# full C++ header set, and newlib's own `libc.a`. Installing the apt ones
+# would put a second, older arm-none-eabi on PATH.

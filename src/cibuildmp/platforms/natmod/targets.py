@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ...resources import build_platforms_data, natmod_data
+from ...toolchain_fetch import IMAGE_CROSS_PREFIX
 
 # ── Architectures ─────────────────────────────────────────────────────────
 # Transcribed from MicroPython's own source, and living in resources/
@@ -88,6 +89,39 @@ _IDENTIFIER_BY_TAG_ARCH: dict[tuple[str, str], str] = {
 }
 
 MPY_ABI: dict[str, str] = {row["tag"]: row["mpy"] for row in _NATMOD_ROWS}
+
+# Toolchain-fetch wiring ([0086]/[0089]): `(tag, arch) -> version`, for
+# every arch whose own image is one of the two `toolchain_fetch.
+# IMAGE_CROSS_PREFIX` names -- `build-platforms.toml`'s own `gcc` field,
+# already real ([0084]'s own live compiler check), even though nothing
+# read it for natmod before this.
+_NATMOD_TOOLCHAIN_VERSION_BY_TAG_ARCH: dict[tuple[str, str], str] = {
+    (row["tag"], row["arch"]): row["gcc"]
+    for row in _NATMOD_ROWS
+    if row.get("gcc")
+    and build_platforms_data()["natmod"]["images"].get(row["arch"])
+    in IMAGE_CROSS_PREFIX
+}
+
+
+def natmod_toolchain(tag: str, arch: str) -> tuple[str, str] | None:
+    """`(cross, version)` for `arch`'s own cross-toolchain fetch at
+    `tag`, or `None` when `arch` needs no fetch at all -- `x86`/`x64`
+    (native, apt-provisioned `natmod_host`, record 0058's own "why
+    `natmod_host` is not just a manylinux image") and `xtensawin`/
+    `xtensa` (`xtensa_esp`/`xtensa_lx106` still bake their own single
+    toolchain -- verified live this session that `xtensawin`'s own
+    version needs no per-tag resolution at all, see [0086]'s own
+    addendum). `KeyError` for a `(tag, arch)` this table has never
+    walked, on one of the two arches that do need a fetch -- the same
+    class of caller error `rp2_toolchain()`'s own docstring already
+    covers.
+    """
+    image = build_platforms_data()["natmod"]["images"].get(arch)
+    cross = IMAGE_CROSS_PREFIX.get(image or "")
+    if cross is None:
+        return None
+    return cross, _NATMOD_TOOLCHAIN_VERSION_BY_TAG_ARCH[(tag, arch)]
 
 
 class UnknownArchError(ValueError):

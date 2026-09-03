@@ -209,6 +209,7 @@ def _port_build_options(
             frozen_manifest=frozen_manifest,
             build_dir=_resolved_build_dir(mpy_dir, port, identifier),
             board=target.arch or "MPS2_AN385",
+            tag=target.tag,
             extra_make_args=extra_make_args,
         )
     if port == "webassembly":

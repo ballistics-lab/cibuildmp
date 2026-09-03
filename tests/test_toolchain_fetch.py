@@ -19,6 +19,7 @@ from cibuildmp.sources import STAMP
 from cibuildmp.toolchain_fetch import (
     ToolchainFetchError,
     fetch_script,
+    rename_prefix_script,
     resolve_pin,
     resolve_toolchain,
     toolchain_dir,
@@ -196,6 +197,37 @@ def test_a_stale_partial_tree_is_not_trusted(tmp_path):
     assert not (dest / "junk").exists()
     assert (dest / STAMP).exists()
     assert (dest / "bin" / "gcc").exists()
+
+
+def test_rename_prefix_script_symlinks_every_matching_tool(tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "riscv-none-elf-gcc").write_text("#!/bin/sh\necho gcc\n")
+    (bin_dir / "riscv-none-elf-as").write_text("#!/bin/sh\necho as\n")
+    (bin_dir / "unrelated-tool").write_text("#!/bin/sh\necho nope\n")
+
+    script = rename_prefix_script(bin_dir, "riscv-none-elf-", "riscv64-unknown-elf-")
+    result = _run(script)
+
+    assert result.returncode == 0, result.stderr
+    gcc = bin_dir / "riscv64-unknown-elf-gcc"
+    assert gcc.is_symlink()
+    assert gcc.resolve() == (bin_dir / "riscv-none-elf-gcc").resolve()
+    assert (bin_dir / "riscv64-unknown-elf-as").is_symlink()
+    assert not (bin_dir / "riscv64-unknown-elf-unrelated-tool").exists()
+
+
+def test_rename_prefix_script_is_idempotent(tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "riscv-none-elf-gcc").write_text("#!/bin/sh\necho gcc\n")
+    script = rename_prefix_script(bin_dir, "riscv-none-elf-", "riscv64-unknown-elf-")
+
+    assert _run(script).returncode == 0
+    result = _run(script)  # re-running must not fail on an existing symlink
+
+    assert result.returncode == 0, result.stderr
+    assert (bin_dir / "riscv64-unknown-elf-gcc").is_symlink()
 
 
 def test_strip_components_is_honoured(tmp_path):

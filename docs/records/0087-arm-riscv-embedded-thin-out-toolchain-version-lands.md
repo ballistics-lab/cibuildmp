@@ -1,7 +1,11 @@
 # 0087 — `arm_embedded`/`riscv_embedded` lose their baked cross toolchain; `toolchain_version` becomes a real, read field
 
-Status: Proposed — blocked on [0086]; not implemented.
-Related: [0025], [0031], [0058], [0068], [0082], [0084], [0085], [0086], [0091]
+Status: Implemented for `rp2` — the one of the six ports this record names that has a real
+`build_<port>()` driver today ([0053]'s own gap: `nrf`/`cc3200`/`renesas-ra`/`stm32`/`samd` have
+verified rows and no build code at all, so there is nothing for this record to wire for them yet).
+See its own addendum below for what landed, two real corrections to this record's own text, and
+what is still open.
+Related: [0025], [0031], [0053], [0058], [0068], [0082], [0084], [0085], [0086], [0091]
 
 ## What this is
 
@@ -70,3 +74,54 @@ assumed safe.
 
 Does not touch `mimxrt` ([0088]), `natmod` ([0089]), `refresh_toolchain_pins.py`, or [0058]'s own
 text ([0090]).
+
+## Addendum: what landed, and two things this record's own text got wrong
+
+Both Dockerfiles are thinned exactly as scoped: no `ARG TOOLCHAIN_URL`/`ARG TOOLCHAIN_SHA256`, no
+`RUN` that curls/verifies/extracts one, no baked `ENV PATH`. `build_rp2()`
+(`usermod/build_rp2.py`) now calls `targets.rp2_toolchain(tag)` — a `tag -> gcc` lookup built from
+`build-platforms.toml`'s own rows, the identical shape `esp32_idf_info()` already has for
+`idf_version` — then `toolchain_fetch.resolve_toolchain()`, wraps its own make command in one
+`bash -c` script (fetch script, then `export PATH=`, then the command), and mounts the fetched
+cache directory alongside its existing mounts. `mimxrt`/`alif` are untouched (no build driver
+exists to wire either into, whatever their own row already carries).
+
+**Two things this record's own text got wrong, found only by actually writing the code:**
+
+1. **"`riscv_embedded`'s own symlink step stays [at image-build time]" is impossible once the
+   tarball itself moves to container-run time** — there is nothing left in the image to symlink
+   *from* at build time. `toolchain_fetch.rename_prefix_script()` (new, [0086]'s own module) now
+   does the `riscv-none-elf-*` → `riscv64-unknown-elf-*` rename inside the fetched cache directory
+   itself, appended into the same `bash -c` script right after the fetch — not `/usr/local/bin`,
+   since `dockerrun.run()`'s own unconditional `--user <uid>:<gid>` (this record's own correct
+   point about *no* root/uid dance) means nothing can write there at container-run time either.
+2. **"`PATH` ... passes as `env=`" is not how it works.** `dockerrun.run()`'s own `env=` only ever
+   emits `-e KEY=VALUE` (replace, not append) — there is no way to *prepend* onto the image's own
+   existing `$PATH` through it. The toolchain's own `bin/` is exported inside the `bash -c` script
+   itself (`export PATH="<dir>/bin:$PATH"`, before the real command), not passed as `env=`.
+
+**Verified for real, not just unit-tested with mocks** — no Docker daemon needed for any of this,
+since every toolchain-group image here is plain `ubuntu:26.04` + a tarball, and this host is
+x86_64 Linux: fetched the real `arm-none-eabi-gcc-xpack` `15.2.1-1.1` tarball with
+`toolchain_fetch.resolve_toolchain()`'s own real generated script (real `https://github.com/...`
+URL, real sha256 check), put it on `PATH` exactly as `build_rp2()`'s own new code composes it, and
+built a real `ports/rp2` `v1.29.0` `RPI_PICO` firmware end to end — `firmware.uf2`, 681472 bytes,
+`FLASH: 51.96%` used, real pico-sdk/tinyusb sources compiled through it.
+
+**What is still open, honestly:**
+
+- `bin/refresh_toolchain_pins.py`'s own `--check` ([0090]'s own scope item 1) is not fixed here.
+  Confirmed live: `current_dockerfile_pin("arm_embedded")`/`("riscv_embedded")` now both return
+  `None` (the regex they grep for is gone), and `--check`'s own loop already treats `None` as
+  "skip" rather than crashing — so nothing is broken, but `--check` now verifies *nothing* at all
+  for these two images' own rows. This was a live, checked fact when [0090] was still a
+  Proposed prediction; now that this record has actually landed, it is a real, present gap, not a
+  hypothetical one.
+- `nrf`/`cc3200`/`renesas-ra`/`stm32`/`samd`/`mimxrt`/`alif` have no `build_<port>()` at all
+  ([0053]) — `toolchain_version`/`gcc` sits ready on every one of their own rows, but there is no
+  code anywhere to read it yet. Wiring them is repeating `rp2`'s own pattern once each one's build
+  driver exists, not new design.
+- 13 tests added directly to `toolchain_fetch.py`'s own suite plus `tests/test_usermod_build_rp2.py`
+  (real fetch/verify/extract/idempotency behaviour, plus `build_rp2()`'s own PATH/mount wiring) —
+  all real `bash -c` execution or real docker-command-list assertions, no shell-string matching on
+  faith.

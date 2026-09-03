@@ -97,3 +97,38 @@ rather than trusted, and `--strip-components` being honoured.
 What still does not call any of this: `arm_embedded.Dockerfile`/`riscv_embedded.Dockerfile` are
 unchanged, no row carries a resolved `(url, sha256)` pair yet, and `PATH`/`env=` wiring into
 `dockerrun.run()` is entirely [0087]'s/[0089]'s own remaining work, not touched here.
+
+## Addendum: the pin table and the combining call
+
+Two more pieces landed after the first pass above, both still inside this record's own
+boundary (a mechanism nothing calls yet, no Dockerfile touched, no row read):
+
+- **`resources/pinned_toolchains.toml` + `resources.pinned_toolchains_data()`** -- the
+  `(cross, version) -> (url, sha256)` table `resolve_pin()` reads. Keyed by `cross`
+  (`build-platforms.toml`'s own existing `CROSS_COMPILE`-prefix field, e.g.
+  `"arm-none-eabi-"`, used verbatim), not by `image`: `image` is a Docker-packaging fact
+  on track to matter less once nothing bakes a toolchain into it any more, while `cross`
+  is a fact about the compiler itself. Every value in it is verified live this session
+  against each release's own sidecar (xpack's `.sha`), not copied from
+  `build-platforms.toml`'s own `gcc` values on faith -- doing that caught a real, live
+  mismatch: `natmod`'s own `rv32imc`/`rv64imc` rows recorded `gcc = "14.3.0-1.1"`, a tag
+  `riscv-none-elf-gcc-xpack` has never published (its own suffix scheme is bare `-1`/`-2`,
+  not `arm-none-eabi`'s `-1.1`); the real tag is `v14.3.0-1`, fixed in both places.
+- **`resolve_pin(cross, version)`** and **`resolve_toolchain(cross, version, *, kind,
+  root)`** -- the latter combines `resolve_pin()` + `toolchain_dir()` + `fetch_script()`
+  into the one call a real caller needs, including creating `dest.parent` on the host
+  first (the same precondition `build_esp32()` meets for `tools_dir` by hand today).
+
+Also verified live, off to the side of this record's own scope but using the same
+no-Docker-needed method (the toolchain is a plain x86_64 Linux tarball, run directly on
+the host): `xtensa_esp`'s own single baked version builds `examples/natmod/features0`
+for `ARCH=xtensawin` cleanly across five tags spanning the whole matrix, including the
+exact `v1.25.0`/`v1.26.0` boundary that breaks `arm_embedded`/`riscv_embedded` -- so
+`natmod.xtensawin` rows should **not** gain a `gcc`/`toolchain_version` field the way
+[0087]/[0089] give `arm_embedded`/`riscv_embedded` rows one: there is nothing here for a
+per-row fact to disambiguate. `pinned_toolchains.toml` carries `xtensa-esp32-elf-`'s one
+version for this same reason -- present for completeness, not because anything reads it
+per row.
+
+13 tests now, all real (`bash -c` against `file://` tarballs, no mocked shell); still
+zero callers in `dockerrun.py` or any `build_<port>.py`.

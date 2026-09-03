@@ -26,13 +26,15 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shlex
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from ... import toolchain_fetch
 from .options import BuildOptions
-from .targets import NATIVE_ARCH_CODE
+from .targets import NATIVE_ARCH_CODE, natmod_toolchain
 
 MPY_HEADER_MAGIC = ord("M")
 MPY_ARCH_FLAGS_BIT = 0x40
@@ -292,6 +294,8 @@ def run_make(
     mpy_dir: Path,
     module_root: Path,
     package_dir: Path,
+    *,
+    toolchain_root: Path | None = None,
 ) -> None:
     # Both paths are mounted at their own identical absolute paths inside
     # the container (dockerrun's own contract), so the command built for a
@@ -316,9 +320,57 @@ def run_make(
     #
     # `module_root` is not mounted separately: it is underneath this.
     command = make_command(build_options, mpy_dir, module_root)
+    mounts = [mpy_dir, package_dir.resolve()]
+
+    # [0086]/[0089]: `arm_embedded`/`riscv_embedded` no longer bake a
+    # cross compiler -- fetch it at container time, the same mechanism
+    # [0087] wires into `usermod`'s own `rp2`. `None` means this arch
+    # needs no fetch at all (`x86`/`x64`'s native `natmod_host`,
+    # `xtensawin`/`xtensa`'s still-baked images) -- run exactly as
+    # before.
+    resolved = natmod_toolchain(build_options.target.tag, build_options.target.arch)
+    if resolved is None:
+        _run_in_image(
+            command,
+            mounts=mounts,
+            workdir=module_root,
+            what=build_options.identifier,
+            arch=build_options.target.arch,
+        )
+        return
+
+    cross, version = resolved
+    toolchain_dir, fetch = toolchain_fetch.resolve_toolchain(
+        cross, version, root=toolchain_root
+    )
+    rename_from = toolchain_fetch.CROSS_RENAME_FROM.get(cross)
+    rename = (
+        toolchain_fetch.rename_prefix_script(toolchain_dir / "bin", rename_from, cross)
+        if rename_from
+        else ""
+    )
+    # One `bash -c` script, not a separate `dockerrun.run()` call for the
+    # fetch -- see `toolchain_fetch.fetch_script()`'s own docstring for
+    # why. `export PATH=`, not `env=`: `dockerrun.run()`'s `env=` only
+    # ever sets `-e KEY=VALUE` (replace, not append), with no way to
+    # prepend onto the image's own existing `$PATH`.
+    script = (
+        f"{fetch}{rename}"
+        f'export PATH="{(toolchain_dir / "bin").as_posix()}:$PATH"\n'
+        f"{shlex.join(command)}\n"
+    )
     _run_in_image(
-        command,
-        mounts=[mpy_dir, package_dir.resolve()],
+        ["bash", "-c", script],
+        # `.parent`, not `toolchain_dir` itself -- found live against a
+        # real image: `toolchain_dir` does not exist on the host until
+        # the fetch script above creates it, so mounting it directly
+        # leaves Docker to synthesize every path component up to it
+        # *inside the container*, root-owned (only the exact bind-mounted
+        # leaf is host-backed) -- the fetch script's own first `mkdir -p`
+        # then fails outright. `resolve_toolchain()` already creates the
+        # parent host-side, host-owned, which the container can actually
+        # stage and `mv` into.
+        mounts=[*mounts, toolchain_dir.parent],
         workdir=module_root,
         what=build_options.identifier,
         arch=build_options.target.arch,
@@ -512,6 +564,7 @@ def build_target(
     extra_files: Sequence[Path] = (),
     name: str = "",
     version: str = "",
+    toolchain_root: Path | None = None,
 ) -> BuildResult:
     """Run one target's build end to end: pre-build-command, make, collect,
     verify, package.
@@ -523,6 +576,12 @@ def build_target(
     on (abi, mode, arch, tag, arch_flags), and natmod_targets()/tag_groups()
     both dedupe by construction, so distinct targets always get distinct
     identifiers and therefore distinct directories.
+
+    `toolchain_root` -- passed straight through to `run_make()` -- is
+    `None` for every real caller today (the fetched cache then lands
+    under `sources.cache_root()`, the same default every other cache
+    this project keys off uses); it exists as a parameter at all only so
+    a test can redirect it away from that real, shared directory.
     """
     start = time.time()
 
@@ -533,7 +592,9 @@ def build_target(
         package_dir,
         build_options.target.arch,
     )
-    run_make(build_options, mpy_dir, module_root, package_dir)
+    run_make(
+        build_options, mpy_dir, module_root, package_dir, toolchain_root=toolchain_root
+    )
 
     produced = collect_output(build_options, module_root)
     verify_output(build_options, produced)

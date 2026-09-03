@@ -1,6 +1,8 @@
 # 0089 — `natmod`'s own `arm_embedded`/`riscv_embedded` rows get `toolchain_version` too
 
-Status: Proposed — blocked on [0086]/[0087]; not implemented.
+Status: Implemented. See its own addendum below for what landed, one real correction
+(`natmod`'s own `gcc` value for `rv32imc`/`rv64imc` was itself wrong, found while wiring this
+record rather than assumed correct), and real verified builds.
 Related: [0082], [0084], [0085], [0086], [0087], [0091]
 
 ## Why this is not covered by [0087] already
@@ -50,3 +52,39 @@ Depends on [0086] (the generic fetch) and benefits from [0087] landing first (pr
 mechanism once, on `usermod`, before a second, differently-shaped build driver adopts it) — but
 does not depend on [0087]'s own code, only on [0086]'s. Independent of [0091], which fixes a
 different failure on the same rows.
+
+## Addendum: what landed, one correction to "already-correct", and real builds
+
+`natmod/build.py`'s `run_make()` now calls `targets.natmod_toolchain(tag, arch)` — a
+`(tag, arch) -> (cross, version) | None` lookup, `None` meaning this arch needs no fetch at all
+(native `x86`/`x64` on `natmod_host`; `xtensawin`/`xtensa`, whose images still bake a single
+toolchain, see [0086]'s own addendum for the live verification behind that "no" for `xtensawin`
+specifically). When it is not `None`, `run_make()` wraps its own `make` command in one `bash -c`
+script exactly the way [0087] wires `build_rp2()` — fetch, then (for `riscv_embedded` only)
+`toolchain_fetch.rename_prefix_script()`, then `export PATH=`, then the real command — and mounts
+the fetched cache directory alongside its existing `mpy_dir`/`package_dir` mounts. `run_make()`/
+`build_target()` both gained a `toolchain_root: Path | None = None` parameter purely so a test can
+redirect the fetch away from the real, shared `sources.cache_root()` — no real caller passes
+anything but `None` today.
+
+**This record's own "using `natmod`'s existing, already-correct `gcc` column values... a
+rename/re-read, not a re-derivation" was wrong for `rv32imc`/`rv64imc`.** Building
+`resources/pinned_toolchains.toml` ([0086]'s own addendum) meant verifying every value against its
+real publisher rather than trusting `build-platforms.toml`'s own column, and that caught a real
+mismatch: those rows recorded `gcc = "14.3.0-1.1"`, a tag `riscv-none-elf-gcc-xpack` has never
+published (its own release-suffix scheme is bare `-1`/`-2`, not `arm-none-eabi`'s `-1.1`). Fixed
+directly in `build-platforms.toml` (13 rows, `"14.3.0-1.1"` → the real `"14.3.0-1"`) rather than
+carried into the pin table as a value nothing would ever successfully fetch.
+
+**Verified for real** — no Docker daemon needed, the same reasoning [0087]'s own addendum gives:
+built `examples/natmod/features0` for both `ARCH=armv7emsp` (the real `arm-none-eabi-gcc`
+`15.2.1-1.1` tarball, fetched live) and `ARCH=rv32imc` (the real `riscv-none-elf-gcc` `14.3.0-1`
+tarball, fetched live, `rename_prefix_script()`'s own symlinks confirmed present and pointing at
+the real binaries before the build ran) against `v1.29.0` — both produced a real `.mpy`
+(`arch: EM_ARM`/`arch: EM_RISCV`, real `LINK`/`GEN` output), not a smoke test against a stub
+toolchain.
+
+**What this still does not fix, unchanged from this record's own text above:** `mpy-cross` on
+these two images' own native compiler for pre-`v1.26.0` tags is [0091]'s own territory, not
+touched here. And `bin/refresh_toolchain_pins.py`'s own `--check` is now checking nothing for
+either image (see [0087]'s own addendum) — [0090], not fixed by this record either.

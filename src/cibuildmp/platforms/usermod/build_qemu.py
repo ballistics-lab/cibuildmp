@@ -15,9 +15,12 @@ axis-config concept along with every other one): every real identifier a
 
 from __future__ import annotations
 
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
+from ... import toolchain_fetch
+from . import targets
 from .build_common import UsermodBuildError, usermod_mounts
 
 # board -> `ports/qemu/Makefile`'s own `CROSS_COMPILE ?=` for it, keyed by
@@ -51,6 +54,7 @@ class QemuBuildOptions:
     frozen_manifest: str
     build_dir: Path
     board: str = "MPS2_AN385"
+    tag: str = ""
     extra_make_args: tuple[str, ...] = ()
 
 
@@ -114,6 +118,12 @@ def build_qemu(
             f"qemu board {opts.board!r} not supported yet. Known: "
             f"{', '.join(QEMU_BOARD_CROSS)}"
         )
+    if not opts.tag and cross in toolchain_fetch.IMAGE_CROSS_PREFIX.values():
+        raise UsermodBuildError(
+            f"qemu/{opts.board}: a real MicroPython tag is required to "
+            "resolve which cross toolchain to fetch (targets.qemu_toolchain()) "
+            "-- got none"
+        )
 
     # **Wired to `ensure_image()` at last** -- record 0032's own gap, and
     # the last bare-host build path in usermod. It survived this long
@@ -130,12 +140,34 @@ def build_qemu(
             f"CIBMP_QEMU_{opts.board.upper()}_DOCKER_IMAGE at a local tag"
         )
 
-    command = qemu_make_command(opts, mpy_dir, cross)
+    make_command = qemu_make_command(opts, mpy_dir, cross)
+    mounts = usermod_mounts(mpy_dir, Path(opts.user_c_modules), package_dir=package_dir)
+
+    # [0086]/[0087]: `arm_embedded`/`riscv_embedded` no longer bake a
+    # cross compiler -- fetch it at container time, same as `rp2`/
+    # `natmod`. `qemu_toolchain()` returns `None` for `POWERNV9`
+    # (`powerpc64le-linux-gnu-`), whose own `ppc64le_linux` image still
+    # bakes its toolchain (record 0025, untouched) -- run exactly as
+    # before for that one.
+    resolved = targets.qemu_toolchain(opts.tag, cross)
+    if resolved is None:
+        command = make_command
+    else:
+        _, version = resolved
+        toolchain_dir, fetch = toolchain_fetch.resolve_toolchain(
+            cross, version, root=toolchain_root
+        )
+        script = (
+            f"{fetch}"
+            f'export PATH="{(toolchain_dir / "bin").as_posix()}:$PATH"\n'
+            f"{shlex.join(make_command)}\n"
+        )
+        command = ["bash", "-c", script]
+        mounts = [*mounts, toolchain_dir.parent]
+
     dockerrun.run(
         command,
-        mounts=usermod_mounts(
-            mpy_dir, Path(opts.user_c_modules), package_dir=package_dir
-        ),
+        mounts=mounts,
         workdir=mpy_dir / "ports" / "qemu",
         image=docker_image,
         timeout=dockerrun.timeout_for("qemu", opts.board),
