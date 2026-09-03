@@ -31,11 +31,49 @@ gained an optional `tag` parameter for this. The mechanism is generic already �
 is every *caller* outside `build_unix.py` passing its own row's tag through to
 `container_mpy_cross()`.
 
+## Verified live, 2026-09-02/03 — the thing [0082] left unchecked
+
+Dispatched `test-platforms.yml` directly (run `33697330722`, branch `claude/what-next-mu1m60`,
+`package-dir: examples/template`) against `natmod`'s own `armv7emsp` (`arm_embedded`) and
+`rv32imc`/`rv64imc` (`riscv_embedded`) identifiers. **One mechanism worth recording before the
+result**: a `--build` glob like `mpy*-v*-armv7emsp` does not select every matching tag — it
+resolves through `narrow_to_newest_tag()` and keeps only the newest tag *per ABI group*, so the
+dispatch actually built one representative tag from each of the five ABIs (`5`, `6`, `6.1`,
+`6.2`, `6.3`) rather than all nineteen tags. A real per-tag sweep needs an explicit
+space-separated identifier list, not a wildcard.
+
+**Result, exactly matching the hypothesis:**
+
+| identifier | tag family | outcome |
+| --- | --- | --- |
+| `mpy5-v1.18-armv7emsp` | ABI 5 (pre-`v1.26.0`) | **failed** — `mpy-cross` exit 2 |
+| `mpy6-v1.19.1-armv7emsp` | ABI 6 (pre-`v1.26.0`) | **failed** — `mpy-cross` exit 2 |
+| `mpy6.1-v1.21.0-armv7emsp` | ABI 6.1 (pre-`v1.26.0`) | **failed** — `mpy-cross` exit 2 |
+| `mpy6.2-v1.22.2-armv7emsp` | ABI 6.2 (pre-`v1.26.0`) | **failed** — `mpy-cross` exit 2 |
+| `mpy6.3-v1.29.0-armv7emsp` | ABI 6.3 (post-`v1.26.0`) | built clean, 0.7s |
+| `mpy6.3-v1.29.0-rv32imc` | ABI 6.3 (post-`v1.26.0`) | built clean, 21.9s |
+| `mpy6.3-v1.29.0-rv64imc` | ABI 6.3 (post-`v1.26.0`) | built clean, 0.6s |
+
+The failing build's own compiler output is the exact diagnostic [0082]/[0084]/[0085] already
+named for `natmod_host`/`windows`, now confirmed live on `arm_embedded`'s own native compiler
+too (`mpy6.2-v1.22.2-armv7emsp`'s log, representative of all four failures):
+
+```
+../py/emitinlinethumb.c:383:24: error: initializer-string for array of 'unsigned char' truncates
+  NUL terminator but destination lacks 'nonstring' attribute (3 chars into 2 available)
+  [-Werror=unterminated-string-initialization]
+cc1: all warnings being treated as errors
+make: *** [../py/mkrules.mk:90: build/py/emitinlinethumb.o] Error 1
+```
+
+So this is not a theoretical risk `arm_embedded`/`riscv_embedded` might share — every
+pre-`v1.26.0` ABI tested failed `mpy-cross` on this image family today, live, independent of
+[0086]-[0090] landing or not. [0082]'s own "not independently checked against ... `rp2`" gap is
+closed: it reaches `rp2` (and every other `arm_embedded`-family port) exactly as predicted.
+
 ## What this record scopes
 
-1. **Verify live, first** — the thing [0082] left unchecked — whether `rp2`'s (or any
-   `arm_embedded`-family port's) `mpy-cross` build actually fails on a pre-`v1.26.0` tag today,
-   before assuming the fix is needed everywhere the theory predicts it.
+1. ~~Verify live, first~~ **Done above.**
 2. **Thread `tag` through every non-`unix` caller of `container_mpy_cross()`** — `natmod`'s own
    build drivers and every `usermod` port's `build_<port>.py` — the same way `build_unix.py`
    already does, so `TAG_CFLAGS` reaches `mpy-cross` regardless of which image or port is
