@@ -16,7 +16,14 @@ APP ?= wat
 # Added for cibuildmp (see examples/template/natmod/Makefile's comment):
 # must be set before the `BUILD ?= build` below, which only applies with no
 # prior value, so this line has to come first, not just be present.
-BUILD = .obj/$(ARCH)
+# $(MPY_DIR)'s own basename scopes it per MicroPython release as well as per
+# arch -- an object file depends on neither, so without it two tags built
+# back to back in this one tree link the first tag's objects against the
+# second's py/ (record 0093, found in examples/template/natmod/Makefile and
+# fixed here for the same reason it was fixed there). `build = ` in this
+# example's own cibuildmp.toml pins one tag today, which is why it had not
+# bitten here yet; nothing but that pin was keeping it from doing so.
+BUILD = .obj/$(notdir $(patsubst %/,%,$(MPY_DIR)))/$(ARCH)
 
 BUILD ?= build
 

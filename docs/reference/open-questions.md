@@ -73,19 +73,20 @@ the same way [docs/0000-TRACKER.md](../0000-TRACKER.md) folds resolved
   `container_mpy_cross()` exists to prevent — just not yet hit for `qemu` —
   or a genuine difference in what that port needs, is **not established**.
   This was written down only in a source comment until now.
-- ~~**Old tags vs. a modern host `gcc`.**~~ **Scoped exactly, not closed** — [0082].
-  Found while verifying **D13** live: `v1.21.0` fails to build `mpy-cross` under a
+- ~~**Old tags vs. a modern host `gcc`.**~~ **Closed** — [0082], [0084], [0091], [0093].
+  Found while verifying **D13** live: `v1.21.0` failed to build `mpy-cross` under a
   recent `gcc` (`-Werror=unterminated-string-initialization` on upstream's own
   `py/emitinlinethumb.c`). Bisected live against this project's own real
-  `natmod_host` image (`ubuntu:26.04`, gcc **15.2.0** — not a hypothetical "recent"
-  compiler, the exact one every unpinned `x64` natmod/`windows` build runs today):
-  9 of 24 known tags fail (all of ABI 6.1/6.2, plus `v1.23.0`-`v1.25.0`), fixed
-  upstream between `v1.25.0` and `v1.26.0`. Confirmed to reach `windows`'s own
-  `container_mpy_cross()` too (identical native gcc, same image family), not
-  independently checked against `unix`/`webassembly`/`esp32`/`rp2`. The zero-config
-  default build is unaffected (newest ABI 6.3 tag is past the boundary). Still
-  open, per [0082]'s own "Not decided": whether to suppress the warning, pin an
-  older gcc, or just document the range as unsupported.
+  `natmod_host` image (`ubuntu:26.04`, gcc **15.2.0** — the exact compiler every
+  unpinned `x64` natmod/`windows` build runs), then found to reach every image
+  whose native compiler is unpinned, `arm_embedded`/`riscv_embedded` included.
+  **18 of the 24 known tags** — every one before `v1.26.0`, which is where upstream
+  rewrote the offending initializers. Answered by suppression, per tag, in
+  `resources/tag_cflags.toml`: [0084] for `unix`, [0091] for every other port's own
+  `container_mpy_cross()` and make invocation, [0082]'s own closing addendum for the
+  nine ABI 5/6 tags its scope paragraph had missed. Not by pinning an older gcc, and
+  not by declaring the range unsupported. [0093] is what the nine oldest tags needed
+  beyond the compiler flags, and the reason they had never built at all.
 - **Toolchain pinning vs. reproducibility.** Pinned tarball versions make
   builds reproducible but drift from what a contributor has on `PATH`. The
   **premise is gone** — [0050] deleted the resolver, and every build now runs
@@ -176,3 +177,6 @@ the same way [docs/0000-TRACKER.md](../0000-TRACKER.md) folds resolved
 [0052]: ../records/0052-config-is-a-tree-not-a-selector-matrix.md
 [0058]: ../records/0058-image-groups-are-toolchains-not-ports.md
 [0082]: ../records/0082-natmod-old-tags-fail-mpy-cross-under-gcc-15.md
+[0084]: ../records/0084-per-identifier-toolchain-tarballs-and-the-end-of-shared-images.md
+[0091]: ../records/0091-tag-cflags-into-every-ports-mpy-cross.md
+[0093]: ../records/0093-pre-v1-20-0-tags-had-never-built.md

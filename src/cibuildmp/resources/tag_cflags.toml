@@ -16,8 +16,28 @@
 # boundary), docs/records/0084 (the gcc-14 `dangling-pointer` case, and
 # why this table exists rather than a per-row `cflags_extra` fact),
 # docs/records/0091 (confirmed live against `natmod`'s own `arm_embedded`/
-# `riscv_embedded` builds, not just `unix`/`natmod_host`/`windows`).
+# `riscv_embedded` builds, not just `unix`/`natmod_host`/`windows`), and
+# docs/records/0082's own closing addendum -- which corrected that record's
+# scope from 9 affected tags to 18. The nine ABI 5/6 rows below are that
+# correction: `v1.12`-`v1.19.1` are real `natmod` identifiers on the
+# failing side of the same `v1.26.0` boundary, and they need two flags the
+# newer tags do not (`-Wno-error=dangling-pointer` until upstream's own
+# `#pragma GCC diagnostic ignored` guard arrives in `v1.21.0`, and
+# `-Wno-error=enum-int-mismatch` for `mpy-cross/main.c`'s own
+# `uint mp_import_stat()` declaration, fixed in `v1.20.0`). Only GCC images
+# have rows in that range (`esp8266`/`cc3200`/`renesas-ra`/`nrf`), so no
+# GCC-specific flag name here can reach `windows`' Clang or `webassembly`'s
+# `emcc` -- checked against build-platforms.toml, not assumed.
 [cflags]
+"v1.12" = ["-Wno-error=unterminated-string-initialization", "-Wno-error=dangling-pointer", "-Wno-error=enum-int-mismatch"]
+"v1.13" = ["-Wno-error=unterminated-string-initialization", "-Wno-error=dangling-pointer", "-Wno-error=enum-int-mismatch"]
+"v1.14" = ["-Wno-error=unterminated-string-initialization", "-Wno-error=dangling-pointer", "-Wno-error=enum-int-mismatch"]
+"v1.15" = ["-Wno-error=unterminated-string-initialization", "-Wno-error=dangling-pointer", "-Wno-error=enum-int-mismatch"]
+"v1.16" = ["-Wno-error=unterminated-string-initialization", "-Wno-error=dangling-pointer", "-Wno-error=enum-int-mismatch"]
+"v1.17" = ["-Wno-error=unterminated-string-initialization", "-Wno-error=dangling-pointer", "-Wno-error=enum-int-mismatch"]
+"v1.18" = ["-Wno-error=unterminated-string-initialization", "-Wno-error=dangling-pointer", "-Wno-error=enum-int-mismatch"]
+"v1.19" = ["-Wno-error=unterminated-string-initialization", "-Wno-error=dangling-pointer", "-Wno-error=enum-int-mismatch"]
+"v1.19.1" = ["-Wno-error=unterminated-string-initialization", "-Wno-error=dangling-pointer", "-Wno-error=enum-int-mismatch"]
 "v1.20.0" = ["-Wno-error=unterminated-string-initialization", "-Wno-error=dangling-pointer"]
 "v1.21.0" = ["-Wno-error=unterminated-string-initialization"]
 "v1.22.0" = ["-Wno-error=unterminated-string-initialization"]

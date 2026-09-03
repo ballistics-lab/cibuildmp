@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Every MicroPython tag before `v1.20.0` — the nine ABI 5 and ABI 6 identifiers
+  (`v1.12` through `v1.19.1`) — had never produced an artifact**, on any arch, for
+  reasons that outlived the gcc 15 diagnostic `[0082]` bisected. Four separate
+  pre-`v1.20.0` upstream facts this project had hardcoded the modern shape of:
+  `mpy-cross` links to `mpy-cross/mpy-cross`, not `mpy-cross/build/mpy-cross`
+  (`py/mkrules.mk` moved it in `v1.20.0`, and `py/dynruntime.mk`'s own
+  `MPY_CROSS =` with it); `py/persistentcode.h` has no `MPY_SUB_VERSION`, so the
+  ABI is the bare `"5"`/`"6"`; `py/stackctrl.c` and `mpy-cross/main.c` need
+  `-Wno-error=dangling-pointer` and `-Wno-error=enum-int-mismatch` on top of the
+  `-Wno-error=unterminated-string-initialization` those tags already needed; and
+  the example natmod Makefile scoped its object cache by arch but not by tag, so
+  one `--build 'mpy*-<arch>'` linked every tag after the first against the first
+  tag's objects. Live-verified on `arm_embedded`: `v1.12`, `v1.18` and `v1.19.1`
+  build end to end, `v1.29.0` unchanged beside them. `examples/wasm2mpy`'s own
+  Makefile carried the same arch-but-not-tag object scoping and is fixed with it,
+  and so did all three `BUILD = .obj/$(ARCH)` snippets in `README.md` — which also
+  claimed a header check catches this (it catches the arch axis; the tag axis
+  produces a correct arch header and no error) and that MicroPython v1.29.0's own
+  `BUILD ?= build-$(ARCH)` default makes it impossible (that default is arch-scoped,
+  never tag-scoped). `[0082]`, `[0093]`.
 - **`mpy-cross` (and, for every port but `natmod`, the port's own build) failed on every
   MicroPython tag before `v1.26.0`, on `rp2`, `stm32`, `samd`, `nrf`, `cc3200`, `renesas-ra`,
   `mimxrt`, `esp32`, `webassembly`, `windows`, and `natmod`'s own `arm_embedded`/`riscv_embedded`
@@ -1541,3 +1561,4 @@ than restarting (see the 0.3.0a1 entry). -->
 [0069]: docs/records/0069-upstream-usercmodule-narrow-ci-slice.md
 [0082]: docs/records/0082-natmod-old-tags-fail-mpy-cross-under-gcc-15.md
 [0091]: docs/records/0091-tag-cflags-into-every-ports-mpy-cross.md
+[0093]: docs/records/0093-pre-v1-20-0-tags-had-never-built.md

@@ -184,10 +184,16 @@ def build_mpy_cross(mpy_dir: Path, arch: str, tag: str = "") -> Path:
     """Build mpy-cross **inside `arch`'s own natmod image** and return the
     binary.
 
-    `py/dynruntime.mk` hardcodes `MPY_CROSS = $(MPY_DIR)/mpy-cross/build/mpy-cross`
+    `py/dynruntime.mk` hardcodes `MPY_CROSS = $(MPY_DIR)/mpy-cross/...`
     with no override (unlike ports/unix's `MICROPY_MPYCROSS=`) -- confirmed
     directly against v1.29.0's own dynruntime.mk, not assumed -- so the
     binary must exist at that exact path before `run_make()` invokes it.
+    **Which path that is, is a fact about the tag**: `build/mpy-cross` from
+    `v1.20.0` on, plain `mpy-cross/mpy-cross` before it, moving in lockstep
+    with `py/mkrules.mk`'s own `all:` target (record 0093 -- the v1.29.0
+    check above was right about v1.29.0 and wrong as a constant, which is
+    why `sources.find_mpy_cross()` resolves it rather than this module
+    naming one layout).
 
     Building it on the host (`sources.build_mpy_cross()`, still used for
     usermod's `qemu`) worked here only because host glibc happened to
@@ -222,8 +228,8 @@ def build_mpy_cross(mpy_dir: Path, arch: str, tag: str = "") -> Path:
     """
     from ... import sources
 
-    binary = mpy_dir / "mpy-cross" / "build" / "mpy-cross"
-    if binary.exists():
+    binary = sources.find_mpy_cross(mpy_dir)
+    if binary is not None:
         return binary
     extra_cflags = sources.tag_cflags(tag)
     _run_in_image(
@@ -239,8 +245,12 @@ def build_mpy_cross(mpy_dir: Path, arch: str, tag: str = "") -> Path:
         what="mpy-cross",
         arch=arch,
     )
-    if not binary.exists():
-        raise BuildError(f"mpy-cross build reported success but {binary} is missing")
+    binary = sources.find_mpy_cross(mpy_dir)
+    if binary is None:
+        raise BuildError(
+            "mpy-cross build reported success but no binary at "
+            + " or ".join(str(p) for p in sources.mpy_cross_candidates(mpy_dir))
+        )
     return binary
 
 

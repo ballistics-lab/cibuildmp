@@ -62,7 +62,6 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 - [ ] [0089] `natmod`'s own `arm_embedded`/`riscv_embedded` rows get `toolchain_version` too
 - [ ] [0090] the checker stops reading a Dockerfile `ARG`, and [0058]'s own text gets its correction
 - [ ] [0083] replace `windows.Dockerfile`'s apt `gcc-mingw-w64` split with one fully prebuilt llvm-mingw toolchain
-- [ ] [0082] nine MicroPython tags fail `mpy-cross` under gcc 15, on every image whose native compiler is unpinned — bisected exactly
 - [ ] [0047] the run output works, but it is not cibuildwheel's
 - [ ] [0046] nothing notices when a pin goes stale, except container images
 - [ ] [0022] zephyr is a third selector axis, not a board-based port that just needs its boards added
@@ -73,6 +72,8 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### Implemented
 
+- [x] [0093] the nine ABI 5/6 tags had never built, and none of the three reasons was the gcc 15 diagnostic
+- [x] [0082] nine MicroPython tags fail `mpy-cross` under gcc 15, on every image whose native compiler is unpinned — bisected exactly
 - [x] [0092] two "should this live in `build-platforms.toml` instead" questions, answered differently
 - [x] [0091] `TAG_CFLAGS` reaches every port's `mpy-cross`, not just `unix`'s
 - [x] [0084] unix's pypa image pin moves from the architecture to the row, and the end of shared/floating compilers
@@ -266,3 +267,4 @@ record is added.
 [0090]: records/0090-toolchain-pins-checker-and-0058-text-followup.md
 [0091]: records/0091-tag-cflags-into-every-ports-mpy-cross.md
 [0092]: records/0092-usermod-toml-and-tag-cflags-against-build-platforms.md
+[0093]: records/0093-pre-v1-20-0-tags-had-never-built.md

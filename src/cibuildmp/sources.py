@@ -301,6 +301,14 @@ def read_mpy_abi(mpy_dir: Path) -> str:
 
     The authoritative answer, as opposed to targets.MPY_ABI's table, which
     exists only so identifiers can be produced with no checkout at all.
+
+    **`MPY_SUB_VERSION` is itself a `v1.20.0`-and-later define** -- upstream
+    added it in the same release that introduced ABI 6.1, and
+    `py/persistentcode.h` before that carries `MPY_VERSION` alone (record
+    0093). So a missing sub-version is a real, valid ABI here, not a
+    malformed header: it yields the bare `"5"`/`"6"` that
+    `build-platforms.toml`'s own `mpy` column already records for exactly
+    those nine tags.
     """
     header = mpy_dir / "py" / "persistentcode.h"
     try:
@@ -314,8 +322,10 @@ def read_mpy_abi(mpy_dir: Path) -> str:
         if len(parts) == 3 and parts[0] == "#define" and parts[1] in _ABI_DEFINES:
             found[parts[1]] = parts[2]
 
-    if len(found) != len(_ABI_DEFINES):
-        raise SourceError(f"could not find MPY_VERSION/MPY_SUB_VERSION in {header}")
+    if "MPY_VERSION" not in found:
+        raise SourceError(f"could not find MPY_VERSION in {header}")
+    if "MPY_SUB_VERSION" not in found:
+        return found["MPY_VERSION"]
     return f"{found['MPY_VERSION']}.{found['MPY_SUB_VERSION']}"
 
 
@@ -349,10 +359,34 @@ def tag_cflags(tag: str) -> tuple[str, ...]:
 # -- mpy-cross ------------------------------------------------------------
 
 
+# `mpy-cross`'s own output path is a fact about the MicroPython tag, not a
+# constant. Upstream's `py/mkrules.mk` links `all: $(PROG)` --
+# `mpy-cross/mpy-cross` -- through `v1.19.1`, and `all: $(BUILD)/$(PROG)`
+# from `v1.20.0` on; `py/dynruntime.mk`'s own hardcoded `MPY_CROSS =`
+# moves with it in the same release. Checked against every tag
+# `build-platforms.toml` knows, not inferred from the two ends -- record
+# 0093, found while closing 0082's own ABI 5/6 gap. The two candidates are
+# disjoint in practice (a tag produces one or the other, never both), so
+# taking the first that exists needs no tag comparison of its own.
+def mpy_cross_candidates(mpy_dir: Path, build_dir: str = "build") -> tuple[Path, ...]:
+    """Every path `make -C mpy-cross` may have written the binary to, newest
+    layout first."""
+    root = mpy_dir / "mpy-cross"
+    return (root / build_dir / "mpy-cross", root / "mpy-cross")
+
+
+def find_mpy_cross(mpy_dir: Path, build_dir: str = "build") -> Path | None:
+    """The built `mpy-cross` binary, or `None` if no layout has one."""
+    for path in mpy_cross_candidates(mpy_dir, build_dir):
+        if path.exists():
+            return path
+    return None
+
+
 def build_mpy_cross(mpy_dir: Path, *, force: bool = False, quiet: bool = False) -> Path:
     """Build mpy-cross in the checkout, once, and return the binary."""
-    binary = mpy_dir / "mpy-cross" / "build" / "mpy-cross"
-    if binary.exists() and not force:
+    binary = find_mpy_cross(mpy_dir)
+    if binary is not None and not force:
         if not quiet:
             print(f"  mpy-cross: cached at {binary}")
         return binary
@@ -365,6 +399,10 @@ def build_mpy_cross(mpy_dir: Path, *, force: bool = False, quiet: bool = False) 
     except subprocess.CalledProcessError as exc:
         raise SourceError(f"building mpy-cross failed: {exc}") from exc
 
-    if not binary.exists():
-        raise SourceError(f"mpy-cross build reported success but {binary} is missing")
+    binary = find_mpy_cross(mpy_dir)
+    if binary is None:
+        raise SourceError(
+            "mpy-cross build reported success but no binary at "
+            + " or ".join(str(p) for p in mpy_cross_candidates(mpy_dir))
+        )
     return binary

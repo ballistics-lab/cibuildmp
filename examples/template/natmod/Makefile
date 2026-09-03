@@ -50,7 +50,20 @@ SRC = template.c ../src/template_core.c
 # One level covers one `..`, which is the layout this repo documents
 # (natmod/, usermod/ and src/ as siblings). A source two levels up would
 # need two, and would deserve its own comment saying so.
-BUILD = .obj/$(ARCH)$(if $(ARCH_FLAGS),+$(ARCH_FLAGS))/o
+#
+# $(MPY_DIR)'s own basename is the *fourth* instance of the same bug, and
+# the one that bites without any manual meddling at all: a single
+# `--build 'mpy*-armv7emsp'` builds one tag per ABI (five of them) against
+# one arch, in one tree, and an object file depends on neither the tag nor
+# MPY_DIR -- so every tag after the first silently linked the first tag's
+# objects against a *different* release's py/. It surfaces as
+# `LinkError: undefined symbol: mp_native_qstr_val_table` when the tags
+# straddle a py/ change, and as a silently mislabelled .mpy when they do
+# not. Found closing record 0082's own ABI 5/6 gap, the moment those old
+# tags could compile at all and reached the link step for the first time
+# (record 0093). `patsubst` guards a trailing slash, which would make
+# `notdir` empty and quietly collapse the scoping back to nothing.
+BUILD = .obj/$(notdir $(patsubst %/,%,$(MPY_DIR)))/$(ARCH)$(if $(ARCH_FLAGS),+$(ARCH_FLAGS))/o
 
 include $(MPY_DIR)/py/dynruntime.mk
 

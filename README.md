@@ -21,6 +21,11 @@ Covers **natmod** (dynamically loadable native `.mpy` modules, built against
 `py/dynruntime.mk`) and **usermod** (`USER_C_MODULES`, compiled straight
 into a port's own firmware build) C extensions.
 
+The two halves reach different distances back: **natmod** builds every
+release from `v1.12` on (ABI 5 through 6.3), **usermod** every port from
+`v1.20.0` on (`qemu` from `v1.24.0`). Both run to the newest preview release
+the pinned tag table knows.
+
 ## Why
 
 MicroPython gives a native C extension two standard, unrelated build paths:
@@ -224,8 +229,10 @@ and the `ambiguous output` error below:
 MOD = mymod
 SRC = mymod.c
 
-# Keep make's own object files out of build/, and scope them per arch.
-BUILD = .obj/$(ARCH)
+# Keep make's own object files out of build/, and scope them per MicroPython
+# release and per arch -- an object file depends on neither, so anything
+# shared here gets silently reused across both.
+BUILD = .obj/$(notdir $(patsubst %/,%,$(MPY_DIR)))/$(ARCH)
 
 include $(MPY_DIR)/py/dynruntime.mk
 
@@ -800,15 +807,25 @@ does not put its output where `cibuildmp` looks. It looks in
 
 Two arches shared one build directory, so the second one reused the first
 one's object files and the `.mpy` is the *first* arch's binary.
-`cibuildmp` catches this rather than shipping it. Scope `BUILD` by arch in
-your Makefile, before the `include`:
+`cibuildmp` catches this rather than shipping it. Scope `BUILD` in your
+Makefile, before the `include`:
 
 ```make
-BUILD = .obj/$(ARCH)
+BUILD = .obj/$(notdir $(patsubst %/,%,$(MPY_DIR)))/$(ARCH)
 ```
 
-(MicroPython v1.29.0 and later already default to `build-$(ARCH)`, so this
-only matters on older tags or if you set `BUILD` yourself.)
+(MicroPython v1.29.0 and later already default to `build-$(ARCH)`, so the
+`$(ARCH)` half only matters on older tags or if you set `BUILD` yourself.)
+
+**The `$(MPY_DIR)` half is the same bug across MicroPython releases, and
+that one produces no error at all.** An object file depends on the tag no
+more than it depends on the arch, so two tags built back to back in one
+tree link the first tag's objects against the second's `py/` — and the
+arch header the check above reads is *correct* in that case, so nothing
+fails. It surfaces as a `LinkError` about an undefined symbol when the two
+releases straddle a `py/` change, and as a quietly mislabelled `.mpy` when
+they do not. No default in any `dynruntime.mk` scopes by tag; only your own
+`BUILD` can.
 
 ### `no image registered for …` / `… is not published for linux/…`
 
@@ -1206,28 +1223,37 @@ specific module name, precision scheme, or test framework — those stay in
 the consuming repo.
 
 **One more requirement for the `cibuildmp` CLI specifically:** scope
-`dynruntime.mk`'s `BUILD` variable by `$(ARCH)` — `BUILD = .obj/$(ARCH)`
-before the `include`, kept outside `build/` so it does not collide with
-the `dist` output the CLI globs for (see
-`examples/template/natmod/Makefile`). `cibuildmp` runs every selected
-target sequentially in one `natmod/` tree, so a `BUILD` shared across
-arches makes a second `ARCH=` in the same invocation find the previous
-arch's own object files "up to date" and skip rebuilding — the merged
-`.mpy` silently stays the *first* arch's binary. `cibuildmp` catches that
-itself (a header-arch verification step fails loudly instead), but scoping
-`BUILD` avoids paying for the failed build at all.
+`dynruntime.mk`'s `BUILD` variable by the MicroPython release *and* the
+arch — `BUILD = .obj/$(notdir $(patsubst %/,%,$(MPY_DIR)))/$(ARCH)` before
+the `include`, kept outside `build/` so it does not collide with the `dist`
+output the CLI globs for (see `examples/template/natmod/Makefile`).
+`cibuildmp` runs every selected target sequentially in one `natmod/` tree,
+and an object file depends on neither the arch nor the tag, so anything
+those targets share in `BUILD` gets silently reused across them.
 
-**How much this matters depends on the tag**, which this paragraph did not
-used to say: `dynruntime.mk` defaulted to an unscoped `BUILD ?= build` up
-to v1.28.0, and to `BUILD ?= build-$(ARCH)` from v1.29.0 — arch-scoped
-already. On v1.29.0 and later the collision cannot happen by default, so
-scoping `BUILD` yourself is only needed to put the objects somewhere other
-than beside the `dist` output, or to support an older `MPY_DIR`.
+**The arch axis is caught; the tag axis is not.** A `BUILD` shared across
+arches makes a second `ARCH=` in the same invocation find the previous
+arch's object files "up to date" and skip rebuilding — the merged `.mpy`
+silently stays the *first* arch's binary, and `cibuildmp`'s own header-arch
+verification fails loudly rather than shipping it, so scoping `$(ARCH)`
+only saves you the failed build. A `BUILD` shared across *tags* produces an
+artifact whose arch header is perfectly correct and whose `py/` is the
+wrong release's, so nothing fails: it shows up as a `LinkError` about an
+undefined symbol when the two releases straddle a `py/` change, and as a
+quietly mislabelled `.mpy` when they do not.
+
+**No `dynruntime.mk` default covers either axis fully**, which this
+paragraph did not used to say: `BUILD` defaulted to an unscoped `build` up
+to v1.28.0 and to `build-$(ARCH)` from v1.29.0 — arch-scoped from that tag
+on, tag-scoped in no release at all, since `MPY_DIR` is the only thing that
+knows which release is being built. So on v1.29.0 and later the arch
+collision cannot happen by default; the tag one still can, and only your
+own `BUILD` prevents it.
 
 If the module also builds `rv32imc` with more than one `arch-flags` value
 in the same invocation, `BUILD` needs `$(ARCH_FLAGS)` folded in too —
-`BUILD = .obj/$(ARCH)$(if $(ARCH_FLAGS),+$(ARCH_FLAGS))`, for the same
-reason on that second axis.
+`BUILD = .obj/$(notdir $(patsubst %/,%,$(MPY_DIR)))/$(ARCH)$(if $(ARCH_FLAGS),+$(ARCH_FLAGS))`,
+for the same reason on a third axis.
 
 None of this cares what produced the `.c` files `SRC` lists —
 [`examples/wasm2mpy`](examples/wasm2mpy) compiles WebAssembly to C via
@@ -1324,7 +1350,7 @@ PyPI unless you pin a version there too.
 <!-- REUSABLE LINKS -->
 
 [micropython-tag]:
-https://img.shields.io/badge/v1.20.0%2B-orange?logo=micropython&label=micropython
+https://img.shields.io/badge/v1.12%2B-orange?logo=micropython&label=micropython
 
 [license]:
 https://img.shields.io/github/license/ballistics-lab/cibuildmp

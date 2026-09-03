@@ -1,8 +1,11 @@
 # 0082 — nine MicroPython tags fail `mpy-cross` under gcc 15, on every image whose native compiler is unpinned — bisected exactly
 
-Status: Proposed — the failure, its exact boundary, and its reach across `natmod`/`windows` are
-confirmed; the fix is not chosen here.
-Related: [0013], [0044], [0068]
+Status: **Implemented (closed 2026-09-03).** The failure, its exact boundary, and its reach across
+`natmod`/`windows` were confirmed when this was written; the fix it deliberately left unchosen was
+chosen in [0084]/[0091] and finished here. **Two of this record's own numbers were wrong and are
+corrected in the closing addendum**: the affected range is 18 of 24 tags, not 9, and the four
+"inferred, not built" tags are now a source-level fact rather than an inference.
+Related: [0013], [0044], [0068], [0084], [0091], [0093]
 
 ## What this closes out
 
@@ -132,3 +135,87 @@ likely unaffected the same way [0068]'s own audit found for everything except `n
 [0013]: 0013-micropython-list-dedup-by-abi.md
 [0044]: 0044-unix-native-images-landed.md
 [0068]: 0068-docker-dependabot-grouping-and-mipsel-ubuntu-26-04.md
+
+## Addendum, 2026-09-03 — closing this record: what was chosen, what was verified, and the two numbers above that were wrong
+
+### The four options under "Not decided here", resolved
+
+1. **Suppress the warning for the affected tag range — chosen, and shipped.** [0084] landed it for
+   `unix` alone (`build_common.TAG_CFLAGS`, keyed by tag, reaching both `container_mpy_cross()` and
+   the port's own make); [0091] threaded the same table through every other port's own
+   `container_mpy_cross()` call and make invocation, and moved the table itself out of a Python
+   dict into `resources/tag_cflags.toml` ([0010]'s rule). This addendum completes the entries.
+2. **Pin an older gcc for `natmod_host`'s `x64` / `windows`'s `container_mpy_cross()` — not taken.**
+   The relaxation makes it unnecessary, and [0068] had already made the unpinned choice
+   deliberately. Nothing about that changed.
+3. **Document the tags as a known-unsupported range — not taken.** They build.
+4. **`webassembly`/`unix`/`esp32`/`rp2` against the same range — verified, except `esp32`.**
+   [0091] checked `webassembly`'s own `emcc` live (accepts the flags — not assumed from "Clang"),
+   built `unix` live at `v1.22.2-manylinux_2_28_x86_64` with `examples/usercmodule`'s real C++, and
+   built `rp2`'s own full `v1.20.0` firmware. `esp32` is still not exercised live: ESP-IDF's tool
+   installer cannot fetch through this session's own proxy CA, which is a sandbox property, not an
+   `esp32` finding. **And one image family this record never named at all was checked and does
+   fail**: `arm_embedded`/`riscv_embedded`, in CI run `33697330722` — the seven `usermod` ports
+   sharing that image plus `natmod`'s own arm/riscv cross arches.
+
+### The scope number above is wrong: 18 of 24 tags, not 9
+
+**"Scope against the real tag table" quoted `natmod.identifiers`' ABI 6.1/6.2/6.3 groups and
+silently omitted ABI 5 (`v1.12`-`v1.18`) and ABI 6 (`v1.19`, `v1.19.1`) entirely.** Those nine tags
+are real rows in `build-platforms.toml` — 8 identifiers each — and they are on the *failing* side of
+the boundary this record bisected, not outside its reach. The evidence was already printed and not
+read as such: [0091]'s own live table shows `mpy5-v1.18-armv7emsp` and `mpy6-v1.19.1-armv7emsp`
+failing `mpy-cross` with exit 2, and both job logs carry the identical
+`-Werror=unterminated-string-initialization` diagnostic in `py/emitinlinethumb.c`, confirmed by
+re-reading that run's own log while closing this record rather than trusting its summary line.
+
+**Source-level, across every tag rather than at the two ends** (`micropython/micropython`,
+read directly): `py/emitinlinethumb.c`'s `reg_name_table` and `cc_name_table` carry exactly-filling
+string initializers (`{10, "r10"}` into `byte name[3]`, `{ ASM_THUMB_CC_EQ, "eq" }` into
+`byte name[2]`) unchanged from `v1.12` through `v1.25.0`, and `v1.26.0` replaces every one with a
+char-array initializer (`{10, {'r', '1', '0' }}`). That is upstream's own fix, and it lands exactly
+at the boundary this record bisected by building.
+
+**So this record's own "not individually built" caveat is now settled, not still open.**
+`v1.22.0`/`v1.22.1`/`v1.23.0`/`v1.24.1` were inferred from the boundary; they are now a source fact,
+along with the other nine. Nothing in the table above needed correcting — only its scope.
+
+### Two further diagnostics on the older nine, found by building rather than by reasoning
+
+Adding `-Wno-error=unterminated-string-initialization` to the nine ABI 5/6 tags was not enough, and
+the next two failures came one at a time out of a real `v1.18` build on `arm_embedded`:
+
+- **`-Wno-error=dangling-pointer`.** `py/stackctrl.c`'s `MP_STATE_THREAD(stack_top) = (char *)&stack_dummy;`
+  trips `-Werror=dangling-pointer=` on gcc 12+. Upstream's fix is a
+  `#pragma GCC diagnostic ignored "-Wdangling-pointer"` guard added **in `v1.21.0`** — so
+  `v1.12`-`v1.20.0` need the flag and `v1.21.0`+ do not, which is exactly the shape
+  `tag_cflags.toml` already had for `v1.20.0` alone ([0084]) without anyone noticing the eight
+  older tags on the same side of that boundary.
+- **`-Wno-error=enum-int-mismatch`.** `mpy-cross/main.c` declares `uint mp_import_stat(const char *path)`
+  against `py/lexer.h`'s `mp_import_stat_t` return type through `v1.19.1`; `v1.20.0` fixes the
+  declaration. gcc 13+ makes that an error. This one is confined to exactly the nine tags.
+
+**Neither flag can reach a Clang toolchain from these entries, checked rather than assumed**: the
+only `usermod` ports with rows in the `v1.12`-`v1.19.1` range are `esp8266`, `cc3200`, `renesas-ra`
+and `nrf` (`build-platforms.toml`, read directly) — all GCC, and none of them has a build driver
+today ([0053]). `windows`' own `win_arm64` Clang and `webassembly`'s `emcc` have no rows there at
+all, and `windows` probes its candidates anyway since [0091]'s own addendum.
+
+### Live verification of the closure
+
+`examples/template`, local Docker, `arm_embedded`: `mpy5-v1.12-armv7emsp`, `mpy5-v1.18-armv7emsp`
+and `mpy6-v1.19.1-armv7emsp` each build end to end to a real `.mpy` — the first time any ABI 5/6
+tag has built in this project at all — and `mpy6.3-v1.29.0-armv7emsp` still builds clean beside
+them, from a clean object tree, as the regression check.
+
+**Getting there needed three non-gcc fixes that are not this record's subject**, each a
+pre-`v1.20.0` upstream layout fact this project had hardcoded the modern shape of: `mpy-cross`'s own
+output path, `MPY_SUB_VERSION`'s absence, and the example Makefile's object scoping. They are
+[0093], written separately, and they are the reason these nine tags had never built even before the
+gcc 15 diagnostic existed.
+
+[0010]: 0010-pinned-data-in-resources.md
+[0053]: 0053-usermod-ports-without-a-build-driver.md
+[0084]: 0084-per-identifier-toolchain-tarballs-and-the-end-of-shared-images.md
+[0091]: 0091-tag-cflags-into-every-ports-mpy-cross.md
+[0093]: 0093-pre-v1-20-0-tags-had-never-built.md
