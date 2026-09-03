@@ -56,6 +56,7 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 ### In progress / Proposed
 
 - [ ] [0085] `arm_embedded` thins out: the toolchain version stops being the image's name and becomes a row fact
+- [ ] [0094] Arm's own GNU toolchain registry is the third choice [0085] said did not exist
 - [ ] [0086] a generic in-container tarball toolchain fetch, generalized out of `arm_embedded.Dockerfile`'s own build-time recipe
 - [ ] [0087] `arm_embedded`/`riscv_embedded` lose their baked cross toolchain; `toolchain_version` becomes a real, read field
 - [ ] [0088] `mimxrt`'s own `>= 13` ceiling gets its own `toolchain_version` row, once [0087] exists
@@ -268,3 +269,4 @@ record is added.
 [0091]: records/0091-tag-cflags-into-every-ports-mpy-cross.md
 [0092]: records/0092-usermod-toml-and-tag-cflags-against-build-platforms.md
 [0093]: records/0093-pre-v1-20-0-tags-had-never-built.md
+[0094]: records/0094-arm-gnu-toolchain-is-a-real-third-choice-for-arm-embedded.md
