@@ -349,6 +349,16 @@ identifiers = [
 [usermod.unix]
 identifier_format = "{tag}-{arch}"
 artifacts_dir_name = "{name}-{ver}-{identifier}"
+# Per-port build-system shape and default-manifest path -- moved here from
+# the now-deleted resources/usermod.toml ([0092]): a fact about the port
+# itself (which USER_C_MODULES shape its own Makefile/CMakeLists.txt
+# expects, D16/D17), never varying by tag/board, so it sits at this
+# table's own top level exactly like `image`/`post_checkout` already do,
+# not repeated per row. See usermod/portinfo.py for what each value means
+# and how it was verified (against a real v1.28.0 checkout, not a
+# composite action's own doc comment).
+build-system = "make"
+default-manifest = "variants/standard/manifest.py"
 
 # `unix` is the one port whose image axis and target axis coincide: every
 # (arch, libc) cell is built natively for itself under emulation, pypa's
@@ -611,6 +621,9 @@ identifiers = [
 [usermod.windows]
 identifier_format = "{tag}-{arch}"
 artifacts_dir_name = "{name}-{ver}-{identifier}"
+# See [usermod.unix]'s own comment -- moved from resources/usermod.toml ([0092]).
+build-system = "make"
+default-manifest = "variants/manifest.py"
 
 image = "windows"
 pre_checkout = "apt-get install python3 build-essential gcc-mingw-w64"
@@ -701,6 +714,9 @@ identifiers = [
 [usermod.webassembly]
 identifier_format = "{tag}-{arch}"
 artifacts_dir_name = "{name}-{ver}-{identifier}"
+# See [usermod.unix]'s own comment -- moved from resources/usermod.toml ([0092]).
+build-system = "make"
+default-manifest = "variants/pyscript/manifest.py"
 
 image = "webassembly"
 identifiers = [
@@ -743,6 +759,12 @@ identifiers = [
 [usermod.qemu]
 identifier_format = "{tag}-qemu-{board}"
 artifacts_dir_name = "{name}-{ver}-{identifier}"
+# See [usermod.unix]'s own comment -- moved from resources/usermod.toml
+# ([0092]). Empty, confirmed by its absence on disk rather than assumed:
+# this port ships no default manifest to combine a consumer's own
+# FROZEN_MANIFEST with.
+build-system = "make"
+default-manifest = ""
 
 # A map, not a scalar: `qemu` is the one usermod port whose boards do
 # not share a toolchain -- six Cortex-M/A boards on `arm-none-eabi-`,
@@ -857,6 +879,9 @@ identifiers = [
 [usermod.esp32]
 identifier_format = "{tag}-esp32-{board}"
 artifacts_dir_name = "{name}-{ver}-{identifier}[-{variant}]"
+# See [usermod.unix]'s own comment -- moved from resources/usermod.toml ([0092]).
+build-system = "cmake"
+default-manifest = "boards/manifest.py"
 
 # Not a toolchain image. `esp32` boards span two instruction sets --
 # Xtensa (`esp32`/`esp32s2`/`esp32s3`) and RISC-V (`esp32c2`/`esp32c3`/
@@ -1340,6 +1365,9 @@ identifiers = [
 [usermod.rp2]
 identifier_format = "{tag}-rp2-{board}"
 artifacts_dir_name = "{name}-{ver}-{identifier}[-{variant}]"
+# See [usermod.unix]'s own comment -- moved from resources/usermod.toml ([0092]).
+build-system = "cmake"
+default-manifest = "boards/manifest.py"
 
 image = "arm_embedded"
 post_checkout = "make -C mpy-cross && make -C ports/rp2 BOARD={board} submodules"

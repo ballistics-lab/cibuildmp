@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`mpy-cross` (and, for every port but `natmod`, the port's own build) failed on every
+  MicroPython tag before `v1.26.0`, on `rp2`, `stm32`, `samd`, `nrf`, `cc3200`, `renesas-ra`,
+  `mimxrt`, `esp32`, `webassembly`, `windows`, and `natmod`'s own `arm_embedded`/`riscv_embedded`
+  cross arches** — `container_mpy_cross()` always builds `mpy-cross` with the image's own native
+  compiler, and every one of these images' native compiler is `ubuntu:26.04`'s own gcc 15, which
+  rejects `py/emitinlinethumb.c`'s pre-`v1.26.0` string initializers
+  (`-Werror=unterminated-string-initialization`, [0082]) the same way it already broke
+  `natmod_host`/`windows`'s own `x64`/`x86` builds. `[0091]` threads the tag-keyed relaxation
+  already fixed for `unix` ([0082]) through every other port's own `container_mpy_cross()` call
+  and make invocation. Live-verified: `natmod`'s `armv7emsp`/`rv32imc`/`rv64imc` (CI, run
+  33697330722) and, locally, `rp2`'s own full firmware build on `v1.20.0` (the one tag needing two
+  stacked relaxations at once).
+- **`windows`'s own `win_arm64` build would have failed the moment `[0091]`'s fix reached it**:
+  `win_arm64`'s cross compiler is Clang (`llvm-mingw`), not GCC, and it rejects
+  `-Wno-error=dangling-pointer` as an unrecognized diagnostic name — a hard `error: unknown
+  warning option`, not a no-op. Caught by building `v1.20.0-win_arm64` locally before it ever
+  reached CI: `build_windows()` now probes its own `CFLAGS_EXTRA` candidates against the real
+  cross compiler first, the same `probe_supported_cflags()` mechanism `unix` already uses for its
+  own gcc version ladder.
+
 ## [0.6.2] - 2026-09-03
 
 ### Fixed
@@ -1518,3 +1540,4 @@ than restarting (see the 0.3.0a1 entry). -->
 [0066]: docs/records/0066-extra-cmake-args.md
 [0069]: docs/records/0069-upstream-usercmodule-narrow-ci-slice.md
 [0082]: docs/records/0082-natmod-old-tags-fail-mpy-cross-under-gcc-15.md
+[0091]: docs/records/0091-tag-cflags-into-every-ports-mpy-cross.md

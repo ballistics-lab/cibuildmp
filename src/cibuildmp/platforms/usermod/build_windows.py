@@ -62,10 +62,10 @@ class WindowsArchSettings:
     #                          uninitialized" to Clang; GCC does not
     #                          apply this diagnosis to a bare asm-tied
     #                          register declaration the way Clang does.
-    # (Migrated here from resources/usermod.toml's own [llvm-mingw]
-    # table, deleted along with usermod/llvmmingw.py once windows went
-    # Docker-only -- these are Make-level flags and belong with the rest
-    # of them, not with a toolchain download pin.)
+    # (Migrated here from a now-deleted per-port resource file's own
+    # [llvm-mingw] table, dropped along with usermod/llvmmingw.py once
+    # windows went Docker-only -- these are Make-level flags and belong
+    # with the rest of them, not with a toolchain download pin.)
     extra_cflags: str = ""
     # COMPILER_TARGET=/STRIP=/SIZE= -- the same overrides MSYS2's own
     # CLANGARM64 environment already needed (D18's own history): this

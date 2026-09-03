@@ -23,8 +23,9 @@ from typing import Any
 # `"cibuildmp.natmod"` and sent every lookup at
 # `cibuildmp/natmod/resources/natmod.toml`, which does not exist. The data
 # directory never moved and never should: `cibuildmp/resources/` is shared
-# rather than natmod-only -- `usermod/portinfo.py` reads `usermod.toml`
-# and `usermod/dockerrun.py` reads both pin tables out of it. A literal
+# rather than natmod-only -- `usermod/portinfo.py` reads its own per-port
+# facts out of `build_platforms_data()["usermod"]` and `usermod/dockerrun.py`
+# reads both pin tables out of it. A literal
 # anchor is what makes this file's own location irrelevant to where the
 # data is found, which is precisely the property that was missing the last
 # time it moved.
@@ -39,10 +40,6 @@ def _load(resource: str) -> dict[str, Any]:
 
 def natmod_data() -> dict[str, Any]:
     return _load("natmod.toml")
-
-
-def usermod_data() -> dict[str, Any]:
-    return _load("usermod.toml")
 
 
 def build_platforms_data() -> dict[str, Any]:

@@ -1,7 +1,8 @@
 # 0092 — two "should this live in `build-platforms.toml` instead" questions, answered differently
 
-Status: Proposed — one half (`usermod.toml`) is a real, unstarted simplification; the other
-(`tag_cflags.toml`) is closed, not open.
+Status: Implemented. `usermod.toml` merged into `build-platforms.toml` the same session this
+record was written, once it turned out to be as easy as the "not attempted here" section below
+predicted; `tag_cflags.toml` stays closed as its own, separate file, unchanged.
 Related: [0010], [0052], [0084], [0091]
 
 Both raised directly while landing [0091]: once `TAG_CFLAGS` moved out of a Python dict into
@@ -66,21 +67,36 @@ is a real merge, not a workaround: one file fewer, one loader function fewer
 (`resources.usermod_data()`), and every fact about a given port answerable by reading its one
 table instead of two.
 
-**Not done in this record.** Small blast radius (one consumer, `portinfo.py`), but real work
-(moving two keys into ~2200 lines of existing rows' own top-level sections, updating that one
-consumer, and updating whatever doc/test currently names `resources/usermod.toml` directly —
-`tests/test_docs.py`'s own path-existence check among them) with no forcing function behind it:
-nothing is broken today by the two files staying separate, unlike `tag_cflags.toml`'s own
-motivating problem (`natmod` needing a fact `usermod/build_common.py` owned). Worth doing the day
-someone is already touching `usermod.toml` for an unrelated reason, not worth a dedicated session
-on its own.
+**Done after all, same session, once asked directly.** The paragraph above sized this as real but
+unforced work; it turned out smaller in practice than the size estimate implied, because the
+blast radius really was just the one consumer:
+
+- `build-system`/`default-manifest` added to each of the six `[usermod.<port>]` tables' own top
+  level (`unix`, `windows`, `webassembly`, `qemu`, `esp32`, `rp2`) in `build-platforms.toml`,
+  right beside `identifier_format`/`artifacts_dir_name` — not per-row, matching `image`/
+  `post_checkout`'s own existing placement exactly.
+- `usermod/portinfo.py`'s `_PORTS` now reads `build_platforms_data()["usermod"]`, filtered to the
+  tables that actually carry `"build-system"` — presence of the key is the signal, not a second
+  allowlist, so the nine driver-less ports ([0053]) simply don't have it, the same absence
+  `usermod.toml` already expressed by omitting their sections entirely.
+- `resources.usermod_data()` deleted along with `resources/usermod.toml` itself; every source
+  comment that named the file by path (`resources.py`, `portinfo.py`'s own docstrings,
+  `manifests.py`, `build_windows.py`'s `[llvm-mingw]` history) reworded to not cite a path that no
+  longer exists — `tests/test_docs.py`'s own `test_source_paths_exist` checks every repo-looking
+  path named in `src/**/*.py` dynamically, so this was not optional cleanup.
+- Verified live, not just by the test suite: `cibuildmp examples/template --dry-run
+  --print-build-identifiers` still resolves every identifier, and a real `v1.20.0-rp2-PICO` build
+  (`build_system("rp2")` → `"cmake"` → `resolve_user_c_modules()`'s own cmake branch) still
+  produces a genuine `firmware-v1.20.0-rp2-PICO.uf2`.
+
+591 tests, ruff, pyright, `bin/refresh_docs.py --check` and pre-commit all clean afterward.
 
 ## What this record is not
 
-Not a decision to leave `usermod.toml` alone forever — it names the merge as real and welcome,
-just unscheduled. Not a reopening of [0091]'s own `tag_cflags.toml` placement — that half is
-closed, with the reason spelled out so it does not get re-litigated from a surface-level "but
-isn't `[tags]` already right there" reading the next time someone notices the two tables.
+Not a reopening of [0091]'s own `tag_cflags.toml` placement — that half is closed, with the reason
+spelled out so it does not get re-litigated from a surface-level "but isn't `[tags]` already right
+there" reading the next time someone notices `resources/tag_cflags.toml` is the only tag-keyed
+table left outside `build-platforms.toml`.
 
 ## Also verified while this question was being asked: `examples/usercmodule` against [0091]'s fix
 
