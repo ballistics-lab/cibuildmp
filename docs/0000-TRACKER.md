@@ -61,7 +61,6 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 - [ ] [0088] `mimxrt`'s own `>= 13` ceiling gets its own `toolchain_version` row, once [0087] exists
 - [ ] [0089] `natmod`'s own `arm_embedded`/`riscv_embedded` rows get `toolchain_version` too
 - [ ] [0090] the checker stops reading a Dockerfile `ARG`, and [0058]'s own text gets its correction
-- [ ] [0091] `TAG_CFLAGS` reaches every port's `mpy-cross`, not just `unix`'s
 - [ ] [0083] replace `windows.Dockerfile`'s apt `gcc-mingw-w64` split with one fully prebuilt llvm-mingw toolchain
 - [ ] [0082] nine MicroPython tags fail `mpy-cross` under gcc 15, on every image whose native compiler is unpinned — bisected exactly
 - [ ] [0047] the run output works, but it is not cibuildwheel's
@@ -74,6 +73,7 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### Implemented
 
+- [x] [0091] `TAG_CFLAGS` reaches every port's `mpy-cross`, not just `unix`'s
 - [x] [0084] unix's pypa image pin moves from the architecture to the row, and the end of shared/floating compilers
 - [x] [0068] docker Dependabot grouping, and what the first grouped bump exposed
 - [x] [0081] `output-dir` gets its own `.gitignore` the first time cibuildmp writes into it

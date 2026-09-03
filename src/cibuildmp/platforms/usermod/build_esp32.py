@@ -24,6 +24,7 @@ class Esp32BuildOptions:
     board: str = "ESP32_GENERIC"
     idf_target: str = "esp32"
     idf_version: str = "v5.5.1"
+    tag: str = ""
     extra_make_args: tuple[str, ...] = ()
     extra_cmake_args: tuple[str, ...] = ()
 
@@ -39,6 +40,12 @@ def esp32_make_command(
     # "undefined reference to mp_qstr_frozen_const_pool", a separate copy
     # of the same symptom build_mpy_cross() being called explicitly,
     # first, already prevents for the main mpy-cross build.
+    # `CFLAGS_EXTRA` here, not just on the `container_mpy_cross()` call
+    # below: `ports/esp32`'s own build recompiles `py/` too, into the
+    # firmware itself, so a diagnostic a MicroPython release needs
+    # suppressed for `mpy-cross` hits this build the same way ([0091],
+    # mirroring `build_unix.py`'s own two-call-site pattern).
+    cflags = build_common.tag_cflags(opts.tag)
     return [
         "make",
         "-C",
@@ -46,6 +53,7 @@ def esp32_make_command(
         f"BOARD={opts.board}",
         f"USER_C_MODULES={opts.user_c_modules}",
         f"FROZEN_MANIFEST={opts.frozen_manifest}",
+        *([f"CFLAGS_EXTRA={' '.join(cflags)}"] if cflags else []),
         # py/mkenv.mk's own `MICROPY_MPYCROSS` override -- the container's
         # own copy (container_mpy_cross()), never the host's. See that
         # function's own docstring for why a host-built mpy-cross cannot
@@ -162,6 +170,7 @@ def build_esp32(
         image=docker_image,
         oci_platform=oci_platform,
         timeout=timeout,
+        extra_cflags=build_common.tag_cflags(opts.tag),
     )
 
     script = _esp32_container_script(opts, mpy_dir, idf_dir, tools_dir, mpy_cross)

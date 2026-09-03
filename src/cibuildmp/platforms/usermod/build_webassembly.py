@@ -22,18 +22,27 @@ class WebassemblyBuildOptions:
     frozen_manifest: str
     build_dir: Path
     variant: str = "pyscript"
+    tag: str = ""
     extra_make_args: tuple[str, ...] = ()
 
 
 def webassembly_make_command(
     opts: WebassemblyBuildOptions, mpy_dir: Path, *, mpy_cross: Path | None = None
 ) -> list[str]:
+    # `CFLAGS_EXTRA` here too, not just on `container_mpy_cross()` below:
+    # `ports/webassembly` recompiles `py/` into the module itself, the
+    # same class of diagnostic [0091] confirmed live on `arm_embedded`'s
+    # native compiler (run 33697330722) for `-Wno-error=
+    # unterminated-string-initialization`-shaped tags, and this image's
+    # own native compiler is the same `ubuntu:26.04` `build-essential`.
+    cflags = build_common.tag_cflags(opts.tag)
     return [
         "make",
         "-C",
         (mpy_dir / "ports" / "webassembly").as_posix(),
         f"VARIANT={opts.variant}",
         f"BUILD={opts.build_dir.as_posix()}",
+        *([f"CFLAGS_EXTRA={' '.join(cflags)}"] if cflags else []),
         # py/mkenv.mk's own `MICROPY_MPYCROSS` override. Passed for the
         # same reason `build_unix()` passes it, arrived at from the other
         # direction (record 0044): this image is amd64, so on an **arm64
@@ -99,6 +108,7 @@ def build_webassembly(
             image=docker_image,
             oci_platform=dockerrun.platform_for("webassembly"),
             timeout=dockerrun.timeout_for("webassembly"),
+            extra_cflags=build_common.tag_cflags(opts.tag),
         ),
     )
     dockerrun.run(

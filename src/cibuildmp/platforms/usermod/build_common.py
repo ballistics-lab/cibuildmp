@@ -22,6 +22,14 @@ import os
 import shlex
 from pathlib import Path
 
+# `natmod` needed this same per-tag `CFLAGS_EXTRA` fact for its own
+# `mpy-cross` build ([0091]) and cannot import `usermod` (the established
+# one-way dependency), so it lives in the shared module both families
+# already import `fetch_micropython()`/`read_mpy_abi()` from. Re-exported
+# here, unchanged, so `build_common.tag_cflags(...)`/`build_common.TAG_CFLAGS`
+# keep resolving for every existing caller in this package.
+from ...sources import TAG_CFLAGS, tag_cflags  # noqa: F401
+
 
 class UsermodBuildError(Exception):
     pass
@@ -128,67 +136,6 @@ def cmake_extra_args_env(
     if not extra_cmake_args:
         return {}
     return {var: " ".join(extra_cmake_args)}
-
-
-# `CFLAGS_EXTRA` a MicroPython *release* needs, whatever port is being
-# built. The fourth axis beside `build_unix.py`'s own libc, architecture
-# and platform-tag tables, and the only one of the four that is a fact
-# about the tag rather than about the cell.
-#
-# It lives here rather than in a `build-platforms.toml` row because the
-# code it protects is `py/`, which every port compiles twice -- once into
-# `mpy-cross` (below) and once into the port itself. A row in
-# `[usermod.unix]` cannot say that: `rp2` at the same tag hits the same
-# diagnostic in the same file. Record 0084 tried the row first and moved
-# it here; a per-row override can come back the day a tag needs different
-# treatment in different ports, which nothing does today.
-#
-# `v1.20.0` -- `-Wno-error=dangling-pointer`. gcc 14 reports
-# `py/stackctrl.c:32` storing `&stack_dummy` into
-# `mp_state_ctx.thread.stack_top`, which is exactly what
-# `mp_stack_ctrl_init()` is for: the address is used as a *limit*, never
-# dereferenced after return. Upstream later rewrote it; this project is
-# not going to hold a 2023 release to a 2025 diagnostic. Live-caught in
-# CI (run 33636118022) rather than predicted: both `unix` x86_64 cells
-# failed inside the `mpy-cross` build, not the port's own.
-#
-# `-Wno-error=unterminated-string-initialization` -- gcc 15.1 rejects
-# `py/emitinlinethumb.c`'s register mnemonics (`{0, "r0\0"}`, ...), each a
-# 3-4 character string packed into a fixed 3-byte array with no room left
-# for the trailing NUL. Upstream's own fix landed in `v1.26.0`, bisected
-# exactly in [0082]: `v1.25.0` still fails, `v1.26.0` does not -- the same
-# boundary [0085] found for `arm_embedded`'s own xpack pin. Live-caught
-# here too, not just on `natmod_host`/`arm_embedded`: `manylinux_2_31_armv7l`
-# and `manylinux_2_41_mipsel`'s own published images carry gcc>=15.1 while
-# `manylinux_2_28_*` (AlmaLinux 8) does not, so `unix`'s own per-tag sweep
-# hit this on those two cells specifically, on `v1.20.0`/`v1.21.0`/`v1.22.0`
-# (0084's own sweep, run ids 33642989476-33643188693). Applied tag-wide
-# rather than per-cell: a suppressed warning that never fires on a cell
-# that does not hit it is a no-op, and `py/` is compiled by every port
-# alike (this dict's own header).
-_UNTERMINATED_STRING_INIT_TAGS = (
-    "v1.20.0",
-    "v1.21.0",
-    "v1.22.0",
-    "v1.22.1",
-    "v1.22.2",
-    "v1.23.0",
-    "v1.24.0",
-    "v1.24.1",
-    "v1.25.0",
-)
-
-TAG_CFLAGS: dict[str, tuple[str, ...]] = {
-    tag: ("-Wno-error=unterminated-string-initialization",)
-    for tag in _UNTERMINATED_STRING_INIT_TAGS
-}
-TAG_CFLAGS["v1.20.0"] += ("-Wno-error=dangling-pointer",)
-
-
-def tag_cflags(tag: str) -> tuple[str, ...]:
-    """Every `CFLAGS_EXTRA` flag this MicroPython release needs, in any
-    port. Empty for a tag that needs none, and for no tag at all."""
-    return TAG_CFLAGS.get(tag, ())
 
 
 def probe_supported_cflags(

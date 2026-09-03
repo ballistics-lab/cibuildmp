@@ -189,6 +189,7 @@ def _port_build_options(
     if port == "windows":
         return WindowsBuildOptions(
             arch=target.arch,
+            tag=target.tag,
             user_c_modules=resolved_user_c_modules,
             frozen_manifest=frozen_manifest,
             build_dir=_resolved_build_dir(mpy_dir, port, identifier),
@@ -215,6 +216,7 @@ def _port_build_options(
             user_c_modules=resolved_user_c_modules,
             frozen_manifest=frozen_manifest,
             build_dir=_resolved_build_dir(mpy_dir, port, identifier),
+            tag=target.tag,
             extra_make_args=extra_make_args,
         )
     if port == "esp32":
@@ -231,6 +233,7 @@ def _port_build_options(
             user_c_modules=resolved_user_c_modules,
             frozen_manifest=frozen_manifest,
             board=target.arch,
+            tag=target.tag,
             extra_make_args=extra_make_args,
             extra_cmake_args=extra_cmake_args,
             **idf_kwargs,
@@ -243,6 +246,7 @@ def _port_build_options(
             user_c_modules=resolved_user_c_modules,
             frozen_manifest=frozen_manifest,
             board=target.arch or "PICO",
+            tag=target.tag,
             extra_make_args=extra_make_args,
             extra_cmake_args=extra_cmake_args,
         )

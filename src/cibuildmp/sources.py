@@ -25,6 +25,8 @@ import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
+from . import resources
+
 # The release *asset*, not GitHub's auto-generated archive: only the former
 # vendors every port's lib/ submodules, which is what makes a submodule init
 # unnecessary. Same URL the fetch-micropython action has always used.
@@ -315,6 +317,33 @@ def read_mpy_abi(mpy_dir: Path) -> str:
     if len(found) != len(_ABI_DEFINES):
         raise SourceError(f"could not find MPY_VERSION/MPY_SUB_VERSION in {header}")
     return f"{found['MPY_VERSION']}.{found['MPY_SUB_VERSION']}"
+
+
+# -- per-tag CFLAGS_EXTRA --------------------------------------------------
+
+# `resources/tag_cflags.toml` -- record 0010's own rule (pinned data lives
+# in resources/, not in Python) applied to the fact record 0084 first put
+# in a `usermod/build_common.py` dict literal. Two reasons it moved here,
+# to the module both families already import `fetch_micropython()`/
+# `read_mpy_abi()` from, rather than staying `usermod`'s own: [0091] found
+# the identical diagnostic hitting `natmod`'s own `mpy-cross` build too,
+# and `natmod` never imports `usermod` (the established one-way
+# dependency); and once a tag-keyed fact is confirmed to apply "in any
+# port", per [0091]'s own live verification, it stops being resolver logic
+# and becomes exactly the kind of "goes stale on someone else's schedule"
+# data record 0010 already has a rule for -- bumping this file for a newly
+# released tag is a reviewable data diff, not a source change. See that
+# file's own header for the full reasoning and per-entry citations.
+TAG_CFLAGS: dict[str, tuple[str, ...]] = {
+    tag: tuple(flags) for tag, flags in resources.tag_cflags_data()["cflags"].items()
+}
+
+
+def tag_cflags(tag: str) -> tuple[str, ...]:
+    """Every `CFLAGS_EXTRA` flag this MicroPython release needs, in any
+    port or family. Empty for a tag that needs none, and for no tag at
+    all."""
+    return TAG_CFLAGS.get(tag, ())
 
 
 # -- mpy-cross ------------------------------------------------------------

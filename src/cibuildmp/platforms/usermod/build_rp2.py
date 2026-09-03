@@ -25,6 +25,7 @@ class Rp2BuildOptions:
     user_c_modules: str
     frozen_manifest: str
     board: str = "PICO"
+    tag: str = ""
     extra_make_args: tuple[str, ...] = ()
     extra_cmake_args: tuple[str, ...] = ()
 
@@ -37,6 +38,12 @@ def rp2_make_command(
     # risks the identical FROZEN_MANIFEST-via-MAKEFLAGS leak into the
     # port's own internal mpy-cross sub-build. Simplest to just not pass
     # one, matching the esp32 driver this one is modeled on.
+    #
+    # `CFLAGS_EXTRA` here too, not just on `container_mpy_cross()` below:
+    # `ports/rp2` recompiles `py/` into the firmware itself, live-confirmed
+    # to hit the identical gcc-15 diagnostic on `arm_embedded`'s own native
+    # compiler ([0091], run 33697330722).
+    cflags = build_common.tag_cflags(opts.tag)
     return [
         "make",
         "-C",
@@ -44,6 +51,7 @@ def rp2_make_command(
         f"BOARD={opts.board}",
         f"USER_C_MODULES={opts.user_c_modules}",
         f"FROZEN_MANIFEST={opts.frozen_manifest}",
+        *([f"CFLAGS_EXTRA={' '.join(cflags)}"] if cflags else []),
         *([f"MICROPY_MPYCROSS={mpy_cross.as_posix()}"] if mpy_cross else []),
         *opts.extra_make_args,
     ]
@@ -108,6 +116,7 @@ def build_rp2(
         image=docker_image,
         oci_platform=oci_platform,
         timeout=timeout,
+        extra_cflags=build_common.tag_cflags(opts.tag),
     )
 
     command = rp2_make_command(opts, mpy_dir, mpy_cross=mpy_cross)

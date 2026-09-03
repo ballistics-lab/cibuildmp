@@ -89,3 +89,16 @@ def pinned_pypa_images() -> dict[str, Any]:
     a diff against one upstream file.
     """
     return _load("pinned_pypa_images.toml")
+
+
+def tag_cflags_data() -> dict[str, Any]:
+    """`resources/tag_cflags.toml` -- every `CFLAGS_EXTRA` flag a
+    MicroPython release needs, whatever port or family builds it
+    (`sources.tag_cflags()`'s own backing table, **record 0091**).
+
+    Was a `dict[str, tuple[str, ...]]` literal inside `sources.py` until
+    this record -- the same escape from **record 0010**'s own rule
+    `pinned_docker_images()`'s docstring already names for that table's
+    own history.
+    """
+    return _load("tag_cflags.toml")

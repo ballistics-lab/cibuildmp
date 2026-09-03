@@ -186,7 +186,7 @@ def build_all(
                 # toolchain-group image alike), so the first one picks
                 # which already-required image pays for it rather than
                 # pulling a fifth image just for this.
-                build_mpy_cross(mpy_dir, group[0].target.arch)
+                build_mpy_cross(mpy_dir, group[0].target.arch, tag=tag)
 
                 # The checkout is authoritative about the ABI;
                 # targets.MPY_ABI's table (resources/build-platforms.toml,

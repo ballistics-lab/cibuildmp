@@ -180,7 +180,7 @@ def _run_in_image(
         raise BuildError(f"{what}: {exc}") from exc
 
 
-def build_mpy_cross(mpy_dir: Path, arch: str) -> Path:
+def build_mpy_cross(mpy_dir: Path, arch: str, tag: str = "") -> Path:
     """Build mpy-cross **inside `arch`'s own natmod image** and return the
     binary.
 
@@ -203,15 +203,37 @@ def build_mpy_cross(mpy_dir: Path, arch: str) -> Path:
     binary, at the fixed path dynruntime.mk itself expects, and no
     `MPY_CROSS=` override to pass, unlike `MICROPY_MPYCROSS=`.
 
+    `tag` reaches `sources.tag_cflags()` the same way `unix`'s own
+    `container_mpy_cross()` call already does ([0084]/[0091]): `mpy-cross`
+    compiles `py/` regardless of which family calls it, so a diagnostic a
+    MicroPython release needs suppressed there is not specific to
+    `usermod`. Live-confirmed for `natmod` itself (run 33697330722): every
+    pre-`v1.26.0` tag tested failed this build on `arm_embedded`'s own
+    native gcc with no relaxation, on the identical
+    `-Werror=unterminated-string-initialization` diagnostic [0082] first
+    named for `natmod_host`/`windows`. `natmod`'s own per-target make
+    (`make_command()`) needs no equivalent: unlike a usermod port, it never
+    recompiles `py/` -- only the module's own sources against an already-
+    built `mpy-cross`.
+
     Cached by existence, like `sources.build_mpy_cross()`/
     `usermod.build.container_mpy_cross()`: rebuilt only when the image
     itself changes (the image is digest-pinned).
     """
+    from ... import sources
+
     binary = mpy_dir / "mpy-cross" / "build" / "mpy-cross"
     if binary.exists():
         return binary
+    extra_cflags = sources.tag_cflags(tag)
     _run_in_image(
-        ["make", "-C", (mpy_dir / "mpy-cross").as_posix(), f"-j{os.cpu_count() or 1}"],
+        [
+            "make",
+            "-C",
+            (mpy_dir / "mpy-cross").as_posix(),
+            *([f"CFLAGS_EXTRA={' '.join(extra_cflags)}"] if extra_cflags else []),
+            f"-j{os.cpu_count() or 1}",
+        ],
         mounts=[mpy_dir],
         workdir=mpy_dir / "mpy-cross",
         what="mpy-cross",

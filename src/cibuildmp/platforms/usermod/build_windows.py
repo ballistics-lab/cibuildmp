@@ -136,6 +136,7 @@ class WindowsBuildOptions:
     frozen_manifest: str
     build_dir: Path
     variant: str = "standard"
+    tag: str = ""
     extra_make_args: tuple[str, ...] = ()
 
 
@@ -165,8 +166,19 @@ def windows_make_command(
         *([f"MICROPY_MPYCROSS={mpy_cross.as_posix()}"] if mpy_cross else []),
         *settings.extra_make_args,
     ]
-    if settings.extra_cflags:
-        command.append(f"CFLAGS_EXTRA={settings.extra_cflags}")
+    # Combined with `settings.extra_cflags` (a fixed, per-arch mingw flag,
+    # `win_arm64` only) rather than a second `CFLAGS_EXTRA=` -- GNU Make
+    # keeps only the last one named on a command line, so two would
+    # silently drop the first. `ports/windows` recompiles `py/` into the
+    # firmware itself, the same class of diagnostic [0091] confirmed live
+    # on `arm_embedded`'s native compiler (run 33697330722) for the
+    # identical `ubuntu:26.04` `build-essential` toolchain this image's
+    # `x64`/`x86` mingw cross-compile shares its native half with.
+    cflags = (settings.extra_cflags.split() if settings.extra_cflags else []) + list(
+        build_common.tag_cflags(opts.tag)
+    )
+    if cflags:
+        command.append(f"CFLAGS_EXTRA={' '.join(cflags)}")
     command += [
         f"USER_C_MODULES={opts.user_c_modules}",
         f"FROZEN_MANIFEST={opts.frozen_manifest}",
@@ -266,11 +278,11 @@ def build_windows(
     uncalled scaffolding, along with `usermod/emsdk.py` and its own
     table for the identical reason.
 
-    mpy-cross is not built here either, same as every other port:
-    it is a host tool (freezes the manifest at build time, is not part of
-    the target binary), so it needs no cross-compiling at all --
-    sources.build_mpy_cross() already builds a native one, shared with
-    every other port.
+    mpy-cross is built inside this image too (`container_mpy_cross()`,
+    matching `unix`/`webassembly`/`esp32`), not on the host: this image is
+    amd64, so an arm64 host's own host-built mpy-cross could not run
+    inside it, the same reasoning `webassembly_make_command()`'s own
+    comment gives.
 
     `toolchain_root`/`quiet` are accepted only for the same call shape
     every `build_<port>()` shares (`orchestrate.py`'s `build_one()`
@@ -310,6 +322,7 @@ def build_windows(
             image=docker_image,
             oci_platform=dockerrun.platform_for("windows", opts.arch),
             timeout=dockerrun.timeout_for("windows", opts.arch),
+            extra_cflags=build_common.tag_cflags(opts.tag),
         ),
     )
     dockerrun.run(

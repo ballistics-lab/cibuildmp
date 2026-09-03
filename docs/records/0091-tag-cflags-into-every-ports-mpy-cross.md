@@ -1,7 +1,7 @@
 # 0091 — `TAG_CFLAGS` reaches every port's `mpy-cross`, not just `unix`'s
 
-Status: Proposed — scoped, not implemented outside `unix`.
-Related: [0082], [0084], [0085], [0087], [0089]
+Status: Implemented.
+Related: [0010], [0082], [0084], [0085], [0087], [0089]
 
 ## Why this is not covered by [0087]/[0089]
 
@@ -36,11 +36,17 @@ is every *caller* outside `build_unix.py` passing its own row's tag through to
 Dispatched `test-platforms.yml` directly (run `33697330722`, branch `claude/what-next-mu1m60`,
 `package-dir: examples/template`) against `natmod`'s own `armv7emsp` (`arm_embedded`) and
 `rv32imc`/`rv64imc` (`riscv_embedded`) identifiers. **One mechanism worth recording before the
-result**: a `--build` glob like `mpy*-v*-armv7emsp` does not select every matching tag — it
-resolves through `narrow_to_newest_tag()` and keeps only the newest tag *per ABI group*, so the
+result**: a `--build` glob like `mpy*-v*-armv7emsp` does not select every matching tag —
+`selector_names_a_tag()` (`natmod/targets.py`) sees no literal `v\d+\.\d+` shape in it, so
+`narrow_to_newest_tag()` keeps only the newest tag *per `(abi, arch, arch_flags)` group*, and the
 dispatch actually built one representative tag from each of the five ABIs (`5`, `6`, `6.1`,
-`6.2`, `6.3`) rather than all nineteen tags. A real per-tag sweep needs an explicit
-space-separated identifier list, not a wildcard.
+`6.2`, `6.3`) rather than all nineteen tags. **An explicit multi-tag list is not the fix, and is
+not just a glob quirk to route around**: `[natmod]`'s own `artifacts_dir_name =
+"{name}-{ver}-mpy{abi}-{arch}..."` keys the output path on `abi`, not `tag`, so two different
+tags sharing one ABI in the same invocation would write into the same output directory —
+building several tags per ABI at once is a real collision, not merely something the selector
+happens to collapse. A genuine full-history sweep needs one invocation per tag (as
+`test-upstream-natmod.yml`'s own per-tag jobs already do), not a single wider `--build`.
 
 **Result, exactly matching the hypothesis:**
 
@@ -71,18 +77,58 @@ pre-`v1.26.0` ABI tested failed `mpy-cross` on this image family today, live, in
 [0086]-[0090] landing or not. [0082]'s own "not independently checked against ... `rp2`" gap is
 closed: it reaches `rp2` (and every other `arm_embedded`-family port) exactly as predicted.
 
-## What this record scopes
+## What this record scopes, and what landed
 
 1. ~~Verify live, first~~ **Done above.**
-2. **Thread `tag` through every non-`unix` caller of `container_mpy_cross()`** — `natmod`'s own
-   build drivers and every `usermod` port's `build_<port>.py` — the same way `build_unix.py`
-   already does, so `TAG_CFLAGS` reaches `mpy-cross` regardless of which image or port is
-   building it.
-3. **Leave the underlying `TAG_CFLAGS` table itself as `unix`'s own `v1.20.0` entry only**, unless
-   step 1's verification finds a *different* diagnostic on a different port — [0082]'s own
-   nine-tag boundary was measured against `unix`/`natmod_host`/`windows` specifically
-   (`-Werror=unterminated-string-literal`), and a new port hitting it is expected to be the same
-   diagnostic, not assumed to be.
+2. ~~Thread `tag` through every non-`unix` caller of `container_mpy_cross()`~~ **Done.**
+   `Esp32BuildOptions`/`Rp2BuildOptions`/`WebassemblyBuildOptions`/`WindowsBuildOptions` all gained
+   a `tag: str = ""` field (mirroring `UnixBuildOptions.tag`), populated from `target.tag` in
+   `orchestrate.py`'s `_port_build_options()`; each port's own `*_make_command()` now passes
+   `CFLAGS_EXTRA=` from `build_common.tag_cflags(opts.tag)` **and** each `container_mpy_cross()`
+   call passes the same as `extra_cflags=` — both, not just `mpy-cross`, because every one of
+   these ports recompiles `py/` into the firmware/module itself (unlike `natmod`'s own per-target
+   build, which never does — see below). `natmod`'s own `build_mpy_cross(mpy_dir, arch, tag="")`
+   gained the same parameter and passes `CFLAGS_EXTRA=` into its one `make` invocation only,
+   called with `tag=tag` from `natmod/__init__.py`'s own per-ABI-group loop — no change to
+   `make_command()` (the module's own per-target build), since `dynruntime.mk` never recompiles
+   `py/`, only the module's own sources against an already-built `mpy-cross`.
+
+   **One correction made in passing, found reading `dockerrun.py` before writing any of this**:
+   [0084]'s own root-then-drop-to-uid/`HOME`-relocation machinery does not apply anywhere here —
+   `dockerrun.run()` already passes `--user {uid}:{gid}` unconditionally on every invocation, so
+   there is no root step to drop from in the first place. That machinery was specific to
+   [0084]'s own decision to `apt-get install` at every `unix` invocation against a bare
+   `ubuntu:26.04`; nothing here does that.
+
+   **A second, adjacent fix, not scope creep**: `build_windows()`'s own docstring claimed
+   "mpy-cross is not built here... `sources.build_mpy_cross()` already builds a native one" —
+   directly contradicted by the `container_mpy_cross()` call four lines below it (stale since
+   [0044] moved `windows` onto that path). Corrected in the same edit, since leaving a
+   docstring wrong right next to the code it was inaccurate about is exactly what CLAUDE.md's own
+   top rule warns against noticing and not fixing.
+3. ~~Leave the underlying `TAG_CFLAGS` table itself as `unix`'s own entries only~~ **Superseded,
+   not just left alone.** No new diagnostic was found (`arm_embedded` hits the identical
+   `-Werror=unterminated-string-initialization`), so the *entries* are unchanged — but the table
+   itself moved out of `usermod/build_common.py` entirely, for two reasons landing together:
+   - **The one-way dependency.** `natmod`'s own `build_mpy_cross()` needs `tag_cflags()` too, and
+     `natmod` never imports `usermod`. `sources.py` — the module both families already import
+     `fetch_micropython()`/`read_mpy_abi()` from — is the shared home now;
+     `usermod/build_common.py` re-exports `TAG_CFLAGS`/`tag_cflags` unchanged so no existing
+     caller's import line needed to move.
+   - **[0010], raised directly during this work**: once a tag-keyed fact is confirmed (this
+     record's own live verification) to mean "in any port", it stops being resolver logic
+     specific to one platform and becomes exactly the "goes stale on someone else's schedule"
+     data [0010] already has a rule for. `TAG_CFLAGS` is now `resources/tag_cflags.toml`
+     (`resources.tag_cflags_data()`), the same escape from a Python dict literal
+     `pinned_docker_images()`'s own docstring already documents for that table's history under
+     [0043]. **Deliberately not folded into `build-platforms.toml`'s own `[tags]` table**, even
+     though that table is the obvious-looking home (already tag-keyed, already shared across
+     every section): `bin/refresh_natmod_archs.py`/`bin/refresh_usermod_boards.py` both
+     regenerate `[tags]` from scratch on every run (`entry = {"sha": sha, "date": ...}`, no
+     `carry_forward()` call for it, unlike the row-level facts those same scripts do protect) —
+     adding `cflags` there without teaching both scripts to preserve it would make the next
+     tag-refresh silently drop every entry. A real follow-up if the duplication (two tag-keyed
+     tables in two files) is worth closing later; not bundled into this record.
 
 ## Ordering relative to the other `arm_embedded` records
 

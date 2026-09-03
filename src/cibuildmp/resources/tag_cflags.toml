@@ -1,0 +1,29 @@
+# Per-MicroPython-release `CFLAGS_EXTRA` a build needs, whatever port or
+# family is building it -- record 0010's own rule (pinned data lives in
+# resources/, not in Python) applied here after [0091] confirmed live that
+# this table's own claim, "in any port", is a fact about the tag rather
+# than about any one platform's code. Bumping this file for a newly
+# released tag is a reviewable data diff, not a patch to resolver logic.
+#
+# Not a `build-platforms.toml` row: the code these flags protect is `py/`,
+# which every port compiles at least once (into `mpy-cross`) and every
+# *non-natmod* one a second time (into the port/module itself) -- a row in
+# one platform's own table cannot say "this tag, in every port everywhere"
+# the way this flat, tag-keyed table does.
+#
+# Full reasoning per entry: docs/records/0082 (the gcc-15
+# `unterminated-string-initialization` diagnostic and its exact tag
+# boundary), docs/records/0084 (the gcc-14 `dangling-pointer` case, and
+# why this table exists rather than a per-row `cflags_extra` fact),
+# docs/records/0091 (confirmed live against `natmod`'s own `arm_embedded`/
+# `riscv_embedded` builds, not just `unix`/`natmod_host`/`windows`).
+[cflags]
+"v1.20.0" = ["-Wno-error=unterminated-string-initialization", "-Wno-error=dangling-pointer"]
+"v1.21.0" = ["-Wno-error=unterminated-string-initialization"]
+"v1.22.0" = ["-Wno-error=unterminated-string-initialization"]
+"v1.22.1" = ["-Wno-error=unterminated-string-initialization"]
+"v1.22.2" = ["-Wno-error=unterminated-string-initialization"]
+"v1.23.0" = ["-Wno-error=unterminated-string-initialization"]
+"v1.24.0" = ["-Wno-error=unterminated-string-initialization"]
+"v1.24.1" = ["-Wno-error=unterminated-string-initialization"]
+"v1.25.0" = ["-Wno-error=unterminated-string-initialization"]
