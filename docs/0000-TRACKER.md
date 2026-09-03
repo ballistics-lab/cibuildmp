@@ -55,6 +55,7 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### In progress / Proposed
 
+- [ ] [0095] `cache_root()` is not one cache: fetched source persists, build state dies with the container
 - [ ] [0085] `arm_embedded` thins out: the toolchain version stops being the image's name and becomes a row fact
 - [ ] [0094] Arm's own GNU toolchain registry is the third choice [0085] said did not exist
 - [ ] [0087] `arm_embedded`/`riscv_embedded` lose their baked cross toolchain; `toolchain_version` becomes a real, read field
@@ -270,3 +271,4 @@ record is added.
 [0092]: records/0092-usermod-toml-and-tag-cflags-against-build-platforms.md
 [0093]: records/0093-pre-v1-20-0-tags-had-never-built.md
 [0094]: records/0094-arm-gnu-toolchain-is-a-real-third-choice-for-arm-embedded.md
+[0095]: records/0095-cache-root-splits-source-from-build-state.md
