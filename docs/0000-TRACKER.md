@@ -55,6 +55,7 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### In progress / Proposed
 
+- [ ] [0095] `cache_root()` is not one cache: fetched source persists, build state dies with the container
 - [ ] [0085] `arm_embedded` thins out: the toolchain version stops being the image's name and becomes a row fact
 - [ ] [0083] replace `windows.Dockerfile`'s apt `gcc-mingw-w64` split with one fully prebuilt llvm-mingw toolchain
 - [ ] [0082] nine MicroPython tags fail `mpy-cross` under gcc 15, on every image whose native compiler is unpinned — bisected exactly
@@ -252,3 +253,4 @@ record is added.
 [0083]: records/0083-windows-fully-prebuilt-mingw-toolchain.md
 [0084]: records/0084-per-identifier-toolchain-tarballs-and-the-end-of-shared-images.md
 [0085]: records/0085-arm-embedded-thins-out-and-the-toolchain-version-becomes-a-row-fact.md
+[0095]: records/0095-cache-root-splits-source-from-build-state.md
