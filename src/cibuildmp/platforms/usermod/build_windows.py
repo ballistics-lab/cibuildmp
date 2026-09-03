@@ -144,9 +144,40 @@ def _windows_dir(mpy_dir: Path) -> Path:
     return mpy_dir / "ports" / "windows"
 
 
+def windows_raw_cflags(opts: WindowsBuildOptions) -> tuple[str, ...]:
+    """The un-probed `CFLAGS_EXTRA` candidate list: `settings.extra_cflags`
+    (a fixed, per-arch mingw flag, `win_arm64` only) plus whatever
+    `opts.tag` needs in every port ([0091]). Raw because `win_arm64`'s own
+    cross compiler is Clang (llvm-mingw), not GCC, unlike every other
+    candidate in `tag_cflags()`'s own table -- confirmed live (a real
+    `v1.20.0-win_arm64` build): `-Wno-error=dangling-pointer` is a GCC-only
+    diagnostic name, and Clang rejects an unrecognized one as a hard
+    `error: unknown warning option`, not a no-op, the same class of failure
+    `probe_supported_cflags()`'s own docstring already documents for
+    `unix`'s pypa gcc ladder. `build_windows()` probes this list against
+    the real cross compiler before it ever reaches `windows_make_command()`
+    -- see its own call site.
+    """
+    settings = WINDOWS_ARCH_SETTINGS[opts.arch]
+    return tuple(settings.extra_cflags.split() if settings.extra_cflags else ()) + (
+        build_common.tag_cflags(opts.tag)
+    )
+
+
 def windows_make_command(
-    opts: WindowsBuildOptions, mpy_dir: Path, *, mpy_cross: Path | None = None
+    opts: WindowsBuildOptions,
+    mpy_dir: Path,
+    *,
+    mpy_cross: Path | None = None,
+    extra_cflags: tuple[str, ...] | None = None,
 ) -> list[str]:
+    """`extra_cflags`, when given, overrides `windows_raw_cflags()`'s own
+    raw candidate list -- `build_windows()` passes the already
+    `probe_supported_cflags()`-filtered set (the same reason
+    `unix_make_command()`'s own `extra_cflags` parameter exists), so this
+    stays the raw candidates only for a caller (a test, a hand invocation)
+    that has not done that filtering itself.
+    """
     settings = WINDOWS_ARCH_SETTINGS[opts.arch]
     command = [
         "make",
@@ -166,17 +197,10 @@ def windows_make_command(
         *([f"MICROPY_MPYCROSS={mpy_cross.as_posix()}"] if mpy_cross else []),
         *settings.extra_make_args,
     ]
-    # Combined with `settings.extra_cflags` (a fixed, per-arch mingw flag,
-    # `win_arm64` only) rather than a second `CFLAGS_EXTRA=` -- GNU Make
-    # keeps only the last one named on a command line, so two would
-    # silently drop the first. `ports/windows` recompiles `py/` into the
-    # firmware itself, the same class of diagnostic [0091] confirmed live
-    # on `arm_embedded`'s native compiler (run 33697330722) for the
-    # identical `ubuntu:26.04` `build-essential` toolchain this image's
-    # `x64`/`x86` mingw cross-compile shares its native half with.
-    cflags = (settings.extra_cflags.split() if settings.extra_cflags else []) + list(
-        build_common.tag_cflags(opts.tag)
-    )
+    # Combined into one `CFLAGS_EXTRA=`, never two -- GNU Make keeps only
+    # the last one named on a command line, so a second would silently
+    # drop the first.
+    cflags = extra_cflags if extra_cflags is not None else windows_raw_cflags(opts)
     if cflags:
         command.append(f"CFLAGS_EXTRA={' '.join(cflags)}")
     command += [
@@ -312,6 +336,27 @@ def build_windows(
             f"wait for publish-docker-images.yml to publish one and "
             f"register it in resources/pinned_docker_images.toml"
         )
+    oci_platform = dockerrun.platform_for("windows", opts.arch)
+    timeout = dockerrun.timeout_for("windows", opts.arch)
+
+    # Probed, not passed raw -- live-caught (a real `v1.20.0-win_arm64`
+    # build): `win_arm64`'s own cross compiler is Clang (llvm-mingw), and
+    # `tag_cflags()`'s own `-Wno-error=dangling-pointer` is a GCC-only
+    # diagnostic name. Clang's response to a name it does not know is a
+    # hard `error: unknown warning option`, not a no-op -- the exact
+    # failure mode `probe_supported_cflags()`'s own docstring already
+    # documents for `unix`'s pypa gcc ladder, now real for the one port
+    # here that mixes compiler families in a single image. `win32`/
+    # `win_amd64` are real apt GCC and would probe every candidate
+    # supported regardless; probing them too costs one cheap container
+    # invocation rather than a special case for "which arch is Clang".
+    cross_cflags = build_common.probe_supported_cflags(
+        windows_raw_cflags(opts),
+        image=docker_image,
+        compiler=f"{WINDOWS_ARCH_SETTINGS[opts.arch].cross_compile}gcc",
+        oci_platform=oci_platform,
+        timeout=timeout,
+    )
 
     command = windows_make_command(
         opts,
@@ -320,10 +365,16 @@ def build_windows(
             mpy_dir,
             slug="windows",
             image=docker_image,
-            oci_platform=dockerrun.platform_for("windows", opts.arch),
-            timeout=dockerrun.timeout_for("windows", opts.arch),
+            oci_platform=oci_platform,
+            timeout=timeout,
+            # Unprobed, unlike the cross build above: mpy-cross always
+            # builds with this image's own *native* compiler (a host
+            # tool, never cross-compiled -- `container_mpy_cross()`'s own
+            # docstring), which is the same real apt GCC every other
+            # port's native build already uses unprobed.
             extra_cflags=build_common.tag_cflags(opts.tag),
         ),
+        extra_cflags=cross_cflags,
     )
     dockerrun.run(
         command,
@@ -332,11 +383,11 @@ def build_windows(
         ),
         workdir=_windows_dir(mpy_dir),
         image=docker_image,
-        timeout=dockerrun.timeout_for("windows", opts.arch),
+        timeout=timeout,
         # Same as webassembly's above (**0043**): an amd64 Linux
         # cross-compile host targeting Windows. All three arches share
         # one image (D42/D28 step 3), so all three share its platform.
-        oci_platform=dockerrun.platform_for("windows", opts.arch),
+        oci_platform=oci_platform,
     )
 
     binary = opts.build_dir / "micropython.exe"

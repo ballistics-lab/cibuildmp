@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,20 @@ from cibuildmp.platforms.usermod.build_windows import (
     verify_windows_output,
     windows_make_command,
 )
+
+
+def _fake_docker_run(cmd, **kwargs):
+    """A `dockerrun.subprocess.run` stand-in that behaves like the real
+    thing when `capture_output=True` -- `build_windows()` now probes its
+    own `CFLAGS_EXTRA` candidates against the real cross compiler
+    ([0091], the same reason `test_usermod_build_unix.py` needed this),
+    and a real `subprocess.run` never returns `None`. Every candidate
+    "passes" (empty stdout, so `probe_supported_cflags()` would normally
+    drop it -- tests that care which flags survive stub this out
+    themselves)."""
+    if kwargs.get("capture_output"):
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+    return None
 
 
 def _pe(machine: int, *, pe_offset: int = 0x80) -> bytes:
@@ -162,7 +177,7 @@ def test_windows_runs_make_inside_the_container(monkeypatch, tmp_path, arch):
     calls = []
     monkeypatch.setattr(
         "cibuildmp.dockerrun.subprocess.run",
-        lambda cmd, **k: calls.append(cmd),
+        lambda cmd, **k: calls.append(cmd) or _fake_docker_run(cmd, **k),
     )
 
     build_dir = tmp_path / f"build-{arch}"
@@ -179,8 +194,14 @@ def test_windows_runs_make_inside_the_container(monkeypatch, tmp_path, arch):
     )
 
     assert result == build_dir / "micropython.exe"
-    assert len(calls) == 1
-    docker_command = calls[0]
+    # Two real container invocations now, not one: `build_windows()` also
+    # probes its own `CFLAGS_EXTRA` candidates against the real cross
+    # compiler before the actual build ([0091], the same reason
+    # `test_usermod_build_unix.py` sees two calls per build too). The
+    # make invocation is the one that actually runs `make`.
+    make_calls = [c for c in calls if "make" in c]
+    assert len(make_calls) == 1
+    docker_command = make_calls[0]
     assert docker_command[0] == "docker"
     assert _FAKE_WINDOWS_IMAGE in docker_command
     # The make command is passed through unchanged, at the same absolute
@@ -214,7 +235,7 @@ def test_windows_mounts_mpy_dir_and_user_c_modules(monkeypatch, tmp_path):
 
 def test_windows_missing_exe_after_success_is_an_error(monkeypatch, tmp_path):
     _mock_windows_image(monkeypatch)
-    monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", lambda *a, **k: None)
+    monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", _fake_docker_run)
     build_dir = tmp_path / "build-arm64"
     build_dir.mkdir()
 

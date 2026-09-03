@@ -1,7 +1,8 @@
 # 0091 — `TAG_CFLAGS` reaches every port's `mpy-cross`, not just `unix`'s
 
-Status: Implemented.
-Related: [0010], [0082], [0084], [0085], [0087], [0089]
+Status: Implemented. **Local live verification found one real bug in the initial landing**,
+fixed in the same pass — see its own addendum below.
+Related: [0010], [0082], [0084], [0085], [0087], [0089], [0092]
 
 ## Why this is not covered by [0087]/[0089]
 
@@ -137,3 +138,79 @@ this fixes the *native* compiler's use in `mpy-cross`, they fix the *cross* comp
 this first would make more of [0087]/[0089]'s own boundary-sample verification meaningful (a
 `mpy-cross` failure caused by this gets misread as a cross-toolchain problem otherwise); doing it
 after is also fine functionally, just noisier to debug in the meantime.
+
+## Addendum, 2026-09-03 — a real bug the CI verification did not reach, found by building locally
+
+CI (the `Verified live` section above) exercised `natmod`'s own arm/riscv arches; it never built a
+`usermod` port through the actual fix, and the docker-local skill made a real local Docker daemon
+available in this session, so every touched path got built for real rather than trusted from the
+mocked test suite alone.
+
+**`natmod`, `mpy6.2-v1.22.2-armv7emsp`** (the exact identifier CI showed failing before this
+record's fix): `mpy-cross` now links clean, module builds, `.mpy` produced. **`usermod`,
+`v1.20.0-rp2-PICO`** (the one tag with *two* stacked `TAG_CFLAGS` entries at once): a real,
+complete `firmware-v1.20.0-rp2-PICO.uf2` (632832 bytes) — `rp2`'s own `CFLAGS_EXTRA` threading
+into `rp2_make_command()`, not just `container_mpy_cross()`, confirmed working end to end, pico-sdk/
+tinyusb/mbedtls included. **`natmod`, `riscv_embedded`**: `mpy6.3-v1.25.0-rv32imc` built clean
+(`mpy6.3-v1.24.0-rv32imc` hit an unrelated, real upstream fact instead — `dynruntime.mk` itself
+does not support the `rv32imc` natmod arch until `v1.25.0`, confirmed by that row's own missing
+`cross` field in `build-platforms.toml` for `v1.24.0`/`v1.24.1` — nothing to do with this record).
+
+**`windows`, `v1.20.0-win_arm64`: real failure, not a false alarm.**
+
+```
+error: unknown warning option '-Werror=dangling-pointer' [-Werror,-Wunknown-warning-option]
+```
+
+`win_arm64`'s own cross compiler is Clang (`llvm-mingw`), the one project-owned image mixing
+compiler families: `win32`/`win_amd64` cross-compile with real, apt-installed GCC, `win_arm64`
+with Clang, in the same `docker/windows.Dockerfile`. `tag_cflags()`'s own
+`-Wno-error=dangling-pointer` (`v1.20.0`) is a GCC-only diagnostic name — Clang's response to a
+name it does not recognize is a hard `error: unknown warning option`, not a no-op, exactly the
+failure class `probe_supported_cflags()`'s own docstring already documents for `unix`'s pypa gcc
+ladder. Every other port this record touches shares one compiler family per image (`arm_embedded`/
+`riscv_embedded`/`natmod_host`/`esp_idf_base`: real GCC throughout; `webassembly`'s own `emcc` —
+also Clang-based — was checked live too and accepts both flags fine, so this is not "every Clang
+fails," specifically llvm-mingw's own bundled version does not know this GCC-specific name)
+— `windows` alone needed the fix.
+
+**Fixed the same way `unix` already solves it**: `windows_make_command()` gained a
+`windows_raw_cflags()` helper (the unprobed candidate list: `settings.extra_cflags` + `tag_cflags()`)
+and an `extra_cflags` override parameter, mirroring `unix_make_command()`'s own shape exactly.
+`build_windows()` now probes that candidate list against the real cross compiler
+(`probe_supported_cflags(..., compiler=f"{cross_compile}gcc")`) before it ever reaches the make
+command line — `container_mpy_cross()`'s own `extra_cflags=` stays unprobed, since mpy-cross always
+builds with the image's *native* compiler (real GCC here, matching every other port's unprobed
+native build). Re-verified after the fix: `v1.20.0-win_arm64` was not re-run to completion locally
+(the probe alone was enough to confirm the flag list it produces no longer contains
+`-Wno-error=dangling-pointer`, and `test_usermod_build_windows.py`'s own updated tests cover the
+probing call shape) — a live full build is exactly what [0091]'s own CI coverage should widen to
+next, since neither this record's CI run nor `test-upstream-usermodule.yml` builds `win_arm64`
+today.
+
+**What this changes about trusting the rest of this record's own "no probing needed" claims,
+stated plainly rather than left implicit**: every other claim above was verified by a real build
+succeeding, not by reasoning about compiler families in the abstract — `webassembly`'s own Clang
+fork was checked live specifically because `windows` had just falsified the assumption once. Two
+project-owned images were not exercised at all in this pass: `esp32` (ESP-IDF's own crosstool-NG
+GCC, blocked locally by this sandbox's own proxy CA on the tool downloader, unrelated to this
+record — see [0092]'s own addendum) and `mimxrt`'s own separate concern ([0088], unrelated to this
+fix). Both are real GCC toolchains by the same reasoning that already held for `arm_embedded`/
+`riscv_embedded`, but "by the same reasoning" is exactly the kind of claim this addendum exists to
+warn against trusting without a live build behind it.
+
+**`unix`, `v1.22.2-manylinux_2_28_x86_64`, `examples/usercmodule` (C++ included) — the case
+`rp2`/`esp32`'s own sandbox-blocked runs couldn't reach.** Requested directly once `windows`'
+Clang failure raised the question of whether a real C++ compile on an old tag could surface
+something `examples/template`'s trivial C never would. `unix` has no build-time network
+dependency of its own (no `picotool`/ESP-IDF fetch), so this ran clean where `rp2`/`esp32` hit
+this sandbox's own proxy limits. All three of upstream's own modules confirmed compiled and
+linked, not just present in the log: `Including User C Module from .../cexample`,
+`.../cppexample`, `.../subpackage`, `CC .../cexample/examplemodule.c`,
+`CXX .../cppexample/example.cpp` (real C++, not just a `.c` file with a `.cpp`-looking name), `CC
+.../subpackage/modexamplepackage.c` — followed by a clean `LINK`, a real
+`micropython-v1.22.2-manylinux_2_28_x86_64` binary, 672376 bytes. `unix` already had
+`probe_supported_cflags()` before this record (record 0084) precisely because pypa's own images
+span a real gcc version ladder, so this was the one port already defended against exactly the
+class of failure `windows` turned out to have; this run confirms that defense still holds with
+[0091]'s own tag threading in place, C++ included, not just that it holds in the abstract.
