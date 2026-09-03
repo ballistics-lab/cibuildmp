@@ -57,7 +57,6 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 - [ ] [0085] `arm_embedded` thins out: the toolchain version stops being the image's name and becomes a row fact
 - [ ] [0094] Arm's own GNU toolchain registry is the third choice [0085] said did not exist
-- [ ] [0086] a generic in-container tarball toolchain fetch, generalized out of `arm_embedded.Dockerfile`'s own build-time recipe
 - [ ] [0087] `arm_embedded`/`riscv_embedded` lose their baked cross toolchain; `toolchain_version` becomes a real, read field
 - [ ] [0088] `mimxrt`'s own `>= 13` ceiling gets its own `toolchain_version` row, once [0087] exists
 - [ ] [0089] `natmod`'s own `arm_embedded`/`riscv_embedded` rows get `toolchain_version` too
@@ -73,6 +72,7 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### Implemented
 
+- [x] [0086] a generic in-container tarball toolchain fetch, generalized out of `arm_embedded.Dockerfile`'s own build-time recipe
 - [x] [0093] the nine ABI 5/6 tags had never built, and none of the three reasons was the gcc 15 diagnostic
 - [x] [0082] nine MicroPython tags fail `mpy-cross` under gcc 15, on every image whose native compiler is unpinned — bisected exactly
 - [x] [0092] two "should this live in `build-platforms.toml` instead" questions, answered differently

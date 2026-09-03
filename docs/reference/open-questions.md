@@ -161,6 +161,21 @@ the same way [docs/0000-TRACKER.md](../0000-TRACKER.md) folds resolved
   no symbol versioning, so a musl build's guarantee comes from its pinned
   base rather than from inspection.
 
+- **Where `xtensa-lx106-elf-`'s own tarball should come from.**
+  `xtensa_lx106.Dockerfile` pins
+  `https://micropython.org/resources/xtensa-lx106-elf-standalone.tar.gz`
+  today — a fixed name with no version segment anywhere in the URL, so
+  `resources/pinned_toolchains.toml` ([0086]) has nowhere real to put a
+  version key for it (see that file's own comment). Espressif's
+  `crosstool-NG` releases (the same registry `xtensa-esp32-elf-` already
+  resolves against) publish a versioned
+  `xtensa-esp-elf-<ver>-x86_64-linux-gnu-esp8266-multilib.tar.gz` asset
+  that mentions esp8266 by name and may be a real, versioned
+  replacement — **unverified**: not yet downloaded, not checked for the
+  binary prefix `ports/esp8266`'s own build expects, not built against a
+  real `ports/esp8266` target. Until someone does that work, the current
+  unversioned micropython.org tarball stays the pin.
+
 [0018]: ../records/0018-windows-provisioning-fourth-story.md
 [0019]: ../records/0019-esp-idf-provisioning-heaviest.md
 [0028]: ../records/0028-container-per-port-migration-plan.md
@@ -178,5 +193,6 @@ the same way [docs/0000-TRACKER.md](../0000-TRACKER.md) folds resolved
 [0058]: ../records/0058-image-groups-are-toolchains-not-ports.md
 [0082]: ../records/0082-natmod-old-tags-fail-mpy-cross-under-gcc-15.md
 [0084]: ../records/0084-per-identifier-toolchain-tarballs-and-the-end-of-shared-images.md
+[0086]: ../records/0086-generic-in-container-toolchain-tarball-fetch.md
 [0091]: ../records/0091-tag-cflags-into-every-ports-mpy-cross.md
 [0093]: ../records/0093-pre-v1-20-0-tags-had-never-built.md

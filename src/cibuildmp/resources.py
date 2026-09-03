@@ -88,6 +88,22 @@ def pinned_pypa_images() -> dict[str, Any]:
     return _load("pinned_pypa_images.toml")
 
 
+def pinned_toolchains_data() -> dict[str, Any]:
+    """`resources/pinned_toolchains.toml` -- the `(url, sha256)` pair
+    behind each `(cross, toolchain_version)` pair a row's own `cross`/
+    `toolchain_version`/`gcc` fields can name (**record 0086**'s own
+    fetch mechanism; **record 0085** put the version string on the row).
+
+    Keyed by `cross` (a row's own real `CROSS_COMPILE` prefix, e.g.
+    `"arm-none-eabi-"` -- not `image`, a Docker-packaging fact rather
+    than a compiler one) then the literal version string, not by `(tag,
+    port)` -- see this file's own header for why: many rows across many
+    ports share one version, and a table keyed per row would repeat the
+    same pair dozens of times over.
+    """
+    return _load("pinned_toolchains.toml")
+
+
 def tag_cflags_data() -> dict[str, Any]:
     """`resources/tag_cflags.toml` -- every `CFLAGS_EXTRA` flag a
     MicroPython release needs, whatever port or family builds it
