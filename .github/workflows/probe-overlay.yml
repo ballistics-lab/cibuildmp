@@ -1,0 +1,134 @@
+name: Probe overlayfs
+
+# The single blocking unknown left by record 0095's own addendum 3.
+#
+# That record's new design mounts the cached MicroPython checkout `:ro` and
+# gives the container a writable overlay on top, so every build writes into
+# the container's own upper layer and the host keeps a pristine, shareable
+# checkout with no duplication. Verified working on a developer workstation
+# (a cold `mpy-cross`, a full `unix` build including libffi's in-tree
+# `autogen.sh`, and `rp2`'s CMake tree -- all three left the host checkout
+# byte-identical). What that verification cannot answer is whether a
+# GitHub-hosted runner permits the `mount -t overlay` at all: cibuildmp
+# launches *sibling* containers against the runner's own Docker daemon
+# (record 0028), and nothing about that daemon's seccomp/apparmor defaults
+# was checked there.
+#
+# If the answer is no, addendum 1's host scratch directory
+# (`sources.scratch_root()`) stays as the fallback and both paths have to
+# coexist -- which is exactly why that code has not been reverted. So this
+# is not a nice-to-have probe; it decides whether one mechanism or two get
+# maintained.
+#
+# Deliberately non-fatal per privilege level. "SYS_ADMIN alone is refused
+# but SYS_ADMIN plus unconfined apparmor works" is a *result*, and a job
+# that red-crosses on the first refusal reports one bit where the useful
+# answer is which rung of the ladder is the lowest that works. The job only
+# fails if the summary could not be produced at all.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/probe-overlay.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: overlay on ${{ matrix.runner }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both architectures this project builds on. `ubuntu-24.04-arm` is
+        # not a formality here: it is a different runner image with its own
+        # daemon configuration, and the two reporting the same `runner.os`
+        # has already hidden a real difference once (see action.yml's own
+        # apt-cache key comment on `runner.arch`).
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Docker and kernel facts
+        run: |
+          uname -a
+          docker version --format '{{.Server.Version}}'
+          docker info --format 'storage={{.Driver}} rootless={{.ClientInfo.Context}}'
+          grep -c overlay /proc/filesystems || true
+
+      # A real MicroPython checkout, fetched the way cibuildmp fetches one,
+      # so the probe runs against the actual thing rather than a synthetic
+      # tree. v1.24.1 specifically: it is the tag the workstation runs used,
+      # so a difference here is a difference in the runner, not in the input.
+      - name: Fetch a real checkout
+        run: |
+          mkdir -p "$RUNNER_TEMP/src"
+          curl -sL -o "$RUNNER_TEMP/mp.tar.xz" \
+            https://github.com/micropython/micropython/releases/download/v1.24.1/micropython-1.24.1.tar.xz
+          tar -xJf "$RUNNER_TEMP/mp.tar.xz" -C "$RUNNER_TEMP/src" --strip-components=1
+          rm "$RUNNER_TEMP/mp.tar.xz"
+          # The state the design depends on: no build output anywhere in it.
+          find "$RUNNER_TEMP/src" -maxdepth 2 -name build -o -maxdepth 2 -name 'build-*' | head
+
+      - name: Probe each privilege level
+        id: probe
+        run: |
+          set -u
+          IMG=ghcr.io/ballistics-lab/embedded_base@sha256:0b7d1b3a4704c6b3ec7835dfe6a2c67c4dbffbcbb8810c7548b7509b3b343c9f
+          SRC="$RUNNER_TEMP/src"
+
+          # `make -C mpy-cross` with **no** BUILD= override -- the exact
+          # command that fails under a plain `:ro` bind with
+          # "Read-only file system: build/genhdr/mpversion.h". Building it
+          # rather than just mounting is the point: a successful mount that
+          # then cannot write is not an answer. CFLAGS_EXTRA is v1.24.1's
+          # own TAG_CFLAGS value (record 0082), unrelated to the overlay.
+          SCRIPT='set -e
+            mkdir -p /ovl/up /ovl/wd /mp
+            mount -t overlay overlay -o lowerdir=/src-ro,upperdir=/ovl/up,workdir=/ovl/wd /mp
+            echo "  mount: ok"
+            make -C /mp/mpy-cross CFLAGS_EXTRA=-Wno-error=unterminated-string-initialization -j"$(nproc)" >/dev/null 2>&1
+            echo "  build: ok ($(stat -c %s /mp/mpy-cross/build/mpy-cross) bytes)"
+            echo "  upper: $(du -sh /ovl/up | cut -f1)"'
+
+          run_level() {
+            name="$1"; shift
+            echo "::group::$name"
+            if docker run --rm "$@" -v "$SRC:/src-ro:ro" -v /ovl "$IMG" bash -c "$SCRIPT"; then
+              echo "$name: PASS" >> "$RUNNER_TEMP/results"
+            else
+              echo "$name: FAIL" >> "$RUNNER_TEMP/results"
+            fi
+            echo "::endgroup::"
+          }
+
+          : > "$RUNNER_TEMP/results"
+          run_level "1-default"                     # no extra privileges at all
+          run_level "2-sys_admin"                   --cap-add SYS_ADMIN
+          run_level "3-sys_admin+apparmor"          --cap-add SYS_ADMIN --security-opt apparmor=unconfined
+          run_level "4-sys_admin+apparmor+seccomp"  --cap-add SYS_ADMIN --security-opt apparmor=unconfined --security-opt seccomp=unconfined
+          run_level "5-privileged"                  --privileged
+
+          # The whole reason for the probe: the host tree must be untouched
+          # by whichever levels did run. Checked once, after all of them.
+          if find "$SRC" -maxdepth 2 \( -name build -o -name 'build-*' \) | grep -q .; then
+            echo "host-clean: FAIL (build output leaked into the :ro checkout)" >> "$RUNNER_TEMP/results"
+          else
+            echo "host-clean: PASS" >> "$RUNNER_TEMP/results"
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### overlay probe -- ${{ matrix.runner }}"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/results"
+            echo '```'
+            echo
+            echo "Lowest passing level is what record 0095's design needs \`dockerrun.run()\` to request."
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/results"
