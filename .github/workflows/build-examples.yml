@@ -110,8 +110,8 @@ jobs:
 
       - name: List built artifacts
         run: |
-          ls -laR examples/template/mpyhouse
-          ls -laR examples/wasm2mpy/mpyhouse
+          tree -a examples/template/mpyhouse
+          tree -a examples/wasm2mpy/mpyhouse
           cat examples/template/mpyhouse/*/package.json
 
   # Split from `build` above rather than added as one more step there:
@@ -265,7 +265,7 @@ jobs:
           build: ${{ matrix.build }}
 
       - name: List built artifacts
-        run: ls -laR examples/template/mpyhouse
+        run: tree -a examples/template/mpyhouse
 
   # ── usermod: stock upstream firmware, no C module at all ───────────
   #
@@ -296,7 +296,7 @@ jobs:
           package-dir: examples/bare-firmware
 
       - name: List built artifacts
-        run: ls -laR examples/bare-firmware/mpyhouse
+        run: tree -a examples/bare-firmware/mpyhouse
 
   # ── the same build on the runner it would not have chosen ──────────
   #
@@ -354,7 +354,7 @@ jobs:
           build: ${{ matrix.build }}
 
       - name: List built artifacts
-        run: ls -laR examples/template/mpyhouse
+        run: tree -a examples/template/mpyhouse
 
   # ── usermod: the six emulated-everywhere cells ──────────────────────
   #
@@ -414,4 +414,4 @@ jobs:
           build: ${{ matrix.build }}
 
       - name: List built artifacts
-        run: ls -laR examples/template/mpyhouse
+        run: tree -a examples/template/mpyhouse

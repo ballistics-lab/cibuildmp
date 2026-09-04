@@ -135,7 +135,7 @@ jobs:
           build: "${{ env.CIBMP_UPSTREAM_ABI_TAG }}-x64 ${{ env.CIBMP_UPSTREAM_ABI_TAG }}-armv7emsp mpy6.3-v1.28.0-x86"
 
       - name: List built artifacts
-        run: ls -laR examples/natmod/mpyhouse
+        run: tree -a examples/natmod/mpyhouse
 
   build-upstream-natmod:
     strategy:
@@ -166,4 +166,4 @@ jobs:
           build: "${{ env.CIBMP_UPSTREAM_ABI_TAG }}-x64"
 
       - name: List built artifacts
-        run: ls -laR examples/natmod/mpyhouse
+        run: tree -a examples/natmod/mpyhouse
