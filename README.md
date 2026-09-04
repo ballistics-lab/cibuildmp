@@ -601,6 +601,7 @@ onto each other rather than the first winning.
 | `pre-build-command`      | natmod  | `""`                   |                                ✓                                 |
 | `extra-make-args`        | both    | `[]`                   |                                ✓                                 |
 | `user-c-modules`         | usermod | `"."`                  |                                ✓                                 |
+| `no-user-c-modules`      | usermod | `false`                |                                ✓                                 |
 | `manifest`               | usermod | `""`                   |                                ✓                                 |
 | `extra-cmake-args`       | usermod | `[]`                   |                                ✓                                 |
 
@@ -643,6 +644,10 @@ Two notes on individual keys:
   the path it is given, so a flat single-module layout would otherwise link
   nothing and still succeed. `cibuildmp` detects that shape and adjusts;
   you do not need to point one level up yourself.
+- `no-user-c-modules = true` builds a stock, unmodified upstream MicroPython
+  through this same usermod path — no `USER_C_MODULES`, nothing of your own
+  in the result. Mutually exclusive with `user-c-modules`; setting both is an
+  error, not a precedence rule ([0056]).
 - `module-dir` and `user-c-modules` accept a literal `{micropython}`
   placeholder, substituted with the pinned checkout cibuildmp itself
   fetched ([0071]/[0072]) — `module-dir = "{micropython}/examples/natmod/btree"`
@@ -769,6 +774,7 @@ naming a scalar option in `inherit` is a config error, not a silent no-op.
 [0038]: docs/records/0038-m5-adopt-in-three-repos.md
 [0043]: docs/records/0043-unix-adopts-cibuildwheel-native-image-model.md
 [0052]: docs/records/0052-config-is-a-tree-not-a-selector-matrix.md
+[0056]: docs/records/0056-usermod-with-no-user-c-module.md
 [0057]: docs/records/0057-multiple-modules-per-build.md
 [0058]: docs/records/0058-image-groups-are-toolchains-not-ports.md
 [0069]: docs/records/0069-upstream-usercmodule-narrow-ci-slice.md

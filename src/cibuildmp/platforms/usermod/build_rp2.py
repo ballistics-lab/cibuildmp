@@ -65,8 +65,11 @@ def _rp2_project_mounts(opts: Rp2BuildOptions, package_dir: Path | None) -> list
     `_project_mounts()`, for a CMake port: `USER_C_MODULES` resolves to a
     *file* here (`portinfo.resolve_user_c_modules()`'s own
     `/micropython.cmake`), so the mount is that file's `.parent`, same as
-    the pre-[0095] `usermod_mounts()` call this replaces."""
-    mounts = [Path(opts.user_c_modules).parent]
+    the pre-[0095] `usermod_mounts()` call this replaces. No entry at all
+    when it is empty (record 0056) -- see `build_unix.py`'s own
+    `_project_mounts()` comment for why `Path("")`/`Path("").parent` must
+    never reach `docker run -v`."""
+    mounts = [Path(opts.user_c_modules).parent] if opts.user_c_modules else []
     if package_dir is not None:
         mounts.append(package_dir.resolve())
     return mounts

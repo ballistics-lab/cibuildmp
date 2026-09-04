@@ -9,6 +9,7 @@ from cibuildmp.platforms.usermod.build_common import UsermodBuildError
 from cibuildmp.platforms.usermod.build_windows import (
     WINDOWS_ARCH_SETTINGS,
     WindowsBuildOptions,
+    _windows_project_mounts,
     verify_windows_output,
     windows_make_command,
 )
@@ -72,6 +73,16 @@ def windows_opts(**overrides) -> WindowsBuildOptions:
     }
     defaults.update(overrides)
     return WindowsBuildOptions(**defaults)
+
+
+def test_windows_project_mounts_omits_user_c_modules_when_empty():
+    assert _windows_project_mounts(windows_opts(user_c_modules=""), None) == []
+
+
+def test_windows_project_mounts_includes_user_c_modules_when_set():
+    assert _windows_project_mounts(
+        windows_opts(user_c_modules="/gh/ws/mymod"), None
+    ) == [Path("/gh/ws/mymod")]
 
 
 def test_windows_win_amd64_command_matches_upstream_cross_build_shape():

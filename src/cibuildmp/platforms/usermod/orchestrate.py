@@ -167,13 +167,25 @@ def _port_build_options(
     # binds the result. Record 0069 named this exact gap ("no `{checkout}`-style
     # template ... this record does not add one") until a real caller
     # needed it; docs/records/0069's own addendum is that caller.
-    user_c_modules = build_options.user_c_modules.replace(
-        "{micropython}", mpy_dir.as_posix()
-    )
-    module_root = (package_dir / user_c_modules).resolve()
-    resolved_user_c_modules = portinfo.resolve_user_c_modules(
-        port, module_root.as_posix()
-    )
+    # `no_user_c_modules` (record 0056's Option A): skip
+    # `resolve_user_c_modules()` entirely rather than feeding it an empty
+    # path -- its cmake branch appends `/micropython.cmake` unconditionally,
+    # which would turn "" into a bogus `<package_dir>/micropython.cmake`
+    # instead of staying empty. `USER_C_MODULES=` (empty) is the verified
+    # no-op driver command lines already produce unmodified; the mount
+    # helpers below (`_project_mounts()` and its per-port siblings) drop
+    # the corresponding mount rather than pass a relative `Path("")` to
+    # `docker run -v` (a hard failure, not a harmless over-mount).
+    if build_options.no_user_c_modules:
+        resolved_user_c_modules = ""
+    else:
+        user_c_modules = build_options.user_c_modules.replace(
+            "{micropython}", mpy_dir.as_posix()
+        )
+        module_root = (package_dir / user_c_modules).resolve()
+        resolved_user_c_modules = portinfo.resolve_user_c_modules(
+            port, module_root.as_posix()
+        )
 
     module_manifest = (
         (package_dir / build_options.manifest).resolve().as_posix()

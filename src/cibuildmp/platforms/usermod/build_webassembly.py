@@ -64,8 +64,9 @@ def _webassembly_project_mounts(
 ) -> list[Path]:
     """The user's own project, mounted so a module whose sources reach
     outside `USER_C_MODULES` still resolves -- `build_unix.py`'s own
-    `_project_mounts()`, unchanged for a Make port."""
-    mounts = [Path(opts.user_c_modules)]
+    `_project_mounts()`, unchanged for a Make port. No entry at all when
+    it is empty (record 0056) -- see `_project_mounts()`'s own comment."""
+    mounts = [Path(opts.user_c_modules)] if opts.user_c_modules else []
     if package_dir is not None:
         mounts.append(package_dir.resolve())
     return mounts

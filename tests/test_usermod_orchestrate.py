@@ -225,6 +225,44 @@ def test_build_one_substitutes_micropython_placeholder_in_user_c_modules(
     assert expected in " ".join(captured["cmd"])
 
 
+def test_build_one_no_user_c_modules_passes_a_bare_empty_flag(tmp_path, monkeypatch):
+    # Record 0056's Option A: `no-user-c-modules = true` must reach the
+    # real build with a literal `USER_C_MODULES=` -- never
+    # `resolve_user_c_modules()`'s cmake-branch `/micropython.cmake`
+    # suffix, which an empty `user_c_modules` would otherwise pick up.
+    package_dir = tmp_path / "pkg"
+    package_dir.mkdir()
+    write_config(package_dir, "no-user-c-modules = true\n")
+    options = UsermodOptions.load(package_dir)
+    options.output_dir = tmp_path / "mpyhouse"
+
+    mpy_dir = tmp_path / "mpy"
+    target = UsermodTarget(port="unix", arch="manylinux_2_28_x86_64")
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        if any("USER_C_MODULES" in str(a) for a in cmd):
+            captured["cmd"] = cmd
+        build_dir = (
+            scratch_root() / "ports" / "unix" / "build-unix-manylinux_2_28_x86_64"
+        )
+        build_dir.mkdir(parents=True, exist_ok=True)
+        (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
+        stage_on_cp(cmd)
+
+    monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
+    (mpy_dir / "ports" / "unix").mkdir(parents=True)
+
+    build_one(options, target, mpy_dir)
+
+    assert "USER_C_MODULES=" in " ".join(captured["cmd"])
+    assert "USER_C_MODULES=." not in " ".join(captured["cmd"])
+    # The mount-list side of this (no relative `Path("")` reaching
+    # `docker run -v`) has its own direct coverage per port --
+    # `test_project_mounts_omits_user_c_modules_when_empty()` and its five
+    # siblings in each `test_usermod_build_<port>.py`.
+
+
 def test_dest_name_unset_keeps_todays_filename():
     # record 0052, A3: gated on `name` alone -- a project that has not set
     # it yet keeps exactly today's filename, "micropython" stem included.

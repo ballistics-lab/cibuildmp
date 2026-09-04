@@ -9,6 +9,7 @@ import pytest
 from cibuildmp.platforms.usermod.build_common import UsermodBuildError
 from cibuildmp.platforms.usermod.build_webassembly import (
     WebassemblyBuildOptions,
+    _webassembly_project_mounts,
     webassembly_make_command,
 )
 from cibuildmp.platforms.usermod.build_webassembly import (
@@ -61,6 +62,16 @@ def wasm_opts(**overrides) -> WebassemblyBuildOptions:
     }
     defaults.update(overrides)
     return WebassemblyBuildOptions(**defaults)
+
+
+def test_webassembly_project_mounts_omits_user_c_modules_when_empty():
+    assert _webassembly_project_mounts(wasm_opts(user_c_modules=""), None) == []
+
+
+def test_webassembly_project_mounts_includes_user_c_modules_when_set():
+    assert _webassembly_project_mounts(
+        wasm_opts(user_c_modules="/gh/ws/mymod"), None
+    ) == [Path("/gh/ws/mymod")]
 
 
 def test_webassembly_command_matches_build_usermod_webassembly_shape():
