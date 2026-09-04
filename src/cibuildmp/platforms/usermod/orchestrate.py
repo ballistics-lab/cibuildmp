@@ -163,8 +163,8 @@ def _port_build_options(
     # real, resolved directory by the time this function runs (`build_one()`
     # receives it already fetched), for every port uniformly -- Make and
     # CMake alike, since this substitution happens before any per-port
-    # branching below and well before `usermod_mounts()` ever bind-mounts
-    # the result. Record 0069 named this exact gap ("no `{checkout}`-style
+    # branching below and well before each driver's own mount list ever
+    # binds the result. Record 0069 named this exact gap ("no `{checkout}`-style
     # template ... this record does not add one") until a real caller
     # needed it; docs/records/0069's own addendum is that caller.
     user_c_modules = build_options.user_c_modules.replace(

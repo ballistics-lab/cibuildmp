@@ -185,9 +185,6 @@ def build_rp2(
 
         mpy_cross = build_common.container_mpy_cross(
             mpy_dir,
-            slug="rp2",
-            image=docker_image,
-            oci_platform=oci_platform,
             timeout=timeout,
             extra_cflags=build_common.tag_cflags(opts.tag),
             container=container,

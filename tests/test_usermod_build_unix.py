@@ -250,15 +250,17 @@ def test_deplibs_command_shape(monkeypatch):
         "cibuildmp.dockerrun.subprocess.run",
         lambda cmd, **k: calls.append(cmd),
     )
-    run_unix_deplibs(
-        opts("manylinux_2_41_mipsel"), Path("/gh/ws/mpy"), docker_image=_FAKE_UNIX_IMAGE
-    )
+    with dockerrun.Container(image=_FAKE_UNIX_IMAGE) as container:
+        run_unix_deplibs(
+            opts("manylinux_2_41_mipsel"), Path("/gh/ws/mpy"), container=container
+        )
 
     # Wrapped in `sh -c` now, not a bare argv: the fixup that follows
     # `make ... deplibs` (see run_unix_deplibs()'s own docstring) has to
     # run in the same container invocation.
-    assert calls[0][-3:-1] == ["sh", "-c"]
-    script = calls[0][-1]
+    exec_call = next(c for c in calls if c[:2] == ["docker", "exec"])
+    assert exec_call[-3:-1] == ["sh", "-c"]
+    script = exec_call[-1]
     assert "deplibs" in script
     assert "MICROPY_STANDALONE=1" in script
 
@@ -272,24 +274,21 @@ def test_deplibs_fixup_queries_the_real_multi_os_directory(monkeypatch):
     # only checked for `out/lib64/libffi.a` missed it entirely. The
     # script asks the compiler that will actually be used, not one
     # value predicted in advance.
-    # riscv64 is non-native on this (x86_64) test host, so dockerrun.run()
-    # would otherwise start a real emulation probe first -- irrelevant to
-    # what this test checks (record 0043's own probe, its own coverage
-    # in test_usermod_dockerrun.py).
-    monkeypatch.setattr("cibuildmp.dockerrun._probe_platform", lambda *a, **k: "")
     calls = []
     monkeypatch.setattr(
         "cibuildmp.dockerrun.subprocess.run",
         lambda cmd, **k: calls.append(cmd),
     )
 
-    run_unix_deplibs(
-        opts("manylinux_2_39_riscv64"),
-        Path("/gh/ws/mpy"),
-        docker_image=_FAKE_UNIX_IMAGE,
-    )
+    with dockerrun.Container(image=_FAKE_UNIX_IMAGE) as container:
+        run_unix_deplibs(
+            opts("manylinux_2_39_riscv64"),
+            Path("/gh/ws/mpy"),
+            container=container,
+        )
 
-    script = calls[0][-1]
+    exec_call = next(c for c in calls if c[:2] == ["docker", "exec"])
+    script = exec_call[-1]
     assert "gcc -print-multi-os-directory" in script
     assert "multi_os_dir" in script
     assert "lib64" not in script  # no hardcoded fallback value anywhere
@@ -811,14 +810,13 @@ def test_repair_is_a_noop_when_nothing_non_baseline(monkeypatch, tmp_path):
         "cibuildmp.dockerrun.subprocess.run", lambda *a, **k: calls.append(a)
     )
 
+    # Never reaches `container` at all -- the no-op return happens before
+    # anything would call it, so a real one is not needed here.
     repair_unix_binary(
         "manylinux_2_28_x86_64",
         tmp_path / "micropython",
-        docker_image=_FAKE_UNIX_IMAGE,
-        oci_platform=None,
-        linux32=False,
         timeout=None,
-        mounts=[tmp_path],
+        container=None,
     )
 
     assert calls == []
@@ -836,21 +834,16 @@ def test_repair_runs_ldd_and_patchelf_inside_the_container(monkeypatch, tmp_path
     )
     binary = tmp_path / "build-manylinux_2_28_x86_64" / "micropython"
 
-    repair_unix_binary(
-        "manylinux_2_28_x86_64",
-        binary,
-        docker_image=_FAKE_UNIX_IMAGE,
-        oci_platform="linux/amd64",
-        linux32=False,
-        timeout=30,
-        mounts=[tmp_path],
-    )
+    with dockerrun.Container(image=_FAKE_UNIX_IMAGE) as container:
+        repair_unix_binary(
+            "manylinux_2_28_x86_64",
+            binary,
+            timeout=30,
+            container=container,
+        )
 
-    assert len(calls) == 1
-    docker_command = calls[0]
-    assert docker_command[0] == "docker"
-    assert _FAKE_UNIX_IMAGE in docker_command
-    script = docker_command[-1]
+    exec_call = next(c for c in calls if c[:2] == ["docker", "exec"])
+    script = exec_call[-1]
     assert "ldd" in script
     assert "libffi.so.6" in script
     # $ORIGIN is patchelf's/the loader's own runtime token, not a shell

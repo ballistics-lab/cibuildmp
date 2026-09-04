@@ -2,9 +2,9 @@
 
 Status: In progress — **the plan below is superseded by addendum 2 (2026-09-04); read that
 first, then addendum 4 (the runner allows it), addendum 5 (what is actually in the code),
-addendum 8 (`rp2` migrated), addendum 9 (`windows` migrated), addendum 10 (`webassembly`
-migrated) and addenda 11-12 (`qemu`/`esp32` migrated -- all six ports done, transition deletion
-still open).** Only item 5 (reports out of `cache_root()`) is settled and landed. Items 1-3 landed as
+addenda 8-12 (all six ports migrated) and addendum 13 (the transition deletion lands, plus a
+live no-op it uncovered: `CIBMP_SCRATCH_PATH` currently does nothing).** Only item 5 (reports
+out of `cache_root()`) is settled and landed among the original plan's own six. Items 1-3 landed as
 described and work, but answer the wrong question — they place a build tree on the host, which the
 tool has no reason to own; addendum 2 replaces them with a `:ro` bind plus an overlayfs upper
 inside the container, measured working. Item 4's instinct was right and its mechanism wrong. Item
@@ -689,11 +689,9 @@ a separate, real change with its own live risk: this exact interaction already c
 regression (addendum 6's item 1) from a well-reasoned but wrong first attempt, and this migration
 does not want to risk a second one blind. Left for its own follow-up.
 
-**Verified live**, `test-upstream-usermodule.yml` run 33891641172 (the same push as `webassembly`
-above -- `qemu` had not changed yet at that point, so this is the pre-migration baseline):
-`build-qemu` green in 1m57s, including the real `qemu-system-arm` smoke test. The migration itself
-is pushed alongside `esp32` (addendum 12) and not yet independently re-verified; read both jobs'
-own latest run before trusting this paragraph.
+**Verified live**, `test-upstream-usermodule.yml` run 33892928315 (`b2614b4`, pushed together with
+`esp32`): `build-qemu` green in 2m47s, including the real `qemu-system-arm` smoke test against the
+built firmware.
 
 ## Addendum 12, 2026-09-04 — `esp32` migrates to `Container`/overlay; all six ports done
 
@@ -725,21 +723,89 @@ marker, the `idf_tools.py export` eval -- needed no changes at all: it already r
 script, and a script's own internal shell logic does not know or care whether the process running
 it was started by `docker run` or `docker exec`.
 
-**Not yet verified live at all** -- neither by hand (addendum 3's own live-run table covers `unix`
-and `rp2`, never `esp32`) nor by CI at the time of writing. `build-esp32` in
-`test-upstream-usermodule.yml` is the job that matters; read its own latest run, not this
-paragraph, before trusting that this port actually builds under the overlay. If it fails, the two
-places most likely to be wrong are ESP-IDF's own `ComponentManager` cache interacting with the
-overlay's `--user` `exec` (untested combination) and the ESP-IDF tools-install step needing to
-write somewhere this driver did not think to make writable.
+**Verified live**, the same run as `qemu` above (`test-upstream-usermodule.yml` 33892928315,
+`b2614b4`): `build-esp32` green in 4m18s -- ESP-IDF's own `ComponentManager` cache and the
+overlay's `--user` `exec` do not conflict, and nothing in the tools-install step needed a mount
+this driver did not already provide. All six usermod ports are now confirmed building through
+`Container`/overlay by real CI, not merely by local tests.
 
 ### What is left of [0095] itself
 
-All six usermod ports now build through `Container`/overlay. What addendum 5/6 named as the very
-last step -- deleting the transition (the `container=` parameters on `probe_supported_cflags()`,
-`container_mpy_cross()`, `run_unix_deplibs()`, `repair_unix_binary()`; `dockerrun.run()` itself;
-`sources.scratch_root()`; `_resolved_build_dir()`'s scratch prefix; `Container.copy_out()` if
-nothing has needed it) -- is **not done in this addendum**, deliberately: it should follow live
-confirmation that `esp32` actually works, not precede it. Natmod's own build path is untouched by
-any of this and does not go through `dockerrun.run()` in the first place, so nothing there is
-affected either way.
+**Correction to a claim two paragraphs above this one, before it propagates further**: natmod's
+own build path is *not* untouched by `dockerrun.run()` -- `natmod/build.py` calls it directly, as
+its own independent mechanism, unaffected by any of this migration but very much still a real
+caller of that function. What is actually true is narrower: no *usermod* driver calls
+`dockerrun.run()` in a real (non-fallback) path any more. Deleting `dockerrun.run()` itself is
+therefore off the table regardless of what happens to usermod's own transitional code -- natmod
+still needs it.
+
+All six usermod ports now build through `Container`/overlay. What addendum 5/6 named as the last
+step -- deleting the transition -- turns out to be narrower than either addendum stated, once
+checked against what actually still calls what:
+
+- **The `container=None` fallback branches** in `build_common.probe_supported_cflags()`,
+  `build_common.container_mpy_cross()`, `build_unix.run_unix_deplibs()` and
+  `build_unix.repair_unix_binary()` are dead in production -- every real caller now always passes
+  a `container`. Each fallback's own `dockerrun.run()` call can go, and the `container` parameter
+  can stop being optional.
+- **`build_common.usermod_mounts()`** loses its only remaining real caller when
+  `run_unix_deplibs()`'s own fallback goes (every other port stopped calling it when it migrated),
+  and can be deleted outright.
+- **`orchestrate._resolved_build_dir()`'s `scratch_root()` prefix** is now a `BUILD=` value no
+  driver ever mounts -- it can be simplified, though `sources.scratch_root()` itself has to stay:
+  `CIBMP_SCRATCH_PATH` is documented, real, host-visible behaviour independent of this.
+- **`dockerrun.run()` itself does not go** -- see the correction above.
+- **`Container.copy_out()`** still has no production caller after all six migrations; whether it
+  goes is a judgement call the same as [0049]/[0050] already made for other unused machinery, not
+  forced by anything above.
+
+Not done in this addendum -- landing separately, once this live-verification lands, rather than
+bundled with the ports it depends on being confirmed first.
+
+## Addendum 13, 2026-09-04 — the transition deletion lands, and a live no-op it uncovered
+
+Landed once addendum 12's own live verification confirmed `esp32`, per that addendum's own
+closing line.
+
+**Narrower than either addendum 5 or 6 predicted, once checked against real callers rather than
+assumed:**
+
+- `build_common.probe_supported_cflags()` and `build_common.container_mpy_cross()` lose their
+  `container=None` fallback branches entirely; `container` is a required keyword-only argument on
+  both now. `container_mpy_cross()` also loses `image=`, `oci_platform=`, `linux32=` and `slug=` --
+  all four were only ever read inside the deleted fallback (`slug` scoped a `scratch_root()`
+  directory that no longer exists; the container path always writes to the one fixed
+  `mpy_dir/mpy-cross/build`, safe because each `build_<port>()` call gets its own fresh
+  container). `probe_supported_cflags()` loses `image=`/`oci_platform=`/`linux32=` the same way.
+- `build_unix.run_unix_deplibs()` loses its own fallback, and with it `docker_image=`/
+  `package_dir=` (both unused once the fallback's `usermod_mounts()` call is gone) --
+  `container` becomes required.
+- `build_unix.repair_unix_binary()` loses its fallback and `docker_image=`/`oci_platform=`/
+  `linux32=`/`mounts=` the same way -- `container` required.
+- `build_common.usermod_mounts()` had exactly one real caller left (`run_unix_deplibs()`'s own
+  fallback); deleted outright along with it.
+- Every driver call site (`build_unix.py`, `build_rp2.py`, `build_windows.py`,
+  `build_webassembly.py`, `build_esp32.py`) updated to match the narrower signatures --
+  `_build_unix_in()` also lost `docker_image=`/`oci_platform=`/`linux32=`/`package_dir=`, all
+  of which had become unused once their only real reader (the two probes and the mpy-cross call)
+  stopped accepting them.
+- **`dockerrun.run()` itself does not go** -- the correction two paragraphs up this record already
+  made: `natmod/build.py` calls it directly, as its own real mechanism, untouched by any of this.
+- **`Container.copy_out()`** -- left as-is. Still no production caller after six migrations, still
+  only a judgement call, not forced by removing the pieces above.
+
+**A live no-op this cleanup surfaced, not created:** `sources.scratch_root()` had exactly one real
+caller left even before this addendum -- `orchestrate._resolved_build_dir()`, which only ever
+names a `BUILD=` *string* now, never mounts it. Nothing in the codebase writes into the directory
+`scratch_root()` creates any more, which means `CIBMP_SCRATCH_PATH` -- real, documented, in both
+`cli.py --help` and `README.md`'s own environment-variable table -- currently has **no observable
+effect**: setting it still redirects and un-cleans-up an empty directory nothing populates. Not
+fixed here -- `scratch_root()`'s own docstring now says so plainly, but whether the right move is
+deleting the env var, repurposing it, or leaving it as a documented knob with no current effect is
+a real design question this record does not decide. Left as an explicit open item rather than
+silently carried forward the way the pre-addendum docstring's stale mpy-cross/`slug` claims were.
+
+**Verified**: full test suite (650 tests) and `pyright` clean over every touched file. Not yet
+re-verified by a fresh CI push at the time of writing -- this addendum's own commit should get one
+before anyone trusts that the signature changes above did not silently break a real build path
+unit tests do not reach.

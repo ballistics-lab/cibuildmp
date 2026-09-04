@@ -398,18 +398,13 @@ def build_windows(
         # rather than a special case for "which arch is Clang".
         cross_cflags = build_common.probe_supported_cflags(
             windows_raw_cflags(opts),
-            image=docker_image,
             compiler=f"{WINDOWS_ARCH_SETTINGS[opts.arch].cross_compile}gcc",
-            oci_platform=oci_platform,
             timeout=timeout,
             container=container,
         )
 
         mpy_cross = build_common.container_mpy_cross(
             mpy_dir,
-            slug="windows",
-            image=docker_image,
-            oci_platform=oci_platform,
             timeout=timeout,
             # Unprobed, unlike the cross build above: mpy-cross always
             # builds with this image's own *native* compiler (a host

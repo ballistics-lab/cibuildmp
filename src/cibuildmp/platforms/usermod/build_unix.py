@@ -49,7 +49,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 
 from . import build_common
-from .build_common import UsermodBuildError, usermod_mounts
+from .build_common import UsermodBuildError
 
 
 @dataclass(frozen=True)
@@ -501,9 +501,7 @@ def run_unix_deplibs(
     opts: UnixBuildOptions,
     mpy_dir: Path,
     *,
-    docker_image: str,
-    package_dir: Path | None = None,
-    container: Any = None,
+    container: Any,
 ) -> None:
     """MICROPY_STANDALONE=1 only makes libffi a DEPLIBS entry, not a
     prerequisite of the default build target -- must run as its own step
@@ -512,9 +510,9 @@ def run_unix_deplibs(
     under $(BUILD)/lib/libffi/out/lib/ and the main build looks for it
     there.
 
-    Docker-only (D30): `docker_image` is always real by the time this is
-    called -- `build_unix()` itself raises before ever reaching here if
-    `ensure_image()` returned `None`.
+    **Required `container`** -- every usermod port builds through
+    `Container` now (record 0095's own addenda 8-12 landed the last of
+    the six).
 
     Every arch reaches this now (`standalone=True` on every
     `UnixArchSettings` row) -- record 0043 dropped this step for every
@@ -578,23 +576,10 @@ def run_unix_deplibs(
     ]
     from ... import dockerrun
 
-    if container is not None:
-        container.call(
-            command,
-            workdir=_unix_dir(mpy_dir),
-            timeout=dockerrun.timeout_for("unix", opts.target),
-        )
-        return
-    dockerrun.run(
+    container.call(
         command,
-        mounts=usermod_mounts(
-            mpy_dir, Path(opts.user_c_modules), package_dir=package_dir
-        ),
         workdir=_unix_dir(mpy_dir),
-        image=docker_image,
         timeout=dockerrun.timeout_for("unix", opts.target),
-        oci_platform=dockerrun.platform_for("unix", opts.target),
-        linux32=dockerrun.needs_linux32("unix", opts.target),
     )
 
 
@@ -835,12 +820,8 @@ def repair_unix_binary(
     target: str,
     binary: Path,
     *,
-    docker_image: str,
-    oci_platform: str | None,
-    linux32: bool,
     timeout: float | None,
-    mounts: list[Path],
-    container: Any = None,
+    container: Any,
 ) -> None:
     """`cibuildmp`'s own `auditwheel repair`, for the one artifact type
     `auditwheel` cannot touch at all: a bare executable rather than a
@@ -876,19 +857,16 @@ def repair_unix_binary(
     load time), not a shell variable -- single-quoted here so bash never
     touches it.
 
-    `binary`'s own directory is always part of `mounts` already (it sits
-    under `opts.build_dir`, itself under the mounted `scratch_root()` --
-    it was `mpy_dir` before [0095] moved build state out of the checkout,
-    and `usermod_mounts()` adds `scratch_root()` for every port precisely
-    so this stayed true through that move), so the `lib/` directory this
-    writes lands on the host for free, the same way the binary itself
-    already does -- no separate copy-out step, no new mount.
+    **Required `container`** -- every usermod port builds through
+    `Container` now (record 0095's own addenda 8-12 landed the last of the
+    six). `binary` is always the `staging` copy (`build_unix()`'s own
+    call), the one read-write mount the container gets, so the `lib/`
+    directory this writes lands on the host for free, the same way the
+    binary itself already does -- no separate copy-out step, no new mount.
     """
     needed = _non_baseline_needed_libs(target, binary)
     if not needed:
         return
-
-    from ... import dockerrun
 
     lib_dir = binary.parent / "lib"
     bin_q = shlex.quote(binary.as_posix())
@@ -906,18 +884,7 @@ for lib in {libs_q}; do
 done
 patchelf --set-rpath '$ORIGIN/lib' {bin_q}
 """
-    if container is not None:
-        container.call(["bash", "-c", script], workdir=binary.parent, timeout=timeout)
-        return
-    dockerrun.run(
-        ["bash", "-c", script],
-        mounts=mounts,
-        workdir=binary.parent,
-        image=docker_image,
-        timeout=timeout,
-        oci_platform=oci_platform,
-        linux32=linux32,
-    )
+    container.call(["bash", "-c", script], workdir=binary.parent, timeout=timeout)
 
 
 def verify_unix_floor(target: str, binary: Path) -> None:
@@ -1061,7 +1028,7 @@ def build_unix(
     every `build_<port>()` shares (`orchestrate.py`'s `build_one()`
     passes them uniformly); neither is used on this Docker-only path.
     `package_dir`, when given, is bind-mounted alongside `USER_C_MODULES`
-    itself -- see `build_common.usermod_mounts()`'s own docstring for why.
+    itself -- see `_project_mounts()`'s own docstring for why.
 
     One more step runs after both verifications pass:
     `repair_unix_binary()` vendors any shared library the binary needs
@@ -1139,18 +1106,17 @@ def build_unix(
             container=container,
             staging=staging,
             settings=settings,
-            docker_image=docker_image,
-            oci_platform=oci_platform,
-            linux32=linux32,
             timeout=timeout,
-            package_dir=package_dir,
         )
 
 
 def _project_mounts(opts: UnixBuildOptions, package_dir: Path | None) -> list[Path]:
     """The user's own project, mounted so a module whose sources reach
-    outside `USER_C_MODULES` still resolves -- `usermod_mounts()`'s own
-    reasoning, minus `mpy_dir`, which arrives through the overlay instead."""
+    outside `USER_C_MODULES` still resolves -- the same reasoning the
+    pre-[0095] `usermod_mounts()` helper had for the same mount, minus
+    `mpy_dir`, which arrives through the overlay instead (and minus
+    `scratch_root()`, no longer mounted at all once every port stopped
+    needing a host-visible build tree)."""
     mounts = [Path(opts.user_c_modules)]
     if package_dir is not None:
         mounts.append(package_dir.resolve())
@@ -1164,11 +1130,7 @@ def _build_unix_in(
     container: Any,
     staging: Path,
     settings: UnixArchSettings,
-    docker_image: str,
-    oci_platform: str | None,
-    linux32: bool,
     timeout: float | None,
-    package_dir: Path | None,
 ) -> Path:
     """`build_unix()`'s own body, once the container exists."""
     from ... import dockerrun  # noqa: F401  -- re-exported names used below
@@ -1179,13 +1141,7 @@ def _build_unix_in(
     # running it would just fail before `MICROPY_PY_FFI=0` below ever
     # gets a chance to make it unnecessary.
     if settings.standalone and not _riscv64_ffi_unported(opts.target, opts.tag):
-        run_unix_deplibs(
-            opts,
-            mpy_dir,
-            docker_image=docker_image,
-            package_dir=package_dir,
-            container=container,
-        )
+        run_unix_deplibs(opts, mpy_dir, container=container)
 
     # `unix_extra_cflags()`'s own candidates include `-Wno-error=
     # <diagnostic>` entries a *different* image's gcc needed ([0082]'s
@@ -1210,9 +1166,6 @@ def _build_unix_in(
     candidates = unix_extra_cflags(opts.target, opts.tag)
     mpy_cross_cflags = build_common.probe_supported_cflags(
         candidates,
-        image=docker_image,
-        oci_platform=oci_platform,
-        linux32=linux32,
         timeout=timeout,
         container=container,
     )
@@ -1221,10 +1174,7 @@ def _build_unix_in(
         if not settings.cross_compile
         else build_common.probe_supported_cflags(
             candidates,
-            image=docker_image,
             compiler=f"{settings.cross_compile}gcc",
-            oci_platform=oci_platform,
-            linux32=linux32,
             timeout=timeout,
             container=container,
         )
@@ -1232,11 +1182,7 @@ def _build_unix_in(
 
     mpy_cross = build_common.container_mpy_cross(
         mpy_dir,
-        slug=f"unix-{opts.target}",
-        image=docker_image,
         extra_cflags=mpy_cross_cflags,
-        oci_platform=oci_platform,
-        linux32=linux32,
         timeout=timeout,
         container=container,
     )
@@ -1277,11 +1223,7 @@ def _build_unix_in(
     repair_unix_binary(
         opts.target,
         binary,
-        docker_image=docker_image,
-        oci_platform=oci_platform,
-        linux32=linux32,
         timeout=timeout,
-        mounts=[],
         container=container,
     )
     return binary

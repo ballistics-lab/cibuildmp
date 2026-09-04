@@ -60,9 +60,8 @@ _SCRATCH_ROOT: Path | None = None
 
 
 def scratch_root() -> Path:
-    """Where **compiled build state** goes: per-identifier port build
-    directories and the container-built `mpy-cross` binaries, i.e. record
-    [0095]'s category C.
+    """Names where **compiled build state** would go: per-identifier port
+    build directories, record [0095]'s category C.
 
     Deliberately *not* under `cache_root()`, and deliberately not merely a
     sibling directory there either. `cache_root()` holds fetched source a
@@ -75,24 +74,23 @@ def scratch_root() -> Path:
     `'MP_QSTR_mymod' undeclared`. Persisting that across runs would have
     turned a one-run bug into a permanent one.
 
-    A fresh temporary directory per `cibuildmp` invocation, removed at
-    exit: the within-run reuse `container_mpy_cross()` depends on (every
-    identifier sharing a `slug` builds `mpy-cross` once) survives intact,
-    while the cross-invocation reuse -- keyed on nothing but
-    `binary.exists()`, never on the image that produced it -- does not.
-    That reuse was never sound; it was only ever invisible.
+    **Its own directory is no longer mounted or written to by anything**,
+    now that every usermod port builds through `Container`/overlay
+    (record 0095's own addenda 8-12): `orchestrate._resolved_build_dir()`
+    still calls this to name a `BUILD=` value, but that value is never
+    bind-mounted any more, so it exists only as a path *string* a
+    container's own `make` writes inside its own ephemeral filesystem.
+    `CIBMP_SCRATCH_PATH` (below) is consequently a no-op in practice today
+    -- still real, still read, but with nothing left to redirect. Flagged
+    here rather than silently assumed still load-bearing; whether to
+    delete the env var, repurpose it, or leave it as a documented knob
+    with no current effect is an open question this function does not
+    answer.
 
     `CIBMP_SCRATCH_PATH` overrides the location **and disables the
-    cleanup**: the path then belongs to the caller, not to this function,
-    which is also how a failed build's own tree is kept for inspection
-    (`CIBMP_SCRATCH_PATH=/tmp/keepme cibuildmp ...`). On a GitHub runner
-    `runner.temp` is the natural value -- job-scoped, never an
-    `actions/cache` target.
-
-    Created eagerly, because `dockerrun.run()` bind-mounts it at its own
-    identical host path: a bind source the daemon has to create itself is
-    created **root-owned**, which the `--user` container then cannot write
-    to and a host-side `rmtree` cannot remove.
+    cleanup**: the path then belongs to the caller, not to this function.
+    On a GitHub runner `runner.temp` is the natural value -- job-scoped,
+    never an `actions/cache` target.
     """
     global _SCRATCH_ROOT
     env = os.environ.get("CIBMP_SCRATCH_PATH")
