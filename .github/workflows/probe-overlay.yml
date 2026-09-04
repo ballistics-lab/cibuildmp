@@ -47,7 +47,20 @@ jobs:
         # daemon configuration, and the two reporting the same `runner.os`
         # has already hidden a real difference once (see action.yml's own
         # apt-cache key comment on `runner.arch`).
-        runner: [ubuntu-latest, ubuntu-24.04-arm]
+        #
+        # The image is per-runner, learned the hard way: the first version
+        # of this probe used `embedded_base` for both and the arm job failed
+        # all five levels in two seconds with `no matching manifest for
+        # linux/arm64/v8` -- that image is published amd64-only, so the arm
+        # half of the run measured nothing at all. The pypa manylinux images
+        # are separate per-architecture repositories that cibuildmp already
+        # pins (`resources/pinned_docker_images.toml`), and both carry a gcc
+        # and a make, so the real build below runs on either side.
+        include:
+          - runner: ubuntu-latest
+            image: quay.io/pypa/manylinux_2_28_x86_64@sha256:94c816d38ad56d2dc1df2f28007d18d306b0f5d05096c6f6b9141345df504d3e
+          - runner: ubuntu-24.04-arm
+            image: quay.io/pypa/manylinux_2_28_aarch64@sha256:45ea412cfbd2cc5e51323cecab614ea8e4e5522b4d4f668946c54056b40152f6
     steps:
       - uses: actions/checkout@v6
 
@@ -76,8 +89,15 @@ jobs:
         id: probe
         run: |
           set -u
-          IMG=ghcr.io/ballistics-lab/embedded_base@sha256:0b7d1b3a4704c6b3ec7835dfe6a2c67c4dbffbcbb8810c7548b7509b3b343c9f
+          IMG='${{ matrix.image }}'
           SRC="$RUNNER_TEMP/src"
+
+          # Pull once, up front and loudly. The first version of this probe
+          # let each level's own `docker run` pull, so an image that simply
+          # does not exist for the runner's architecture looked exactly like
+          # five overlay refusals -- five FAILs in two seconds, and a
+          # conclusion about overlays that the run had not measured.
+          docker pull "$IMG"
 
           # `make -C mpy-cross` with **no** BUILD= override -- the exact
           # command that fails under a plain `:ro` bind with
