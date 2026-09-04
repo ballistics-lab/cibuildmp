@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`bin/refresh_toolchain_pins.py --check` had been a silent no-op since `[0087]` landed** —
+  it read a shared toolchain version straight out of `arm_embedded.Dockerfile`'s own `ARG
+  TOOLCHAIN_URL=` line, which `[0087]` deleted the moment the version became a per-row fact
+  instead; every check since then exited `0` regardless of what `build-platforms.toml` actually
+  held, confirmed live with a deliberately-broken row that passed clean. Rewritten to read the
+  row's own committed `gcc` field directly; deliberately re-broke the same row to confirm
+  `--check` now catches it (`v1.20.0 usermod.mimxrt: pinned 13.3.1 >= ceiling 13`) before
+  restoring it. `[0090]`.
+- **`mimxrt`'s eleven `v1.20.0` rows carried a toolchain version (`14.2.1-1.1`) that violates
+  their own `>= 13` ceiling** (`sdcard_cmd_set_bus_width()`, fixed upstream in `v1.21.0`) —
+  `[0087]`'s general per-row mechanism never special-cased this one disjoint window, exactly the
+  gap `[0088]` had scoped and left unimplemented. Now `12.3.1-1.2`, the newest xpack release
+  genuinely below the ceiling, sha256-verified live against the publisher's own sidecar.
+  `[0088]`.
 - **Every MicroPython tag before `v1.20.0` — the nine ABI 5 and ABI 6 identifiers
   (`v1.12` through `v1.19.1`) — had never produced an artifact**, on any arch, for
   reasons that outlived the gcc 15 diagnostic `[0082]` bisected. Four separate
@@ -48,6 +62,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reached CI: `build_windows()` now probes its own `CFLAGS_EXTRA` candidates against the real
   cross compiler first, the same `probe_supported_cflags()` mechanism `unix` already uses for its
   own gcc version ladder.
+
+### Changed
+
+- **`arm_embedded` and `riscv_embedded` collapse into one Docker image, `embedded_base`.**
+  `[0087]`/`[0089]` already moved both toolchains' cross compilers to a container-run-time
+  fetch (`toolchain_fetch.py`, `[0086]`), leaving the two Dockerfiles' own build-time layers
+  identical but for one apt package (`cmake`, `rp2`-only) — an open question `[0044]`'s own
+  addendum had sketched but never tracked, closed once nothing was left to reconcile. Every
+  `image`/`images.<arch/board>` field naming the two groups, `resources/
+  pinned_docker_images.toml`'s `[image_group]` table, and both `publish-docker-images.yml`'s
+  and `verify-docker-images.yml`'s own matrices now name the one merged group. Fixed the one
+  real functional dependency the merge would otherwise have broken silently:
+  `natmod/targets.py`'s `natmod_toolchain()` used to resolve which cross toolchain an arch
+  needs by looking up its image-group name, which stops disambiguating once both toolchains
+  share one image — it now resolves from a direct, fixed `arch -> toolchain family` table
+  instead. `[0096]`.
 
 ## [0.6.2] - 2026-09-03
 
@@ -1562,3 +1592,9 @@ than restarting (see the 0.3.0a1 entry). -->
 [0082]: docs/records/0082-natmod-old-tags-fail-mpy-cross-under-gcc-15.md
 [0091]: docs/records/0091-tag-cflags-into-every-ports-mpy-cross.md
 [0093]: docs/records/0093-pre-v1-20-0-tags-had-never-built.md
+[0086]: docs/records/0086-generic-in-container-toolchain-tarball-fetch.md
+[0087]: docs/records/0087-arm-riscv-embedded-thin-out-toolchain-version-lands.md
+[0089]: docs/records/0089-natmod-arm-riscv-embedded-toolchain-version.md
+[0088]: docs/records/0088-mimxrt-own-floor.md
+[0090]: docs/records/0090-toolchain-pins-checker-and-0058-text-followup.md
+[0096]: docs/records/0096-arm-riscv-embedded-collapse-into-embedded-base.md

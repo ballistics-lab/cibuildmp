@@ -76,8 +76,20 @@ from cibuildmp.platforms.natmod.options import read_config
 # first one, not just stale numbers.
 _WEIGHTS: dict[str, float] = {
     "esp_idf_base": 144,
-    "arm_embedded": 55,  # non-rp2 share (qemu/natmod) -- see _PORT_WEIGHTS
-    "riscv_embedded": 26,
+    # non-rp2 share (qemu/natmod) -- see _PORT_WEIGHTS for rp2's own.
+    # Was two entries, `arm_embedded: 55` and `riscv_embedded: 26`,
+    # measured separately because each had its own image; record 0096
+    # merged both images into `embedded_base`, so `dockerrun.image_for()`
+    # can no longer tell the two apart for this table's own purposes.
+    # Blended here as the real identifier-count-weighted average of the
+    # two original per-second numbers (140 arm + 26 riscv non-rp2
+    # identifiers, `build-platforms.toml`'s own real count at the time of
+    # this merge: (140*55 + 26*26) / 166 ~= 50.5) rather than either
+    # original value alone or an unweighted mean -- a real re-measurement
+    # from a batched run against the merged image would still be worth
+    # more than this arithmetic estimate, and should replace it should one
+    # ever happen.
+    "embedded_base": 50,
     "windows": 26,
     "webassembly": 41,
     "natmod_host": 37,
@@ -85,10 +97,10 @@ _WEIGHTS: dict[str, float] = {
     "xtensa_lx106": 96,
     "ppc64le_linux": 85,
 }
-# rp2 alone accounts for 74 of arm_embedded's 93 real identifiers and
+# rp2 alone accounts for 74 of embedded_base's own real identifiers and
 # genuinely costs more per board than qemu/natmod's much smaller legs on
-# the same image (116s vs ~54s, measured the same way as `_WEIGHTS`
-# above) -- checked by port, not folded into one blended arm_embedded
+# the same image (116s vs ~50s, measured the same way as `_WEIGHTS`
+# above) -- checked by port, not folded into one blended embedded_base
 # number the way the first seeding did, which is exactly what let two
 # same-estimate buckets (16 rp2-heavy identifiers vs 16 natmod-arm-heavy
 # ones) land at 37 real minutes and 12 real minutes respectively.
@@ -99,11 +111,11 @@ _PORT_WEIGHTS: dict[str, float] = {
 # real QEMU execution, not just an emulated compile, ~15-20 real minutes
 # each (record 0044's own addendum). Matched by arch suffix, not image name:
 # unix's image *is* the target (record 0043/0044), so there is no shared
-# group name to key these on the way arm_embedded/esp_idf_base have one.
+# group name to key these on the way embedded_base/esp_idf_base have one.
 # Kept at the first (isolated-job) seeding's own number, deliberately not
 # re-measured from a batched run: none of these six cells has landed in a
 # small enough, single-port bucket yet to isolate a trustworthy per-id
-# share the way arm_embedded's own port split could -- the crude
+# share the way embedded_base's own port split could -- the crude
 # even-split-per-bucket estimate for them come out an implausible 30-40s,
 # contradicted outright by every real isolated measurement this project
 # has (800-1200s), so it is not trusted here.

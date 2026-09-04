@@ -1,7 +1,13 @@
 # 0090 — the checker stops reading a Dockerfile `ARG`, and [0058]'s own text gets its correction
 
-Status: Proposed — blocked on [0087]; not implemented.
-Related: [0058], [0077], [0085], [0087]
+Status: Implemented in part — items 1 and 3 landed 2026-09-04 (this record's own addendum). Item
+2 (the board-scoped floor) stays deliberately unimplemented: confirmed live, this session, that
+it does not fire a false positive today (no `MCU_SERIES=n6` board exists in `stm32`'s own rows,
+and every value [0087] actually chose already sits above the `14.3` floor regardless), so
+building a feature this project has no real row to test it against is exactly the "leave it
+theoretical rather than relying on it" [0085] itself already argued for. Revisit if an n6 board
+is ever added.
+Related: [0058], [0077], [0085], [0087], [0088], [0096]
 
 ## Three things [0085] named and none of the implementation records above cover
 
@@ -43,3 +49,34 @@ unlike [0088]/[0089], which are each a real, independently verifiable code chang
 path. Splitting further here would be the record-per-line-item CLAUDE.md's own tracker convention
 already warns against ("a row that needs a sentence to explain itself is a record whose title
 needs fixing").
+
+## Addendum, 2026-09-04 — items 1 and 3, landed alongside [0096]
+
+Picked back up while landing [0096] (merging `arm_embedded`/`riscv_embedded` into
+`embedded_base`), which made item 1's own gap worse in a way this record had not anticipated:
+[0087] had already made `current_dockerfile_pin()` read nothing at all (the regex it needs was
+already gone), so `--check` was not just stale, it was silently a no-op — `exit 0`, "ok",
+regardless of what `build-platforms.toml` actually held. Confirmed live before touching
+anything: a deliberately broken `mimxrt` `v1.20.0` row (`gcc = "13.3.1-1.1"`, [0088]'s own first
+wrong answer) passed `--check` clean.
+
+**Item 1.** `bin/refresh_toolchain_pins.py`'s `DOCKERFILE_PIN`/`DOCKERFILE_VERSION_RE` are gone.
+`current_row_pin()` reads `build-platforms.toml`'s own committed `gcc` field for the exact
+`(scope, tag)` being checked instead — real per-row validation, not a stale shared-pin
+comparison. Re-verified against the same deliberately-broken row: `--check` now exits 1 and
+names it (`v1.20.0 usermod.mimxrt: pinned 13.3.1 >= ceiling 13`), then clean again once
+restored. This surfaced a second bug [0096] itself would have shipped otherwise: natmod's own
+`arm_embedded`/`riscv_embedded` families both resolve to the merged `embedded_base` image now,
+so grouping this checker's own natmod rows by *image* (as item 1's own original text assumed)
+would have silently conflated two different `gcc` facts into one scope. Fixed the same way
+[0096] fixed the identical class of bug in `natmod/targets.py`'s own `natmod_toolchain()`: a
+direct `arch -> toolchain family` table (`NATMOD_ARCH_FAMILY`), not the image name.
+
+**Item 3.** [0096]'s own commits already regenerated `docs/reference/vendored-images.md`'s
+mapping table and corrected `README.md`/`docs/reference/design.md`'s prose (group counts, the
+`arm_embedded`/`riscv_embedded` names, [0077]'s own generator). What [0096] had not yet done —
+because it is [0058]'s own text, not [0096]'s — is [0058] acknowledging its own headline no
+longer holding for this group; added as [0058]'s own dated correction, in the same session as
+this addendum, per CLAUDE.md's own standing rule.
+
+**Item 2 stays open** — see this record's own Status line above.

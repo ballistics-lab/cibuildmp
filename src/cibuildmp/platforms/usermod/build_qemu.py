@@ -118,7 +118,7 @@ def build_qemu(
             f"qemu board {opts.board!r} not supported yet. Known: "
             f"{', '.join(QEMU_BOARD_CROSS)}"
         )
-    if not opts.tag and cross in toolchain_fetch.IMAGE_CROSS_PREFIX.values():
+    if not opts.tag and cross in toolchain_fetch.TOOLCHAIN_CROSS_PREFIX.values():
         raise UsermodBuildError(
             f"qemu/{opts.board}: a real MicroPython tag is required to "
             "resolve which cross toolchain to fetch (targets.qemu_toolchain()) "
@@ -143,9 +143,10 @@ def build_qemu(
     make_command = qemu_make_command(opts, mpy_dir, cross)
     mounts = usermod_mounts(mpy_dir, Path(opts.user_c_modules), package_dir=package_dir)
 
-    # [0086]/[0087]: `arm_embedded`/`riscv_embedded` no longer bake a
-    # cross compiler -- fetch it at container time, same as `rp2`/
-    # `natmod`. `qemu_toolchain()` returns `None` for `POWERNV9`
+    # [0086]/[0087]: `embedded_base` (`arm_embedded`/`riscv_embedded`
+    # before [0096] merged them) no longer bakes a cross compiler --
+    # fetch it at container time, same as `rp2`/`natmod`.
+    # `qemu_toolchain()` returns `None` for `POWERNV9`
     # (`powerpc64le-linux-gnu-`), whose own `ppc64le_linux` image still
     # bakes its toolchain (record 0025, untouched) -- run exactly as
     # before for that one.

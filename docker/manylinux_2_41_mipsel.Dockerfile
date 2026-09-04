@@ -63,7 +63,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # The cross-toolchain, pinned by version + URL + sha256 -- the same
-# model `arm_embedded`/`riscv_embedded`/`xtensa_esp`/`xtensa_lx106`
+# model `embedded_base`/`xtensa_esp`/`xtensa_lx106`
 # (record 0025) already use, and the whole point of the change: this
 # image no longer depends on an apt archive for an architecture its
 # upstream has abandoned. A pruned mirror or the next base-OS bump

@@ -2,7 +2,8 @@
 
 [![SWUbanner]][SWUBadge]
 [![license]][license-url]
-![micropython-tag]
+![natmod-abi]
+![usermod-tag]
 [![pypi version]][PyPiUrl]
 [![python versions]][PyPiUrl]
 [![pre-commit]][pre-commit-workflow]
@@ -86,7 +87,7 @@ are pypa's own `quay.io/pypa/<target>` directly; the handful cibuildmp
 adds a thin layer to publish as `ghcr.io/ballistics-lab/<target>`) and
 launches sibling containers, one per target, the same way cibuildwheel's
 own container runtime does. That
-covers natmod (five of the six toolchain-group images cover all ten
+covers natmod (four of the five toolchain-group images cover all ten
 arches — see [`docs/reference/vendored-images.md`](docs/reference/vendored-images.md))
 and every usermod port, `esp32` included — only the ESP-IDF `git clone` itself
 stays on the host (source, not a binary, the same reasoning `mpy_dir`
@@ -876,10 +877,10 @@ All ten `ARCH=` values `py/dynruntime.mk` accepts, each running inside a
 pulled `linux/amd64` image — natmod builds no bare-host toolchain of any
 kind any more, `x86`'s 32-bit multilib included, which is exactly what makes
 it buildable on an arm64 runner too. There is no single `natmod` image any
-more either: five of the six toolchain-group images cover all ten arches
-(`arm_embedded`, `riscv_embedded`, `xtensa_lx106`, `xtensa_esp`,
-`natmod_host`), and three of those five are shared with several usermod
-ports too, keyed by toolchain rather than by port — see
+more either: four of the five toolchain-group images cover all ten arches
+(`embedded_base`, `xtensa_lx106`, `xtensa_esp`, `natmod_host`), and two of
+those four are shared with several usermod ports too, keyed by toolchain
+rather than by port — see
 [`docs/reference/vendored-images.md`](docs/reference/vendored-images.md) for
 the full group model. Adopted in all three consuming repos and verified on
 real CI, arch by arch, not just `--dry-run`.
@@ -1138,7 +1139,7 @@ scheduled `test-all-platforms.yml` run since.
   <td>
     every board across <code>v1.20.0</code>-<code>v1.30.0-preview</code>
   </td>
-  <td><code>arm_embedded</code> (Docker) -- Pico SDK + every <code>lib/</code> it needs are vendored by the MicroPython release tarball itself[^rp2ci]</td>
+  <td><code>embedded_base</code> (Docker) -- Pico SDK + every <code>lib/</code> it needs are vendored by the MicroPython release tarball itself[^rp2ci]</td>
   <td>✅</td>
 </tr>
 <tr>
@@ -1349,8 +1350,11 @@ PyPI unless you pin a version there too.
 
 <!-- REUSABLE LINKS -->
 
-[micropython-tag]:
-https://img.shields.io/badge/v1.12%2B-orange?logo=micropython&label=micropython
+[natmod-abi]:
+https://img.shields.io/badge/mpy_v5%2B-orange?logo=micropython&label=natmod
+
+[usermod-tag]:
+https://img.shields.io/badge/v1.20%2B-orange?logo=micropython&label=usermod
 
 [license]:
 https://img.shields.io/github/license/ballistics-lab/cibuildmp

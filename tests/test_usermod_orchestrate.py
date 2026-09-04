@@ -219,9 +219,9 @@ def test_build_one_qemu_uses_default_board_not_empty_string(tmp_path, monkeypatc
     # back to the plain "qemu" shape rather than a real-row lookup) has
     # none for `build_qemu()` to resolve a cross toolchain from, so tell
     # it this board needs no fetch at all (both the module-level guard,
-    # which reads `toolchain_fetch.IMAGE_CROSS_PREFIX` directly, and the
+    # which reads `toolchain_fetch.TOOLCHAIN_CROSS_PREFIX` directly, and the
     # later resolution call).
-    monkeypatch.setattr("cibuildmp.toolchain_fetch.IMAGE_CROSS_PREFIX", {})
+    monkeypatch.setattr("cibuildmp.toolchain_fetch.TOOLCHAIN_CROSS_PREFIX", {})
     monkeypatch.setattr(
         "cibuildmp.platforms.usermod.build_qemu.targets.qemu_toolchain",
         lambda tag, cross: None,
@@ -798,9 +798,9 @@ def test_build_one_does_not_copy_a_non_unix_lib_directory(tmp_path, monkeypatch)
     # back to the plain "qemu" shape rather than a real-row lookup) has
     # none for `build_qemu()` to resolve a cross toolchain from, so tell
     # it this board needs no fetch at all (both the module-level guard,
-    # which reads `toolchain_fetch.IMAGE_CROSS_PREFIX` directly, and the
+    # which reads `toolchain_fetch.TOOLCHAIN_CROSS_PREFIX` directly, and the
     # later resolution call).
-    monkeypatch.setattr("cibuildmp.toolchain_fetch.IMAGE_CROSS_PREFIX", {})
+    monkeypatch.setattr("cibuildmp.toolchain_fetch.TOOLCHAIN_CROSS_PREFIX", {})
     monkeypatch.setattr(
         "cibuildmp.platforms.usermod.build_qemu.targets.qemu_toolchain",
         lambda tag, cross: None,

@@ -216,7 +216,8 @@ def test_run_make_resolves_relative_paths(tmp_path, monkeypatch):
 
 
 def test_run_make_fetches_the_arm_toolchain_and_puts_it_on_path(tmp_path, monkeypatch):
-    # [0086]/[0089]: `armv7emsp` is on `arm_embedded`, which no longer
+    # [0086]/[0089]: `armv7emsp` is on `embedded_base` (`arm_embedded`
+    # before record 0096 merged it with `riscv_embedded`), which no longer
     # bakes a cross compiler -- run_make() must fetch it and prepend it
     # onto PATH in the same container invocation as the real build.
     calls = _capture_docker(monkeypatch)
@@ -243,15 +244,15 @@ def test_run_make_fetches_the_arm_toolchain_and_puts_it_on_path(tmp_path, monkey
     assert expected_dir.parent in kwargs["mounts"]
     assert f'export PATH="{(expected_dir / "bin").as_posix()}:$PATH"' in script
     assert "xpack-arm-none-eabi-gcc-15.2.1-1.1-linux-x64.tar.gz" in script
-    assert "riscv" not in script  # no rename step for arm_embedded
+    assert "riscv" not in script  # no rename step for the arm family
 
 
 def test_run_make_riscv_arch_also_renames_the_xpack_prefix(tmp_path, monkeypatch):
-    # [0089]: `rv32imc` is on `riscv_embedded` -- xpack's own
-    # `riscv-none-elf-*` binaries must also be symlinked to the
-    # `riscv64-unknown-elf-*` names `py/dynruntime.mk` invokes, at
-    # container run time now that `riscv_embedded.Dockerfile`'s own
-    # build-time symlink loop is gone.
+    # [0089]: `rv32imc` is on `embedded_base` (`riscv_embedded` before
+    # record 0096) -- xpack's own `riscv-none-elf-*` binaries must also be
+    # symlinked to the `riscv64-unknown-elf-*` names `py/dynruntime.mk`
+    # invokes, at container run time now that the old
+    # `riscv_embedded.Dockerfile`'s own build-time symlink loop is gone.
     calls = _capture_docker(monkeypatch)
     toolchain_root = tmp_path / "toolchains"
 

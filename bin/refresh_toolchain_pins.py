@@ -1,9 +1,16 @@
 #!/usr/bin/env -S uv run --script
 
 """Print the real, per-`(tag, scope)` compiler pin as TOML rows -- the fact
-that would fill a new `toolchain` column in `build-platforms.toml`'s own
-`identifiers`, the same way `idf_version` already is a per-row fact for
-`esp32`.
+`build-platforms.toml`'s own per-row `gcc` field already is for `embedded_base`'s
+two toolchain families, the same way `idf_version` already is a per-row fact for
+`esp32`. `gcc` predates this script's own first landing; the docstring here used
+to describe it as a future column nothing read yet ("no resolver shipped in the
+package at all") -- untrue since [0087]/[0089]: `toolchain_fetch.resolve_toolchain()`,
+reached through `usermod/targets.py`'s `rp2_toolchain()`/`qemu_toolchain()` and
+`natmod/targets.py`'s `natmod_toolchain()`, reads exactly this field at build time.
+What is still true, and still this script's own reason to exist: nothing in
+`src/cibuildmp` *computes* a floor/ceiling window from `toolchains.toml`'s own raw
+facts -- that happens here, once, by hand-reviewed generation, never live.
 
 Third stage of the pipeline `docs/reference/toolchain-facts/toolchains.toml`'s own header
 already describes: `[tags]` names a MicroPython release ->
@@ -27,9 +34,10 @@ build time -- that logic (this script's own `resolve_row`) belongs at
 *generation* time only, same as `idf_version` was never computed live from
 `tools/ci.sh` inside `usermod/build_esp32.py`; it was read once, by a
 script, into a static TOML fact `Esp32BuildOptions.idf_version` just reads.
-A `toolchain` field here is meant to be exactly that: a plain string a
-future `dockerrun`/`build_<port>.py` reads off the row, no resolver shipped
-in the package at all.
+`gcc` is exactly that: a plain string `rp2_toolchain()`/`qemu_toolchain()`/
+`natmod_toolchain()` read straight off the row, no resolver shipped in the
+package at all -- this script is where a human decides what value goes into
+that field, never where a build recomputes one.
 
 ## What "resolve" means, per `(tag, scope)`
 
@@ -50,22 +58,35 @@ in the package at all.
 
 ## `--check`: the drift `bin/update_toolchains.py`'s own shape does not catch
 
-`bin/update_toolchains.py` (record [0046]) reports when a *shared* pin
-(one `ARG` in one Dockerfile) falls behind its own upstream's latest
-release. It has nothing to say about whether that pin is still *inside*
-every row's own window -- confirmed live, this session, against
-`docker/arm_embedded.Dockerfile`/`docker/riscv_embedded.Dockerfile`: both
-are pinned at xpack `15.2.1`/`15.2.0`, `update_toolchains.py` reports them
-as current (they *are* the newest xpack release), and both are still
-**above every `usermod.rp2`/`usermod.samd`/`usermod.nrf`/pre-`v1.27.0`
-`usermod.stm32` tag's own `<15.1` ceiling** -- a real, live, silent breakage
-`update_toolchains.py`'s own "is there a newer release" question was never
-built to see. `--check` here re-resolves every row from the *current*
-`toolchains.toml` and compares against `build-platforms.toml`'s own
-committed `toolchain` field (once one exists) or, absent that field, against
-whatever a Dockerfile currently pins for that row's own image -- exit
-nonzero and name every row outside its own window, so this class of drift
-fails a build instead of shipping silently the way it did here.
+`bin/update_toolchains.py` (record [0046]) reports when a pin falls behind
+its own upstream's latest release. It has nothing to say about whether that
+pin is still *inside* every row's own window -- confirmed live, back when
+`arm_embedded.Dockerfile`/`riscv_embedded.Dockerfile` still baked one shared
+version each: both were pinned at xpack `15.2.1`/`15.2.0`,
+`update_toolchains.py` reported them as current (they *are* the newest
+xpack release), and both were still **above every `usermod.rp2`/
+`usermod.samd`/`usermod.nrf`/pre-`v1.27.0` `usermod.stm32` tag's own
+`<15.1` ceiling** -- a real, live, silent breakage `update_toolchains.py`'s
+own "is there a newer release" question was never built to see.
+
+`--check` here re-resolves every row from the *current* `toolchains.toml`
+and compares against `build-platforms.toml`'s own already-committed `gcc`
+field for that exact `(tag, scope)` row -- exit nonzero and name every row
+outside its own window, so this class of drift fails a build instead of
+shipping silently the way it did above. **This is [0090]'s own fix, not
+[0086]'s original design**: `[0087]`/`[0089]` deleted the baked `ARG
+TOOLCHAIN_URL=` line the first version of this flag read out of
+`arm_embedded.Dockerfile`/`riscv_embedded.Dockerfile`, which meant `--check`
+silently stopped comparing against anything at all the moment those two
+records landed -- exit 0, "ok", regardless of what `build-platforms.toml`
+actually held. `[0088]`'s own `mimxrt` `v1.20.0` row is the case that check
+exists to catch: `gcc = "13.3.1-1.1"` (record [0088]'s own first, wrong
+answer) sits inside `[floor, ceiling)` for every scope's ordinary `<15.1`
+window and would pass a check that only asked that question -- it is
+`mimxrt`'s own disjoint `<13` ceiling that rejects it, the one window this
+tool's real value ([0088]'s corrected `12.3.1-1.2`) had to be re-derived
+from `toolchains.toml`'s own facts to satisfy, not assumed from the ordinary
+ladder every other row here follows.
 
 Needs `docs/reference/toolchain-facts/toolchains.toml` already generated (`bin/refresh_toolchains.py`)
 and current -- this script trusts it, it does not regenerate it.
@@ -86,20 +107,33 @@ RESOURCES = REPO / "src" / "cibuildmp" / "resources"
 # It lives under `docs/reference/` for that reason.
 FACTS = REPO / "docs" / "reference" / "toolchain-facts"
 
-# The currently-shared, image-level pins this script's own `--check` can
-# compare a resolved window against until a real `toolchain` column exists
-# in `build-platforms.toml` -- read here, not imported from
-# `bin/update_toolchains.py`, because that script's own `PINS` tracks
-# *upstream freshness* (does a newer release exist), a different question
-# from *does this version sit inside this row's own window*.
-DOCKERFILE_PIN = {
-    "arm_embedded": (REPO / "docker" / "arm_embedded.Dockerfile", "gcc-arm-embedded"),
-    "riscv_embedded": (
-        REPO / "docker" / "riscv_embedded.Dockerfile",
-        "gcc-riscv-embedded",
-    ),
+# The usermod/natmod image groups this script knows how to validate a
+# per-row `gcc` fact for. Just the one: [0087] only gave `embedded_base`'s
+# two toolchain families a real, varying per-row `gcc` field -- every other
+# image group either bakes one fixed version with nothing per-row to check
+# (`xtensa_lx106`/`xtensa_esp`), is native (`natmod_host`), or carries a
+# different per-row fact this script does not resolve a window for at all
+# (`esp32`'s own `idf_version`, `unix`'s own pypa image floor -- neither is
+# a compiler-threshold window `toolchains.toml` has facts for).
+CHECKABLE_IMAGES = frozenset({"embedded_base"})
+
+# Which of the two toolchain families `toolchain_fetch.TOOLCHAIN_CROSS_PREFIX`
+# names each natmod arch needs -- duplicated from `natmod/targets.py`'s own
+# `_NATMOD_ARCH_TOOLCHAIN_FAMILY` rather than imported (this script stays
+# decoupled from `src/cibuildmp` by design, see this file's own header) --
+# keep both in sync by hand if a new arch is ever added to either family.
+# **Not** `images[arch]` any more: record 0096 merged `arm_embedded`/
+# `riscv_embedded` into one Docker image (`embedded_base`), so grouping by
+# image name can no longer tell the two toolchain families' own separate
+# `gcc` facts apart the way it could through record 0090's own first draft.
+NATMOD_ARCH_FAMILY = {
+    "armv6m": "arm_embedded",
+    "armv7m": "arm_embedded",
+    "armv7emsp": "arm_embedded",
+    "armv7emdp": "arm_embedded",
+    "rv32imc": "riscv_embedded",
+    "rv64imc": "riscv_embedded",
 }
-DOCKERFILE_VERSION_RE = re.compile(r"xpack-\S+?-gcc-xpack/releases/download/v([\d.]+)")
 
 
 def _load_toml(path: Path) -> dict:
@@ -187,14 +221,18 @@ def real_rows(build_platforms: dict, scope: str) -> list[tuple[str, str]]:
         # natmod into the `unix` scope the way this used to -- is what keeps
         # a genuinely port-specific fact (`usermod.rp2`'s pico-sdk
         # workaround) from leaking into an arch natmod builds itself.
-        image = scope.removeprefix("natmod.")
+        #
+        # `natmod.<family>` (`arm_embedded`/`riscv_embedded`, see
+        # `NATMOD_ARCH_FAMILY`), not `natmod.<image>` -- both families
+        # share one Docker image (`embedded_base`, record 0096) but keep
+        # two distinct `gcc` facts, and grouping by image would merge them.
+        family = scope.removeprefix("natmod.")
         section = build_platforms["natmod"]
-        images = section["images"]
         tags = sorted(
             {
                 r["tag"]
                 for r in section["identifiers"]
-                if images.get(r["arch"]) == image and "gcc" in r
+                if NATMOD_ARCH_FAMILY.get(r["arch"]) == family and "gcc" in r
             }
         )
         return [(t, scope) for t in tags]
@@ -210,24 +248,56 @@ def real_rows(build_platforms: dict, scope: str) -> list[tuple[str, str]]:
     return [(t, scope) for t in tags]
 
 
-def image_for(build_platforms: dict, port: str) -> str | None:
-    """The `image` a usermod port's own build actually runs in -- several
-    ports share one (`rp2`/`samd`/`nrf`/`stm32`/`mimxrt` all resolve to
-    `arm_embedded`, record 0058), so the Dockerfile to check is never the
-    port's own name. A `natmod.<image>` scope names its image directly --
-    natmod has no per-port indirection to resolve it through."""
-    if port.startswith("natmod."):
-        return port.removeprefix("natmod.")
+def usermod_image_for(build_platforms: dict, port: str) -> str | None:
+    """The Docker image group `port`'s own build actually runs in --
+    several ports share one (`rp2`/`samd`/`nrf`/`stm32`/`mimxrt` all
+    resolve to `embedded_base`, record 0058/0096)."""
     return build_platforms.get("usermod", {}).get(port, {}).get("image")
 
 
-def current_dockerfile_pin(image: str) -> tuple[int, ...] | None:
-    entry = DOCKERFILE_PIN.get(image)
-    if entry is None:
+def natmod_image_for_family(build_platforms: dict, family: str) -> str | None:
+    """The Docker image group `family`'s own natmod rows actually run in
+    -- `embedded_base` for both `arm_embedded`/`riscv_embedded` since
+    record 0096, read off a real row (any arch `NATMOD_ARCH_FAMILY` maps
+    to `family`) rather than hardcoded, so a future re-split still
+    resolves correctly here with no change to this function."""
+    images = build_platforms["natmod"]["images"]
+    for arch, fam in NATMOD_ARCH_FAMILY.items():
+        if fam == family and arch in images:
+            return images[arch]
+    return None
+
+
+def current_row_pin(
+    build_platforms: dict, scope: str, tag: str
+) -> tuple[int, ...] | None:
+    """`build-platforms.toml`'s own already-committed `gcc` value for this
+    exact `(scope, tag)` -- what `--check` compares against the window
+    `resolve_row()` resolves, now that this is a real per-row fact
+    ([0087]/[0089]) rather than one shared Dockerfile `ARG` ([0090]).
+    Every row sharing a `(scope, tag)` carries the same value (checked
+    directly, every ARM/RISC-V-family port and natmod arch, at every
+    tag) -- the first matching row's own value is `the` value, not one of
+    several to reconcile. `None` when this `(scope, tag)` has no `gcc`
+    field at all: nothing to check, not a violation."""
+    if scope.startswith("natmod."):
+        family = scope.removeprefix("natmod.")
+        for row in build_platforms["natmod"]["identifiers"]:
+            if (
+                row["tag"] == tag
+                and NATMOD_ARCH_FAMILY.get(row["arch"]) == family
+                and row.get("gcc")
+            ):
+                return parse_ver(row["gcc"])
         return None
-    path, _ = entry
-    match = DOCKERFILE_VERSION_RE.search(path.read_text())
-    return parse_ver(match.group(1)) if match else None
+    port = scope.removeprefix("usermod.")
+    section = build_platforms.get("usermod", {}).get(port)
+    if section is None:
+        return None
+    for row in section.get("identifiers", []):
+        if row["tag"] == tag and row.get("gcc"):
+            return parse_ver(row["gcc"])
+    return None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -247,18 +317,20 @@ def main(argv: list[str] | None = None) -> int:
 
     # natmod contributes no `toolchains.toml` fact rows of its own (it is
     # not an upstream port `refresh_toolchains.py` can read a workflow for),
-    # so its scopes never appear in `facts` -- added here from the one
-    # thing that does exist for it: `build-platforms.toml`'s own image map,
-    # narrowed to images `DOCKERFILE_PIN` actually knows how to check.
-    natmod_images = set(build_platforms["natmod"]["images"].values()) & set(
-        DOCKERFILE_PIN
-    )
+    # so its scopes never appear in `facts` -- added here from
+    # `NATMOD_ARCH_FAMILY`'s own two families, narrowed to the ones this
+    # script actually knows how to check (`CHECKABLE_IMAGES`).
+    natmod_families = {
+        family
+        for family in NATMOD_ARCH_FAMILY.values()
+        if natmod_image_for_family(build_platforms, family) in CHECKABLE_IMAGES
+    }
     scopes = (
         [args.scope]
         if args.scope
         else sorted(
             {r["scope"] for r in facts if r["scope"] not in ("any", "mpy-cross")}
-            | {f"natmod.{image}" for image in natmod_images}
+            | {f"natmod.{family}" for family in natmod_families}
         )
     )
 
@@ -277,18 +349,26 @@ def main(argv: list[str] | None = None) -> int:
                 f'source = "{pin_row["source"] if pin_row else "no verified value in window"}" }}'
             )
             if args.check:
-                port = scope.removeprefix("usermod.")
-                image = image_for(build_platforms, port)
-                shared = current_dockerfile_pin(image) if image else None
-                if shared is None:
-                    continue
-                if floor and shared < floor:
-                    problems.append(
-                        f"{tag} {scope}: pinned {vstr(shared)} < floor {vstr(floor)}"
+                if scope.startswith("natmod."):
+                    image = natmod_image_for_family(
+                        build_platforms, scope.removeprefix("natmod.")
                     )
-                if ceiling and shared >= ceiling:
+                else:
+                    image = usermod_image_for(
+                        build_platforms, scope.removeprefix("usermod.")
+                    )
+                if image not in CHECKABLE_IMAGES:
+                    continue
+                current = current_row_pin(build_platforms, scope, tag)
+                if current is None:
+                    continue
+                if floor and current < floor:
                     problems.append(
-                        f"{tag} {scope}: pinned {vstr(shared)} >= ceiling {vstr(ceiling)}"
+                        f"{tag} {scope}: pinned {vstr(current)} < floor {vstr(floor)}"
+                    )
+                if ceiling and current >= ceiling:
+                    problems.append(
+                        f"{tag} {scope}: pinned {vstr(current)} >= ceiling {vstr(ceiling)}"
                     )
 
     if args.check:
@@ -298,7 +378,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  {line}", file=sys.stderr)
             return 1
         print(
-            "ok: every checked row's shared pin is inside its own window",
+            "ok: every checked row's own gcc pin is inside its own window",
             file=sys.stderr,
         )
     return 0

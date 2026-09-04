@@ -1,8 +1,9 @@
 # 0088 — `mimxrt`'s own `>= 13` ceiling gets its own `toolchain_version` row, once [0087] exists
 
-Status: Proposed — blocked on [0087]; not implemented. **The version this record names does not
-satisfy the constraint it exists to fix**; corrected in the addendum below, which is where the
-value to land comes from.
+Status: Implemented — landed 2026-09-04, once [0087] existed. `mimxrt`'s eleven `v1.20.0` rows
+carry `gcc = "12.3.1-1.2"` (the addendum's own corrected value, not this record's first, wrong
+one), pinned for real in `pinned_toolchains.toml`, and `bin/refresh_toolchain_pins.py --check`
+now validates it directly ([0090]'s own item 1).
 Related: [0084], [0085], [0087], [0090]
 
 ## The one violation the other six ports' fix does not reach
@@ -89,3 +90,22 @@ record's scope changes, only the total it is one of.
 
 Still `Proposed`, still blocked on [0087]. Nothing implemented here; this addendum only replaces
 the value the implementation should use.
+
+## Addendum, 2026-09-04 — landed, using this addendum's own corrected value
+
+[0087] had long since landed by the time this record was picked back up. All eleven `mimxrt`
+`v1.20.0` rows in `build-platforms.toml` now carry `gcc = "12.3.1-1.2"` (replacing
+`14.2.1-1.1`, the ordinary shared value every other pre-`v1.26.0` row on this image got from
+[0087]'s own general mechanism, which never special-cased `mimxrt`). `resources/
+pinned_toolchains.toml` gets the real `["arm-none-eabi-"]."12.3.1-1.2"` entry, sha256 verified
+live against the publisher's own `.sha` sidecar a second time (matches this addendum's own
+table above, and the tarball itself, byte for byte). The orphaned `"13.3.1-1.1"` entry this
+record's own first, wrong answer left behind -- never referenced by any real row -- is removed
+rather than kept alongside the correct one.
+
+Verified by the mechanism this record depends on existing: [0090]'s own item 1 landed in the
+same session, so `bin/refresh_toolchain_pins.py --check` now reads `mimxrt`'s real, committed
+`gcc` field directly and confirms `12.3.1-1.2` sits inside `[floor, ceiling) = (-, 13)` for
+`v1.20.0` -- deliberately re-broken to `13.3.1-1.1` and re-checked first, to confirm the checker
+actually catches the violation this record exists to prevent, not just that it runs clean
+against an already-correct file.

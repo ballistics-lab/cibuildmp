@@ -236,7 +236,7 @@ def _image_group_for(port: str, target: str | None) -> str | None:
 
     Reads `resources/build-platforms.toml`'s own table-level policy, not
     a row: a scalar `image = "..."` for a port with no per-build image
-    axis (`windows`, `webassembly`, `esp32`, every arm_embedded-toolchain
+    axis (`windows`, `webassembly`, `esp32`, every `embedded_base`-toolchain
     usermod port), an `images.<...>` map for one that has one (`natmod`
     keyed by `arch`, `qemu` by `board`, `unix` by its own platform tag --
     an identity map, since that port's image axis and build-target axis

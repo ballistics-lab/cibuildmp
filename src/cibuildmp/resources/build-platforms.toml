@@ -129,12 +129,12 @@ post_checkout = "make -C mpy-cross"
 # the rest of the policy it belongs with.
 images.x86       = "natmod_host"
 images.x64       = "natmod_host"
-images.armv6m    = "arm_embedded"
-images.armv7m    = "arm_embedded"
-images.armv7emsp = "arm_embedded"
-images.armv7emdp = "arm_embedded"
-images.rv32imc   = "riscv_embedded"
-images.rv64imc   = "riscv_embedded"
+images.armv6m    = "embedded_base"
+images.armv7m    = "embedded_base"
+images.armv7emsp = "embedded_base"
+images.armv7emdp = "embedded_base"
+images.rv32imc   = "embedded_base"
+images.rv64imc   = "embedded_base"
 images.xtensa    = "xtensa_lx106"
 images.xtensawin = "xtensa_esp"
 # ----------------------------------------------------
@@ -771,14 +771,14 @@ default-manifest = ""
 # two RISC-V, and `POWERNV9` on `powerpc64le-linux-gnu-`. Read straight
 # off this table's own `cross`, which for `qemu` (unlike `[natmod]`) is
 # present on every row.
-images.MICROBIT   = "arm_embedded"
-images.MPS2_AN385 = "arm_embedded"
-images.MPS2_AN500 = "arm_embedded"
-images.MPS3_AN547 = "arm_embedded"
-images.NETDUINO2  = "arm_embedded"
-images.SABRELITE  = "arm_embedded"
-images.VIRT_RV32  = "riscv_embedded"
-images.VIRT_RV64  = "riscv_embedded"
+images.MICROBIT   = "embedded_base"
+images.MPS2_AN385 = "embedded_base"
+images.MPS2_AN500 = "embedded_base"
+images.MPS3_AN547 = "embedded_base"
+images.NETDUINO2  = "embedded_base"
+images.SABRELITE  = "embedded_base"
+images.VIRT_RV32  = "embedded_base"
+images.VIRT_RV64  = "embedded_base"
 images.POWERNV9   = "ppc64le_linux"
 # ----------------------------------------------------
 post_checkout = "make -C mpy-cross && make -C ports/qemu BOARD={board} submodules"
@@ -1369,7 +1369,7 @@ artifacts_dir_name = "{name}-{ver}-{identifier}[-{variant}]"
 build-system = "cmake"
 default-manifest = "boards/manifest.py"
 
-image = "arm_embedded"
+image = "embedded_base"
 post_checkout = "make -C mpy-cross && make -C ports/rp2 BOARD={board} submodules"
 identifiers = [
     { tag = "v1.20.0", board = "ADAFRUIT_FEATHER_RP2040", mcu = "rp2040", product = "Feather RP2040", vendor = "Adafruit", variants = [], identifier = "v1.20.0-rp2-ADAFRUIT_FEATHER_RP2040", gcc = "14.2.1-1.1" },
@@ -1773,20 +1773,20 @@ identifiers = [
 identifier_format = "{tag}-mimxrt-{board}"
 artifacts_dir_name = "{name}-{ver}-{identifier}"
 
-image = "arm_embedded"
+image = "embedded_base"
 post_checkout = "make -C mpy-cross && make -C ports/mimxrt BOARD={board} submodules"
 identifiers = [
-    { tag = "v1.20.0", board = "MIMXRT1010_EVK", mcu = "mimxrt", product = "MIMXRT1010_EVK", vendor = "NXP", variants = [], cross = "arm-none-eabi-", identifier = "v1.20.0-mimxrt-MIMXRT1010_EVK", gcc = "14.2.1-1.1" },
-    { tag = "v1.20.0", board = "MIMXRT1015_EVK", mcu = "mimxrt", product = "MIMXRT1015_EVK", vendor = "NXP", variants = [], cross = "arm-none-eabi-", identifier = "v1.20.0-mimxrt-MIMXRT1015_EVK", gcc = "14.2.1-1.1" },
-    { tag = "v1.20.0", board = "MIMXRT1020_EVK", mcu = "mimxrt", product = "MIMXRT1020_EVK", vendor = "NXP", variants = [], cross = "arm-none-eabi-", identifier = "v1.20.0-mimxrt-MIMXRT1020_EVK", gcc = "14.2.1-1.1" },
-    { tag = "v1.20.0", board = "MIMXRT1050_EVK", mcu = "mimxrt", product = "MIMXRT1050_EVK", vendor = "NXP", variants = [], cross = "arm-none-eabi-", identifier = "v1.20.0-mimxrt-MIMXRT1050_EVK", gcc = "14.2.1-1.1" },
-    { tag = "v1.20.0", board = "MIMXRT1060_EVK", mcu = "mimxrt", product = "MIMXRT1060_EVK", vendor = "NXP", variants = [], cross = "arm-none-eabi-", identifier = "v1.20.0-mimxrt-MIMXRT1060_EVK", gcc = "14.2.1-1.1" },
-    { tag = "v1.20.0", board = "MIMXRT1064_EVK", mcu = "mimxrt", product = "MIMXRT1064_EVK", vendor = "NXP", variants = [], cross = "arm-none-eabi-", identifier = "v1.20.0-mimxrt-MIMXRT1064_EVK", gcc = "14.2.1-1.1" },
-    { tag = "v1.20.0", board = "MIMXRT1170_EVK", mcu = "mimxrt", product = "MIMXRT1170_EVK", vendor = "NXP", variants = [], cross = "arm-none-eabi-", identifier = "v1.20.0-mimxrt-MIMXRT1170_EVK", gcc = "14.2.1-1.1" },
-    { tag = "v1.20.0", board = "OLIMEX_RT1010", mcu = "mimxrt", product = "Olimex_RT1010Py", vendor = "OLIMEX", variants = [], cross = "arm-none-eabi-", identifier = "v1.20.0-mimxrt-OLIMEX_RT1010", gcc = "14.2.1-1.1" },
-    { tag = "v1.20.0", board = "SEEED_ARCH_MIX", mcu = "mimxrt", product = "Arch Mix", vendor = "Seeed Technology Co.,Ltd.", variants = [], cross = "arm-none-eabi-", identifier = "v1.20.0-mimxrt-SEEED_ARCH_MIX", gcc = "14.2.1-1.1" },
-    { tag = "v1.20.0", board = "TEENSY40", mcu = "mimxrt", product = "Teensy 4.0", vendor = "PJRC", variants = [], cross = "arm-none-eabi-", identifier = "v1.20.0-mimxrt-TEENSY40", gcc = "14.2.1-1.1" },
-    { tag = "v1.20.0", board = "TEENSY41", mcu = "mimxrt", product = "Teensy 4.1", vendor = "PJRC", variants = [], cross = "arm-none-eabi-", identifier = "v1.20.0-mimxrt-TEENSY41", gcc = "14.2.1-1.1" },
+    { tag = "v1.20.0", board = "MIMXRT1010_EVK", mcu = "mimxrt", product = "MIMXRT1010_EVK", vendor = "NXP", variants = [], cross = "arm-none-eabi-", identifier = "v1.20.0-mimxrt-MIMXRT1010_EVK", gcc = "12.3.1-1.2" },
+    { tag = "v1.20.0", board = "MIMXRT1015_EVK", mcu = "mimxrt", product = "MIMXRT1015_EVK", vendor = "NXP", variants = [], cross = "arm-none-eabi-", identifier = "v1.20.0-mimxrt-MIMXRT1015_EVK", gcc = "12.3.1-1.2" },
+    { tag = "v1.20.0", board = "MIMXRT1020_EVK", mcu = "mimxrt", product = "MIMXRT1020_EVK", vendor = "NXP", variants = [], cross = "arm-none-eabi-", identifier = "v1.20.0-mimxrt-MIMXRT1020_EVK", gcc = "12.3.1-1.2" },
+    { tag = "v1.20.0", board = "MIMXRT1050_EVK", mcu = "mimxrt", product = "MIMXRT1050_EVK", vendor = "NXP", variants = [], cross = "arm-none-eabi-", identifier = "v1.20.0-mimxrt-MIMXRT1050_EVK", gcc = "12.3.1-1.2" },
+    { tag = "v1.20.0", board = "MIMXRT1060_EVK", mcu = "mimxrt", product = "MIMXRT1060_EVK", vendor = "NXP", variants = [], cross = "arm-none-eabi-", identifier = "v1.20.0-mimxrt-MIMXRT1060_EVK", gcc = "12.3.1-1.2" },
+    { tag = "v1.20.0", board = "MIMXRT1064_EVK", mcu = "mimxrt", product = "MIMXRT1064_EVK", vendor = "NXP", variants = [], cross = "arm-none-eabi-", identifier = "v1.20.0-mimxrt-MIMXRT1064_EVK", gcc = "12.3.1-1.2" },
+    { tag = "v1.20.0", board = "MIMXRT1170_EVK", mcu = "mimxrt", product = "MIMXRT1170_EVK", vendor = "NXP", variants = [], cross = "arm-none-eabi-", identifier = "v1.20.0-mimxrt-MIMXRT1170_EVK", gcc = "12.3.1-1.2" },
+    { tag = "v1.20.0", board = "OLIMEX_RT1010", mcu = "mimxrt", product = "Olimex_RT1010Py", vendor = "OLIMEX", variants = [], cross = "arm-none-eabi-", identifier = "v1.20.0-mimxrt-OLIMEX_RT1010", gcc = "12.3.1-1.2" },
+    { tag = "v1.20.0", board = "SEEED_ARCH_MIX", mcu = "mimxrt", product = "Arch Mix", vendor = "Seeed Technology Co.,Ltd.", variants = [], cross = "arm-none-eabi-", identifier = "v1.20.0-mimxrt-SEEED_ARCH_MIX", gcc = "12.3.1-1.2" },
+    { tag = "v1.20.0", board = "TEENSY40", mcu = "mimxrt", product = "Teensy 4.0", vendor = "PJRC", variants = [], cross = "arm-none-eabi-", identifier = "v1.20.0-mimxrt-TEENSY40", gcc = "12.3.1-1.2" },
+    { tag = "v1.20.0", board = "TEENSY41", mcu = "mimxrt", product = "Teensy 4.1", vendor = "PJRC", variants = [], cross = "arm-none-eabi-", identifier = "v1.20.0-mimxrt-TEENSY41", gcc = "12.3.1-1.2" },
     { tag = "v1.21.0", board = "ADAFRUIT_METRO_M7", mcu = "mimxrt", product = "Adafruit Metro M7", vendor = "Adafruit", variants = [], cross = "arm-none-eabi-", identifier = "v1.21.0-mimxrt-ADAFRUIT_METRO_M7", gcc = "14.2.1-1.1" },
     { tag = "v1.21.0", board = "MIMXRT1010_EVK", mcu = "mimxrt", product = "MIMXRT1010_EVK", vendor = "NXP", variants = [], cross = "arm-none-eabi-", identifier = "v1.21.0-mimxrt-MIMXRT1010_EVK", gcc = "14.2.1-1.1" },
     { tag = "v1.21.0", board = "MIMXRT1015_EVK", mcu = "mimxrt", product = "MIMXRT1015_EVK", vendor = "NXP", variants = [], cross = "arm-none-eabi-", identifier = "v1.21.0-mimxrt-MIMXRT1015_EVK", gcc = "14.2.1-1.1" },
@@ -1995,7 +1995,7 @@ identifiers = [
 identifier_format = "{tag}-samd-{board}"
 artifacts_dir_name = "{name}-{ver}-{identifier}[-{variant}]"
 
-image = "arm_embedded"
+image = "embedded_base"
 post_checkout = "make -C mpy-cross && make -C ports/samd BOARD={board} submodules"
 identifiers = [
     { tag = "v1.20.0", board = "ADAFRUIT_FEATHER_M0_EXPRESS", mcu = "samd21", product = "Feather M0 Express", vendor = "Adafruit", variants = [], cross = "arm-none-eabi-", identifier = "v1.20.0-samd-ADAFRUIT_FEATHER_M0_EXPRESS", gcc = "14.2.1-1.1" },
@@ -2239,7 +2239,7 @@ identifiers = [
 identifier_format = "{tag}-stm32-{board}"
 artifacts_dir_name = "{name}-{ver}-{identifier}[-{variant}]"
 
-image = "arm_embedded"
+image = "embedded_base"
 post_checkout = "make -C mpy-cross && make -C ports/stm32 BOARD={board} submodules"
 identifiers = [
     { tag = "v1.20.0", board = "ADAFRUIT_F405_EXPRESS", mcu = "stm32f4", product = "F405 Express", vendor = "Adafruit", variants = [], cross = "arm-none-eabi-", identifier = "v1.20.0-stm32-ADAFRUIT_F405_EXPRESS", gcc = "14.2.1-1.1" },
@@ -3270,7 +3270,7 @@ identifiers = [
 identifier_format = "{tag}-psoc-edge-{board}"
 artifacts_dir_name = "{name}-{ver}-{identifier}"
 
-image = "arm_embedded"
+image = "embedded_base"
 pre_checkout = "sudo apt-get install gcc-arm-none-eabi libnewlib-arm-none-eabi"
 post_checkout = "make -C mpy-cross && make -C ports/psoc-edge BOARD={board} submodules"
 identifiers = [
@@ -3289,7 +3289,7 @@ identifiers = [
 identifier_format = "{tag}-alif-{board}"
 artifacts_dir_name = "{name}-{ver}-{identifier}"
 
-image = "arm_embedded"
+image = "embedded_base"
 post_checkout = "make -C mpy-cross && make -C ports/alif BOARD={board} submodules"
 identifiers = [
     { tag = "v1.26.0", board = "ALIF_ENSEMBLE", mcu = "AE722F80F55D5XX", product = "Ensemble E7 DevKit", vendor = "Alif Semiconductor", toolchain_version = "13.3.Rel1", variants = [], identifier = "v1.26.0-alif-ALIF_ENSEMBLE" },
@@ -3366,7 +3366,7 @@ identifiers = [
 identifier_format = "{tag}-cc3200-{board}"
 artifacts_dir_name = "{name}-{ver}-{identifier}"
 
-image = "arm_embedded"
+image = "embedded_base"
 identifiers = [
     { tag = "v1.18", board = "WIPY", mcu = "cc3200", product = "WiPy Module", vendor = "Pycom", variants = [], cross = "arm-none-eabi-", identifier = "v1.18-cc3200-WIPY", gcc = "14.2.1-1.1" },
     { tag = "v1.19", board = "WIPY", mcu = "cc3200", product = "WiPy Module", vendor = "Pycom", variants = [], cross = "arm-none-eabi-", identifier = "v1.19-cc3200-WIPY", gcc = "14.2.1-1.1" },
@@ -3413,7 +3413,7 @@ identifiers = [
 identifier_format = "{tag}-renesas-ra-{board}"
 artifacts_dir_name = "{name}-{ver}-{identifier}"
 
-image = "arm_embedded"
+image = "embedded_base"
 post_checkout = "make -C mpy-cross && make -C ports/renesas-ra BOARD={board} submodules"
 identifiers = [
     { tag = "v1.19", board = "RA4M1_CLICKER", mcu = "RA4M1", product = "Mikroe RA4M1 Clicker", vendor = "MikroElektronika", variants = [], cross = "arm-none-eabi-", identifier = "v1.19-renesas-ra-RA4M1_CLICKER", gcc = "14.2.1-1.1" },
@@ -3561,7 +3561,7 @@ identifiers = [
 identifier_format = "{tag}-nrf-{board}"
 artifacts_dir_name = "{name}-{ver}-{identifier}"
 
-image = "arm_embedded"
+image = "embedded_base"
 post_checkout = "make -C mpy-cross && make -C ports/nrf BOARD={board} submodules"
 identifiers = [
     { tag = "v1.18", board = "actinius_icarus", mcu = "nrf91", product = "actinius_icarus", vendor = "Actinius", variants = [], cross = "arm-none-eabi-", identifier = "v1.18-nrf-actinius_icarus", gcc = "14.2.1-1.1" },

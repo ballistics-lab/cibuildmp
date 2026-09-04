@@ -56,10 +56,7 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 ### In progress / Proposed
 
 - [ ] [0095] `cache_root()` is not one cache: fetched source persists, build state dies with the container
-- [ ] [0085] `arm_embedded` thins out: the toolchain version stops being the image's name and becomes a row fact
 - [ ] [0094] Arm's own GNU toolchain registry is the third choice [0085] said did not exist
-- [ ] [0088] `mimxrt`'s own `>= 13` ceiling gets its own `toolchain_version` row, once [0087] exists
-- [ ] [0090] the checker stops reading a Dockerfile `ARG`, and [0058]'s own text gets its correction
 - [ ] [0083] replace `windows.Dockerfile`'s apt `gcc-mingw-w64` split with one fully prebuilt llvm-mingw toolchain
 - [ ] [0047] the run output works, but it is not cibuildwheel's
 - [ ] [0046] nothing notices when a pin goes stale, except container images
@@ -71,6 +68,10 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### Implemented
 
+- [x] [0096] `arm_embedded` and `riscv_embedded` collapse into one `embedded_base` image
+- [x] [0090] the checker stops reading a Dockerfile `ARG`, and [0058]'s own text gets its correction
+- [x] [0088] `mimxrt`'s own `>= 13` ceiling gets its own `toolchain_version` row, once [0087] exists
+- [x] [0085] `arm_embedded` thins out: the toolchain version stops being the image's name and becomes a row fact
 - [x] [0089] `natmod`'s own `arm_embedded`/`riscv_embedded` rows get `toolchain_version` too
 - [x] [0087] `arm_embedded`/`riscv_embedded` lose their baked cross toolchain; `toolchain_version` becomes a real, read field
 - [x] [0086] a generic in-container tarball toolchain fetch, generalized out of `arm_embedded.Dockerfile`'s own build-time recipe
@@ -272,3 +273,4 @@ record is added.
 [0093]: records/0093-pre-v1-20-0-tags-had-never-built.md
 [0094]: records/0094-arm-gnu-toolchain-is-a-real-third-choice-for-arm-embedded.md
 [0095]: records/0095-cache-root-splits-source-from-build-state.md
+[0096]: records/0096-arm-riscv-embedded-collapse-into-embedded-base.md
