@@ -1,0 +1,23 @@
+# Record 0097's own living proof, not a hypothetical: LVGL's real MicroPython
+# bindings (github.com/lvgl/lv_binding_micropython) -- a heavy, external
+# usermod module this project neither wrote nor controls -- build clean
+# through cibuildmp's real usermod path and actually run.
+#
+# `lv_binding_micropython/` here is never committed (see .gitignore, the
+# same "no vendoring" call [0054] makes for examples/usercmodule's own real
+# upstream source) -- .github/workflows/verify-lv-binding-micropython.yml
+# clones it fresh every run, at the exact commit `lv_micropython` (LVGL's
+# own MicroPython fork, the pairing their own CI actually tests) pins as
+# its own `user_modules/lv_binding_micropython` submodule, with its own
+# `lvgl`/`pycparser` submodules initialized the same way that workflow's own
+# header explains.
+#
+# No `build =` here, on purpose -- the same reason `examples/usercmodule/
+# cibuildmp.toml`'s own header gives: the workflow's own `build:` input is
+# the one place this identifier should be named, so a default here cannot
+# duplicate it and drift.
+#
+# `user-c-modules` points straight at the clone's own root: it carries both
+# `micropython.mk` (Make ports) and `micropython.cmake` (CMake ports)
+# already, no wrapper of any kind needed.
+user-c-modules = "lv_binding_micropython"

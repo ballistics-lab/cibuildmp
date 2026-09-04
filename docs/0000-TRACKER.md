@@ -67,6 +67,7 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### Implemented
 
+- [x] [0097] a real, external, heavy usermod module builds through cibuildmp unmodified
 - [x] [0095] `cache_root()` is not one cache: fetched source persists, build state dies with the container
 - [x] [0096] `arm_embedded` and `riscv_embedded` collapse into one `embedded_base` image
 - [x] [0090] the checker stops reading a Dockerfile `ARG`, and [0058]'s own text gets its correction
@@ -274,3 +275,4 @@ record is added.
 [0094]: records/0094-arm-gnu-toolchain-is-a-real-third-choice-for-arm-embedded.md
 [0095]: records/0095-cache-root-splits-source-from-build-state.md
 [0096]: records/0096-arm-riscv-embedded-collapse-into-embedded-base.md
+[0097]: records/0097-lv-binding-micropython-builds-through-cibuildmp.md

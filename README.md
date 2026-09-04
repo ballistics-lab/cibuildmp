@@ -27,6 +27,16 @@ release from `v1.12` on (ABI 5 through 6.3), **usermod** every port from
 `v1.20.0` on (`qemu` from `v1.24.0`). Both run to the newest preview release
 the pinned tag table knows.
 
+> [!TIP]
+> **We can build even this.** [`lv_binding_micropython`](https://github.com/lvgl/lv_binding_micropython)
+> — LVGL's own real MicroPython bindings, a heavy external module this
+> project neither wrote nor controls, code generation and all — builds
+> clean through cibuildmp's usermod path with zero changes to cibuildmp
+> itself, and the result actually renders a frame, not just links. See
+> [`examples/lv_binding_micropython/`](examples/lv_binding_micropython/),
+> [`.github/workflows/verify-lv-binding-micropython.yml`](.github/workflows/verify-lv-binding-micropython.yml),
+> and record [0097][0097] for the live proof.
+
 ## Why
 
 MicroPython gives a native C extension two standard, unrelated build paths:
@@ -727,6 +737,7 @@ naming a scalar option in `inherit` is a config error, not a silent no-op.
 [0075]: docs/records/0075-top-level-scalar-keys-are-validated.md
 [0076]: docs/records/0076-the-mipsel-holdout-is-bclibc-and-wasm3-not-a7p.md
 [0077]: docs/records/0077-docs-drift-is-a-failing-test-not-a-discipline-problem.md
+[0097]: docs/records/0097-lv-binding-micropython-builds-through-cibuildmp.md
 
 ## When a build fails
 
