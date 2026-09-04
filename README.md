@@ -644,10 +644,6 @@ Two notes on individual keys:
   the path it is given, so a flat single-module layout would otherwise link
   nothing and still succeed. `cibuildmp` detects that shape and adjusts;
   you do not need to point one level up yourself.
-- `no-user-c-modules = true` builds a stock, unmodified upstream MicroPython
-  through this same usermod path — no `USER_C_MODULES`, nothing of your own
-  in the result. Mutually exclusive with `user-c-modules`; setting both is an
-  error, not a precedence rule ([0056]).
 - `module-dir` and `user-c-modules` accept a literal `{micropython}`
   placeholder, substituted with the pinned checkout cibuildmp itself
   fetched ([0071]/[0072]) — `module-dir = "{micropython}/examples/natmod/btree"`
@@ -667,6 +663,35 @@ Two notes on individual keys:
 
   So an override for the flagged variant is `[override."*rv32imc+0x3"]`, and
   a plain `skip = "*-rv32imc"` will *not* match it — `*-rv32imc*` does.
+
+### Building stock upstream firmware
+
+`cibuildmp` is not only for building *your own* C module into a port — set
+`no-user-c-modules = true` and it builds a stock, unmodified upstream
+MicroPython through the exact same usermod path instead: no
+`USER_C_MODULES`, nothing of your own in the result. Mutually exclusive
+with `user-c-modules`; setting both is a load-time error, not a precedence
+rule ([0056]).
+
+That makes the whole matrix this project already resolves — every port,
+every board, every pinned toolchain — usable as a plain "does upstream
+still build here" check, with no C module involved at all. Useful for this
+project's own consumers, but arguably more useful to MicroPython's own
+maintainers: a regression check across a real cross-toolchain/board matrix
+that costs nothing to run beyond pointing `--build` at the tags and
+identifiers you care about, e.g.:
+
+```console
+$ CIBMP_NO_USER_C_MODULES=1 cibuildmp --build "v1.29.0-manylinux_2_28_x86_64 v1.29.0-rp2-RPI_PICO"
+```
+
+[`examples/bare-firmware`](examples/bare-firmware) is exactly this — no
+`natmod/`, no `usermod/`, no `src/`, just a `cibuildmp.toml` naming two
+targets (one Make-driven port, one CMake-driven one — record 0056's own
+two build systems). `.github/workflows/build-examples.yml`'s own
+`build-bare-firmware` job builds it on every push, activating the flag via
+`CIBMP_NO_USER_C_MODULES` rather than the TOML key, so it doubles as a
+live demonstration of the environment-variable form.
 
 ### Environment variables
 
