@@ -99,41 +99,39 @@ def test_ro_mounts_are_bound_read_only_and_plain_mounts_are_not(calls):
 
     create = _create(calls)
     assert "/rw:/rw" in create
-    assert "/ro:/ro:ro" in create
+    assert "/ro:/cibuildmp-lower-1:ro" in create
 
 
-def test_overlay_container_declares_the_lower_as_a_read_only_bind(calls):
-    container = dockerrun.overlay_container(
-        Path("/checkout"), at=PurePosixPath("/mp"), image="img"
-    )
-    with container:
+def test_overlay_container_binds_the_lower_out_of_the_way(calls):
+    """Not at its own host path, unlike every other mount: `overlay()` needs
+    that path free to mount the writable view on."""
+    with dockerrun.overlay_container(Path("/checkout"), image="img"):
         pass
 
-    assert "/checkout:/checkout:ro" in _create(calls)
+    assert "/checkout:/cibuildmp-lower-1:ro" in _create(calls)
 
 
-def test_overlay_mounts_lower_at_its_own_host_path(calls):
-    """`lowerdir` is the host path itself: Docker has already bound it
-    read-only, and re-binding it inside would need a mount the container
-    cannot add to itself for a tree it does not own."""
-    with dockerrun.overlay_container(
-        Path("/checkout"), at=PurePosixPath("/mp"), image="img"
-    ) as container:
-        container.overlay(Path("/checkout"), at=PurePosixPath("/mp"))
+def test_overlay_mounts_the_writable_view_at_the_trees_own_host_path(calls):
+    """The whole point: a `make` command line built from host paths runs
+    unchanged inside, the same convention `run()` already established. A
+    fixed `/mp` would make every driver translate `mpy_dir`, `BUILD=`,
+    `USER_C_MODULES` and `MICROPY_MPYCROSS` on the way in."""
+    with dockerrun.overlay_container(Path("/checkout"), image="img") as container:
+        container.overlay(Path("/checkout"))
 
-    script = next(c for c in calls if "mount" in " ".join(c))[-1]
-    assert "lowerdir=/checkout" in script
+    script = next(c for c in calls if "lowerdir=" in c[-1])[-1]
+    assert "lowerdir=/cibuildmp-lower-1" in script
     assert f"upperdir={dockerrun.OVERLAY_SCRATCH}/up-1" in script
     assert f"workdir={dockerrun.OVERLAY_SCRATCH}/work-1" in script
-    assert script.rstrip().endswith("/mp")
+    assert script.rstrip().endswith("/checkout")
 
 
 def test_two_overlays_in_one_container_do_not_share_upper_dirs(calls):
     with dockerrun.Container(
         image="img", ro_mounts=[Path("/a"), Path("/b")]
     ) as container:
-        container.overlay(Path("/a"), at=PurePosixPath("/mp-a"))
-        container.overlay(Path("/b"), at=PurePosixPath("/mp-b"))
+        container.overlay(Path("/a"))
+        container.overlay(Path("/b"))
 
     scripts = [c[-1] for c in calls if "lowerdir=" in c[-1]]
     assert len(scripts) == 2
@@ -145,7 +143,7 @@ def test_overlay_refuses_a_lower_that_was_never_bound(calls):
         dockerrun.Container(image="img") as container,
         pytest.raises(UsermodBuildError, match="read-only bind"),
     ):
-        container.overlay(Path("/never-mounted"), at=PurePosixPath("/mp"))
+        container.overlay(Path("/never-mounted"))
 
 
 def test_overlay_refuses_when_the_container_asked_for_none(calls):
@@ -153,7 +151,7 @@ def test_overlay_refuses_when_the_container_asked_for_none(calls):
         dockerrun.Container(image="img", overlay=False) as container,
         pytest.raises(UsermodBuildError, match="overlay=False"),
     ):
-        container.overlay(Path("/x"), at=PurePosixPath("/mp"))
+        container.overlay(Path("/x"))
 
 
 def test_call_outside_the_with_block_is_an_error():

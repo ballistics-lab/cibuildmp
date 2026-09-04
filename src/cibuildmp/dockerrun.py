@@ -850,8 +850,12 @@ class Container:
             command += [*OVERLAY_CREATE_ARGS, "-v", OVERLAY_SCRATCH]
         for mount in self.mounts:
             command += ["-v", f"{mount.as_posix()}:{mount.as_posix()}"]
-        for mount in self.ro_mounts:
-            command += ["-v", f"{mount.as_posix()}:{mount.as_posix()}:ro"]
+        # Read-only binds are *not* at their own host path, unlike every
+        # other mount here: `overlay()` puts the writable view there, and a
+        # lowerdir shadowed by the overlay mounted on top of it is not a
+        # lowerdir at all.
+        for index, mount in enumerate(self.ro_mounts, start=1):
+            command += ["-v", f"{mount.as_posix()}:{_lower_path(index)}:ro"]
         for key, value in self.env.items():
             command += ["-e", f"{key}={value}"]
         # See this module's own section comment for why the keep-alive is a
@@ -878,17 +882,27 @@ class Container:
         )
         self._started = False
 
-    def overlay(self, lower: Path, *, at: PurePosixPath) -> None:
-        """Present host directory `lower` at `at`, writable, without the
-        container being able to change it.
+    def overlay(self, lower: Path) -> None:
+        """Present host directory `lower` **at its own host path**, writable,
+        without the container being able to change it.
 
-        `lower` is bind-mounted read-only and an overlayfs is mounted over
-        it, so every write the build makes -- a `BUILD=` tree, libffi's own
-        in-tree `autogen.sh` output, `mpy-cross/build/`, rp2's CMake
-        directory -- lands in the container's upper layer and dies with the
-        container. The host copy is shared by every container that mounts
-        it and is never duplicated: this is what lets one cached checkout
-        serve a whole run.
+        `lower` is bind-mounted read-only somewhere out of the way and an
+        overlayfs is then mounted over its real path, so every write the
+        build makes -- a `BUILD=` tree, libffi's own in-tree `autogen.sh`
+        output, `mpy-cross/build/`, rp2's CMake directory -- lands in the
+        container's upper layer and dies with the container. The host copy
+        is shared by every container that mounts it and is never
+        duplicated: this is what lets one cached checkout serve a whole run.
+
+        **The mount point is `lower` itself, not a tidy `/mp`.** That keeps
+        the convention `run()` already established and this module's own
+        header states -- everything is visible inside at its own identical
+        host path -- so a `make` command line built from host paths needs no
+        rewriting to run in here. The alternative, mounting at a fixed
+        container path, would mean every driver translating `mpy_dir`,
+        `BUILD=`, `USER_C_MODULES`, `FROZEN_MANIFEST` and
+        `MICROPY_MPYCROSS` on the way in, and a single missed one would
+        produce a build that works by reading the wrong tree.
 
         Called after `__enter__`, because the mount is itself a command run
         inside the container -- `docker create` has no equivalent, and
@@ -900,15 +914,6 @@ class Container:
             raise UsermodBuildError(msg)
         # A distinct upper/work pair per call, so a caller may overlay more
         # than one tree into one container without them colliding.
-        self._lowers += 1
-        upper = f"{OVERLAY_SCRATCH}/up-{self._lowers}"
-        work = f"{OVERLAY_SCRATCH}/work-{self._lowers}"
-        # `lowerdir` is the host path itself, already bind-mounted read-only
-        # by `docker create` -- a bind cannot be added to a running
-        # container, so it has to have been declared there. That is the
-        # whole reason `overlay_container()` exists rather than callers
-        # building a `Container` by hand: the two halves are decided at
-        # different moments and are easy to get out of step.
         if lower not in self.ro_mounts:
             msg = (
                 f"overlay() needs {lower} declared as a read-only bind at "
@@ -916,15 +921,19 @@ class Container:
                 "constructing Container directly"
             )
             raise UsermodBuildError(msg)
+        index = self.ro_mounts.index(lower) + 1
+        lower_at = _lower_path(index)
+        upper = f"{OVERLAY_SCRATCH}/up-{index}"
+        work = f"{OVERLAY_SCRATCH}/work-{index}"
         self.call(
             [
                 "sh",
                 "-c",
                 (
-                    f"mkdir -p {upper} {work} {at} && "
+                    f"mkdir -p {upper} {work} {lower.as_posix()} && "
                     f"mount -t overlay overlay "
-                    f"-o lowerdir={lower.as_posix()},upperdir={upper},"
-                    f"workdir={work} {at}"
+                    f"-o lowerdir={lower_at},upperdir={upper},"
+                    f"workdir={work} {lower.as_posix()}"
                 ),
             ],
             workdir=PurePosixPath("/"),
@@ -1063,17 +1072,23 @@ class Container:
             raise UsermodBuildError(msg) from exc
 
 
+def _lower_path(index: int) -> str:
+    """Where the `index`-th read-only bind lands inside the container -- out
+    of the way, since `overlay()` needs the tree's own path free to mount
+    the writable view on."""
+    return f"/cibuildmp-lower-{index}"
+
+
 def overlay_container(
     lower: Path,
     *,
-    at: PurePosixPath,
     image: str,
     oci_platform: str | None = None,
     mounts: list[Path] | None = None,
     env: dict[str, str] | None = None,
 ) -> Container:
     """A `Container` with `lower` already declared as a read-only bind, ready
-    for `overlay(lower, at=at)` once entered.
+    for `overlay(lower)` once entered.
 
     The two halves have to agree and are easy to get wrong apart: the bind
     can only be declared at `docker create` time, while the overlay can only
