@@ -1,10 +1,10 @@
 # 0095 — `cache_root()` is not one cache: fetched source persists, build state dies with the container
 
 Status: In progress — **the plan below is superseded by addendum 2 (2026-09-04); read that
-first, then addendum 4 (the runner allows it), addendum 5 (what is actually in the code) and
-addendum 8 (`rp2` migrated).** Two of six ports are migrated; the transitional dual path
-addendum 5 describes has to be deleted when the last one is. Only item 5 (reports out of
-`cache_root()`) is settled and landed. Items 1-3 landed as
+first, then addendum 4 (the runner allows it), addendum 5 (what is actually in the code),
+addendum 8 (`rp2` migrated) and addendum 9 (`windows` migrated).** Three of six ports are
+migrated; the transitional dual path addendum 5 describes has to be deleted when the last one
+is. Only item 5 (reports out of `cache_root()`) is settled and landed. Items 1-3 landed as
 described and work, but answer the wrong question — they place a build tree on the host, which the
 tool has no reason to own; addendum 2 replaces them with a `:ro` bind plus an overlayfs upper
 inside the container, measured working. Item 4's instinct was right and its mechanism wrong. Item
@@ -595,3 +595,42 @@ exercises this port for real (`{tag}-rp2-RPI_PICO}`, `examples/usercmodule`, [00
 push with no branch filter; whoever reads this next should check that job's own latest run before
 trusting this addendum, the same caution addendum 6 asked for and addendum 7 needed a second look
 to actually follow.
+
+**Verified live**, `test-upstream-usermodule.yml` run 33888833430: `build-rp2` green in 3m22s, a
+real upstream `examples/usercmodule` build through the migrated driver. `build-examples.yml` run
+33888833566 (the broader `unix` matrix) stayed green too — no regression in the port migrated
+before this one.
+
+## Addendum 9, 2026-09-04 — `windows` migrates to `Container`/overlay
+
+Third of six. Structurally the simplest migration so far: `windows` has no `deplibs`-equivalent
+step and nothing in `ports/windows/Makefile` writes outside `BUILD=`, so unlike `unix` the overlay
+buys this port nothing on its own merits — it is needed purely because `container_mpy_cross()`
+writes its binary under `mpy_dir/mpy-cross/build` once given a `container=`, and that path only
+exists if `mpy_dir` is writable inside. Same shape as `build_unix()`/`build_rp2()` regardless:
+`overlay_container()`, `container.overlay(mpy_dir)`, every command through `container.call()`,
+finished `.exe` `cp`'d into `staging` before the container exits.
+
+`opts.build_dir` (`BUILD=`) needed **no change at all** — it was already a `scratch_root()`-based
+host path (`orchestrate._resolved_build_dir()`, unchanged since before [0095] even started this
+port's own migration) that this driver never mounts. Under the pre-`Container` model that path was
+a real host directory `dockerrun.run()` bind-mounted; under this one it is never mounted at all, so
+`make` creates and fills it purely inside the container's own writable root filesystem — the same
+"BUILD= redirects state away from the checkout, and not mounting it any more is what makes that
+state die with the container" fact addendum 5 already established for `unix`'s own build tree.
+
+`usermod_mounts()` is no longer called here either; a local `_windows_project_mounts()` mirrors
+`build_unix.py`'s own `_project_mounts()` — a Make port mounts `USER_C_MODULES` itself (a
+directory), unlike the CMake ports' file-`.parent` convention `build_rp2.py`'s own
+`_rp2_project_mounts()` uses.
+
+`probe_supported_cflags()`'s own two-container-per-build shape ([0091]) is now two `exec`s in the
+one long-lived container instead of two separate `docker run --rm`s — no code change needed there
+either, both helpers already took the `container=` parameter [0095]'s addendum 5 built.
+
+Not yet re-verified live. Unlike the claim this addendum first carried (corrected before landing,
+not after): `test-upstream-usermodule.yml` does have its own `build-windows` job, running the real
+upstream `examples/usercmodule` and a wine smoke test, and `build-examples.yml`'s own usermod
+matrix covers all three `windows` arches too. Whoever picks this up should read that job's own
+latest run before trusting this addendum, the same caution addendum 6 asked for and addendum 7
+needed a second look to actually follow.
