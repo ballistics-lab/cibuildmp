@@ -455,3 +455,63 @@ gone; `mpyhouse/` holds the artifact, `reports/` and `.gitignore`.
 2. `windows`, `webassembly`, `qemu`.
 3. `esp32` — the only port never run through an overlay at all.
 4. Delete the transition: `container=`, `run()`, `scratch_root()`.
+
+## Addendum 6, 2026-09-04 — handoff: two CI regressions, and where to pick this up
+
+Written for whoever continues this. **Verify CI state before trusting anything below** — the last
+push at the time of writing had not finished.
+
+### Two regressions this migration caused, both found only by CI
+
+Neither was reachable from a workstation, and both are worth knowing as a class rather than as
+incidents.
+
+1. **The host `mpy-cross` cannot leave the checkout** (`c279a95`, regression from `b9222ee`).
+   Item 3 moved `sources.build_mpy_cross()` under `scratch_root()`. Its one caller is `usermod`'s
+   `qemu`, which passes **no** `MICROPY_MPYCROSS=` and reaches the binary through
+   `py/mkrules.mk`'s own default path. With that path empty, `mkrules.mk`'s
+   `$(MICROPY_MPYCROSS_DEPENDENCY)` rule builds mpy-cross itself as a sub-make of the port build,
+   compiling the *port's* `genhdr/qstrdefs.generated.h` against mpy-cross's qstr pool:
+   `unsigned conversion from 'int' to 'unsigned char' changes value from '2791' to '231'
+   [-Werror=overflow]`. Addendum 1's table of "paths upstream fixes" named natmod's mpy-cross and
+   rp2/esp32's CMake trees and **missed this one**, because it is a *host* build reaching an
+   upstream-fixed path rather than a container one.
+2. **`Container` did not carry `linux32`.** `run()` probes the container's kernel and wraps the
+   command when a 32-bit image runs on a 64-bit one; the first version of `Container` simply did
+   not. On `ubuntu-24.04-arm` building `manylinux_2_31_armv7l`, `uname -m` then reports the
+   kernel's `aarch64` inside a correctly-selected 32-bit container, libffi's `configure` picks the
+   wrong machine-dependent sources, and the port links against a `libffi.a` with no `ffi_call` in
+   it.
+
+**The lesson for the remaining five ports is the same in both cases**: a local end-to-end run on an
+x86_64 workstation building an x86_64 target exercises none of the emulation, none of the 32-bit
+handling, and none of the arm runner. Green locally is not green. `build-examples.yml` is the
+check that matters, and it has to be read *per job* — the arm job's own matrix cell is where both
+of these surfaced.
+
+**Also read the failure against the right commit.** The first *completed* red run sat on a
+docs-only commit, because the two pushes between it and the culprit were cancelled by newer
+pushes. `gh run list --workflow=build-examples.yml` and walking back to the last `success` is what
+identifies the real one.
+
+### Where to pick up
+
+- `unix` is migrated and green locally; whether it is green on the arm runner depends on the
+  `linux32` fix above, which was pushed but unverified at the time of writing.
+- Next: `rp2` (already run through an overlay by hand — 44.6 s, `firmware.uf2` 667648 B), then
+  `windows`/`webassembly`/`qemu`, then `esp32` (never run through an overlay at all).
+- `qemu` specifically closes two things at once: it is the last member of
+  `_HOST_MPY_CROSS_PORTS`, so migrating it is what finally lets `sources.build_mpy_cross()` stop
+  writing into the checkout, and what makes `action.yml`'s own `build-essential` unnecessary.
+- Then delete the transition: the `container=` parameters on `probe_supported_cflags()`,
+  `container_mpy_cross()`, `run_unix_deplibs()` and `repair_unix_binary()`; `dockerrun.run()`
+  itself; `sources.scratch_root()`; and `Container.copy_out()` if nothing has needed it by then.
+
+### One unrelated thing noticed on the way
+
+`action.yml`'s **"Cache apt archives" step is dead weight now**. It was written when the apt step
+installed mingw-w64 and cross toolchains (~12 minutes); the list is down to `build-essential git
+ca-certificates curl python3`, all of which a GitHub runner image already carries, so the step
+caches and restores nothing. The apt step itself is not *quite* dead — `build-essential` is there
+for `qemu`'s host mpy-cross — so both it and its ~60 lines of i386/multilib archaeology should go
+in the same change that migrates `qemu`, not before.
