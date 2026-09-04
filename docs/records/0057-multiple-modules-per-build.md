@@ -1,10 +1,10 @@
 # 0057 — more than one module per build, in both modes
 
-- Status: Accepted, both halves (decided by the user). natmod: one config per module.
-  usermod: `user-c-modules` stays a single path, and a consumer expresses N modules in
-  their own layout — subdirectories on Make ports, an aggregating `micropython.cmake`
-  that `include()`s the others on CMake ports. Documentation in both cases; no new
-  mechanism in either
+- Status: Implemented (closed 2026-09-04 — see addendum). Both halves decided by the
+  user. natmod: one config per module. usermod: `user-c-modules` stays a single path,
+  and a consumer expresses N modules in their own layout — subdirectories on Make
+  ports, an aggregating `micropython.cmake` that `include()`s the others on CMake
+  ports. Documentation in both cases; no new mechanism in either
 
 ## It has come up twice before, never as its own decision
 
@@ -209,6 +209,27 @@ had an answer.
 Nothing. Both halves are decided above; what remains in each is prose and, for the
 usermod half, [0054]'s fixture to prove the worked example actually builds.
 
+## Addendum, 2026-09-04: both remaining items closed
+
+Both items this record's own "Not decided here" section named as outstanding are done:
+
+- **The usermod fixture builds, for real, across all six ports.** [0069], written
+  independently to give [0054]'s scoping a real CI slice, turned out to be this
+  record's own proof: `examples/usercmodule/micropython.cmake` is not a one-line patch
+  to a vendored copy as this record originally proposed — [0054]'s own "no vendoring"
+  call still holds — it is a fixture-owned file that `include()`s upstream's aggregator
+  unmodified and adds the one line for `subpackage`, resolved against the checkout
+  `sources.fetch_micropython()` already fetches. `examples/usercmodule/smoke_test.py`
+  then imports and calls into all three modules for real. [0069]'s own status line:
+  "Implemented — widened to all six ports 2026-08-31, all green."
+- **Both documentation sections landed in `README.md`**, under "More than one module":
+  natmod's one-module-per-config rule (pointing at
+  [`examples/template`](../../examples/template) and
+  [`examples/wasm2mpy`](../../examples/wasm2mpy) as the two-modules-two-configs
+  demonstration this record already named), and usermod's Make-glob-vs-CMake-`include()`
+  convention (pointing at `examples/usercmodule/micropython.cmake` above), including the
+  asymmetry paragraph this record's own "trap" section said had to be named out loud.
+
 [0002]: 0002-delegate-compile-own-environment.md
 [0014]: 0014-mip-package-per-identifier.md
 [0015]: 0015-rv32imc-arch-flags-identifier.md
@@ -220,3 +241,4 @@ usermod half, [0054]'s fixture to prove the worked example actually builds.
 [0052]: 0052-config-is-a-tree-not-a-selector-matrix.md
 [0054]: 0054-usermod-example-from-upstream-usercmodule.md
 [0056]: 0056-usermod-with-no-user-c-module.md
+[0069]: 0069-upstream-usercmodule-narrow-ci-slice.md

@@ -63,10 +63,10 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 - [ ] [0040] usermod's own test-runner axis, deferred
 - [ ] [0053] usermod ports with verified facts but no build driver
 - [ ] [0056] building upstream MicroPython through the usermod path with no user C module at all
-- [ ] [0057] more than one module per build, in both modes
 
 ### Implemented
 
+- [x] [0057] more than one module per build, in both modes
 - [x] [0097] a real, external, heavy usermod module builds through cibuildmp unmodified
 - [x] [0095] `cache_root()` is not one cache: fetched source persists, build state dies with the container
 - [x] [0096] `arm_embedded` and `riscv_embedded` collapse into one `embedded_base` image
