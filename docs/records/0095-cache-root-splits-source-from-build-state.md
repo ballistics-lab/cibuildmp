@@ -1,7 +1,7 @@
 # 0095 — `cache_root()` is not one cache: fetched source persists, build state dies with the container
 
 Status: In progress — **the plan below is superseded by addendum 2 (2026-09-04); read that
-first.** Only item 5 (reports out of `cache_root()`) is settled and landed. Items 1-3 landed as
+first, then addendum 4, which closes the last thing that could have invalidated it.** Only item 5 (reports out of `cache_root()`) is settled and landed. Items 1-3 landed as
 described and work, but answer the wrong question — they place a build tree on the host, which the
 tool has no reason to own; addendum 2 replaces them with a `:ro` bind plus an overlayfs upper
 inside the container, measured working. Item 4's instinct was right and its mechanism wrong. Item
@@ -322,3 +322,53 @@ directories called exactly that — `lib/protobuf-c/build-cmake`,
 `.cibuildmp-complete` went on marking them valid, so `sources.py:152` would have kept serving
 them. The recovery is to delete the stamp, not to repair the tree. Delete only the paths cibuildmp
 itself creates, named explicitly, and never below `lib/`.
+
+## Addendum 4, 2026-09-04 — the runner allows it, on both architectures; the last open item is closed
+
+`.github/workflows/probe-overlay.yml`, run 33866525827. Five privilege levels, bottom up, each
+running a real `make -C mpy-cross` with **no** `BUILD=` override against a real `v1.24.1` tarball
+mounted `:ro` — the exact command that fails under a plain `:ro` bind:
+
+| level | `ubuntu-latest` | `ubuntu-24.04-arm` |
+| --- | --- | --- |
+| bare `docker run` | `mount: /mp: permission denied` | same |
+| `--cap-add SYS_ADMIN` | `mount: /mp: cannot mount overlay read-only` | same |
+| **`+ --security-opt apparmor=unconfined`** | **mount ok, build ok (347072 B), upper 16 MB** | **mount ok, build ok (527296 B), upper 16 MB** |
+| `+ --security-opt seccomp=unconfined` | pass | pass |
+| `--privileged` | pass | pass |
+
+`host-clean: PASS` on both — the `:ro` checkout carried no `build*` anywhere after all five levels.
+
+**The minimum is `--cap-add SYS_ADMIN --security-opt apparmor=unconfined`.** Neither
+`seccomp=unconfined` nor `--privileged` is needed — the workstation verification in addendum 2 had
+tested the two upper rungs together and could not tell which was load-bearing.
+
+**So there is no fallback to maintain.** Addendum 3 kept `sources.scratch_root()` alive
+specifically against the possibility that a runner would refuse this; it does not, on either
+architecture, so the two-mechanism outcome that made that hedge necessary is off the table and
+the scratch path can be removed with the rest of the implementation.
+
+### Two false conclusions this probe produced before it produced a true one
+
+Both worth writing down, because in each case the *summary* was green-or-red in a way the run had
+not earned, and only the elapsed time gave it away:
+
+1. **Run 33866098636** — the arm job reported five `FAIL` in two seconds, which is not enough for
+   five `docker run`s that each pull an image. Cause: `no matching manifest for linux/arm64/v8`.
+   **`ghcr.io/ballistics-lab/embedded_base` is published amd64-only** — a fact worth knowing well
+   outside this probe, for a project whose own CI uses arm runners. The arm half had mounted
+   nothing; its `FAIL`s said nothing about overlays. Fixed by making the image a matrix field
+   (the pypa manylinux images are per-architecture repositories this project already pins) and by
+   pulling once, up front and unsuppressed.
+2. **Run 33866281084** — then *both* runners reported five `FAIL`. The mount was not the reason:
+   levels 3, 4 and 5 each printed `mount: ok` and the *build* after them failed.
+   `-Wunterminated-string-initialization` is a **gcc 15** option ([0082]), `manylinux_2_28` ships
+   gcc 14.2.1, and gcc does not quietly ignore `-Wno-error=` for a warning it has never heard of —
+   it errors with `no option '-Wunterminated-string-initialization'`. Fixed by asking the compiler
+   whether it takes the flag, which is exactly what `build_common.probe_supported_cflags()` already
+   does and what this file should have done from the start.
+
+The probe now prints `mount:` / `cflags:` / `build:` as separate lines and dumps the build tail on
+failure, so a future failure names its stage instead of collapsing into one bit. **It stays in the
+repo rather than being deleted as a one-off**: the whole build model now rests on a runner-image
+property that nothing else in this project would notice changing.
