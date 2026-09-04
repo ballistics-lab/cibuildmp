@@ -443,9 +443,7 @@ def test_x86_64_builds_and_returns_binary_path(tmp_path, monkeypatch):
 
     monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", _fake_docker_run)
     staging = tmp_path / "staging"
-    result = build_unix_fn(
-        opts(build_dir=build_dir), tmp_path / "mpy", staging=staging
-    )
+    result = build_unix_fn(opts(build_dir=build_dir), tmp_path / "mpy", staging=staging)
 
     assert result == staging / "micropython"
 
