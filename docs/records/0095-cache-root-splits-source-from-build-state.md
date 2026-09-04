@@ -2,10 +2,9 @@
 
 Status: In progress — **the plan below is superseded by addendum 2 (2026-09-04); read that
 first, then addendum 4 (the runner allows it), addendum 5 (what is actually in the code),
-addendum 8 (`rp2` migrated), addendum 9 (`windows` migrated) and addendum 10 (`webassembly`
-migrated).** Four of six ports are migrated; the transitional dual path addendum 5 describes
-has to be deleted when the last one is. Only item 5 (reports out of `cache_root()`) is settled
-and landed. Items 1-3 landed as
+addendum 8 (`rp2` migrated), addendum 9 (`windows` migrated), addendum 10 (`webassembly`
+migrated) and addenda 11-12 (`qemu`/`esp32` migrated -- all six ports done, transition deletion
+still open).** Only item 5 (reports out of `cache_root()`) is settled and landed. Items 1-3 landed as
 described and work, but answer the wrong question — they place a build tree on the host, which the
 tool has no reason to own; addendum 2 replaces them with a `:ro` bind plus an overlayfs upper
 inside the container, measured working. Item 4's instinct was right and its mechanism wrong. Item
@@ -665,3 +664,82 @@ job ([0069]'s six jobs are unix/rp2/esp32/windows/webassembly/qemu), and `build-
 usermod matrix covers `webassembly` too, but neither had run against this change at the time of
 writing. Whoever picks this up should read that job's own latest run before trusting this
 addendum, the same caution every addendum since 6 has needed to repeat.
+
+**Verified live**, `test-upstream-usermodule.yml` run 33891641172: `build-webassembly` green.
+`build-examples.yml` run 33891641085 stayed green too.
+
+## Addendum 11, 2026-09-04 — `qemu` migrates to `Container`/overlay; five of six done
+
+Fifth port, same shape as `build_windows()`/`build_webassembly()` for the port's own main build:
+`BUILD=` never mounted, finished `firmware.elf` `cp`'d into `staging`. `usermod_mounts()` is no
+longer called here either -- a local `_qemu_project_mounts()` mirrors the other Make ports' own
+helper.
+
+**One thing deliberately not touched: `qemu`'s own host-built mpy-cross**
+(`orchestrate._HOST_MPY_CROSS_PORTS = frozenset({"qemu"})`, `sources.build_mpy_cross()`). This port
+passes no `MICROPY_MPYCROSS=`, so `py/mkrules.mk` resolves it at its own fixed in-checkout default
+path. `orchestrate.build()` still builds that binary on the *host*, once per run, before any
+target's own container ever starts -- so by the time this driver's `container.overlay(mpy_dir)`
+runs, the pre-built binary already sits in the overlay's read-only lower, and `mkrules.mk` finds it
+there without rebuilding it, exactly reproducing today's working behaviour. That host pre-build is
+exactly the `cache_root()`-writing state this whole record exists to move out of the checkout, and
+addendum 6 named finishing that move as what migrating `qemu` unlocks -- but redesigning *how* that
+binary reaches the build, rather than merely which container mechanism runs `qemu`'s own `make`, is
+a separate, real change with its own live risk: this exact interaction already caused one CI-only
+regression (addendum 6's item 1) from a well-reasoned but wrong first attempt, and this migration
+does not want to risk a second one blind. Left for its own follow-up.
+
+**Verified live**, `test-upstream-usermodule.yml` run 33891641172 (the same push as `webassembly`
+above -- `qemu` had not changed yet at that point, so this is the pre-migration baseline):
+`build-qemu` green in 1m57s, including the real `qemu-system-arm` smoke test. The migration itself
+is pushed alongside `esp32` (addendum 12) and not yet independently re-verified; read both jobs'
+own latest run before trusting this paragraph.
+
+## Addendum 12, 2026-09-04 — `esp32` migrates to `Container`/overlay; all six ports done
+
+Last port. Pushed together with `qemu` (addendum 11) rather than separately, on the reasoning that
+each port's own CI job (`build-esp32`, `build-qemu` in `test-upstream-usermodule.yml`) reports
+independently, so one push loses no diagnostic power over two.
+
+**The one port never run through the overlay even by hand before this.** Two things make it the
+least mechanical of the six:
+
+- **No `BUILD=` override, like `rp2`** -- `esp32_make_command()`'s own comment: passing `BUILD=`
+  at all makes the port's own internal mpy-cross sub-build pick up `FROZEN_MANIFEST` through
+  `MAKEFLAGS` and fail. So the build tree stays at the port's unmodified default,
+  `mpy_dir/ports/esp32/build-<BOARD>/`, which only exists on a writable checkout -- the overlay is
+  load-bearing here for the same reason it is for `rp2`, not only for `container_mpy_cross()`'s own
+  write.
+- **Two persistent, non-overlay mounts, not one** -- `idf_dir` (the ESP-IDF checkout,
+  `espidf.fetch_esp_idf()`) and `tools_dir` (its own tools cache), both fetched input
+  ([0095]'s own category A) that has to survive across runs, so both stay plain read-write host
+  mounts outside the overlay -- the same reasoning `build_rp2()`'s own toolchain-cache mount
+  documents, just two of them instead of one.
+
+Two files copied to `staging`, both tolerant of a missing source, the same shape
+`build_webassembly()` established: `micropython.bin` (primary) and `firmware.bin` (the combined
+bootloader + partition table + application image `esp32_companions()` collects, [0079]).
+
+`_esp32_container_script()` itself -- the `HOME=`/`IDF_TOOLS_PATH=` exports, the `.installed`
+marker, the `idf_tools.py export` eval -- needed no changes at all: it already ran as one `bash -c`
+script, and a script's own internal shell logic does not know or care whether the process running
+it was started by `docker run` or `docker exec`.
+
+**Not yet verified live at all** -- neither by hand (addendum 3's own live-run table covers `unix`
+and `rp2`, never `esp32`) nor by CI at the time of writing. `build-esp32` in
+`test-upstream-usermodule.yml` is the job that matters; read its own latest run, not this
+paragraph, before trusting that this port actually builds under the overlay. If it fails, the two
+places most likely to be wrong are ESP-IDF's own `ComponentManager` cache interacting with the
+overlay's `--user` `exec` (untested combination) and the ESP-IDF tools-install step needing to
+write somewhere this driver did not think to make writable.
+
+### What is left of [0095] itself
+
+All six usermod ports now build through `Container`/overlay. What addendum 5/6 named as the very
+last step -- deleting the transition (the `container=` parameters on `probe_supported_cflags()`,
+`container_mpy_cross()`, `run_unix_deplibs()`, `repair_unix_binary()`; `dockerrun.run()` itself;
+`sources.scratch_root()`; `_resolved_build_dir()`'s scratch prefix; `Container.copy_out()` if
+nothing has needed it) -- is **not done in this addendum**, deliberately: it should follow live
+confirmation that `esp32` actually works, not precede it. Natmod's own build path is untouched by
+any of this and does not go through `dockerrun.run()` in the first place, so nothing there is
+affected either way.

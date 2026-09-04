@@ -72,13 +72,14 @@ def stage_on_cp(cmd, payload: bytes = b"") -> None:
         dest.write_bytes(FAKE_X86_64_ELF)
 
 
-def stage_webassembly_outputs_on_copy_script(cmd) -> None:
-    """`build_webassembly()`'s own `staging` copy is a conditional `sh -c`
-    script (`[ -e <src> ] && cp <src> <dest> || true`, one line per file --
-    that function's own comment: a missing `.mjs` has to reach the
-    `produced.exists()` check below as a clean "is missing" error, not an
-    opaque `cp` failure), not a bare `cp` argv, so it needs its own parsing
-    rather than `stage_on_cp()`'s `"cp" in cmd` shortcut.
+def stage_on_conditional_copy_script(cmd) -> None:
+    """`build_webassembly()`/`build_esp32()`'s own `staging` copy is a
+    conditional `sh -c` script (`[ -e <src> ] && cp <src> <dest> || true`,
+    one line per file -- each function's own comment: a missing primary
+    has to reach the `produced.exists()` check below as a clean "is
+    missing" error, not an opaque `cp` failure), not a bare `cp` argv, so
+    it needs its own parsing rather than `stage_on_cp()`'s `"cp" in cmd`
+    shortcut.
     """
     if cmd[:2] != ["docker", "exec"] or cmd[-2] != "-c":
         return
@@ -315,16 +316,17 @@ def test_build_one_qemu_uses_default_board_not_empty_string(tmp_path, monkeypatc
 
     def fake_run(cmd, **kwargs):
         # The port's own `make`, not whatever ran last: every step is a
-        # `docker exec` in one container since record 0095, and teardown
-        # (`docker rm`) is now the final call.
+        # `docker exec` in one container since record 0095.
         if any("USER_C_MODULES" in str(a) for a in cmd):
             captured["cmd"] = cmd
-        build_dir = scratch_root() / "ports" / "qemu" / "build-qemu"
-        build_dir.mkdir(parents=True, exist_ok=True)
-        (build_dir / "firmware.elf").write_bytes(FAKE_X86_64_ELF)
+            build_dir = scratch_root() / "ports" / "qemu" / "build-qemu"
+            build_dir.mkdir(parents=True, exist_ok=True)
+            (build_dir / "firmware.elf").write_bytes(FAKE_X86_64_ELF)
+            return
+        stage_on_cp(cmd)
 
     monkeypatch.setattr(dockerrun, "ensure_image", lambda *a, **k: "qemu:test")
-    monkeypatch.setattr(dockerrun, "run", lambda cmd, **k: fake_run(cmd, **k))
+    monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
     (mpy_dir / "ports" / "qemu").mkdir(parents=True)
 
     result = build_one(options, target, mpy_dir)
@@ -394,14 +396,15 @@ def test_build_one_esp32_passes_board_through(tmp_path, monkeypatch):
     captured = {}
 
     def fake_run(cmd, **kwargs):
-        # The port's own `make`, not whatever ran last: every step is a
-        # `docker exec` in one container since record 0095, and teardown
-        # (`docker rm`) is now the final call.
+        # The port's own `bash -c` script, not whatever ran last: every
+        # step is a `docker exec` in one container since record 0095.
         if any("USER_C_MODULES" in str(a) for a in cmd):
             captured["cmd"] = cmd
-        build_dir = mpy_dir / "ports" / "esp32" / "build-ESP32_GENERIC_S3"
-        build_dir.mkdir(parents=True, exist_ok=True)
-        (build_dir / "micropython.bin").write_bytes(FAKE_X86_64_ELF)
+            build_dir = mpy_dir / "ports" / "esp32" / "build-ESP32_GENERIC_S3"
+            build_dir.mkdir(parents=True, exist_ok=True)
+            (build_dir / "micropython.bin").write_bytes(FAKE_X86_64_ELF)
+            return
+        stage_on_conditional_copy_script(cmd)
 
     monkeypatch.setenv("CIBMP_ESP32_DOCKER_IMAGE", "cibuildmp-esp32:local")
     monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", fake_run)
@@ -436,14 +439,15 @@ def test_build_one_esp32_threads_real_idf_version_and_target(tmp_path, monkeypat
     captured = {}
 
     def fake_run(cmd, **kwargs):
-        # The port's own `make`, not whatever ran last: every step is a
-        # `docker exec` in one container since record 0095, and teardown
-        # (`docker rm`) is now the final call.
+        # The port's own `bash -c` script, not whatever ran last: every
+        # step is a `docker exec` in one container since record 0095.
         if any("USER_C_MODULES" in str(a) for a in cmd):
             captured["cmd"] = cmd
-        build_dir = mpy_dir / "ports" / "esp32" / "build-ESP32_GENERIC_C3"
-        build_dir.mkdir(parents=True, exist_ok=True)
-        (build_dir / "micropython.bin").write_bytes(FAKE_X86_64_ELF)
+            build_dir = mpy_dir / "ports" / "esp32" / "build-ESP32_GENERIC_C3"
+            build_dir.mkdir(parents=True, exist_ok=True)
+            (build_dir / "micropython.bin").write_bytes(FAKE_X86_64_ELF)
+            return
+        stage_on_conditional_copy_script(cmd)
 
     fetch_calls = []
     monkeypatch.setenv("CIBMP_ESP32_DOCKER_IMAGE", "cibuildmp-esp32:local")
@@ -862,7 +866,7 @@ def test_build_one_collects_the_wasm_blob_beside_the_mjs(tmp_path, monkeypatch):
             )
             (build_dir / "micropython.wasm").write_bytes(b"\x00asm\x01\x00\x00\x00")
             return
-        stage_webassembly_outputs_on_copy_script(cmd)
+        stage_on_conditional_copy_script(cmd)
 
     monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
     (mpy_dir / "ports" / "webassembly").mkdir(parents=True)
@@ -892,10 +896,13 @@ def test_build_one_collects_the_esp32_combined_firmware(tmp_path, monkeypatch):
     target = UsermodTarget(port="esp32", arch="ESP32_GENERIC")
 
     def fake_run(cmd, **kwargs):
-        build_dir = mpy_dir / "ports" / "esp32" / "build-ESP32_GENERIC"
-        build_dir.mkdir(parents=True, exist_ok=True)
-        (build_dir / "micropython.bin").write_bytes(FAKE_X86_64_ELF)
-        (build_dir / "firmware.bin").write_bytes(b"combined-image")
+        if any("USER_C_MODULES" in str(a) for a in cmd):
+            build_dir = mpy_dir / "ports" / "esp32" / "build-ESP32_GENERIC"
+            build_dir.mkdir(parents=True, exist_ok=True)
+            (build_dir / "micropython.bin").write_bytes(FAKE_X86_64_ELF)
+            (build_dir / "firmware.bin").write_bytes(b"combined-image")
+            return
+        stage_on_conditional_copy_script(cmd)
 
     monkeypatch.setenv("CIBMP_ESP32_DOCKER_IMAGE", "cibuildmp-esp32:local")
     monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", fake_run)
@@ -939,15 +946,18 @@ def test_build_one_does_not_copy_a_non_unix_lib_directory(tmp_path, monkeypatch)
     )
 
     def fake_run(cmd, **kwargs):
-        build_dir = scratch_root() / "ports" / "qemu" / "build-qemu"
-        build_dir.mkdir(parents=True, exist_ok=True)
-        (build_dir / "firmware.elf").write_bytes(FAKE_X86_64_ELF)
-        libm = build_dir / "lib" / "libm"
-        libm.mkdir(parents=True)
-        (libm / "math.o").write_bytes(b"object-file")
+        if any("USER_C_MODULES" in str(a) for a in cmd):
+            build_dir = scratch_root() / "ports" / "qemu" / "build-qemu"
+            build_dir.mkdir(parents=True, exist_ok=True)
+            (build_dir / "firmware.elf").write_bytes(FAKE_X86_64_ELF)
+            libm = build_dir / "lib" / "libm"
+            libm.mkdir(parents=True)
+            (libm / "math.o").write_bytes(b"object-file")
+            return
+        stage_on_cp(cmd)
 
     monkeypatch.setattr(dockerrun, "ensure_image", lambda *a, **k: "qemu:test")
-    monkeypatch.setattr(dockerrun, "run", lambda cmd, **k: fake_run(cmd, **k))
+    monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
     (mpy_dir / "ports" / "qemu").mkdir(parents=True)
 
     result = build_one(options, target, mpy_dir)

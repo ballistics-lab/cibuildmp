@@ -21,7 +21,7 @@ from pathlib import Path
 
 from ... import toolchain_fetch
 from . import targets
-from .build_common import UsermodBuildError, usermod_mounts
+from .build_common import UsermodBuildError
 
 # board -> `ports/qemu/Makefile`'s own `CROSS_COMPILE ?=` for it, keyed by
 # `QEMU_ARCH`, not by board directly. Every value here is copied straight
@@ -86,6 +86,18 @@ def qemu_make_command(
     ]
 
 
+def _qemu_project_mounts(
+    opts: QemuBuildOptions, package_dir: Path | None
+) -> list[Path]:
+    """The user's own project, mounted so a module whose sources reach
+    outside `USER_C_MODULES` still resolves -- `build_unix.py`'s own
+    `_project_mounts()`, unchanged for a Make port."""
+    mounts = [Path(opts.user_c_modules)]
+    if package_dir is not None:
+        mounts.append(package_dir.resolve())
+    return mounts
+
+
 def build_qemu(
     opts: QemuBuildOptions,
     mpy_dir: Path,
@@ -105,11 +117,34 @@ def build_qemu(
     exception: no natmod arch cross-compiles to PowerPC, so
     `ppc64le_linux` ([0058]) is a `qemu`-only image.
 
-    The output path is `opts.build_dir / "firmware.elf"` --
-    ports/qemu/Makefile's own `all: $(BUILD)/firmware.elf` target, again
-    no globbing needed. `package_dir`, when given, is bind-mounted
-    alongside `USER_C_MODULES` itself -- see
-    `build_common.usermod_mounts()`.
+    **`Container`/overlay, not `dockerrun.run()`** ([0095]), same shape as
+    `build_windows()`/`build_webassembly()`: `BUILD=` (still
+    `opts.build_dir`) is never mounted, so it lives and dies inside the
+    container's own ephemeral filesystem, and the finished firmware is
+    `cp`'d into `staging` before the container exits.
+
+    **Deliberately not touched here: `qemu`'s own host-built mpy-cross**
+    (`orchestrate._HOST_MPY_CROSS_PORTS`, `sources.build_mpy_cross()`).
+    This port passes no `MICROPY_MPYCROSS=`, so `py/mkrules.mk` resolves
+    it at its own fixed in-checkout default (`mpy_dir/mpy-cross/build/
+    mpy-cross`) -- `orchestrate.build()` still builds that binary on the
+    *host*, once per run, before any target's container ever starts, so it
+    already exists in the overlay's read-only lower by the time this
+    driver's own `container.overlay(mpy_dir)` runs, and `mkrules.mk` finds
+    it there without rebuilding it. That pre-build is exactly the
+    `cache_root()`-writing state [0095] exists to move out of the
+    checkout, and record 0095's own addendum 6 names finishing that move
+    as what migrating this port unlocks -- but redesigning *how* that
+    binary reaches the build is a separate, real change with its own live
+    risk (this exact interaction already caused one CI-only regression,
+    addendum 6's item 1, from a well-reasoned but wrong first attempt).
+    Left for its own follow-up rather than folded into this one.
+
+    The output path is `staging / "firmware.elf"`, copied out of
+    `opts.build_dir / "firmware.elf"` -- `ports/qemu/Makefile`'s own
+    `all: $(BUILD)/firmware.elf` target. `package_dir`, when given, is
+    bind-mounted alongside `USER_C_MODULES` itself -- see
+    `_qemu_project_mounts()`.
     """
     from ... import dockerrun
 
@@ -140,9 +175,18 @@ def build_qemu(
             "`resources/pinned_docker_images.toml`, or point "
             f"CIBMP_QEMU_{opts.board.upper()}_DOCKER_IMAGE at a local tag"
         )
+    oci_platform = dockerrun.platform_for("qemu", opts.board)
+    timeout = dockerrun.timeout_for("qemu", opts.board)
+
+    if staging is None:
+        msg = (
+            "qemu builds need a staging directory to hand the artifact "
+            "back through ([0095]); orchestrate.build_one() provides one"
+        )
+        raise UsermodBuildError(msg)
 
     make_command = qemu_make_command(opts, mpy_dir, cross)
-    mounts = usermod_mounts(mpy_dir, Path(opts.user_c_modules), package_dir=package_dir)
+    mounts = [staging, *_qemu_project_mounts(opts, package_dir)]
 
     # [0086]/[0087]: `embedded_base` (`arm_embedded`/`riscv_embedded`
     # before [0096] merged them) no longer bakes a cross compiler --
@@ -167,20 +211,32 @@ def build_qemu(
         command = ["bash", "-c", script]
         mounts = [*mounts, toolchain_dir.parent]
 
-    dockerrun.run(
-        command,
-        mounts=mounts,
-        workdir=mpy_dir / "ports" / "qemu",
+    with dockerrun.overlay_container(
+        mpy_dir,
         image=docker_image,
-        timeout=dockerrun.timeout_for("qemu", opts.board),
         # `linux/amd64`: a statement about the image, not about the build
         # target. qemu cross-compiles to bare metal, which no Linux
         # container is native to (0043) -- so on an arm64 host this runs
         # emulated, like `windows` and `webassembly` do.
-        oci_platform=dockerrun.platform_for("qemu", opts.board),
-    )
+        oci_platform=oci_platform,
+        mounts=mounts,
+    ) as container:
+        container.overlay(mpy_dir)
+        container.call(command, workdir=mpy_dir / "ports" / "qemu", timeout=timeout)
 
-    firmware = opts.build_dir / "firmware.elf"
+        # The firmware exists only inside the container until this copy --
+        # see `build_unix()`'s identical reasoning.
+        firmware = staging / "firmware.elf"
+        container.call(
+            [
+                "cp",
+                (opts.build_dir / "firmware.elf").as_posix(),
+                firmware.as_posix(),
+            ],
+            workdir=mpy_dir / "ports" / "qemu",
+            timeout=timeout,
+        )
+
     if not firmware.exists():
         raise UsermodBuildError(
             f"qemu/{opts.board}: build reported success but {firmware} is missing"
