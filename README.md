@@ -2,7 +2,8 @@
 
 [![SWUbanner]][SWUBadge]
 [![license]][license-url]
-![micropython-tag]
+![natmod-abi]
+![usermod-tag]
 [![pypi version]][PyPiUrl]
 [![python versions]][PyPiUrl]
 [![pre-commit]][pre-commit-workflow]
@@ -1349,8 +1350,11 @@ PyPI unless you pin a version there too.
 
 <!-- REUSABLE LINKS -->
 
-[micropython-tag]:
-https://img.shields.io/badge/v1.12%2B-orange?logo=micropython&label=micropython
+[natmod-abi]:
+https://img.shields.io/badge/mpy_v5%2B-orange?logo=micropython&label=natmod
+
+[usermod-tag]:
+https://img.shields.io/badge/v1.20%2B-orange?logo=micropython&label=usermod
 
 [license]:
 https://img.shields.io/github/license/ballistics-lab/cibuildmp
