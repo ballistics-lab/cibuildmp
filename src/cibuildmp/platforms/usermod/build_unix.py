@@ -868,10 +868,12 @@ def repair_unix_binary(
     touches it.
 
     `binary`'s own directory is always part of `mounts` already (it sits
-    under `opts.build_dir`, itself under the mounted `mpy_dir`), so the
-    `lib/` directory this writes lands on the host for free, the same way
-    the binary itself already does -- no separate copy-out step, no new
-    mount.
+    under `opts.build_dir`, itself under the mounted `scratch_root()` --
+    it was `mpy_dir` before [0095] moved build state out of the checkout,
+    and `usermod_mounts()` adds `scratch_root()` for every port precisely
+    so this stayed true through that move), so the `lib/` directory this
+    writes lands on the host for free, the same way the binary itself
+    already does -- no separate copy-out step, no new mount.
     """
     needed = _non_baseline_needed_libs(target, binary)
     if not needed:

@@ -441,9 +441,10 @@ outcome rather than stop at the first one that fails.
 
 Every attempted target — success or failure, `--keep-going` or not — is
 written to a JSON report, one file per invocation, under
-`~/.cache/cibuildmp/reports/` by default (`CIBMP_REPORT_PATH` to redirect
-it). Each entry carries the identifier, how long it took, and either the
-built artifact's directory/size/file listing or the error that stopped it:
+`<output-dir>/reports/` by default — `mpyhouse/reports/`, beside the
+artifacts of the same run (`CIBMP_REPORT_PATH` to redirect it). Each entry
+carries the identifier, how long it took, and either the built artifact's
+directory/size/file listing or the error that stopped it:
 
 ```json
 {
@@ -652,7 +653,8 @@ the port**, because it is that port's own build axis:
 
 | Variable                                | Effect                                                                                                                                                                                                                            |
 | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CIBMP_CACHE_PATH`                      | Where MicroPython checkouts and mpy-cross builds are cached. Defaults to `$XDG_CACHE_HOME/cibuildmp`, or `~/.cache/cibuildmp`. Pin it in CI when a later step needs the checkout by path — `<CIBMP_CACHE_PATH>/micropython/<tag>` |
+| `CIBMP_CACHE_PATH`                      | Where fetched MicroPython checkouts and ESP-IDF are cached. Defaults to `$XDG_CACHE_HOME/cibuildmp`, or `~/.cache/cibuildmp`. Pin it in CI when a later step needs the checkout by path — `<CIBMP_CACHE_PATH>/micropython/<tag>` |
+| `CIBMP_SCRATCH_PATH`                    | Where compiled build state goes (per-identifier build directories, container-built `mpy-cross`). Defaults to a temporary directory removed when the run ends; setting this keeps it. Never point it at a directory a CI cache step saves                |
 | `CIBMP_REPORT_PATH`                     | Where the JSON build report is written                                                                                                                                                                                            |
 | `CIBMP_TIMEOUT`                         | Seconds before a build container is killed (`docker kill`, not just the CLI). No limit by default. **usermod only** -- natmod's own container call does not consult it                                                            |
 | `CIBMP_<PORT>_<TARGET>_TIMEOUT`         | The same, for one container — `CIBMP_UNIX_MANYLINUX_2_28_X86_64_TIMEOUT`                                                                                                                                                          |
@@ -852,10 +854,17 @@ it runs to several GB. `cibuildmp --clean-cache` deletes the lot
 (`$XDG_CACHE_HOME/cibuildmp`, or wherever `CIBMP_CACHE_PATH` points);
 Docker images are Docker's own to prune.
 
-That includes the JSON build reports: one per invocation, never
-overwritten, under the same cache root — so they accumulate until you clean
-the cache, and cleaning the cache takes them with it. Set
-`CIBMP_REPORT_PATH` if you want one kept somewhere you control.
+The JSON build reports are **not** in there — they live beside the
+artifacts, under `<output-dir>/reports/`, so `--clean-cache` never takes
+them with it. They are one file per invocation and never overwritten, so
+they accumulate in the output directory instead; set `CIBMP_REPORT_PATH`
+if you want them somewhere else.
+
+Nor is the build state: object files, per-identifier `build-<identifier>/`
+trees and the container-built `mpy-cross` binaries go to a temporary
+directory that is removed when the run ends. Point `CIBMP_SCRATCH_PATH` at
+a directory of your own to keep a failed build's tree for inspection — that
+also disables the cleanup, since the path is then yours, not cibuildmp's.
 
 ### Still stuck
 

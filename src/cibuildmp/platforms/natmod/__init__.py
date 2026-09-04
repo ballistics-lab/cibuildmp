@@ -266,7 +266,12 @@ def build_all(
     finally:
         # Always, keep_going or not, fail-fast or not -- see the
         # docstring's own keep_going paragraph.
-        report.write_report(entries, total_duration=sum(e.duration for e in entries))
+        report.write_report(
+            entries,
+            total_duration=sum(e.duration for e in entries),
+            package_dir=options.package_dir,
+            output_dir=options.output_dir,
+        )
 
     total_duration = sum(r.duration for r in results)
     print(f"\ncibuildmp: {total} target(s) built in {total_duration:.1f}s")

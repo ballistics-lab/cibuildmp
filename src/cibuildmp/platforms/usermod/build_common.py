@@ -28,7 +28,7 @@ from pathlib import Path
 # already import `fetch_micropython()`/`read_mpy_abi()` from. Re-exported
 # here, unchanged, so `build_common.tag_cflags(...)`/`build_common.TAG_CFLAGS`
 # keep resolving for every existing caller in this package.
-from ...sources import TAG_CFLAGS, tag_cflags  # noqa: F401
+from ...sources import TAG_CFLAGS, scratch_root, tag_cflags  # noqa: F401
 
 
 class UsermodBuildError(Exception):
@@ -91,8 +91,24 @@ def usermod_mounts(
     project directory in scope) keeps today's narrower behaviour exactly,
     rather than raising or guessing one -- there is no sane default to
     invent for "no project directory was given."
+
+    `scratch_root()` is in the list unconditionally, for every port,
+    since [0095] moved compiled build state out of `mpy_dir`: a Make port
+    writes its `BUILD=` tree there, and `container_mpy_cross()` writes its
+    binary there, so a build whose only mount was `mpy_dir` would now have
+    nowhere to put its output. It is mounted rather than each individual
+    `build-<identifier>/` for a specific reason -- `docker run -v` creates
+    a **root-owned** directory when the bind source does not exist on the
+    host, and `build_one()` deletes and recreates that directory per
+    build, so mounting it directly would hand the `--user` container a
+    path it cannot write to. `scratch_root()` itself always exists (that
+    function creates it) and is never deleted mid-run. Ports with no
+    `build_dir` of their own (`esp32`, `rp2` -- both CMake-driven, see
+    `rp2_make_command()`'s own comment on why neither overrides `BUILD=`)
+    still get the mount, because `container_mpy_cross()` is common to
+    every port.
     """
-    mounts = [mpy_dir, user_c_modules_mount]
+    mounts = [mpy_dir, user_c_modules_mount, scratch_root()]
     if package_dir is not None:
         mounts.append(package_dir.resolve())
     return mounts
@@ -272,11 +288,22 @@ def container_mpy_cross(
     either host architecture" property 0043 exists to provide, so they
     use this too.
 
-    `slug` scopes the build directory (`mpy-cross/build-<slug>/`) so each
-    image gets its own binary and none of them collide with the host
-    build at `mpy-cross/build/` that natmod still uses -- natmod is
-    unaffected by all of this, since it never runs mpy-cross anywhere but
-    the host.
+    `slug` scopes the build directory (`mpy-cross/build-<slug>/` under
+    `scratch_root()`) so each image gets its own binary and none of them
+    collide -- including with `natmod`'s own container-built binary, which
+    has to stay at `mpy_dir/mpy-cross/build/` because `py/dynruntime.mk`
+    hardcodes `MPY_CROSS = $(MPY_DIR)/mpy-cross/...` with no override
+    (see `natmod/build.py`'s own `build_mpy_cross()`).
+
+    Under `scratch_root()`, not `mpy_dir`, since [0095]: `mpy_dir` is
+    fetched input that a CI cache step may restore from a previous run,
+    and this binary is keyed on an image -- so a restored one is a
+    silently wrong compiler, not a saved minute. Within one invocation
+    every identifier sharing a `slug` still builds it exactly once, which
+    is the reuse this function was written for; across invocations the
+    default `scratch_root()` is a fresh directory, so the existence check
+    below no longer answers "was one ever built" but "was one built by
+    this run".
 
     Cached by existence, like `sources.build_mpy_cross()`: a rebuilt
     container binary is only needed when the image itself changes, and the
@@ -284,7 +311,7 @@ def container_mpy_cross(
     """
     from ... import dockerrun
 
-    build_dir = mpy_dir / "mpy-cross" / f"build-{slug}"
+    build_dir = scratch_root() / "mpy-cross" / f"build-{slug}"
     binary = build_dir / "mpy-cross"
     if binary.exists():
         return binary
@@ -305,7 +332,10 @@ def container_mpy_cross(
             *([f"CFLAGS_EXTRA={' '.join(extra_cflags)}"] if extra_cflags else []),
             f"-j{os.cpu_count() or 1}",
         ],
-        mounts=[mpy_dir],
+        # `scratch_root()` alongside `mpy_dir`: `make -C <mpy_dir>/mpy-cross`
+        # reads its sources from the checkout and writes every object into
+        # `BUILD=`, which is no longer inside it ([0095]).
+        mounts=[mpy_dir, scratch_root()],
         workdir=mpy_dir / "mpy-cross",
         image=image,
         timeout=timeout,

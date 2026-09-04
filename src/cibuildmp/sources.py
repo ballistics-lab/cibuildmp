@@ -13,6 +13,7 @@ dependency tree resolved before it can fetch anything is harder to trust.
 
 from __future__ import annotations
 
+import atexit
 import hashlib
 import os
 import shutil
@@ -43,13 +44,66 @@ class SourceError(Exception):
 
 
 def cache_root() -> Path:
-    """Where downloaded sources and toolchains live."""
+    """Where downloaded sources and toolchains live -- **fetched input only**
+    ([0095]). Compiled build state goes to `scratch_root()` instead; the
+    two were one directory until that record, which is why the split has
+    to be stated here rather than left to each caller's own judgement."""
     env = os.environ.get("CIBMP_CACHE_PATH")
     if env:
         return Path(env).expanduser()
     xdg = os.environ.get("XDG_CACHE_HOME")
     base = Path(xdg).expanduser() if xdg else Path.home() / ".cache"
     return base / "cibuildmp"
+
+
+_SCRATCH_ROOT: Path | None = None
+
+
+def scratch_root() -> Path:
+    """Where **compiled build state** goes: per-identifier port build
+    directories and the container-built `mpy-cross` binaries, i.e. record
+    [0095]'s category C.
+
+    Deliberately *not* under `cache_root()`, and deliberately not merely a
+    sibling directory there either. `cache_root()` holds fetched source a
+    CI job can legitimately restore from a previous run; anything compiled
+    is keyed on a toolchain image, an identifier and a `USER_C_MODULES`
+    set that a restore knows nothing about. The two were the same tree
+    until [0095], and the cost was already paid once inside a *single*
+    job: a leftover `build-unix-x64/` carried a stale
+    `genhdr/qstrdefs.generated.h` and failed the next build with
+    `'MP_QSTR_mymod' undeclared`. Persisting that across runs would have
+    turned a one-run bug into a permanent one.
+
+    A fresh temporary directory per `cibuildmp` invocation, removed at
+    exit: the within-run reuse `container_mpy_cross()` depends on (every
+    identifier sharing a `slug` builds `mpy-cross` once) survives intact,
+    while the cross-invocation reuse -- keyed on nothing but
+    `binary.exists()`, never on the image that produced it -- does not.
+    That reuse was never sound; it was only ever invisible.
+
+    `CIBMP_SCRATCH_PATH` overrides the location **and disables the
+    cleanup**: the path then belongs to the caller, not to this function,
+    which is also how a failed build's own tree is kept for inspection
+    (`CIBMP_SCRATCH_PATH=/tmp/keepme cibuildmp ...`). On a GitHub runner
+    `runner.temp` is the natural value -- job-scoped, never an
+    `actions/cache` target.
+
+    Created eagerly, because `dockerrun.run()` bind-mounts it at its own
+    identical host path: a bind source the daemon has to create itself is
+    created **root-owned**, which the `--user` container then cannot write
+    to and a host-side `rmtree` cannot remove.
+    """
+    global _SCRATCH_ROOT
+    env = os.environ.get("CIBMP_SCRATCH_PATH")
+    if env:
+        root = Path(env).expanduser()
+        root.mkdir(parents=True, exist_ok=True)
+        return root
+    if _SCRATCH_ROOT is None:
+        _SCRATCH_ROOT = Path(tempfile.mkdtemp(prefix="cibuildmp-build-"))
+        atexit.register(shutil.rmtree, _SCRATCH_ROOT, ignore_errors=True)
+    return _SCRATCH_ROOT
 
 
 # -- Shared primitives ----------------------------------------------------
@@ -383,26 +437,64 @@ def find_mpy_cross(mpy_dir: Path, build_dir: str = "build") -> Path | None:
     return None
 
 
+def host_mpy_cross_dir() -> Path:
+    """Where the **host-built** `mpy-cross` goes -- under `scratch_root()`,
+    not in the checkout ([0095] item 3)."""
+    return scratch_root() / "mpy-cross-host"
+
+
 def build_mpy_cross(mpy_dir: Path, *, force: bool = False, quiet: bool = False) -> Path:
-    """Build mpy-cross in the checkout, once, and return the binary."""
-    binary = find_mpy_cross(mpy_dir)
-    if binary is not None and not force:
+    """Build mpy-cross on the host, once, and return the binary.
+
+    `BUILD=` points at `host_mpy_cross_dir()` rather than letting the
+    Makefile default to `mpy-cross/build/` inside the checkout ([0095]):
+    the checkout is fetched input, and a compiled binary sitting in it is
+    the exact mixing that record exists to undo.
+
+    Two consequences worth stating, because neither is obvious from the
+    diff:
+
+    * **The pre-build cache check now looks only in the scratch
+      directory**, not at `find_mpy_cross(mpy_dir)`'s in-tree layouts.
+      `natmod`'s own `build_mpy_cross()` writes a *container*-built binary
+      to exactly those in-tree paths -- it has no choice, `py/
+      dynruntime.mk` hardcodes `MPY_CROSS = $(MPY_DIR)/mpy-cross/...` with
+      no override -- so the old check could hand this function's one
+      caller (`usermod`'s `qemu`, `_HOST_MPY_CROSS_PORTS`) a binary built
+      under a different libc than the host it is about to run on. That was
+      latent, not observed; it is now impossible rather than unlikely.
+    * **The in-tree layouts stay in the post-build lookup.** A tag whose
+      `mpy-cross/Makefile` predates `BUILD=` being honoured writes where it
+      always did, and this function still finds it -- [0093]'s own finding
+      that the binary's path is a fact about the tag, not a constant.
+    """
+    build_dir = host_mpy_cross_dir()
+    binary = build_dir / "mpy-cross"
+    if binary.exists() and not force:
         if not quiet:
             print(f"  mpy-cross: cached at {binary}")
         return binary
 
     if not quiet:
         print("  mpy-cross: building")
-    command = ["make", "-C", str(mpy_dir / "mpy-cross"), f"-j{os.cpu_count() or 1}"]
+    command = [
+        "make",
+        "-C",
+        str(mpy_dir / "mpy-cross"),
+        f"BUILD={build_dir.as_posix()}",
+        f"-j{os.cpu_count() or 1}",
+    ]
     try:
         subprocess.run(command, check=True, capture_output=quiet)
     except subprocess.CalledProcessError as exc:
         raise SourceError(f"building mpy-cross failed: {exc}") from exc
 
-    binary = find_mpy_cross(mpy_dir)
-    if binary is None:
+    if binary.exists():
+        return binary
+    fallback = find_mpy_cross(mpy_dir)
+    if fallback is None:
         raise SourceError(
             "mpy-cross build reported success but no binary at "
-            + " or ".join(str(p) for p in mpy_cross_candidates(mpy_dir))
+            + " or ".join(str(p) for p in (binary, *mpy_cross_candidates(mpy_dir)))
         )
-    return binary
+    return fallback

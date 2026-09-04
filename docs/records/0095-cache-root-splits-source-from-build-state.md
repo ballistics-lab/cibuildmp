@@ -1,7 +1,10 @@
 # 0095 — `cache_root()` is not one cache: fetched source persists, build state dies with the container
 
-Status: Proposed — nothing implemented; this scopes the split and names every real change it
-requires.
+Status: Implemented in part — items 1, 2, 3 and 5 landed and are live-verified; item 4 stays
+open (this record left it open pending a live run, and the run did not force it), item 6 was
+scoped out here and now matters more than this record's own text says. **Read the 2026-09-04
+addendum before acting on the plan below**: a real run found three further writers into
+`cache_root()` that category C misses, two of which cannot be moved at all.
 Related: [0009], [0012], [0019], [0033], [0043], [0044], [0058], [0063], [0069], [0084]
 
 ## The problem
@@ -121,3 +124,87 @@ state leaks into what should be pure fetched source.
 - **natmod's own `build/<arch>*/` scratch space** (`natmod/__init__.py:119-128`) looks like the
   same shape but is not: it lives under the *user's own `package_dir`*, never under `cache_root()`,
   and is already handled by a pre-loop `rmtree` per `module_root`. Out of scope here.
+
+## Addendum, 2026-09-04 — items 1, 2, 3 and 5 landed; a live run found three more sources of category C
+
+Implemented as scoped: `_resolved_build_dir()` (1), `container_mpy_cross()`'s build directory
+(2), `sources.build_mpy_cross()`'s host build (3) and `report_dir()` (5). Item 4 stays open --
+this record left it open on purpose pending a live run, and the run below did not need it decided,
+because the mechanism chosen for (1)-(3) keeps the produced artifact host-readable without any
+`:ro`/`docker cp` question arising. Item 6 was already out of scope here and still is.
+
+### The mechanism
+
+`sources.scratch_root()` -- a fresh `tempfile.mkdtemp()` per invocation, removed at exit,
+overridable with `CIBMP_SCRATCH_PATH` (which also disables the cleanup, since the path is then the
+caller's; that is how a failed build's tree is kept for inspection, and `runner.temp` is the
+natural CI value). `usermod_mounts()` adds it for **every** port, unconditionally.
+
+Two details that are not obvious from the plan above and were decided by how Docker actually
+behaves, not by preference:
+
+- **The mount is `scratch_root()` itself, never the individual `build-<identifier>/`.** `docker
+  run -v` creates a missing bind source **root-owned**, and `build_one()` deletes and recreates
+  that directory before every build -- so mounting it directly would hand the `--user` container a
+  path it cannot write to. `scratch_root()` always exists (the function creates it eagerly, for
+  this reason) and is never removed mid-run.
+- **`sources.build_mpy_cross()`'s pre-build cache check now looks only in the scratch
+  directory**, not at `find_mpy_cross(mpy_dir)`'s in-tree layouts. Those in-tree paths are where
+  `natmod`'s own container-built binary lives, so the old check could hand this function's one
+  caller (`usermod`'s `qemu`, host-built by definition) a binary compiled under a different libc.
+  Latent, never observed; now structurally impossible.
+
+### Live-verified, not reviewed
+
+Real builds from `examples/template`, real Docker, on this machine:
+
+- `v1.29.0-manylinux_2_28_x86_64` -- **built in 156.6s**, 738024 bytes. Every object and the link
+  step ran against `/tmp/cibuildmp-build-<rand>/ports/unix/build-v1.29.0-manylinux_2_28_x86_64/`,
+  i.e. `make BUILD=` pointed **outside the checkout** works, which was the one mechanical
+  assumption items 1-3 rest on. The collected binary runs and imports the module
+  (`micropython-... -c "import template"` -> `template`), so `repair_unix_binary()`'s `lib/`
+  sidecar still lands on the host through the new mount.
+- `mpy6.3-v1.29.0-x64` (natmod) -- built in 100.3s, 237 bytes.
+- Both reports landed in `examples/template/mpyhouse/reports/`, not under `cache_root()`.
+- The scratch directory was gone after the process exited (`ls -d /tmp/cibuildmp-build-*` -> none).
+
+### What the run found that this record's category C had missed
+
+Counting files under `cache_root()/micropython/v1.29.0/` newer than that checkout's own
+`.cibuildmp-complete` stamp separates what these two runs wrote from what earlier ones left. Three
+of the four remaining writers are **not** in this record's own list above, and two of them cannot
+be moved by the mechanism this record proposes:
+
+| what | where | movable? |
+| --- | --- | --- |
+| `natmod`'s container-built `mpy-cross` | `mpy_dir/mpy-cross/build/` | **No.** `py/dynruntime.mk` hardcodes `MPY_CROSS = $(MPY_DIR)/mpy-cross/...` with no override -- `natmod/build.py`'s own `build_mpy_cross()` says so, and record [0093] establishes the path is a fact about the tag |
+| `rp2`/`esp32` CMake build trees | `mpy_dir/ports/<port>/build-<BOARD>/` | **No**, not without reopening a settled decision: `rp2_make_command()` deliberately passes no `BUILD=` because a mismatched one breaks the port's own internal mpy-cross sub-build. 2186 files measured under `ports/rp2` from an earlier run |
+| libffi's autotools output | `mpy_dir/lib/libffi/` (`configure`, `Makefile.in`, `aclocal.m4`, `ltmain.sh`, …) | **No.** `ports/unix/Makefile`'s own `deplibs` target runs libffi's `autogen.sh`/`configure` *in the source tree*; only the `out/` prefix follows `BUILD=`. **29 files, created by the verification run above**, timestamped inside its own window |
+| the combined frozen manifest | `mpy_dir/ports/<port>/cibuildmp-manifest-<identifier>.py` | Yes, but it is generated config rather than build state -- 1 file, not addressed here |
+
+**This changes item 6 from a belt-and-braces measure into the actual mechanism.** This record's own
+wording -- *"not because (1)-(5) leave anything behind"* -- is now known to be false: they do, and
+three of the four writers have no lever to stop them. A cache step that saves `CIBMP_CACHE_PATH`
+must therefore *exclude*, not merely *scope*:
+
+```yaml
+path: |
+  ${{ env.CIBMP_CACHE_PATH }}/micropython
+  ${{ env.CIBMP_CACHE_PATH }}/esp-idf
+  !${{ env.CIBMP_CACHE_PATH }}/micropython/*/mpy-cross/build*
+  !${{ env.CIBMP_CACHE_PATH }}/micropython/*/ports/*/build*
+  !${{ env.CIBMP_CACHE_PATH }}/micropython/*/lib/libffi
+```
+
+Still not wired into any workflow -- this record scoped that out and the addendum does not change
+it -- but the exclusion list is no longer something the person wiring it can derive from the plan
+above, which is why it is written down here.
+
+### Docs corrected in the same session
+
+`README.md`'s report paragraph (`~/.cache/cibuildmp/reports/`), its "Disk, and clearing it"
+section (which claimed `--clean-cache` takes the reports with it -- it no longer can), its
+`CIBMP_CACHE_PATH` row (which said mpy-cross builds are cached there), and `--clean-cache`'s own
+`--help` text (same claim). `CIBMP_SCRATCH_PATH` added to the environment-variable table. This is
+CLAUDE.md's own rule about narrative docs not self-correcting, applied at the time rather than
+left for a reader to find.

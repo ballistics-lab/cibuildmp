@@ -47,17 +47,35 @@ def test_entry_for_error_carries_no_output_fields():
     assert entry.files == ()
 
 
-def test_report_dir_defaults_under_cache_root(monkeypatch, tmp_path):
+def test_report_dir_defaults_under_the_builds_own_output_dir(monkeypatch, tmp_path):
+    # Record 0095: a report is host-written output, so it belongs beside
+    # the artifacts, not in cache_root() -- which a CI cache step may
+    # restore over the top of from an earlier run.
+    monkeypatch.delenv("CIBMP_REPORT_PATH", raising=False)
+
+    assert (
+        report.report_dir(tmp_path / "pkg", Path("mpyhouse"))
+        == tmp_path / "pkg" / "mpyhouse" / "reports"
+    )
+
+
+def test_report_dir_is_not_under_cache_root(monkeypatch, tmp_path):
+    # The exact regression 0095 closes: CIBMP_CACHE_PATH must have no
+    # influence on where a report lands.
     monkeypatch.delenv("CIBMP_REPORT_PATH", raising=False)
     monkeypatch.setenv("CIBMP_CACHE_PATH", str(tmp_path / "cache"))
 
-    assert report.report_dir() == tmp_path / "cache" / "reports"
+    directory = report.report_dir(tmp_path / "pkg", Path("mpyhouse"))
+
+    assert (tmp_path / "cache") not in directory.parents
 
 
 def test_report_dir_honors_cibmp_report_path_override(monkeypatch, tmp_path):
     monkeypatch.setenv("CIBMP_REPORT_PATH", str(tmp_path / "elsewhere"))
 
-    assert report.report_dir() == tmp_path / "elsewhere"
+    assert (
+        report.report_dir(tmp_path / "pkg", Path("mpyhouse")) == tmp_path / "elsewhere"
+    )
 
 
 def test_write_report_writes_one_json_file_with_every_entry(monkeypatch, tmp_path):
@@ -74,7 +92,12 @@ def test_write_report_writes_one_json_file_with_every_entry(monkeypatch, tmp_pat
         report.entry_for_error("bad", 0.5, RuntimeError("make failed")),
     ]
 
-    path = report.write_report(entries, total_duration=1.5)
+    path = report.write_report(
+        entries,
+        total_duration=1.5,
+        package_dir=tmp_path,
+        output_dir=Path("mpyhouse"),
+    )
 
     assert path.parent == tmp_path / "reports"
     payload = json.loads(path.read_text())
@@ -107,8 +130,9 @@ def test_write_report_two_calls_produce_two_distinct_files(monkeypatch, tmp_path
     # each write_report() call gets its own path.
     monkeypatch.setenv("CIBMP_REPORT_PATH", str(tmp_path / "reports"))
 
-    first = report.write_report([], total_duration=0.0)
-    second = report.write_report([], total_duration=0.0)
+    kwargs = {"package_dir": tmp_path, "output_dir": Path("mpyhouse")}
+    first = report.write_report([], total_duration=0.0, **kwargs)
+    second = report.write_report([], total_duration=0.0, **kwargs)
 
     assert first != second
     assert first.exists() and second.exists()

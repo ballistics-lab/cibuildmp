@@ -21,12 +21,14 @@ random suffix (not overwritten, not appended to -- unlike
 `$GITHUB_STEP_SUMMARY`, nothing names one report file across more than one
 `cibuildmp` invocation, so there is no multiple-calls-per-step problem
 `stepsummary.py`'s own `open(path, "a")` exists to solve). Directory
-defaults to `cache_root() / "reports"`, overridable with
-`CIBMP_REPORT_PATH` -- the same one-env-var-per-path-setting shape
-`CIBMP_CACHE_PATH` already has (`sources.cache_root()`), not the
-`opt()`/`cibuildmp.toml` cascade: this is a runtime/CI knob about *where
-output lands*, not a per-project build setting, the same category
-`CIBMP_DISABLE_GITHUB_STEP_SUMMARY` (`stepsummary.py`) already lives in.
+defaults to `<package_dir>/<output_dir>/reports` (it was
+`cache_root() / "reports"` until [0095] -- see `report_dir()` for why that
+was the wrong root), overridable with `CIBMP_REPORT_PATH` -- the same
+one-env-var-per-path-setting shape `CIBMP_CACHE_PATH` already has
+(`sources.cache_root()`), not the `opt()`/`cibuildmp.toml` cascade: this
+is a runtime/CI knob about *where output lands*, not a per-project build
+setting, the same category `CIBMP_DISABLE_GITHUB_STEP_SUMMARY`
+(`stepsummary.py`) already lives in.
 
 Both `BuildResult` (natmod, `platforms/natmod/build.py`) and
 `UsermodBuildResult` (usermod, `platforms/usermod/orchestrate.py`) already
@@ -36,6 +38,7 @@ shape `stepsummary.py` already uses, rather than importing either
 dataclass, so this module depends on neither family.
 
 [0063]: docs/records/0063-keep-going-and-json-build-report.md
+[0095]: docs/records/0095-cache-root-splits-source-from-build-state.md
 """
 
 from __future__ import annotations
@@ -48,8 +51,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
-
-from .sources import cache_root
 
 
 class _Result(Protocol):
@@ -112,21 +113,49 @@ def entry_for_error(
     return ReportEntry(identifier=identifier, duration=duration, error=str(error))
 
 
-def report_dir() -> Path:
+def report_dir(package_dir: Path, output_dir: Path) -> Path:
+    """Where the JSON build report goes.
+
+    Under the build's own output directory since [0095], not under
+    `cache_root()`. A report is **output** -- written host-side by
+    cibuildmp's own Python after every container has exited, never by a
+    container -- and `cache_root()` is fetched input a CI job may restore
+    from an earlier run. Rooting reports there put the newest run's own
+    result in the one directory a cache restore can overwrite with an
+    older run's, and split cibuildmp's two host-written outputs across two
+    roots for no reason anyone could state.
+
+    `output_dir` is resolved against `package_dir` (never the process's
+    own cwd) exactly as `usermod.orchestrate.build_one()` and
+    `natmod/cli.py` already resolve it for the artifacts themselves --
+    that join is not a detail to re-derive per call site, a real Docker
+    action run having already caught the unjoined version writing to
+    `<repo-root>/mpyhouse`.
+
+    `CIBMP_REPORT_PATH` still wins outright, unchanged: [0063] added it
+    for exactly the case where the report has to land somewhere neither
+    default reaches (a runner step that uploads it separately).
+    """
     env = os.environ.get("CIBMP_REPORT_PATH")
     if env:
         return Path(env).expanduser()
-    return cache_root() / "reports"
+    return package_dir / output_dir / "reports"
 
 
-def write_report(entries: Sequence[ReportEntry], *, total_duration: float) -> Path:
+def write_report(
+    entries: Sequence[ReportEntry],
+    *,
+    total_duration: float,
+    package_dir: Path,
+    output_dir: Path,
+) -> Path:
     """Write `entries` (in build order, successes and failures both) as one
     JSON file under `report_dir()`, creating it if needed, and return the
     path written. Never raises for an empty `entries` -- a group-level
     failure under `--keep-going` (a bad fetch, before any target in that
     group even started) can leave a report with zero results and one
     failure, or a truly empty run reaches this with nothing at all."""
-    directory = report_dir()
+    directory = report_dir(package_dir, output_dir)
     directory.mkdir(parents=True, exist_ok=True)
     now = datetime.now(UTC)
     stamp = now.strftime("%Y%m%dT%H%M%SZ")

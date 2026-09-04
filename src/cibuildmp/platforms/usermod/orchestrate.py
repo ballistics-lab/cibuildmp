@@ -104,12 +104,22 @@ class UsermodBuildResult:
         return self.output.stat().st_size
 
 
-def _resolved_build_dir(mpy_dir: Path, port: str, identifier: str) -> Path:
+def _resolved_build_dir(port: str, identifier: str) -> Path:
     # One build directory per identifier, not the port's own bare default
     # -- so building unix-manylinux_2_28_x86_64 and
     # unix-manylinux_2_28_aarch64 against the same checkout
     # in one invocation never has one overwrite the other mid-build.
-    return mpy_dir / "ports" / port / f"build-{identifier}"
+    #
+    # Under `sources.scratch_root()`, not under `mpy_dir`, since [0095]:
+    # `mpy_dir` is `cache_root()/micropython/<tag>/`, i.e. fetched input a
+    # CI job may legitimately restore from an earlier run, and a compiled
+    # tree nested inside it rides along in any such restore no matter how
+    # narrowly the cache step scopes its own `path:` -- `micropython/*/`
+    # already contains `micropython/*/ports/<port>/build-<identifier>/`.
+    # The `mpy_dir` parameter is gone rather than ignored: a build
+    # directory that no longer has anything to do with the checkout should
+    # not still be asking for it.
+    return sources.scratch_root() / "ports" / port / f"build-{identifier}"
 
 
 def _manifest_path(mpy_dir: Path, port: str, identifier: str) -> Path:
@@ -183,7 +193,7 @@ def _port_build_options(
             tag=target.tag,
             user_c_modules=resolved_user_c_modules,
             frozen_manifest=frozen_manifest,
-            build_dir=_resolved_build_dir(mpy_dir, port, identifier),
+            build_dir=_resolved_build_dir(port, identifier),
             extra_make_args=extra_make_args,
         )
     if port == "windows":
@@ -192,7 +202,7 @@ def _port_build_options(
             tag=target.tag,
             user_c_modules=resolved_user_c_modules,
             frozen_manifest=frozen_manifest,
-            build_dir=_resolved_build_dir(mpy_dir, port, identifier),
+            build_dir=_resolved_build_dir(port, identifier),
             extra_make_args=extra_make_args,
         )
     if port == "qemu":
@@ -207,7 +217,7 @@ def _port_build_options(
         return QemuBuildOptions(
             user_c_modules=resolved_user_c_modules,
             frozen_manifest=frozen_manifest,
-            build_dir=_resolved_build_dir(mpy_dir, port, identifier),
+            build_dir=_resolved_build_dir(port, identifier),
             board=target.arch or "MPS2_AN385",
             tag=target.tag,
             extra_make_args=extra_make_args,
@@ -216,7 +226,7 @@ def _port_build_options(
         return WebassemblyBuildOptions(
             user_c_modules=resolved_user_c_modules,
             frozen_manifest=frozen_manifest,
-            build_dir=_resolved_build_dir(mpy_dir, port, identifier),
+            build_dir=_resolved_build_dir(port, identifier),
             tag=target.tag,
             extra_make_args=extra_make_args,
         )
@@ -331,9 +341,15 @@ def build_one(
 
     # `build_dir` (unix/windows/qemu/webassembly only -- esp32 has none,
     # see Esp32BuildOptions, and uses ESP-IDF's own CMake-based staleness
-    # tracking instead of a raw Makefile) is `mpy_dir/ports/<port>/
-    # build-<identifier>/`, already scoped per identifier, but nothing
-    # ever removes it *between* separate `cibuildmp` invocations. Found
+    # tracking instead of a raw Makefile) is
+    # `scratch_root()/ports/<port>/build-<identifier>/` since [0095] (it
+    # was `mpy_dir/ports/<port>/build-<identifier>/`), already scoped per
+    # identifier, but nothing ever removes it *between* separate
+    # `cibuildmp` invocations. Still true, and still needed, after that
+    # move: the default `scratch_root()` is per-invocation and so cannot
+    # carry anything over, but `CIBMP_SCRATCH_PATH` is exactly the escape
+    # hatch that makes it persist, and that is the case this `rmtree`
+    # exists for. Found
     # for real: a leftover build-unix-x64/ from an earlier run (built
     # against a different, or no, USER_C_MODULES) carried a stale
     # genhdr/qstrdefs.generated.h missing this run's own module's QSTRs --
@@ -545,6 +561,11 @@ def build(
     finally:
         # Always, keep_going or not, fail-fast or not -- see the
         # docstring's own keep_going paragraph.
-        report.write_report(entries, total_duration=sum(e.duration for e in entries))
+        report.write_report(
+            entries,
+            total_duration=sum(e.duration for e in entries),
+            package_dir=options.package_dir,
+            output_dir=options.output_dir,
+        )
 
     return results
