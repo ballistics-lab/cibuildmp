@@ -1,14 +1,20 @@
 # 0095 — `cache_root()` is not one cache: fetched source persists, build state dies with the container
 
-Status: In progress — **the plan below is superseded by addendum 2 (2026-09-04); read that
+Status: Implemented — **the plan below is superseded by addendum 2 (2026-09-04); read that
 first, then addendum 4 (the runner allows it), addendum 5 (what is actually in the code),
-addenda 8-12 (all six ports migrated) and addendum 13 (the transition deletion lands, plus a
-live no-op it uncovered: `CIBMP_SCRATCH_PATH` currently does nothing).** Only item 5 (reports
-out of `cache_root()`) is settled and landed among the original plan's own six. Items 1-3 landed as
-described and work, but answer the wrong question — they place a build tree on the host, which the
-tool has no reason to own; addendum 2 replaces them with a `:ro` bind plus an overlayfs upper
-inside the container, measured working. Item 4's instinct was right and its mechanism wrong. Item
-6 was scoped out here and matters more than this record's own text says (addendum 1).
+addenda 8-12 (all six ports migrated) and addendum 13 (the transition deletion lands, closing
+this record — with a live no-op it uncovered left open on purpose: `CIBMP_SCRATCH_PATH`
+currently does nothing).** All six usermod ports now build through `Container`/overlay, live
+CI-verified individually, and the transitional dual path is deleted. Of the original plan's own
+six items, only item 5 (reports out of `cache_root()`) matches what actually landed — items 1-3
+described a mechanism later superseded (see below), item 4 was left open on purpose and closed
+by the overlay instead, and item 6 (excluding compiled state from a persisted CI cache) is still
+genuinely unscoped: no workflow here saves `CIBMP_CACHE_PATH` to `actions/cache` at all yet.
+Items 1-3 landed as described and worked, but answered the wrong question — they placed a build
+tree on the host, which the tool has no reason to own; addendum 2 replaces them with a `:ro` bind
+plus an overlayfs upper inside the container, measured working. Item 4's instinct was right and
+its mechanism wrong. Item 6 was scoped out here and matters more than this record's own text
+originally said (addendum 1).
 Related: [0009], [0012], [0019], [0033], [0043], [0044], [0058], [0063], [0069], [0084]
 
 ## The problem

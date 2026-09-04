@@ -55,7 +55,6 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### In progress / Proposed
 
-- [ ] [0095] `cache_root()` is not one cache: fetched source persists, build state dies with the container
 - [ ] [0094] Arm's own GNU toolchain registry is the third choice [0085] said did not exist
 - [ ] [0083] replace `windows.Dockerfile`'s apt `gcc-mingw-w64` split with one fully prebuilt llvm-mingw toolchain
 - [ ] [0047] the run output works, but it is not cibuildwheel's
@@ -68,6 +67,7 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### Implemented
 
+- [x] [0095] `cache_root()` is not one cache: fetched source persists, build state dies with the container
 - [x] [0096] `arm_embedded` and `riscv_embedded` collapse into one `embedded_base` image
 - [x] [0090] the checker stops reading a Dockerfile `ARG`, and [0058]'s own text gets its correction
 - [x] [0088] `mimxrt`'s own `>= 13` ceiling gets its own `toolchain_version` row, once [0087] exists

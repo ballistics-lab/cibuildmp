@@ -654,7 +654,7 @@ the port**, because it is that port's own build axis:
 | Variable                                | Effect                                                                                                                                                                                                                            |
 | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `CIBMP_CACHE_PATH`                      | Where fetched MicroPython checkouts and ESP-IDF are cached. Defaults to `$XDG_CACHE_HOME/cibuildmp`, or `~/.cache/cibuildmp`. Pin it in CI when a later step needs the checkout by path — `<CIBMP_CACHE_PATH>/micropython/<tag>` |
-| `CIBMP_SCRATCH_PATH`                    | Where compiled build state goes (per-identifier build directories, container-built `mpy-cross`). Defaults to a temporary directory removed when the run ends; setting this keeps it. Never point it at a directory a CI cache step saves                |
+| `CIBMP_SCRATCH_PATH`                    | Read, but currently redirects nothing: every usermod port's compiled build state now lives inside its own container and never reaches the host (record 0095's own addendum 13). Left as a documented knob rather than removed outright |
 | `CIBMP_REPORT_PATH`                     | Where the JSON build report is written                                                                                                                                                                                            |
 | `CIBMP_TIMEOUT`                         | Seconds before a build container is killed (`docker kill`, not just the CLI). No limit by default. **usermod only** -- natmod's own container call does not consult it                                                            |
 | `CIBMP_<PORT>_<TARGET>_TIMEOUT`         | The same, for one container — `CIBMP_UNIX_MANYLINUX_2_28_X86_64_TIMEOUT`                                                                                                                                                          |
@@ -860,11 +860,14 @@ them with it. They are one file per invocation and never overwritten, so
 they accumulate in the output directory instead; set `CIBMP_REPORT_PATH`
 if you want them somewhere else.
 
-Nor is the build state: object files, per-identifier `build-<identifier>/`
-trees and the container-built `mpy-cross` binaries go to a temporary
-directory that is removed when the run ends. Point `CIBMP_SCRATCH_PATH` at
-a directory of your own to keep a failed build's tree for inspection — that
-also disables the cleanup, since the path is then yours, not cibuildmp's.
+Nor is the build state: every usermod port builds inside a container's own
+overlay now (a `:ro` bind of the checkout plus a writable view on top), so
+object files, per-identifier `build-<identifier>/` trees and the
+container-built `mpy-cross` binaries never touch the host at all — they die
+with the container. `CIBMP_SCRATCH_PATH` is still read but currently has
+nothing to redirect, since nothing writes to the path it names any more;
+kept for now as a documented knob rather than removed outright (see record
+0095's own addendum 13 for the reasoning).
 
 ### Still stuck
 

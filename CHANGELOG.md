@@ -62,9 +62,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reached CI: `build_windows()` now probes its own `CFLAGS_EXTRA` candidates against the real
   cross compiler first, the same `probe_supported_cflags()` mechanism `unix` already uses for its
   own gcc version ladder.
+- **A container-per-build port could link a wrong-architecture `libffi`, silently, on an arm64 CI
+  runner** — `dockerrun.Container`'s own `linux32` decision reused a throwaway `docker run` to ask
+  whether the kernel needed the wrap, but every real command reaches the container through
+  `docker exec` into an already-running one, and Docker's `--platform` personality translation
+  applies to a container's own PID 1, not to a process `exec` starts fresh — the two answers can
+  disagree. Caught live on `ubuntu-24.04-arm` building `manylinux_2_31_armv7l`: `libffi`'s own
+  `configure` picked its `aarch64` sources and the port linked against a `libffi.a` with no
+  `ffi_call` in it, despite the create-time probe itself reporting the 32-bit-safe answer.
+  `Container.__enter__` now asks `docker exec <name> uname -m` on itself instead of a `docker run`
+  standing in for it. `[0095]`'s own addendum 7.
 
 ### Changed
 
+- **Every usermod port now builds through one long-lived `Container` and its own overlay, not a
+  `docker run --rm` per build step.** `rp2`, `windows`, `webassembly`, `qemu` and `esp32` migrate
+  to the model `unix` adopted first — each live-verified building the real upstream
+  `examples/usercmodule` fixture through its migrated driver, not merely unit-tested. The
+  transition machinery every driver carried meanwhile (`container=None` fallbacks in
+  `probe_supported_cflags()`, `container_mpy_cross()`, `run_unix_deplibs()` and
+  `repair_unix_binary()`, plus `usermod_mounts()`, their now-unreachable pre-migration
+  `dockerrun.run()` path) is deleted now that every real caller always passes a container.
+  `CIBMP_SCRATCH_PATH` is left in place but currently redirects nothing — no usermod port writes
+  compiled build state to the host any more, an open question flagged rather than resolved by
+  quietly removing the variable. `[0095]`'s addenda 8-13.
 - **`arm_embedded` and `riscv_embedded` collapse into one Docker image, `embedded_base`.**
   `[0087]`/`[0089]` already moved both toolchains' cross compilers to a container-run-time
   fetch (`toolchain_fetch.py`, `[0086]`), leaving the two Dockerfiles' own build-time layers
@@ -1597,4 +1618,5 @@ than restarting (see the 0.3.0a1 entry). -->
 [0089]: docs/records/0089-natmod-arm-riscv-embedded-toolchain-version.md
 [0088]: docs/records/0088-mimxrt-own-floor.md
 [0090]: docs/records/0090-toolchain-pins-checker-and-0058-text-followup.md
+[0095]: docs/records/0095-cache-root-splits-source-from-build-state.md
 [0096]: docs/records/0096-arm-riscv-embedded-collapse-into-embedded-base.md
