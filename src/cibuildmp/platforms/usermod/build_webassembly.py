@@ -9,11 +9,12 @@ that Dockerfile is now the pin of record.
 
 from __future__ import annotations
 
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
 from . import build_common
-from .build_common import UsermodBuildError, usermod_mounts
+from .build_common import UsermodBuildError
 
 
 @dataclass(frozen=True)
@@ -58,6 +59,18 @@ def webassembly_make_command(
     ]
 
 
+def _webassembly_project_mounts(
+    opts: WebassemblyBuildOptions, package_dir: Path | None
+) -> list[Path]:
+    """The user's own project, mounted so a module whose sources reach
+    outside `USER_C_MODULES` still resolves -- `build_unix.py`'s own
+    `_project_mounts()`, unchanged for a Make port."""
+    mounts = [Path(opts.user_c_modules)]
+    if package_dir is not None:
+        mounts.append(package_dir.resolve())
+    return mounts
+
+
 def build_webassembly(
     opts: WebassemblyBuildOptions,
     mpy_dir: Path,
@@ -83,10 +96,27 @@ def build_webassembly(
     shares (`orchestrate.py`'s `build_one()` passes them uniformly);
     neither is used on this Docker-only path. `package_dir`, when given,
     is bind-mounted alongside `USER_C_MODULES` itself -- see
-    `build_common.usermod_mounts()`.
+    `_webassembly_project_mounts()`.
 
-    The output path is `opts.build_dir / "micropython.mjs"` --
-    `ports/webassembly/Makefile`'s own `all:` target.
+    **`Container`/overlay, not `dockerrun.run()`** ([0095]): the checkout
+    arrives read-only, `container.overlay(mpy_dir)` gives the build a
+    writable view of it that dies with the container, and `BUILD=` (still
+    `opts.build_dir`, unchanged) is never mounted, so it lives purely
+    inside the container's own ephemeral filesystem -- see
+    `build_windows()`'s identical comment for why the overlay is needed
+    regardless (`container_mpy_cross()`'s own in-container path). `staging`
+    is the one thing that survives: both `micropython.mjs` and its own
+    `micropython.wasm` companion (the `.mjs` loads that literal name --
+    record 0070) are `cp`'d there before the container exits, since a
+    build that produced the JS half without the wasm blob would collect
+    an artifact that cannot load at all. `micropython.wasm` is copied only
+    when it exists, matching `webassembly_companions()`'s own tolerance
+    for a build shape that never has one (nothing here passes emscripten
+    `-sSINGLE_FILE`, but this driver does not assume that stays true).
+
+    The output path is `staging / "micropython.mjs"`, copied out of
+    `opts.build_dir / "micropython.mjs"` -- `ports/webassembly/Makefile`'s
+    own `all:` target.
     """
     from ... import dockerrun
 
@@ -99,37 +129,72 @@ def build_webassembly(
             "publish-docker-images.yml to publish one and register it in "
             "resources/pinned_docker_images.toml"
         )
+    oci_platform = dockerrun.platform_for("webassembly")
+    timeout = dockerrun.timeout_for("webassembly")
 
-    command = webassembly_make_command(
-        opts,
+    if staging is None:
+        msg = (
+            "webassembly builds need a staging directory to hand the "
+            "artifact back through ([0095]); orchestrate.build_one() "
+            "provides one"
+        )
+        raise UsermodBuildError(msg)
+
+    with dockerrun.overlay_container(
         mpy_dir,
-        mpy_cross=build_common.container_mpy_cross(
-            mpy_dir,
-            slug="webassembly",
-            image=docker_image,
-            oci_platform=dockerrun.platform_for("webassembly"),
-            timeout=dockerrun.timeout_for("webassembly"),
-            extra_cflags=build_common.tag_cflags(opts.tag),
-        ),
-    )
-    dockerrun.run(
-        command,
-        mounts=usermod_mounts(
-            mpy_dir, Path(opts.user_c_modules), package_dir=package_dir
-        ),
-        workdir=mpy_dir / "ports" / "webassembly",
         image=docker_image,
-        timeout=dockerrun.timeout_for("webassembly"),
         # `linux/amd64` -- a statement about this *image* (an emsdk cross
         # host), not about the build target, which is wasm and which no
         # container is ever native to. Passing it is what lets this port
         # run on an arm64 host at all (**0043**): emulated, explicitly,
         # instead of resolving by accident-of-host and failing with a
         # bare `exec format error` from inside `make`.
-        oci_platform=dockerrun.platform_for("webassembly"),
-    )
+        oci_platform=oci_platform,
+        mounts=[staging, *_webassembly_project_mounts(opts, package_dir)],
+    ) as container:
+        container.overlay(mpy_dir)
 
-    produced = opts.build_dir / "micropython.mjs"
+        mpy_cross = build_common.container_mpy_cross(
+            mpy_dir,
+            slug="webassembly",
+            image=docker_image,
+            oci_platform=oci_platform,
+            timeout=timeout,
+            extra_cflags=build_common.tag_cflags(opts.tag),
+            container=container,
+        )
+        command = webassembly_make_command(opts, mpy_dir, mpy_cross=mpy_cross)
+        container.call(
+            command, workdir=mpy_dir / "ports" / "webassembly", timeout=timeout
+        )
+
+        # Both files exist only inside the container until this copy --
+        # see `build_unix()`'s identical reasoning. Each is copied only
+        # when present -- **including the `.mjs`** -- rather than letting
+        # a missing one fail this `cp` outright: the check below
+        # (`produced.exists()`) is what turns a missing primary into the
+        # informative "build reported success but ... is missing" error;
+        # a hard `cp` failure here would instead surface as an opaque
+        # "failed with exit code" naming this copy step, not the build.
+        # `micropython.wasm`'s own tolerance additionally matches
+        # `webassembly_companions()`'s host-side check.
+        mjs_src = (opts.build_dir / "micropython.mjs").as_posix()
+        wasm_src = (opts.build_dir / "micropython.wasm").as_posix()
+        mjs_dest = (staging / "micropython.mjs").as_posix()
+        wasm_dest = (staging / "micropython.wasm").as_posix()
+        script = (
+            f"[ -e {shlex.quote(mjs_src)} ] && "
+            f"cp {shlex.quote(mjs_src)} {shlex.quote(mjs_dest)} || true\n"
+            f"[ -e {shlex.quote(wasm_src)} ] && "
+            f"cp {shlex.quote(wasm_src)} {shlex.quote(wasm_dest)} || true\n"
+        )
+        container.call(
+            ["sh", "-c", script],
+            workdir=mpy_dir / "ports" / "webassembly",
+            timeout=timeout,
+        )
+
+    produced = staging / "micropython.mjs"
     if not produced.exists():
         raise UsermodBuildError(
             f"webassembly/{opts.variant}: build reported success but "

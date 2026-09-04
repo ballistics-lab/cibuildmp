@@ -2,9 +2,10 @@
 
 Status: In progress — **the plan below is superseded by addendum 2 (2026-09-04); read that
 first, then addendum 4 (the runner allows it), addendum 5 (what is actually in the code),
-addendum 8 (`rp2` migrated) and addendum 9 (`windows` migrated).** Three of six ports are
-migrated; the transitional dual path addendum 5 describes has to be deleted when the last one
-is. Only item 5 (reports out of `cache_root()`) is settled and landed. Items 1-3 landed as
+addendum 8 (`rp2` migrated), addendum 9 (`windows` migrated) and addendum 10 (`webassembly`
+migrated).** Four of six ports are migrated; the transitional dual path addendum 5 describes
+has to be deleted when the last one is. Only item 5 (reports out of `cache_root()`) is settled
+and landed. Items 1-3 landed as
 described and work, but answer the wrong question — they place a build tree on the host, which the
 tool has no reason to own; addendum 2 replaces them with a `:ro` bind plus an overlayfs upper
 inside the container, measured working. Item 4's instinct was right and its mechanism wrong. Item
@@ -628,9 +629,39 @@ directory), unlike the CMake ports' file-`.parent` convention `build_rp2.py`'s o
 one long-lived container instead of two separate `docker run --rm`s — no code change needed there
 either, both helpers already took the `container=` parameter [0095]'s addendum 5 built.
 
-Not yet re-verified live. Unlike the claim this addendum first carried (corrected before landing,
-not after): `test-upstream-usermodule.yml` does have its own `build-windows` job, running the real
-upstream `examples/usercmodule` and a wine smoke test, and `build-examples.yml`'s own usermod
-matrix covers all three `windows` arches too. Whoever picks this up should read that job's own
-latest run before trusting this addendum, the same caution addendum 6 asked for and addendum 7
-needed a second look to actually follow.
+**Verified live**, `test-upstream-usermodule.yml` run 33890135504: `build-windows` green in 1m56s,
+including its own wine smoke test against the real built `.exe`. `build-examples.yml` run
+33890135253 stayed green too.
+
+## Addendum 10, 2026-09-04 — `webassembly` migrates to `Container`/overlay
+
+Fourth of six. Same shape as `build_windows()` (no `deplibs`-equivalent, `BUILD=` never mounted,
+the overlay needed purely for `container_mpy_cross()`'s own in-`mpy_dir` path), with one real
+difference this port alone has: its output is **two files**, not one. `micropython.mjs` loads
+`micropython.wasm` by that literal name from its own directory (record 0070's own failure --
+collecting the `.mjs` alone shipped an artifact that could not load at all), so both have to reach
+`staging`, and `webassembly_companions()`'s host-side collection step depends on the `.wasm`
+already sitting beside the `.mjs` there.
+
+Both copies go through one `sh -c` script, each line independently tolerant of a missing source
+(`[ -e <src> ] && cp <src> <dest> || true`) — deliberately, for two different reasons. The `.wasm`
+line matches `webassembly_companions()`'s own existing host-side tolerance (nothing here passes
+emscripten `-sSINGLE_FILE`, but the check does not assume that stays true). The `.mjs` line's own
+tolerance is less obvious and worth stating plainly: a hard `cp` of a missing primary would surface
+as an opaque `` `failed with exit code` `` naming a `cp`/`sh` step, not the build -- letting the
+copy no-op instead means the existing `if not produced.exists()` check downstream is what raises
+the informative "build reported success but ... is missing" error, the same message every other
+migrated port's own missing-artifact test already expects.
+
+`test_usermod_orchestrate.py::test_build_one_collects_the_wasm_blob_beside_the_mjs` needed updating
+alongside the driver -- it predates this migration and drove a fake `dockerrun.run()` directly,
+which the migrated driver no longer calls at all. Fixed the same way the driver-level tests were:
+fake `dockerrun.subprocess.run`, write the two stub outputs when the fake sees `make`, and parse
+the conditional-copy script's own two lines (a new `stage_webassembly_outputs_on_copy_script()`
+helper, since the script shape is not `stage_on_cp()`'s bare `cp` argv).
+
+Not yet re-verified live -- `test-upstream-usermodule.yml` does have its own `build-webassembly`
+job ([0069]'s six jobs are unix/rp2/esp32/windows/webassembly/qemu), and `build-examples.yml`'s own
+usermod matrix covers `webassembly` too, but neither had run against this change at the time of
+writing. Whoever picks this up should read that job's own latest run before trusting this
+addendum, the same caution every addendum since 6 has needed to repeat.

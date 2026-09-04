@@ -1,5 +1,6 @@
 import json
 import re
+import shlex
 import shutil
 from pathlib import Path
 
@@ -69,6 +70,27 @@ def stage_on_cp(cmd, payload: bytes = b"") -> None:
         # artifact to come out, and what matters to these tests is that one
         # exists, not which bytes it holds.
         dest.write_bytes(FAKE_X86_64_ELF)
+
+
+def stage_webassembly_outputs_on_copy_script(cmd) -> None:
+    """`build_webassembly()`'s own `staging` copy is a conditional `sh -c`
+    script (`[ -e <src> ] && cp <src> <dest> || true`, one line per file --
+    that function's own comment: a missing `.mjs` has to reach the
+    `produced.exists()` check below as a clean "is missing" error, not an
+    opaque `cp` failure), not a bare `cp` argv, so it needs its own parsing
+    rather than `stage_on_cp()`'s `"cp" in cmd` shortcut.
+    """
+    if cmd[:2] != ["docker", "exec"] or cmd[-2] != "-c":
+        return
+    for line in cmd[-1].splitlines():
+        line = line.strip()
+        if not line.startswith("[ -e "):
+            continue
+        tokens = shlex.split(line.split("||", 1)[0])
+        source, dest = Path(tokens[2]), Path(tokens[-1])
+        if source.exists():
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(source, dest)
 
 
 def write_config(tmp_path: Path, text: str) -> Path:
@@ -830,16 +852,19 @@ def test_build_one_collects_the_wasm_blob_beside_the_mjs(tmp_path, monkeypatch):
     target = UsermodTarget(port="webassembly", arch="wasm32")
 
     def fake_run(cmd, **kwargs):
-        build_dir = (
-            scratch_root() / "ports" / "webassembly" / "build-webassembly-wasm32"
-        )
-        build_dir.mkdir(parents=True, exist_ok=True)
-        (build_dir / "micropython.mjs").write_text(
-            "var wasmBinaryFile='micropython.wasm'"
-        )
-        (build_dir / "micropython.wasm").write_bytes(b"\x00asm\x01\x00\x00\x00")
+        if "make" in cmd:
+            build_dir = (
+                scratch_root() / "ports" / "webassembly" / "build-webassembly-wasm32"
+            )
+            build_dir.mkdir(parents=True, exist_ok=True)
+            (build_dir / "micropython.mjs").write_text(
+                "var wasmBinaryFile='micropython.wasm'"
+            )
+            (build_dir / "micropython.wasm").write_bytes(b"\x00asm\x01\x00\x00\x00")
+            return
+        stage_webassembly_outputs_on_copy_script(cmd)
 
-    monkeypatch.setattr(dockerrun, "run", fake_run)
+    monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
     (mpy_dir / "ports" / "webassembly").mkdir(parents=True)
 
     result = build_one(options, target, mpy_dir)
