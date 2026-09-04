@@ -55,6 +55,7 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### In progress / Proposed
 
+- [ ] [0098] `BUILD=` may be as unnecessary for unix/windows/qemu/webassembly as `scratch_root()` was
 - [ ] [0094] Arm's own GNU toolchain registry is the third choice [0085] said did not exist
 - [ ] [0083] replace `windows.Dockerfile`'s apt `gcc-mingw-w64` split with one fully prebuilt llvm-mingw toolchain
 - [ ] [0047] the run output works, but it is not cibuildwheel's
@@ -276,3 +277,4 @@ record is added.
 [0095]: records/0095-cache-root-splits-source-from-build-state.md
 [0096]: records/0096-arm-riscv-embedded-collapse-into-embedded-base.md
 [0097]: records/0097-lv-binding-micropython-builds-through-cibuildmp.md
+[0098]: records/0098-build-override-may-be-as-unnecessary-as-scratch-root-was.md
