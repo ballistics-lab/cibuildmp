@@ -1,13 +1,29 @@
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
 
 from cibuildmp.platforms.usermod.build_common import UsermodBuildError
-from cibuildmp.platforms.usermod.build_rp2 import (
-    Rp2BuildOptions,
-    build_rp2,
-    rp2_make_command,
-)
+from cibuildmp.platforms.usermod.build_rp2 import Rp2BuildOptions, rp2_make_command
+from cibuildmp.platforms.usermod.build_rp2 import build_rp2 as _build_rp2
+
+
+def build_rp2_fn(*args, staging=None, **kwargs):
+    """`build_rp2()` with a staging directory supplied.
+
+    Record 0095 made `staging` part of the contract -- the build tree lives
+    inside the container's own overlay now, so there is no host path to
+    read a result from, and the artifact is copied into this directory
+    instead. `orchestrate.build_one()` supplies it in production; a test
+    that does not care where it lands gets a throwaway one, and a test that
+    does passes its own -- same shape as `test_usermod_build_unix.py`'s own
+    `build_unix_fn()`.
+    """
+    if staging is None:
+        staging = Path(tempfile.mkdtemp(prefix="cibmp-test-staging-"))
+    return _build_rp2(*args, staging=staging, **kwargs)
 
 
 def rp2_opts(**overrides) -> Rp2BuildOptions:
@@ -21,6 +37,25 @@ def rp2_opts(**overrides) -> Rp2BuildOptions:
     }
     defaults.update(overrides)
     return Rp2BuildOptions(**defaults)
+
+
+def _fake_docker_run(cmd, **kwargs):
+    """A `dockerrun.subprocess.run` stand-in, the same one
+    `test_usermod_build_unix.py` uses. Since record 0095 the build runs
+    inside one long-lived container, so this also stands in for the one
+    step that used to happen implicitly on a bind mount: the `cp` of the
+    finished `firmware.uf2` into `staging`. Without it the artifact would
+    exist nowhere a host-side check could read, which is exactly the real
+    behaviour -- the container is the only place it lives until that copy.
+    """
+    if cmd[:2] == ["docker", "exec"] and "cp" in cmd:
+        source, dest = (Path(p) for p in cmd[cmd.index("cp") + 1 :][:2])
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if source.exists():
+            shutil.copy(source, dest)
+    if kwargs.get("capture_output"):
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+    return None
 
 
 def test_rp2_command_shape():
@@ -50,6 +85,13 @@ def _mock_rp2_image(monkeypatch, image="cibuildmp-rp2:local"):
         "cibuildmp.platforms.usermod.build_common.container_mpy_cross",
         lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build-stub" / "mpy-cross",
     )
+    # `rp2`'s own OCI platform is the fixed `linux/amd64` ([0043] does not
+    # apply -- there is no per-target axis here), but the *test* host's own
+    # architecture is not fixed the same way, and a mismatch would make
+    # `Container.__enter__` run a real `_probe_platform()` -- a real
+    # `docker run --pull missing`. Stubbed the same way
+    # `test_usermod_build_unix.py` stubs it for its own non-native cells.
+    monkeypatch.setattr("cibuildmp.dockerrun._probe_platform", lambda *a, **k: "")
 
 
 def test_rp2_no_docker_image_raises_clear_error(monkeypatch, tmp_path):
@@ -63,7 +105,7 @@ def test_rp2_no_docker_image_raises_clear_error(monkeypatch, tmp_path):
     )
 
     with pytest.raises(UsermodBuildError, match="no Docker image registered"):
-        build_rp2(rp2_opts(), tmp_path / "mpy", toolchain_root=tmp_path / "cache")
+        build_rp2_fn(rp2_opts(), tmp_path / "mpy", toolchain_root=tmp_path / "cache")
 
     assert calls == []
 
@@ -81,7 +123,28 @@ def test_rp2_no_tag_raises_a_clear_error_before_touching_docker(monkeypatch, tmp
     )
 
     with pytest.raises(UsermodBuildError, match="real MicroPython tag"):
-        build_rp2(rp2_opts(tag=""), tmp_path / "mpy", toolchain_root=tmp_path / "cache")
+        build_rp2_fn(
+            rp2_opts(tag=""), tmp_path / "mpy", toolchain_root=tmp_path / "cache"
+        )
+
+    assert calls == []
+
+
+def test_rp2_no_staging_is_a_clear_error(monkeypatch, tmp_path):
+    """Unlike the other four checks above, this one needs a real image
+    resolved first (`build_rp2()` only reaches the staging check after
+    `ensure_image()` succeeds) but must still fail before any container is
+    created -- `_build_rp2()` directly, bypassing `build_rp2_fn()`'s own
+    default staging directory."""
+    _mock_rp2_image(monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        "cibuildmp.dockerrun.subprocess.run",
+        lambda cmd, **k: calls.append(cmd) or None,
+    )
+
+    with pytest.raises(UsermodBuildError, match="staging directory"):
+        _build_rp2(rp2_opts(), tmp_path / "mpy", toolchain_root=tmp_path / "cache")
 
     assert calls == []
 
@@ -90,44 +153,61 @@ def test_rp2_missing_firmware_after_success_is_an_error(monkeypatch, tmp_path):
     _mock_rp2_image(monkeypatch)
     (tmp_path / "mpy" / "ports" / "rp2").mkdir(parents=True)
 
-    monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "cibuildmp.dockerrun.subprocess.run",
+        lambda cmd, **k: _fake_docker_run(cmd, **k),
+    )
 
     with pytest.raises(UsermodBuildError, match="build reported success but"):
-        build_rp2(rp2_opts(), tmp_path / "mpy", toolchain_root=tmp_path / "cache")
+        build_rp2_fn(rp2_opts(), tmp_path / "mpy", toolchain_root=tmp_path / "cache")
 
 
 def test_rp2_builds_and_returns_firmware_path(monkeypatch, tmp_path):
     _mock_rp2_image(monkeypatch)
     build_dir = tmp_path / "mpy" / "ports" / "rp2" / "build-PICO"
     build_dir.mkdir(parents=True)
-    (build_dir / "firmware.uf2").write_bytes(b"")
+    (build_dir / "firmware.uf2").write_bytes(b"uf2")
 
-    monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "cibuildmp.dockerrun.subprocess.run",
+        lambda cmd, **k: _fake_docker_run(cmd, **k),
+    )
 
-    result = build_rp2(rp2_opts(), tmp_path / "mpy", toolchain_root=tmp_path / "cache")
+    staging = tmp_path / "staging"
+    result = build_rp2_fn(
+        rp2_opts(),
+        tmp_path / "mpy",
+        toolchain_root=tmp_path / "cache",
+        staging=staging,
+    )
 
-    assert result == build_dir / "firmware.uf2"
+    assert result == staging / "firmware.uf2"
+    assert result.read_bytes() == b"uf2"
 
 
 def test_rp2_fetches_its_own_toolchain_and_puts_it_on_path(monkeypatch, tmp_path):
     # [0086]/[0087]: the cross compiler is no longer baked into the
     # image -- build_rp2() must fetch it at container time and prepend
-    # it onto PATH, mounting the cache directory it lands in.
+    # it onto PATH, mounting the cache directory it lands in -- a real,
+    # persistent read-write host mount, not part of the checkout's own
+    # overlay ([0095]: fetched toolchains are category-A input, meant to
+    # survive across runs, unlike the ephemeral build tree).
     _mock_rp2_image(monkeypatch)
     build_dir = tmp_path / "mpy" / "ports" / "rp2" / "build-PICO"
     build_dir.mkdir(parents=True)
-    (build_dir / "firmware.uf2").write_bytes(b"")
+    (build_dir / "firmware.uf2").write_bytes(b"uf2")
 
     calls = []
     monkeypatch.setattr(
         "cibuildmp.dockerrun.subprocess.run",
-        lambda cmd, **k: calls.append(cmd) or None,
+        lambda cmd, **k: calls.append(cmd) or _fake_docker_run(cmd, **k),
     )
 
     toolchain_root = tmp_path / "cache"
-    build_rp2(rp2_opts(), tmp_path / "mpy", toolchain_root=toolchain_root)
+    mpy_dir = tmp_path / "mpy"
+    build_rp2_fn(rp2_opts(), mpy_dir, toolchain_root=toolchain_root)
 
-    docker_command = calls[0]
+    create = next(c for c in calls if c[:2] == ["docker", "create"])
     expected_dir = (
         toolchain_root / "toolchains" / "arm-none-eabi-" / "cross" / "15.2.1-1.1"
     )
@@ -136,8 +216,16 @@ def test_rp2_fetches_its_own_toolchain_and_puts_it_on_path(monkeypatch, tmp_path
     # comment: mounting the not-yet-existing leaf would leave Docker to
     # synthesize its own path up to it, root-owned, inside the container.
     mount = f"{expected_dir.parent.as_posix()}:{expected_dir.parent.as_posix()}"
-    assert mount in docker_command
-    script = docker_command[-1]
+    assert mount in create
+    # The checkout itself arrives as a read-only overlay lower, out of the
+    # way, not at its own host path -- record 0095's own addendum 2.
+    assert f"{mpy_dir}:/cibuildmp-lower-1:ro" in create
+    assert f"{mpy_dir}:{mpy_dir}" not in create
+
+    script_call = next(
+        c for c in calls if "BOARD=PICO" in " ".join(str(part) for part in c)
+    )
+    script = script_call[-1]
     assert f'export PATH="{(expected_dir / "bin").as_posix()}:$PATH"' in script
     assert "xpack-arm-none-eabi-gcc-15.2.1-1.1-linux-x64.tar.gz" in script
 
@@ -151,36 +239,41 @@ def test_rp2_extra_cmake_args_reach_the_container_as_cmake_args(monkeypatch, tmp
     _mock_rp2_image(monkeypatch)
     build_dir = tmp_path / "mpy" / "ports" / "rp2" / "build-PICO"
     build_dir.mkdir(parents=True)
-    (build_dir / "firmware.uf2").write_bytes(b"")
+    (build_dir / "firmware.uf2").write_bytes(b"uf2")
 
     calls = []
     monkeypatch.setattr(
         "cibuildmp.dockerrun.subprocess.run",
-        lambda cmd, **k: calls.append(cmd) or None,
+        lambda cmd, **k: calls.append(cmd) or _fake_docker_run(cmd, **k),
     )
 
-    build_rp2(
+    build_rp2_fn(
         rp2_opts(extra_cmake_args=("-DMICROPY_C_HEAP_SIZE=131072",)),
         tmp_path / "mpy",
         toolchain_root=tmp_path / "cache",
     )
 
-    docker_command = calls[0]
-    assert "CMAKE_ARGS=-DMICROPY_C_HEAP_SIZE=131072" in docker_command
+    script_call = next(
+        c for c in calls if "BOARD=PICO" in " ".join(str(part) for part in c)
+    )
+    assert "CMAKE_ARGS=-DMICROPY_C_HEAP_SIZE=131072" in script_call
 
 
 def test_rp2_no_extra_cmake_args_means_no_cmake_args_env(monkeypatch, tmp_path):
     _mock_rp2_image(monkeypatch)
     build_dir = tmp_path / "mpy" / "ports" / "rp2" / "build-PICO"
     build_dir.mkdir(parents=True)
-    (build_dir / "firmware.uf2").write_bytes(b"")
+    (build_dir / "firmware.uf2").write_bytes(b"uf2")
 
     calls = []
     monkeypatch.setattr(
         "cibuildmp.dockerrun.subprocess.run",
-        lambda cmd, **k: calls.append(cmd) or None,
+        lambda cmd, **k: calls.append(cmd) or _fake_docker_run(cmd, **k),
     )
 
-    build_rp2(rp2_opts(), tmp_path / "mpy", toolchain_root=tmp_path / "cache")
+    build_rp2_fn(rp2_opts(), tmp_path / "mpy", toolchain_root=tmp_path / "cache")
 
-    assert not any(arg.startswith("CMAKE_ARGS=") for arg in calls[0])
+    script_call = next(
+        c for c in calls if "BOARD=PICO" in " ".join(str(part) for part in c)
+    )
+    assert not any(arg.startswith("CMAKE_ARGS=") for arg in script_call)

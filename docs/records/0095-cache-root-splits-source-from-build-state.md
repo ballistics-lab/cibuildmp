@@ -1,9 +1,10 @@
 # 0095 — `cache_root()` is not one cache: fetched source persists, build state dies with the container
 
 Status: In progress — **the plan below is superseded by addendum 2 (2026-09-04); read that
-first, then addendum 4 (the runner allows it) and addendum 5 (what is actually in the code).**
-One of six ports is migrated; the transitional dual path addendum 5 describes has to be deleted
-when the last one is. Only item 5 (reports out of `cache_root()`) is settled and landed. Items 1-3 landed as
+first, then addendum 4 (the runner allows it), addendum 5 (what is actually in the code) and
+addendum 8 (`rp2` migrated).** Two of six ports are migrated; the transitional dual path
+addendum 5 describes has to be deleted when the last one is. Only item 5 (reports out of
+`cache_root()`) is settled and landed. Items 1-3 landed as
 described and work, but answer the wrong question — they place a build tree on the host, which the
 tool has no reason to own; addendum 2 replaces them with a `:ro` bind plus an overlayfs upper
 inside the container, measured working. Item 4's instinct was right and its mechanism wrong. Item
@@ -553,3 +554,44 @@ ca-certificates curl python3`, all of which a GitHub runner image already carrie
 caches and restores nothing. The apt step itself is not *quite* dead — `build-essential` is there
 for `qemu`'s host mpy-cross — so both it and its ~60 lines of i386/multilib archaeology should go
 in the same change that migrates `qemu`, not before.
+
+## Addendum 8, 2026-09-04 — `rp2` migrates to `Container`/overlay
+
+Second of six, and the one addendum 6 named as next: already run through the overlay by hand
+(addendum 3, 44.6 s, `firmware.uf2` 667648 B), so this was cibuildmp's own plumbing, not the
+model, exactly as expected.
+
+`build_rp2()` now follows `build_unix()`'s own shape: `dockerrun.overlay_container(mpy_dir, ...)`,
+`container.overlay(mpy_dir)`, every command through `container.call()`, and the finished
+`firmware.uf2` `cp`'d into `staging` before the container exits — `ports/rp2`'s own
+`build-<BOARD>/` (CMake, no `BUILD=` override, unchanged from before this migration) now lives and
+dies inside the container's overlay upper instead of on the host. `build_rp2()` gained the same
+"no staging, no build" guard `build_unix()` already has.
+
+**One real difference from `unix`, not a simplification of it:** the toolchain cache
+(`toolchain_root`, `sources.cache_root()`'s own `toolchains/` subtree) is fetched input meant to
+persist across runs — [0095]'s own category A — so it stays a plain, real read-write host mount
+(`toolchain_dir.parent`) passed straight to `overlay_container(mounts=[...])`, *outside* the
+overlay entirely. Only the mechanism carrying it into the container changed (`Container`'s
+`mounts=` instead of `dockerrun.run()`'s own); the mount itself, and the reasoning for mounting the
+parent rather than the not-yet-existing version directory, are unchanged from before this
+migration.
+
+`container_mpy_cross()` and `cmake_extra_args_env()` needed no changes at all — both already took
+an optional `container=`/worked through `call()`'s own `env=`, the shared plumbing [0095]'s
+addendum 5 built for exactly this. `usermod_mounts()` is no longer called here; a local
+`_rp2_project_mounts()` (mirroring `build_unix.py`'s own `_project_mounts()`) replaces it, since
+under the overlay model `mpy_dir` and `scratch_root()` are no longer things this driver mounts by
+hand.
+
+Tests rewritten on `test_usermod_build_unix.py`'s own pattern: a `_fake_docker_run()` stand-in that
+performs the `docker exec ... cp` for real (so a host-written stub `firmware.uf2` becomes readable
+at its `staging` destination the same way a real container's copy would), assertions on `docker
+create`'s own mount list (the checkout arrives `:ro` at `/cibuildmp-lower-1`, never at its own host
+path) rather than on a single flat `dockerrun.run()` argv.
+
+Not yet re-verified live — `build-rp2` in `test-upstream-usermodule.yml` is the CI job that
+exercises this port for real (`{tag}-rp2-RPI_PICO}`, `examples/usercmodule`, [0069]), on every
+push with no branch filter; whoever reads this next should check that job's own latest run before
+trusting this addendum, the same caution addendum 6 asked for and addendum 7 needed a second look
+to actually follow.
