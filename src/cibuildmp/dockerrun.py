@@ -84,10 +84,12 @@ from __future__ import annotations
 
 import os
 import platform
+import shutil
 import subprocess
+import tempfile
 import uuid
-from pathlib import Path
-from typing import Any
+from pathlib import Path, PurePosixPath
+from typing import Any, Self
 
 from .platforms.usermod.build_common import UsermodBuildError
 from .resources import build_platforms_data, pinned_docker_images, pinned_pypa_images
@@ -725,3 +727,364 @@ def run(
             f"docker run against image {image!r} was requested but the "
             "docker CLI itself is not on PATH"
         ) from exc
+
+
+# ── The container session (record 0095, addendum 2) ──────────────────────
+#
+# `run()` above is one `docker run --rm` per command: the container is born
+# and dies around a single `make`, so anything it produced has to already be
+# on a host bind mount by the time it exits. That is the whole reason build
+# state used to live inside `mpy_dir` -- not a design choice, a consequence
+# of the container lifetime.
+#
+# `Container` below inverts it. The container outlives the commands, so the
+# build tree can live *inside* it and the finished artifact is fetched with
+# `docker cp` before it is torn down. That is cibuildwheel's own shape
+# (`OCIContainer`: `create` -> `exec`/`copy_out` -> `rm --force`,
+# `oci_container.py:320-360,478`), arrived at here for the same reason.
+#
+# Two deliberate differences from upstream, both narrower rather than
+# cleverer:
+#
+# * **Commands go through `docker exec`, not a bash kept open on stdin.**
+#   Upstream writes each command into one attached `/bin/bash` and finds the
+#   end of the output by a UUID sentinel it prints after `$?`
+#   (`oci_container.py:499-575`). That earns its complexity there -- a
+#   cibuildwheel build issues many small commands per Python version -- and
+#   costs a real exit code, separated stderr, and a working `timeout=`.
+#   cibuildmp issues a handful of commands per build, so `docker exec` is
+#   both simpler and strictly better-behaved here.
+# * **The keep-alive is `sh -c 'while :; do sleep 3600; done'`, not an
+#   attached bash.** No supervising `Popen` to leak, and it works on every
+#   image this project uses -- `sleep infinity` deliberately avoided, since
+#   busybox's own `sleep` (the musllinux/Alpine images) does not take it.
+
+# `mount -t overlay` inside a container needs more than the default
+# `docker run` sandbox allows, and exactly how much more was measured
+# rather than guessed -- `.github/workflows/probe-overlay.yml`, run
+# 33866525827, five privilege levels on both `ubuntu-latest` and
+# `ubuntu-24.04-arm`:
+#
+#   bare `docker run`            mount: /mp: permission denied
+#   + --cap-add SYS_ADMIN        mount: /mp: cannot mount overlay read-only
+#   + apparmor=unconfined        ok, on both runners
+#   + seccomp=unconfined         ok (unnecessary)
+#   --privileged                 ok (unnecessary)
+#
+# So this is the minimum, not a conservative over-grant: `seccomp` stays at
+# Docker's own default profile and the container is never `--privileged`.
+OVERLAY_CREATE_ARGS = (
+    "--cap-add",
+    "SYS_ADMIN",
+    "--security-opt",
+    "apparmor=unconfined",
+)
+
+# Where a `Container` puts an overlay's own `upperdir`/`workdir`. An
+# anonymous volume, declared at create time, for one reason that is not
+# about tidiness: `upperdir` may not sit on an overlayfs, and the
+# container's own root filesystem *is* one -- the mount fails outright
+# otherwise. A volume also keeps the write path on real disk rather than in
+# the page cache of a tmpfs, which matters when the upper layer holds a
+# whole port's object tree (measured: 72 MB for `unix`, 101 MB for `rp2`).
+OVERLAY_SCRATCH = "/cibuildmp-overlay"
+
+
+class Container:
+    """A container that outlives the commands run in it.
+
+    Used as a context manager::
+
+        with Container(image=..., oci_platform=...) as c:
+            c.overlay(host_checkout, at=PurePosixPath("/mp"))
+            c.call(["make", "-C", "/mp/ports/unix"], workdir=...)
+            c.copy_out(PurePosixPath("/mp/ports/unix/build/micropython"), dest)
+
+    `mounts` are bind-mounted at their own identical host paths, the same
+    convention `run()` already uses, so a path built for the host resolves
+    unchanged inside. Under the overlay model most callers need none: the
+    checkout arrives through `overlay()` and the artifact leaves through
+    `copy_out()`.
+
+    **No `--user`.** `run()` passes one, and has to: everything it produced
+    landed on a host bind mount, and root-owned build output there could not
+    be cleaned by an ordinary `rm -rf` (found for real, see that function's
+    own comment). Here nothing is written to the host at all -- `docker cp`
+    creates its output owned by whoever invoked it -- and the overlay mount
+    needs `CAP_SYS_ADMIN`, which a non-root user does not keep. The reason
+    for the flag and the flag itself disappear together.
+    """
+
+    def __init__(
+        self,
+        *,
+        image: str,
+        oci_platform: str | None = None,
+        mounts: list[Path] | None = None,
+        ro_mounts: list[Path] | None = None,
+        env: dict[str, str] | None = None,
+        overlay: bool = True,
+    ) -> None:
+        self.image = image
+        self.oci_platform = oci_platform
+        self.mounts = list(mounts or [])
+        # Separate from `mounts` rather than a `(path, mode)` tuple list:
+        # every read-only mount here is a *lowerdir* for `overlay()`, which
+        # is the only reason this class mounts anything read-only at all.
+        # Docker enforces it at the bind, so nothing inside the container
+        # can write through to the host even if a build tries.
+        self.ro_mounts = list(ro_mounts or [])
+        self.env = dict(env or {})
+        self.overlay_enabled = overlay
+        self.name = f"cibuildmp-{uuid.uuid4().hex[:12]}"
+        self._started = False
+        self._lowers = 0
+
+    def __enter__(self) -> Self:
+        if self.oci_platform is not None and self.oci_platform != host_oci_platform():
+            _probe_platform(self.image, self.oci_platform)
+        command = ["docker", "create", "--name", self.name, "--pull", "missing"]
+        if self.oci_platform is not None:
+            command += [f"--platform={self.oci_platform}"]
+        if self.overlay_enabled:
+            command += [*OVERLAY_CREATE_ARGS, "-v", OVERLAY_SCRATCH]
+        for mount in self.mounts:
+            command += ["-v", f"{mount.as_posix()}:{mount.as_posix()}"]
+        for mount in self.ro_mounts:
+            command += ["-v", f"{mount.as_posix()}:{mount.as_posix()}:ro"]
+        for key, value in self.env.items():
+            command += ["-e", f"{key}={value}"]
+        # See this module's own section comment for why the keep-alive is a
+        # `sleep` loop rather than `sleep infinity` or an attached bash.
+        command += [self.image, "sh", "-c", "while :; do sleep 3600; done"]
+        # `capture_output=True` purely to swallow the container id/name both
+        # commands echo -- neither is useful to a caller watching a build,
+        # and `run()`'s own output has never carried it.
+        self._docker(command, what="create", capture_output=True)
+        self._docker(["docker", "start", self.name], what="start", capture_output=True)
+        self._started = True
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+        # `--force`, and never `check=True`: teardown runs on the failure
+        # path too, and a container that already died (a timeout kill, an
+        # OOM) must not turn into a second, misleading exception on top of
+        # the real one.
+        subprocess.run(
+            ["docker", "rm", "--force", "--volumes", self.name],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        self._started = False
+
+    def overlay(self, lower: Path, *, at: PurePosixPath) -> None:
+        """Present host directory `lower` at `at`, writable, without the
+        container being able to change it.
+
+        `lower` is bind-mounted read-only and an overlayfs is mounted over
+        it, so every write the build makes -- a `BUILD=` tree, libffi's own
+        in-tree `autogen.sh` output, `mpy-cross/build/`, rp2's CMake
+        directory -- lands in the container's upper layer and dies with the
+        container. The host copy is shared by every container that mounts
+        it and is never duplicated: this is what lets one cached checkout
+        serve a whole run.
+
+        Called after `__enter__`, because the mount is itself a command run
+        inside the container -- `docker create` has no equivalent, and
+        `--mount type=bind` cannot express "writable view of a read-only
+        tree" at all.
+        """
+        if not self.overlay_enabled:
+            msg = "overlay() on a Container created with overlay=False"
+            raise UsermodBuildError(msg)
+        # A distinct upper/work pair per call, so a caller may overlay more
+        # than one tree into one container without them colliding.
+        self._lowers += 1
+        upper = f"{OVERLAY_SCRATCH}/up-{self._lowers}"
+        work = f"{OVERLAY_SCRATCH}/work-{self._lowers}"
+        # `lowerdir` is the host path itself, already bind-mounted read-only
+        # by `docker create` -- a bind cannot be added to a running
+        # container, so it has to have been declared there. That is the
+        # whole reason `overlay_container()` exists rather than callers
+        # building a `Container` by hand: the two halves are decided at
+        # different moments and are easy to get out of step.
+        if lower not in self.ro_mounts:
+            msg = (
+                f"overlay() needs {lower} declared as a read-only bind at "
+                "create time; use overlay_container() rather than "
+                "constructing Container directly"
+            )
+            raise UsermodBuildError(msg)
+        self.call(
+            [
+                "sh",
+                "-c",
+                (
+                    f"mkdir -p {upper} {work} {at} && "
+                    f"mount -t overlay overlay "
+                    f"-o lowerdir={lower.as_posix()},upperdir={upper},"
+                    f"workdir={work} {at}"
+                ),
+            ],
+            workdir=PurePosixPath("/"),
+        )
+
+    def call(
+        self,
+        command: list[str],
+        *,
+        workdir: PurePosixPath | Path,
+        env: dict[str, str] | None = None,
+        timeout: float | None = None,
+        capture_output: bool = False,
+    ) -> str | None:
+        """Run one command inside the container and wait for it.
+
+        `docker exec` rather than a shell kept open on stdin, so the exit
+        code, the timeout and stderr are all the real ones -- see this
+        module's own section comment.
+        """
+        if not self._started:
+            msg = "Container.call() outside the `with` block"
+            raise UsermodBuildError(msg)
+        exec_command = ["docker", "exec", "--workdir", str(workdir)]
+        for key, value in (env or {}).items():
+            exec_command += ["-e", f"{key}={value}"]
+        exec_command += [self.name, *command]
+        return self._docker(
+            exec_command,
+            what=" ".join(command),
+            timeout=timeout,
+            capture_output=capture_output,
+        )
+
+    def copy_out(self, source: PurePosixPath, dest: Path) -> None:
+        """Copy `source` (a file or a directory) out of the container to host
+        path `dest`.
+
+        The only way anything leaves a container under this model, and the
+        reason the container has to outlive the build at all: a
+        `docker run --rm` has already destroyed its filesystem by the time
+        the host regains control.
+
+        **`docker exec ... tar`, not `docker cp`** -- found the hard way, on
+        the first real build driven through this class. `docker cp` is
+        served by the daemon reading the container's filesystem through its
+        own graph driver, and a mount the *container itself* made is not
+        part of that view: copying the freshly built binary out of an
+        overlay failed with
+
+            Error response from daemon: Could not find the file
+            /mp/ports/unix/build-standard/micropython in container ...
+
+        while `docker cp` of an ordinary container path in the same
+        container worked. `docker exec` enters the container's own mount
+        namespace, so it sees exactly what the build saw. This is
+        cibuildwheel's own `copy_into()` mechanism (`oci_container.py:442`,
+        a `tar` piped through `exec -i`) run in the other direction, for a
+        reason upstream never has to state because it never mounts anything
+        from inside.
+
+        `--no-same-owner` on the host side: everything in the container is
+        built as root (see the class docstring on why there is no `--user`
+        here any more), and without it a privileged host extraction would
+        reproduce that ownership on files the invoking user has to be able
+        to delete.
+        """
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=dest.parent) as staging:
+            producer = subprocess.Popen(
+                [
+                    "docker",
+                    "exec",
+                    self.name,
+                    "tar",
+                    "-cf",
+                    "-",
+                    "-C",
+                    str(source.parent),
+                    source.name,
+                ],
+                stdout=subprocess.PIPE,
+            )
+            assert producer.stdout is not None
+            with producer.stdout:
+                extracted = subprocess.run(
+                    ["tar", "-xf", "-", "--no-same-owner", "-C", staging],
+                    stdin=producer.stdout,
+                    check=False,
+                )
+            if producer.wait() != 0 or extracted.returncode != 0:
+                msg = f"{self.image}: copying {source} out of the container failed"
+                raise UsermodBuildError(msg)
+            # Atomic-ish rename rather than extracting straight to `dest`:
+            # the archive member is named after `source`, which need not
+            # match `dest`'s own basename, and a half-extracted tree must
+            # never be mistaken for a finished artifact.
+            produced = Path(staging) / source.name
+            if dest.exists():
+                shutil.rmtree(dest) if dest.is_dir() else dest.unlink()
+            shutil.move(str(produced), str(dest))
+
+    def _docker(
+        self,
+        command: list[str],
+        *,
+        what: str,
+        timeout: float | None = None,
+        capture_output: bool = False,
+    ) -> str | None:
+        try:
+            result = subprocess.run(
+                command,
+                check=True,
+                timeout=timeout,
+                capture_output=capture_output,
+                text=capture_output,
+            )
+            return result.stdout if capture_output else None
+        except subprocess.TimeoutExpired as exc:
+            # The same reasoning `run()` documents: killing the CLI process
+            # leaves the container itself running under `dockerd`. Here it
+            # is `kill`, not `rm`, so `__exit__` still does the teardown and
+            # a caller inspecting the failure sees one path, not two.
+            subprocess.run(["docker", "kill", self.name], check=False)
+            msg = f"{self.image}: `{what}` timed out after {timeout}s and was killed"
+            raise UsermodBuildError(msg) from exc
+        except subprocess.CalledProcessError as exc:
+            msg = f"{self.image}: `{what}` failed with exit code {exc.returncode}"
+            raise UsermodBuildError(msg) from exc
+        except FileNotFoundError as exc:
+            msg = (
+                f"a container against image {self.image!r} was requested but "
+                "the docker CLI itself is not on PATH"
+            )
+            raise UsermodBuildError(msg) from exc
+
+
+def overlay_container(
+    lower: Path,
+    *,
+    at: PurePosixPath,
+    image: str,
+    oci_platform: str | None = None,
+    mounts: list[Path] | None = None,
+    env: dict[str, str] | None = None,
+) -> Container:
+    """A `Container` with `lower` already declared as a read-only bind, ready
+    for `overlay(lower, at=at)` once entered.
+
+    The two halves have to agree and are easy to get wrong apart: the bind
+    can only be declared at `docker create` time, while the overlay can only
+    be mounted once the container is running. This is the entry point every
+    caller should use.
+    """
+    return Container(
+        image=image,
+        oci_platform=oci_platform,
+        mounts=list(mounts or []),
+        ro_mounts=[lower],
+        env=env,
+        overlay=True,
+    )
