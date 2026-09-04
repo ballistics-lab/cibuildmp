@@ -53,8 +53,10 @@ in the package at all.
 `bin/update_toolchains.py` (record [0046]) reports when a *shared* pin
 (one `ARG` in one Dockerfile) falls behind its own upstream's latest
 release. It has nothing to say about whether that pin is still *inside*
-every row's own window -- confirmed live, this session, against
-`docker/arm_embedded.Dockerfile`/`docker/riscv_embedded.Dockerfile`: both
+every row's own window -- confirmed live, this session, against what
+were then two separate files, `docker/arm_embedded.Dockerfile`/
+`docker/riscv_embedded.Dockerfile` (merged into one,
+`docker/embedded_base.Dockerfile`, by record [0096]): both
 are pinned at xpack `15.2.1`/`15.2.0`, `update_toolchains.py` reports them
 as current (they *are* the newest xpack release), and both are still
 **above every `usermod.rp2`/`usermod.samd`/`usermod.nrf`/pre-`v1.27.0`
@@ -93,10 +95,9 @@ FACTS = REPO / "docs" / "reference" / "toolchain-facts"
 # *upstream freshness* (does a newer release exist), a different question
 # from *does this version sit inside this row's own window*.
 DOCKERFILE_PIN = {
-    "arm_embedded": (REPO / "docker" / "arm_embedded.Dockerfile", "gcc-arm-embedded"),
-    "riscv_embedded": (
-        REPO / "docker" / "riscv_embedded.Dockerfile",
-        "gcc-riscv-embedded",
+    "embedded_base": (
+        REPO / "docker" / "embedded_base.Dockerfile",
+        "gcc-arm-embedded",
     ),
 }
 DOCKERFILE_VERSION_RE = re.compile(r"xpack-\S+?-gcc-xpack/releases/download/v([\d.]+)")
@@ -213,7 +214,7 @@ def real_rows(build_platforms: dict, scope: str) -> list[tuple[str, str]]:
 def image_for(build_platforms: dict, port: str) -> str | None:
     """The `image` a usermod port's own build actually runs in -- several
     ports share one (`rp2`/`samd`/`nrf`/`stm32`/`mimxrt` all resolve to
-    `arm_embedded`, record 0058), so the Dockerfile to check is never the
+    `embedded_base`, record 0058/0096), so the Dockerfile to check is never the
     port's own name. A `natmod.<image>` scope names its image directly --
     natmod has no per-port indirection to resolve it through."""
     if port.startswith("natmod."):

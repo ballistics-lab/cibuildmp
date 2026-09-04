@@ -255,7 +255,7 @@ trusting this table if it might have drifted:
 | Host | Used by |
 |---|---|
 | `toolchains.bootlin.com` | `manylinux_2_41_mipsel`, `ppc64le_linux` |
-| `github.com` (+ its release-asset redirect, `*.githubusercontent.com`) | `arm_embedded`/`riscv_embedded` (xpack), `xtensa_esp` (Espressif crosstool-NG), `windows` (llvm-mingw, `arm64` frontend) |
+| `github.com` (+ its release-asset redirect, `*.githubusercontent.com`) | `embedded_base` (xpack), `xtensa_esp` (Espressif crosstool-NG), `windows` (llvm-mingw, `arm64` frontend) |
 | `micropython.org` | `xtensa_lx106` |
 | `storage.googleapis.com` | `webassembly` (pinned emsdk tarball) |
 | `quay.io` (+ `*.quay.io`) | every `manylinux_2_28_*` and `pypa-tracker` base |

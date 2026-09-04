@@ -1,7 +1,8 @@
 """Generic in-container tarball toolchain fetch -- record 0086.
 
-Generalizes what `docker/arm_embedded.Dockerfile`/`riscv_embedded.Dockerfile`
-used to do only at *image build* time (curl a pinned tarball, verify its
+Generalizes what `docker/embedded_base.Dockerfile` (`arm_embedded.Dockerfile`/
+`riscv_embedded.Dockerfile` before record 0096 merged them) used to do only
+at *image build* time (curl a pinned tarball, verify its
 sha256, `--strip-components=1` it into place) into something a real build can
 also run at *container* time, against a host-mounted cache directory -- the
 same shape `usermod/build_esp32.py`'s own `_esp32_container_script()` already
@@ -44,19 +45,27 @@ class ToolchainFetchError(Exception):
     pass
 
 
-# The one real cross-compiler product each of these two toolchain-group
-# images provides (record 0058's own "image groups are toolchains, not
-# ports" design -- each image is keyed to exactly one compiler family).
+# The two cross-compiler families `docker/embedded_base.Dockerfile` fetches
+# at container run time. **Not** keyed by image name any more -- record
+# 0096 merged the two toolchain-group images `arm_embedded`/
+# `riscv_embedded` used to be (record 0058's own "image groups are
+# toolchains, not ports" design) into one shared `embedded_base` image, so
+# an image name can no longer disambiguate which cross toolchain a row
+# needs the way it could when each toolchain had its own image. These keys
+# are toolchain-family identifiers only, kept at their pre-0096 spelling
+# because every caller already names them this way; a caller resolves
+# *which* family a given row needs from the row's own arch/board (natmod's
+# `_NATMOD_ARCH_TOOLCHAIN_FAMILY`, `build_qemu.QEMU_BOARD_CROSS`, `rp2`
+# being unconditionally the arm family), never from `image`/`images`.
 # Shared between `usermod/targets.py` and `natmod/targets.py` rather than
-# each keeping its own copy: both need the same `image -> cross` fact to
-# turn a row's own `image`/`images` field into the key this module's own
-# `resolve_pin()`/`toolchain_dir()` take. Not read off a row's own
-# `cross` field -- that field is a Makefile grep
+# each keeping its own copy. Not read off a row's own `cross` field --
+# that field is a Makefile grep
 # (`parse_cross_compile()`/`parse_cross_prefixes()`) and is `None`
 # wherever a port's own Makefile has no `CROSS_COMPILE` line to find
-# (`rp2`'s CMake wrapper, confirmed directly), even though the image it
-# runs in hosts exactly the toolchain named here regardless.
-IMAGE_CROSS_PREFIX: dict[str, str] = {
+# (`rp2`'s CMake wrapper, confirmed directly, and -- checked directly for
+# 0096 -- `natmod`'s own `armv6m`/`rv32imc`/`rv64imc` rows), even though
+# the image it runs in hosts exactly the toolchain named here regardless.
+TOOLCHAIN_CROSS_PREFIX: dict[str, str] = {
     "arm_embedded": "arm-none-eabi-",
     "riscv_embedded": "riscv64-unknown-elf-",
 }
@@ -81,11 +90,13 @@ def resolve_pin(cross: str, version: str) -> tuple[str, str]:
 
     `cross` is `build-platforms.toml`'s own existing per-row field (each
     port's real `CROSS_COMPILE` prefix, e.g. `"arm-none-eabi-"`), used
-    verbatim -- not `image` (`arm_embedded`/`riscv_embedded`, record
-    0058): that name is a Docker-packaging fact, while `cross` is a fact
-    about the compiler itself, and the one that survives any future
-    repackaging of the images (see `pinned_toolchains.toml`'s own
-    header). `version` is a row's own `toolchain_version`/`gcc` string.
+    verbatim -- not `image` (`embedded_base` since record 0096; was
+    `arm_embedded`/`riscv_embedded`, record 0058): that name is a
+    Docker-packaging fact, while `cross` is a fact about the compiler
+    itself, and the one that survives any future repackaging of the
+    images (see `pinned_toolchains.toml`'s own header, and 0096's own
+    argument for why the images' own repackaging already happened).
+    `version` is a row's own `toolchain_version`/`gcc` string.
 
     The `(tag, port) -> version` half of this lookup is not this
     function's job and has no code yet -- `targets.py`'s own

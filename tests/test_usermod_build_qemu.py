@@ -16,8 +16,8 @@ def qemu_opts(**overrides) -> QemuBuildOptions:
         "user_c_modules": "/gh/ws/micropython/usermod",
         "frozen_manifest": "/gh/ws/a7p_manifest.py",
         "build_dir": Path("/gh/ws/usermod/build/armv7m"),
-        # A real tag with a real, pinned toolchain_version for both
-        # arm_embedded and riscv_embedded -- since [0087], build_qemu()
+        # A real tag with a real, pinned toolchain_version for both the
+        # arm and riscv toolchain families -- since [0087], build_qemu()
         # needs one to resolve which cross compiler to fetch
         # (targets.qemu_toolchain()) for every board but POWERNV9.
         "tag": "v1.29.0",
@@ -124,9 +124,10 @@ def test_qemu_unsupported_board_rejected(tmp_path):
 
 
 def test_qemu_no_tag_raises_a_clear_error_before_touching_docker(monkeypatch, tmp_path):
-    # [0087]: with arm_embedded/riscv_embedded no longer baking a cross
-    # compiler, a real tag is required to resolve which one to fetch --
-    # this must fail before ever calling docker.
+    # [0087]: with embedded_base (`arm_embedded`/`riscv_embedded` before
+    # record 0096) no longer baking a cross compiler, a real tag is
+    # required to resolve which one to fetch -- this must fail before
+    # ever calling docker.
     calls = []
     monkeypatch.setattr(
         dockerrun, "ensure_image", lambda *a, **k: calls.append(a) or "qemu:test"
@@ -143,7 +144,7 @@ def test_qemu_no_tag_raises_a_clear_error_before_touching_docker(monkeypatch, tm
 
 
 def test_qemu_fetches_its_own_toolchain_and_puts_it_on_path(monkeypatch, tmp_path):
-    # [0086]/[0087]: arm_embedded no longer bakes a cross compiler --
+    # [0086]/[0087]: embedded_base no longer bakes a cross compiler --
     # build_qemu() must fetch it at container time and prepend it onto
     # PATH, mounting the cache directory it lands in.
     monkeypatch.setattr(dockerrun, "ensure_image", lambda *a, **k: "qemu:test")

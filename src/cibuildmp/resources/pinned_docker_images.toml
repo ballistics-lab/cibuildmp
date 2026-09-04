@@ -68,11 +68,12 @@
 # parity in the matrix is worth little if the labels still need
 # translating at every comparison.
 #
-# The six toolchain groups record 0058 introduced (`arm_embedded`,
-# `riscv_embedded`, `xtensa_lx106`, `xtensa_esp`, `natmod_host`,
-# `ppc64le_linux`) and `esp_idf_base` are named for what they hold, since
-# none of them is a PEP 600 tag -- there is no upstream naming convention
-# to reuse for a bare-metal cross toolchain.
+# The five toolchain groups record 0058 introduced (`embedded_base` --
+# `arm_embedded`/`riscv_embedded` before record 0096 merged them,
+# `xtensa_lx106`, `xtensa_esp`, `natmod_host`, `ppc64le_linux`) and
+# `esp_idf_base` are named for what they hold, since none of them is a
+# PEP 600 tag -- there is no upstream naming convention to reuse for a
+# bare-metal cross toolchain.
 #
 # A key with an **empty value** is a declared group with nothing
 # published for it yet. It is still real: `unix_targets()` (and, for
@@ -213,18 +214,31 @@ manylinux_2_41_mipsel = "ghcr.io/ballistics-lab/manylinux_2_41_mipsel@sha256:cda
 windows = "ghcr.io/ballistics-lab/windows@sha256:0ea64a917a652d8540dea81b4cf33eff6fac2d46308a3f7418ae9ad023a199d5"
 webassembly = "ghcr.io/ballistics-lab/webassembly@sha256:ffea4467f27e9e7ee494f1cf2797e5b2d49e98f4458304300f08ae53440eb6d8"
 
-# ── the six toolchain-group images (record 0058) ───────────────────────
+# ── the five toolchain-group images (record 0058, thinned by 0096) ─────
 #
 # `natmod.Dockerfile` (all ten `dynruntime.mk` toolchains) and
 # `qemu.Dockerfile` (one board's worth of `arm-none-eabi`) are gone --
-# every natmod arch and every qemu board now names one of these six
+# every natmod arch and every qemu board now names one of these five
 # through `build-platforms.toml`'s own `images.<arch>`/`images.<board>`
 # map, the same way ten usermod ports already do. Published by
 # `publish-docker-images.yml` run 33175380705 (2026-08-28), each one
 # verified live before that run -- see record 0058's own "built and
 # verified" table for what each was tested against.
-arm_embedded = "ghcr.io/ballistics-lab/arm_embedded@sha256:607f3163d2600e45e1dd25af5ed273a896d65433a82937940b77d061feae4a5a"
-riscv_embedded = "ghcr.io/ballistics-lab/riscv_embedded@sha256:47826777013650ceef1a3577c041dd3939f1c4e9b642387cfa7e403034f634a5"
+#
+# `embedded_base` was `arm_embedded`/`riscv_embedded`, two separate
+# entries, until record 0096 merged their Dockerfiles into one
+# (`docker/embedded_base.Dockerfile`) once [0087]/[0089] had already made
+# their build-time content identical but for one apt package. **The
+# digest below is the old `arm_embedded` publish, kept verbatim, not a
+# new one** -- `docker/embedded_base.Dockerfile`'s own content is that
+# same image plus `cmake` folded in from `riscv_embedded`'s superset
+# relationship (real, already-published, already pullable; not this
+# repo's own `embedded_base` package yet, since nothing has pushed to it).
+# A maintainer running `publish-docker-images.yml` for real replaces this
+# with the genuine `ghcr.io/ballistics-lab/embedded_base@sha256:...`
+# digest that run prints -- until then this pin is correct in content,
+# not yet in provenance, and `[0096]`'s own record says so.
+embedded_base = "ghcr.io/ballistics-lab/arm_embedded@sha256:607f3163d2600e45e1dd25af5ed273a896d65433a82937940b77d061feae4a5a"
 xtensa_lx106 = "ghcr.io/ballistics-lab/xtensa_lx106@sha256:bd995c552089749441f038e7a20eacb60ea5af23c98d91cec60ae60aababc040"
 xtensa_esp = "ghcr.io/ballistics-lab/xtensa_esp@sha256:2b7985855597188faa2d3750ecbe144cbee814768620f96dccfa5dc2848cb638"
 natmod_host = "ghcr.io/ballistics-lab/natmod_host@sha256:05454c937c3d7d712d10631662592fa789570278dd47ee78b1eaf60f73894b35"

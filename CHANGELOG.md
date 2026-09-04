@@ -49,6 +49,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cross compiler first, the same `probe_supported_cflags()` mechanism `unix` already uses for its
   own gcc version ladder.
 
+### Changed
+
+- **`arm_embedded` and `riscv_embedded` collapse into one Docker image, `embedded_base`.**
+  `[0087]`/`[0089]` already moved both toolchains' cross compilers to a container-run-time
+  fetch (`toolchain_fetch.py`, `[0086]`), leaving the two Dockerfiles' own build-time layers
+  identical but for one apt package (`cmake`, `rp2`-only) — an open question `[0044]`'s own
+  addendum had sketched but never tracked, closed once nothing was left to reconcile. Every
+  `image`/`images.<arch/board>` field naming the two groups, `resources/
+  pinned_docker_images.toml`'s `[image_group]` table, and both `publish-docker-images.yml`'s
+  and `verify-docker-images.yml`'s own matrices now name the one merged group. Fixed the one
+  real functional dependency the merge would otherwise have broken silently:
+  `natmod/targets.py`'s `natmod_toolchain()` used to resolve which cross toolchain an arch
+  needs by looking up its image-group name, which stops disambiguating once both toolchains
+  share one image — it now resolves from a direct, fixed `arch -> toolchain family` table
+  instead. `[0096]`.
+
 ## [0.6.2] - 2026-09-03
 
 ### Fixed
@@ -1562,3 +1578,7 @@ than restarting (see the 0.3.0a1 entry). -->
 [0082]: docs/records/0082-natmod-old-tags-fail-mpy-cross-under-gcc-15.md
 [0091]: docs/records/0091-tag-cflags-into-every-ports-mpy-cross.md
 [0093]: docs/records/0093-pre-v1-20-0-tags-had-never-built.md
+[0086]: docs/records/0086-generic-in-container-toolchain-tarball-fetch.md
+[0087]: docs/records/0087-arm-riscv-embedded-thin-out-toolchain-version-lands.md
+[0089]: docs/records/0089-natmod-arm-riscv-embedded-toolchain-version.md
+[0096]: docs/records/0096-arm-riscv-embedded-collapse-into-embedded-base.md

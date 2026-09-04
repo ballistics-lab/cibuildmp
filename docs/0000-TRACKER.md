@@ -71,6 +71,7 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### Implemented
 
+- [x] [0096] `arm_embedded` and `riscv_embedded` collapse into one `embedded_base` image
 - [x] [0089] `natmod`'s own `arm_embedded`/`riscv_embedded` rows get `toolchain_version` too
 - [x] [0087] `arm_embedded`/`riscv_embedded` lose their baked cross toolchain; `toolchain_version` becomes a real, read field
 - [x] [0086] a generic in-container tarball toolchain fetch, generalized out of `arm_embedded.Dockerfile`'s own build-time recipe
@@ -272,3 +273,4 @@ record is added.
 [0093]: records/0093-pre-v1-20-0-tags-had-never-built.md
 [0094]: records/0094-arm-gnu-toolchain-is-a-real-third-choice-for-arm-embedded.md
 [0095]: records/0095-cache-root-splits-source-from-build-state.md
+[0096]: records/0096-arm-riscv-embedded-collapse-into-embedded-base.md

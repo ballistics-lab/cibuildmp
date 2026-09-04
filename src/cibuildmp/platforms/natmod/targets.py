@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ...resources import build_platforms_data, natmod_data
-from ...toolchain_fetch import IMAGE_CROSS_PREFIX
+from ...toolchain_fetch import TOOLCHAIN_CROSS_PREFIX
 
 # ── Architectures ─────────────────────────────────────────────────────────
 # Transcribed from MicroPython's own source, and living in resources/
@@ -90,17 +90,36 @@ _IDENTIFIER_BY_TAG_ARCH: dict[tuple[str, str], str] = {
 
 MPY_ABI: dict[str, str] = {row["tag"]: row["mpy"] for row in _NATMOD_ROWS}
 
+# Which of `toolchain_fetch.TOOLCHAIN_CROSS_PREFIX`'s two fetched
+# toolchain families each natmod arch needs. **Not** derived from
+# `images[arch]` any more -- record 0096 merged `arm_embedded`/
+# `riscv_embedded` into one shared `embedded_base` Docker image, so
+# `images["armv6m"]` and `images["rv32imc"]` now resolve to the *same*
+# image name and could no longer disambiguate a cross toolchain family
+# the way they used to (one image, two families it hosts). The set below
+# is fixed and closed -- every natmod arch that resolves to
+# `embedded_base` today, checked directly against
+# `build-platforms.toml`'s own `images` map -- and does not need to grow
+# on its own the way a real per-row fact would, since a new arch needing
+# this image is also a new line in `natmod.toml`'s own `[arch]` table,
+# the natural place to add it.
+_NATMOD_ARCH_TOOLCHAIN_FAMILY: dict[str, str] = {
+    "armv6m": "arm_embedded",
+    "armv7m": "arm_embedded",
+    "armv7emsp": "arm_embedded",
+    "armv7emdp": "arm_embedded",
+    "rv32imc": "riscv_embedded",
+    "rv64imc": "riscv_embedded",
+}
+
 # Toolchain-fetch wiring ([0086]/[0089]): `(tag, arch) -> version`, for
-# every arch whose own image is one of the two `toolchain_fetch.
-# IMAGE_CROSS_PREFIX` names -- `build-platforms.toml`'s own `gcc` field,
-# already real ([0084]'s own live compiler check), even though nothing
-# read it for natmod before this.
+# every arch `_NATMOD_ARCH_TOOLCHAIN_FAMILY` above names -- `build-
+# platforms.toml`'s own `gcc` field, already real ([0084]'s own live
+# compiler check), even though nothing read it for natmod before this.
 _NATMOD_TOOLCHAIN_VERSION_BY_TAG_ARCH: dict[tuple[str, str], str] = {
     (row["tag"], row["arch"]): row["gcc"]
     for row in _NATMOD_ROWS
-    if row.get("gcc")
-    and build_platforms_data()["natmod"]["images"].get(row["arch"])
-    in IMAGE_CROSS_PREFIX
+    if row.get("gcc") and row["arch"] in _NATMOD_ARCH_TOOLCHAIN_FAMILY
 }
 
 
@@ -117,10 +136,10 @@ def natmod_toolchain(tag: str, arch: str) -> tuple[str, str] | None:
     class of caller error `rp2_toolchain()`'s own docstring already
     covers.
     """
-    image = build_platforms_data()["natmod"]["images"].get(arch)
-    cross = IMAGE_CROSS_PREFIX.get(image or "")
-    if cross is None:
+    family = _NATMOD_ARCH_TOOLCHAIN_FAMILY.get(arch)
+    if family is None:
         return None
+    cross = TOOLCHAIN_CROSS_PREFIX[family]
     return cross, _NATMOD_TOOLCHAIN_VERSION_BY_TAG_ARCH[(tag, arch)]
 
 

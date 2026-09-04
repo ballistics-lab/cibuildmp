@@ -445,9 +445,9 @@ moved to containers entirely ([0050]): there is no host toolchain resolver
 left at all (`natmod/toolchains.py`, its `--toolchain` flag, and
 `resources/natmod.toml`'s own `[[toolchain]]` table were all deleted), and
 no bare-host natmod build path survives it. Every arch above now runs inside
-a pulled image — one of six toolchain-group images keyed by what they hold,
-not by port ([0058]), several shared across natmod arches and usermod ports
-alike. See [docs/reference/vendored-images.md](vendored-images.md) for the
+a pulled image — one of five toolchain-group images keyed by what they hold,
+not by port ([0058], thinned from six to five by [0096]), several shared
+across natmod arches and usermod ports alike. See [docs/reference/vendored-images.md](vendored-images.md) for the
 full group model: which arch/port/board resolves to which image, how a build
 actually picks one at runtime, and how those images get published.
 
@@ -544,3 +544,4 @@ not a toolchain) are an open question — see
 [0075]: ../records/0075-top-level-scalar-keys-are-validated.md
 [0076]: ../records/0076-the-mipsel-holdout-is-bclibc-and-wasm3-not-a7p.md
 [0077]: ../records/0077-docs-drift-is-a-failing-test-not-a-discipline-problem.md
+[0096]: ../records/0096-arm-riscv-embedded-collapse-into-embedded-base.md

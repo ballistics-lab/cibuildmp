@@ -77,9 +77,10 @@ DEFAULT_OUTPUT = (
 
 # Every architecture this project has a real target for, and why. Bootlin
 # publishes Linux toolchains only, so the bare-metal groups
-# (`arm_embedded`, `riscv_embedded`, `xtensa_esp`, `xtensa_lx106`) are
-# absent by construction -- they stay on xpack/Espressif tarballs, which
-# record 0084's "Bootlin uniformly" does not reach and was never claimed to.
+# (`embedded_base` -- `arm_embedded`/`riscv_embedded` before record 0096
+# merged them --, `xtensa_esp`, `xtensa_lx106`) are absent by
+# construction -- they stay on xpack/Espressif tarballs, which record
+# 0084's "Bootlin uniformly" does not reach and was never claimed to.
 DEFAULT_ARCHES = (
     "x86-64",  # usermod.unix x86_64; natmod x64
     "x86-i686",  # usermod.unix i686; natmod x86
