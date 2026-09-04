@@ -2,7 +2,10 @@
 
 Status: Proposed — verified this session against real downloads and real builds; no Dockerfile
 or config changed. Corrects [0085]'s own claim rather than replacing its decision.
-Related: [0058], [0084], [0085], [0086], [0087], [0088], [0090]
+**Its own violation table is superseded by the 2026-09-04 addendum** — that table counts against
+one shared image pin, a model [0087]/[0089]/[0096] removed three commits later; read the addendum
+before treating any number in it as a live count. Held evidence, not pending work.
+Related: [0058], [0084], [0085], [0086], [0087], [0088], [0089], [0090], [0096]
 
 ## What [0085] claimed, and what it actually checked
 
@@ -83,3 +86,85 @@ disjoint per-row fix for.
 - **The `stm32` floor is still board-scoped, not row-scoped** — [0090]'s own open item
   (`MCU_SERIES=n6`, no such board exists among today's 1016 `stm32` rows) is unaffected by which
   toolchain answers it.
+
+## Addendum, 2026-09-04 — the shared pin this record measured against no longer exists
+
+The table above (`89` → `7` → `1` violations remaining) answers exactly one question: *which
+single compiler version, baked into one image and shared by every row, leaves the fewest rows
+outside their own window*. That question was retired three commits after this record landed, and
+its answer went with it.
+
+| commit | date | what it did |
+| --- | --- | --- |
+| `0f82a7e` | 2026-09-03 | this record |
+| `d66dfb0` | 2026-09-03 | [0086] landed — `toolchain_fetch.fetch_script()`, a container-time tarball fetch |
+| `094b09d` | 2026-09-04 | [0087]/[0089] wired — `toolchain_version`/`gcc` become real, *read* per-row fields |
+| `32f29c3` | 2026-09-04 | [0096] — `arm_embedded`/`riscv_embedded` merge into `embedded_base`, which bakes no toolchain `ARG` at all |
+
+There is no shared pin left to bump. `bin/refresh_toolchain_pins.py --check` was rewritten to
+match ([0090]): its `current_row_pin()` reads each row's own `gcc` from `build-platforms.toml`
+instead of a Dockerfile `ARG`. That is the same comparator this record's table was simulated
+through — run now, against inputs that have since changed, it produces a different answer.
+
+### Every window today is satisfiable on xpack alone
+
+`python3 bin/refresh_toolchain_pins.py --check` exits `0`: *"ok: every checked row's own gcc pin
+is inside its own window"*. Not vacuously — the rows carry real pins. Every cross-toolchain row
+resolves to one of four values, and `pinned_toolchains.toml` already holds all four:
+
+| value | rows | scopes |
+| --- | --- | --- |
+| `14.2.1-1.1` | 1386 | every `arm-none-eabi-` port, plus natmod's four ARM arches, at the older tags |
+| `15.2.1-1.1` | 1028 | the same scopes, at `v1.26.0`+ |
+| `14.3.0-1` | 13 | `natmod.rv32imc` / `natmod.rv64imc` |
+| `12.3.1-1.2` | 11 | `usermod.mimxrt` `v1.20.0` ([0088]) |
+
+(`gcc = "14"` / `"15"` on a further 63 / 30 rows is `natmod.x64`/`x86` and `usermod.windows`'s own
+*native* host compiler, not a cross toolchain — unrelated to this record.)
+
+Only three window shapes carry a floor at all, and xpack's ladder clears every one:
+
+| scope | window | pinned | inside |
+| --- | --- | --- | --- |
+| `usermod.stm32` `v1.20.0`–`v1.25.0` | `< 15.1` | `14.2.1-1.1` | yes |
+| `usermod.stm32` `v1.26.0`–`v1.30.0-preview` | `>= 14.3` | `15.2.1-1.1` | yes |
+| `usermod.qemu` `v1.24.0`–`v1.25.0` | `[10, 15.1)` | — | yes, either rung |
+| `usermod.mimxrt` `v1.20.0` | `< 13` | `12.3.1-1.2` | yes, [0088] |
+
+**The six `stm32` rows this record singled out are the clearest case of the difference.** Under
+one shared pin they were a genuine dead end — no xpack release sits in `[14.3, 15.1)`, which is
+what made Arm's own `14.3.rel1` rung look decisive. Per-row, the two constraints never meet: the
+`>= 14.3` floor at `v1.26.0`+ has no ceiling above it, so `15.2.1-1.1` satisfies it outright, and
+the pre-`v1.26.0` tags with the `< 15.1` ceiling carry no floor, so `14.2.1-1.1` satisfies those.
+The gap in xpack's ladder was only ever a problem for a single version trying to be both at once.
+
+### What this addendum does not retract
+
+**Every live verification above stands.** The sha256 checks against Arm's own `.sha256asc`, the
+39-multilib byte-for-byte diff against the published xpack image, 19/20 natmod builds across five
+tags, and the three real `RPI_PICO` `.uf2` artifacts are facts about Arm's tarballs; no later
+record touched them. `pinned_toolchains.toml`'s own header names
+`gitlab.arm.com/tooling/gnu-toolchains-for-arm` as an acceptable verification source *because* of
+this record — the table simply carries no Arm URL yet.
+
+Two reasons remain to reach for that registry, neither of them urgent:
+
+- **A second publisher.** xpack is one GitHub organisation's releases. Arm's registry is the
+  vendor's own, and this record is the standing evidence that a row can be pointed at it with no
+  change to [0086]'s fetch mechanism beyond one verified `{url, sha256}` pair.
+- **The finer ladder** (`12.2`, `12.3`, `13.2`, `13.3`, `14.2`, `14.3`, `15.2`, `15.3`), the first
+  time a row's window is bounded on *both* sides and is narrower than a gap in xpack's own. No
+  such window exists today: `usermod.qemu`'s `[10, 15.1)` is the only two-sided one, and it is
+  wide.
+
+Neither is scheduled here. This record stays open as **held evidence, not pending work** — the
+distinction that matters when picking what to do next, since its own headline table reads like a
+bug list and is not one.
+
+### One caveat on that `ok`
+
+`--check` skips any row whose image is not `embedded_base`
+(`CHECKABLE_IMAGES`, `bin/refresh_toolchain_pins.py:118`) and any row carrying no `gcc` field at
+all (`current_row_pin()` returning `None`). "Every checked row" therefore means *the ARM/RISC-V
+embedded rows that carry a pin* — it says nothing about `xtensa_esp`, `xtensa_lx106`,
+`webassembly`, `windows`, or the `unix` native images.
