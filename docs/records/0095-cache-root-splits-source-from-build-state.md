@@ -1,10 +1,11 @@
 # 0095 — `cache_root()` is not one cache: fetched source persists, build state dies with the container
 
-Status: Implemented in part — items 1, 2, 3 and 5 landed and are live-verified; item 4 stays
-open (this record left it open pending a live run, and the run did not force it), item 6 was
-scoped out here and now matters more than this record's own text says. **Read the 2026-09-04
-addendum before acting on the plan below**: a real run found three further writers into
-`cache_root()` that category C misses, two of which cannot be moved at all.
+Status: In progress — **the plan below is superseded by addendum 2 (2026-09-04); read that
+first.** Only item 5 (reports out of `cache_root()`) is settled and landed. Items 1-3 landed as
+described and work, but answer the wrong question — they place a build tree on the host, which the
+tool has no reason to own; addendum 2 replaces them with a `:ro` bind plus an overlayfs upper
+inside the container, measured working. Item 4's instinct was right and its mechanism wrong. Item
+6 was scoped out here and matters more than this record's own text says (addendum 1).
 Related: [0009], [0012], [0019], [0033], [0043], [0044], [0058], [0063], [0069], [0084]
 
 ## The problem
@@ -208,3 +209,79 @@ section (which claimed `--clean-cache` takes the reports with it -- it no longer
 `--help` text (same claim). `CIBMP_SCRATCH_PATH` added to the environment-variable table. This is
 CLAUDE.md's own rule about narrative docs not self-correcting, applied at the time rather than
 left for a reader to find.
+
+## Addendum 2, 2026-09-04 — the plan above is the wrong shape; an overlay makes the whole question go away
+
+The addendum above moved compiled state to a host scratch directory and redirected `BUILD=` into
+it. That works, and it is live-verified, but it answers the wrong question. It accepts as given
+that cibuildmp must own, place and clean a build tree on the host. It does not have to. **Nothing
+outside the container needs a build file at all** — the tool's job is fetching and caching
+tarballs and dispatching containers, and a build directory on the host is not part of that job.
+
+Two constraints have to hold at once, and this record kept treating them as one:
+
+- **No duplication.** The checkout is 1.7 GB extracted, 1.6 GB of it `lib/` (the release tarball
+  vendors every port's submodules). Copying it into each container — cibuildwheel's own
+  `copy_into()` tar-pipe, `oci_container.py:442` — is fine for a Python project of a few MB and
+  wrong here. Extracting the 154 MB tarball inside the container instead takes **17.5 s**
+  (measured, real image, `tar -xJf` from a `:ro`-mounted tarball) — cheap enough to consider, but
+  it still writes 1.6 GB per container for data the host already has.
+- **Nothing compiled on the host.** Which a plain `:ro` bind cannot give, because four things
+  write into the checkout and none can be redirected (see the previous addendum's own table).
+
+### The shape that satisfies both: `:ro` bind + overlayfs upper inside the container
+
+`lowerdir` is the read-only bind of the existing host checkout — shared by every container, copied
+never. `upperdir`/`workdir` live inside the container. Every write the build makes — `BUILD=`
+trees, libffi's `autogen.sh` output, `mpy-cross/build/`, rp2's CMake directory — lands in the
+upper layer and dies with the container.
+
+**Measured, this session, not reasoned:**
+
+| test | result |
+| --- | --- |
+| `make -C mpy-cross` (no `BUILD=`), checkout `:ro`, no overlay | fails: `OSError: [Errno 30] Read-only file system: 'build/genhdr/mpversion.h'`, `py/mkrules.mk:236` |
+| same, **through the overlay**, cold build on a clean `v1.24.1` | **BUILD OK**, 4.7 s, binary at `/mp/mpy-cross/build/mpy-cross` (407760 B) |
+| host checkout afterwards | **unchanged** — no `build/` directory created |
+| overlay upper after that build | 19 MB — only what changed |
+
+The privilege needed is **less than `--privileged`**: `--cap-add SYS_ADMIN --security-opt
+apparmor=unconfined --security-opt seccomp=unconfined` is sufficient (verified; full
+`--privileged` also works, and is not required). Without them the mount fails as `cannot mount
+overlay read-only` — and it fails that way **even when `lowerdir` is itself inside the container**,
+so the blocker is the `mount(2)` call being denied, not anything about the `:ro` bind. `upperdir`
+cannot sit on the container's own overlayfs root; an anonymous volume (`-v /ovl`, disk-backed,
+removed with `--rm`) or a tmpfs works.
+
+### What this does to what already landed
+
+- **`sources.scratch_root()` and the `BUILD=` redirect become unnecessary**, not wrong. They are
+  the only thing that makes a `:ro` bind survivable *without* an overlay, so they stay useful as
+  the fallback path for any environment where the overlay mount is unavailable — which is exactly
+  the question the open items below have to answer before either is removed.
+- **`report_dir()`'s move out of `cache_root()` (item 5) stands unconditionally.** A report is
+  host-written output and has nothing to do with which side of the container a build tree lives
+  on.
+- **Items 1-4 of the original plan are superseded by this addendum.** Item 4 in particular
+  (`mpy_dir` becomes `:ro`, plus a `docker cp`/staging-mount decision for getting the artifact
+  back) is the right instinct with the wrong mechanism: `:ro` is achievable, but only with the
+  overlay above, and the artifact still has to come out — and it cannot come out of a
+  `docker run --rm` one-shot, which is why cibuildwheel keeps a **long-lived container**
+  (`docker create` → many `exec` → `copy_out()` via `docker cp` → `rm -f`,
+  `oci_container.py:320-360,478`) rather than a container per command the way `dockerrun.run()`
+  does today. That refactor is the real work this record now implies.
+
+### Open, and honestly not answered here
+
+- **Does the overlay mount work on a GitHub Actions runner?** Verified only on this workstation.
+  The runner's own Docker daemon is reachable from a plain step (`0028` established that), but
+  nothing here checked whether `--cap-add SYS_ADMIN` plus relaxed apparmor/seccomp is permitted
+  there. If it is not, the previous addendum's scratch directory is the fallback, and both paths
+  have to coexist.
+- **Docker Desktop / rootless / Podman.** Unchecked.
+- **A full port build through the overlay.** Only `mpy-cross` was built this way. `unix` (with
+  libffi's in-tree `autogen.sh`, the case that motivated all of this) and `rp2`'s CMake tree are
+  the two that matter and neither has been run yet.
+- **Whether `mpy_dir` stops being a host path in cibuildmp's own API.** Every build driver takes
+  it as one today and embeds it in `make` command lines; under the overlay the container-side path
+  (`/mp`) is what those commands need, and the host path is only what gets bind-mounted.
