@@ -125,10 +125,34 @@ On CI, use the action instead of installing the CLI yourself — it already
 runs on a bare runner with the runner's own Docker daemon reachable:
 
 ```yaml
-- uses: ballistics-lab/cibuildmp@v0.7.0
+- uses: ballistics-lab/cibuildmp@v0.7.1
   with:
     build: "mpy6.3-* v1.29.0-manylinux_2_28_x86_64"
 ```
+
+**Cache fetched MicroPython checkouts (and ESP-IDF) between runs** with a plain
+`actions/cache` step before the action, pointed at `CIBMP_CACHE_PATH`'s own
+default (`~/.cache/cibuildmp`, `$XDG_CACHE_HOME/cibuildmp` if that's set) — a
+prefix key rather than one hashed to a single config, since a checkout is
+addressed by MicroPython tag inside the cache directory and the same cache
+usefully accumulates every tag a repo's history ever built, not just the
+newest:
+
+```yaml
+- uses: actions/cache@v4
+  with:
+    path: ~/.cache/cibuildmp
+    key: cibuildmp-${{ runner.os }}
+    restore-keys: cibuildmp-${{ runner.os }}
+- uses: ballistics-lab/cibuildmp@v0.7.1
+  with:
+    build: "mpy6.3-* v1.29.0-manylinux_2_28_x86_64"
+```
+
+This caches fetched *source* only. Compiled build state does not live on the
+host to cache at all any more — every usermod port builds inside its own
+container now (record 0095), and `CIBMP_SCRATCH_PATH` is read but currently
+redirects nothing.
 
 The action takes seven inputs, all optional — every one overrides the
 config file rather than replacing it:
@@ -180,7 +204,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ballistics-lab/cibuildmp@v0.7.0
+      - uses: ballistics-lab/cibuildmp@v0.7.1
         with:
           build: "mpy6.3-v1.29.0-*"
       - uses: actions/upload-artifact@v4

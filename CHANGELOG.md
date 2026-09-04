@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-09-04
+
+### Added
+
+- **`no-user-c-modules = true` builds a stock, unmodified upstream MicroPython
+  through the usermod path — no `USER_C_MODULES`, nothing of a consumer's own in
+  the result.** Mutually exclusive with `user-c-modules` (a load-time error, not
+  a precedence rule); the empty `USER_C_MODULES=` this resolves to is a verified
+  no-op on both build systems this project drives, confirmed live against a real
+  `v1.29.0` checkout — a stock `unix` binary correctly raising `ImportError` for
+  a module never linked in, and the same binary succeeding once one is. Surfaced
+  and fixed a real bug along the way: every per-port mount helper built
+  `Path(opts.user_c_modules)` unconditionally, and an empty value is `Path(".")`
+  — a *relative* path `docker run -v` rejects outright, not merely an
+  unnecessary over-mount. `[0056]`.
+- **`examples/bare-firmware`**, a real CI-built demonstration with no `natmod/`,
+  no `usermod/`, no `src/` — just a `cibuildmp.toml` naming one Make-driven
+  target (`unix` `x86_64`) and one CMake-driven one (`rp2` `RPI_PICO`), the two
+  build-system shapes `no-user-c-modules` has to no-op on cleanly.
+  `build-examples.yml`'s new `build-bare-firmware` job activates the flag
+  through `CIBMP_NO_USER_C_MODULES` rather than the TOML key, doubling as a live
+  demonstration of the environment-variable form. `README.md` gets its own
+  "Building stock upstream firmware" section for it — framed as a real
+  capability (a cross-toolchain/board regression check with no C module
+  needed), useful to this project's own consumers but arguably more useful to
+  MicroPython's own maintainers.
+
+### Changed
+
+- **"List built artifacts" CI steps use `tree -a` instead of `ls -laR`**, across
+  `build-examples.yml`, `test-upstream-natmod.yml`, `test-upstream-usermodule.yml`
+  and `verify-lv-binding-micropython.yml` — more readable output for the same
+  recursive listing; `tree` is already an apt package on the `ubuntu-24.04`
+  runner image both `ubuntu-latest` and `ubuntu-24.04-arm` use.
+
 ## [0.7.0] - 2026-09-04
 
 ### Fixed
@@ -1590,7 +1625,8 @@ ballistics-lab/micropython-native-ci, but both tags exist here too, so every
 link resolves inside this repository -- the version line continues rather
 than restarting (see the 0.3.0a1 entry). -->
 
-[Unreleased]: https://github.com/ballistics-lab/cibuildmp/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/ballistics-lab/cibuildmp/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/ballistics-lab/cibuildmp/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/ballistics-lab/cibuildmp/compare/v0.6.2...v0.7.0
 [0.6.2]: https://github.com/ballistics-lab/cibuildmp/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/ballistics-lab/cibuildmp/compare/v0.6.0...v0.6.1
@@ -1623,3 +1659,4 @@ than restarting (see the 0.3.0a1 entry). -->
 [0090]: docs/records/0090-toolchain-pins-checker-and-0058-text-followup.md
 [0095]: docs/records/0095-cache-root-splits-source-from-build-state.md
 [0096]: docs/records/0096-arm-riscv-embedded-collapse-into-embedded-base.md
+[0056]: docs/records/0056-usermod-with-no-user-c-module.md
