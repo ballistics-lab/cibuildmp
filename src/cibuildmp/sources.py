@@ -437,64 +437,50 @@ def find_mpy_cross(mpy_dir: Path, build_dir: str = "build") -> Path | None:
     return None
 
 
-def host_mpy_cross_dir() -> Path:
-    """Where the **host-built** `mpy-cross` goes -- under `scratch_root()`,
-    not in the checkout ([0095] item 3)."""
-    return scratch_root() / "mpy-cross-host"
-
-
 def build_mpy_cross(mpy_dir: Path, *, force: bool = False, quiet: bool = False) -> Path:
     """Build mpy-cross on the host, once, and return the binary.
 
-    `BUILD=` points at `host_mpy_cross_dir()` rather than letting the
-    Makefile default to `mpy-cross/build/` inside the checkout ([0095]):
-    the checkout is fetched input, and a compiled binary sitting in it is
-    the exact mixing that record exists to undo.
+    **In the checkout, at `mpy-cross/build/`, deliberately** -- [0095]
+    moved this under `scratch_root()` and CI caught why it cannot go there
+    within the day (`build-examples.yml`, `v1.29.0-qemu-MPS2_AN385`). This
+    function's one caller is `usermod`'s `qemu` (`_HOST_MPY_CROSS_PORTS`),
+    which passes **no** `MICROPY_MPYCROSS=` and so reaches this binary
+    through `py/mkrules.mk`'s own default path. Move it and that path is
+    simply empty, at which point `mkrules.mk`'s own
+    `$(MICROPY_MPYCROSS_DEPENDENCY)` rule builds mpy-cross *itself*, as a
+    sub-make of the port build -- which compiles the **port's** own
+    `genhdr/qstrdefs.generated.h` against mpy-cross's qstr pool and fails:
 
-    Two consequences worth stating, because neither is obvious from the
-    diff:
+        qstrdefs.generated.h:666:21: error: unsigned conversion from 'int'
+        to 'unsigned char' changes value from '2791' to '231'
+        [-Werror=overflow]
+        make: *** [py/mkrules.mk:209: ../../mpy-cross/build/mpy-cross]
 
-    * **The pre-build cache check now looks only in the scratch
-      directory**, not at `find_mpy_cross(mpy_dir)`'s in-tree layouts.
-      `natmod`'s own `build_mpy_cross()` writes a *container*-built binary
-      to exactly those in-tree paths -- it has no choice, `py/
-      dynruntime.mk` hardcodes `MPY_CROSS = $(MPY_DIR)/mpy-cross/...` with
-      no override -- so the old check could hand this function's one
-      caller (`usermod`'s `qemu`, `_HOST_MPY_CROSS_PORTS`) a binary built
-      under a different libc than the host it is about to run on. That was
-      latent, not observed; it is now impossible rather than unlikely.
-    * **The in-tree layouts stay in the post-build lookup.** A tag whose
-      `mpy-cross/Makefile` predates `BUILD=` being honoured writes where it
-      always did, and this function still finds it -- [0093]'s own finding
-      that the binary's path is a fact about the tag, not a constant.
+    That makes this the same class as `natmod`'s own container-built
+    mpy-cross (`py/dynruntime.mk` hardcodes `MPY_CROSS`) and `rp2`/`esp32`'s
+    CMake trees: a path upstream fixes and cibuildmp cannot redirect. It
+    stops being a write into `cache_root()` when `qemu` moves to the
+    container model, not before -- there the checkout is an overlay and
+    this path exists only inside the container.
     """
-    build_dir = host_mpy_cross_dir()
-    binary = build_dir / "mpy-cross"
-    if binary.exists() and not force:
+    binary = find_mpy_cross(mpy_dir)
+    if binary is not None and not force:
         if not quiet:
             print(f"  mpy-cross: cached at {binary}")
         return binary
 
     if not quiet:
         print("  mpy-cross: building")
-    command = [
-        "make",
-        "-C",
-        str(mpy_dir / "mpy-cross"),
-        f"BUILD={build_dir.as_posix()}",
-        f"-j{os.cpu_count() or 1}",
-    ]
+    command = ["make", "-C", str(mpy_dir / "mpy-cross"), f"-j{os.cpu_count() or 1}"]
     try:
         subprocess.run(command, check=True, capture_output=quiet)
     except subprocess.CalledProcessError as exc:
         raise SourceError(f"building mpy-cross failed: {exc}") from exc
 
-    if binary.exists():
-        return binary
-    fallback = find_mpy_cross(mpy_dir)
-    if fallback is None:
+    binary = find_mpy_cross(mpy_dir)
+    if binary is None:
         raise SourceError(
             "mpy-cross build reported success but no binary at "
-            + " or ".join(str(p) for p in (binary, *mpy_cross_candidates(mpy_dir)))
+            + " or ".join(str(p) for p in mpy_cross_candidates(mpy_dir))
         )
-    return fallback
+    return binary
