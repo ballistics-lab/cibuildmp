@@ -875,21 +875,34 @@ class Container:
         # -- `run()` does the same probe per invocation, which is the only
         # difference a long-lived container makes here.
         #
-        # **Not optional, and not cosmetic.** Live CI failure on an
-        # `ubuntu-24.04-arm` runner building `manylinux_2_31_armv7l`: with
-        # no `linux32`, `uname -m` inside a correctly-selected 32-bit
-        # container still reports the *kernel's* `aarch64`, libffi's own
-        # `configure` picks the wrong machine-dependent sources, and the
-        # port links against a `libffi.a` with no `ffi_call` in it at all
+        # **Probed through `docker exec` on this exact container, not
+        # `docker run`.** The first version of this used `_kernel_is_64bit()`
+        # -- a throwaway `docker run --platform=... image uname -m` -- and
+        # that measures the wrong process. Docker applies `--platform`'s
+        # 32-bit personality translation to a container's own PID 1; `docker
+        # exec` starts a fresh process in the same namespaces that does not
+        # inherit it. Caught live on `ubuntu-24.04-arm` building
+        # `manylinux_2_31_armv7l`: the `docker run` probe reported `armv8l`
+        # (32-bit, no wrap by the old logic), while every real command here
+        # runs through `exec` and still saw the kernel's own `aarch64` --
+        # libffi's `configure` picked its `aarch64` sources and the port
+        # linked against a `libffi.a` with no `ffi_call` in it at all
         # (`undefined reference to 'ffi_call'`, `ffi_prep_cif_machdep`, …).
-        # Omitting it here is what that failure was -- the first version of
-        # this class simply did not carry the flag `run()` already had.
-        if (
-            self.linux32
-            and self.oci_platform is not None
-            and _kernel_is_64bit(self.image, self.oci_platform)
-        ):
-            self._linux32_prefix = ["linux32"]
+        # `run()` never had this gap: its `linux32` wrap decides and runs in
+        # the same `docker run` invocation, so its probe and its command are
+        # the same process by construction.
+        if self.linux32:
+            machine = (
+                self._docker(
+                    ["docker", "exec", self.name, "uname", "-m"],
+                    what="uname -m",
+                    capture_output=True,
+                )
+                or ""
+            ).strip()
+            print(f"  {self.oci_platform}: exec uname -m = {machine}")
+            if machine in _64BIT_MACHINES:
+                self._linux32_prefix = ["linux32"]
         return self
 
     def __exit__(self, exc_type: object, exc: object, tb: object) -> None:

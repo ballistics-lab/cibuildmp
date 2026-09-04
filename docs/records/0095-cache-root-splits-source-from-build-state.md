@@ -507,6 +507,43 @@ identifies the real one.
   `container_mpy_cross()`, `run_unix_deplibs()` and `repair_unix_binary()`; `dockerrun.run()`
   itself; `sources.scratch_root()`; and `Container.copy_out()` if nothing has needed it by then.
 
+## Addendum 7, 2026-09-04 — a third regression, in the fix for the second: `docker run` and `docker exec` disagree about `uname -m`
+
+Addendum 6 handed off with `4af034f` "pushed but unverified." It was not enough. The same
+`ubuntu-24.04-arm` / `manylinux_2_31_armv7l` leg still linked a `libffi.a` with no `ffi_call` in
+it, and the build log makes the mechanism visible directly: `deplibs` compiled
+`src/aarch64/ffi.lo src/aarch64/sysv.lo` -- libffi's `configure` picked `aarch64` machine-dependent
+sources for an `armv7l` image -- while two lines above it, the create-time probe had printed
+`linux/arm/v7: uname -m = armv8l (32-bit kernel)`.
+
+That probe answer was not wrong; it was an answer to the wrong question. `4af034f`'s `linux32`
+decision reused `_kernel_is_64bit()` -- a throwaway `docker run --platform=... image uname -m`,
+the same probe `_probe_platform()` already runs once per (image, platform) for the early-failure
+check. `Container.call()` never runs a command that way; every command after `__enter__` reaches
+the container through `docker exec` into an already-created, already-started container. Docker
+applies `--platform`'s 32-bit personality translation (`setarch`/`PER_LINUX32`) to a container's
+own PID 1 -- the process `docker run` or `docker create` starts -- and a `docker exec`'d process is
+a *new* process in the same namespaces that does not inherit it. On this runner the two disagreed
+outright: the `docker run` probe's PID 1 reported `armv8l` (correctly emulated, by the old logic
+no wrap needed), while every real command here is `exec`'d and still saw the kernel's own
+`aarch64`.
+
+`run()` itself never had this gap -- its own `linux32` probe and the command it decides for are
+the same `docker run` invocation, so probe and command are necessarily the same process. `Container`
+introduced a second process type (`exec`) between deciding and running, and the port of `run()`'s
+probe did not account for that.
+
+**Fix:** `Container.__enter__` no longer asks `_kernel_is_64bit()` at all. Once the container is
+created and started, it runs `docker exec <name> uname -m` on itself and decides `linux32` from
+that answer -- the exact process type every subsequent `call()` uses. `_kernel_is_64bit()` and
+`_probe_platform()` are unchanged and still used by `run()`, which still asks the right question
+for its own process model.
+
+Not yet re-verified live on the arm runner -- this addendum records the fix and the reasoning;
+whoever picks this up next should treat the arm leg of `build-examples.yml` as unverified until a
+run after this lands is read directly, the same caution addendum 6 itself asked for and the same
+one that caught it not having been followed.
+
 ### One unrelated thing noticed on the way
 
 `action.yml`'s **"Cache apt archives" step is dead weight now**. It was written when the apt step

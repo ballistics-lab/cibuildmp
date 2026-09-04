@@ -22,8 +22,9 @@ from cibuildmp.platforms.usermod.build_common import UsermodBuildError
 
 
 class _FakeCompleted:
-    returncode = 0
-    stdout = ""
+    def __init__(self, stdout: str = ""):
+        self.returncode = 0
+        self.stdout = stdout
 
 
 @pytest.fixture
@@ -282,37 +283,78 @@ def test_copy_out_uses_exec_tar_not_docker_cp(monkeypatch, tmp_path):
     assert (tmp_path / "out" / "bin").read_bytes() == b"ELF"
 
 
-def test_linux32_wraps_every_command_when_the_kernel_is_64_bit(calls, monkeypatch):
+def _fake_run_with_uname(monkeypatch, machine: str) -> list[list[str]]:
+    """Like the `calls` fixture, but the `docker exec ... uname -m` probe
+    `__enter__` now issues answers with `machine` instead of the fixture's
+    blanket `""` -- every other call still gets a plain success.
+
+    Not built on `calls` itself: that fixture's `fake_run` cannot tell the
+    `uname -m` probe apart from `docker create`/`docker start`, both of
+    which also return `_FakeCompleted()` with an empty `stdout`."""
+    recorded: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        recorded.append(list(command))
+        if command[-2:] == ["uname", "-m"]:
+            return _FakeCompleted(machine)
+        return _FakeCompleted()
+
+    monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
+    monkeypatch.setattr(dockerrun, "_probe_platform", lambda image, platform: "")
+    return recorded
+
+
+def test_linux32_wraps_every_command_when_the_kernel_is_64_bit(monkeypatch):
     """Live CI failure on `ubuntu-24.04-arm` building
     `manylinux_2_31_armv7l`: without `linux32`, `uname -m` inside a
     correctly-selected 32-bit container still reports the kernel's
     `aarch64`, libffi's `configure` picks the wrong machine-dependent
     sources, and the port links against a `libffi.a` with no `ffi_call` in
     it. The first version of this class simply did not carry the flag
-    `run()` already had."""
-    monkeypatch.setattr(dockerrun, "_kernel_is_64bit", lambda image, platform: True)
-    monkeypatch.setattr(dockerrun, "host_oci_platform", lambda: "linux/arm64")
+    `run()` already had.
+
+    The probe has to be `docker exec`, not `docker run` (`_kernel_is_64bit`):
+    a second live CI failure showed `docker run --platform=...`'s own 32-bit
+    personality translation does not carry over to a process started with
+    `docker exec` in the same container -- the two can disagree, and only
+    the `exec` answer is the one `call()` actually needs."""
+    recorded = _fake_run_with_uname(monkeypatch, "aarch64")
 
     with dockerrun.Container(
         image="img", oci_platform="linux/arm/v7", linux32=True
     ) as container:
         container.call(["make"], workdir=PurePosixPath("/"))
 
-    exec_call = next(c for c in calls if c[:2] == ["docker", "exec"])
+    exec_call = next(c for c in recorded if c[-1] == "make")
     assert exec_call[-2:] == ["linux32", "make"]
 
 
-def test_no_linux32_when_the_kernel_is_already_32_bit(calls, monkeypatch):
+def test_no_linux32_when_the_kernel_is_already_32_bit(monkeypatch):
     """Wrapping unconditionally would be wrong on a genuinely 32-bit
     kernel, where `linux32` may not exist at all -- upstream probes rather
     than assuming, and so does this."""
-    monkeypatch.setattr(dockerrun, "_kernel_is_64bit", lambda image, platform: False)
-    monkeypatch.setattr(dockerrun, "host_oci_platform", lambda: "linux/arm64")
+    recorded = _fake_run_with_uname(monkeypatch, "armv8l")
 
     with dockerrun.Container(
         image="img", oci_platform="linux/arm/v7", linux32=True
     ) as container:
         container.call(["make"], workdir=PurePosixPath("/"))
 
-    exec_call = next(c for c in calls if c[:2] == ["docker", "exec"])
+    exec_call = next(c for c in recorded if c[-1] == "make")
     assert "linux32" not in exec_call
+
+
+def test_linux32_probe_uses_exec_not_run(monkeypatch):
+    """The probe has to ask the same process type `call()` uses.
+
+    `_kernel_is_64bit()` -- a `docker run` -- is what the first version of
+    this decision reused, and that measures a different process than
+    `docker exec` starts; see the class's own comment for the live CI
+    failure this caused."""
+    recorded = _fake_run_with_uname(monkeypatch, "aarch64")
+
+    with dockerrun.Container(image="img", oci_platform="linux/arm/v7", linux32=True):
+        pass
+
+    probe = next(c for c in recorded if c[-2:] == ["uname", "-m"])
+    assert probe[:2] == ["docker", "exec"]
