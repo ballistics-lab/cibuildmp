@@ -228,17 +228,12 @@ webassembly = "ghcr.io/ballistics-lab/webassembly@sha256:ffea4467f27e9e7ee494f1c
 # `embedded_base` was `arm_embedded`/`riscv_embedded`, two separate
 # entries, until record 0096 merged their Dockerfiles into one
 # (`docker/embedded_base.Dockerfile`) once [0087]/[0089] had already made
-# their build-time content identical but for one apt package. **The
-# digest below is the old `arm_embedded` publish, kept verbatim, not a
-# new one** -- `docker/embedded_base.Dockerfile`'s own content is that
-# same image plus `cmake` folded in from `riscv_embedded`'s superset
-# relationship (real, already-published, already pullable; not this
-# repo's own `embedded_base` package yet, since nothing has pushed to it).
-# A maintainer running `publish-docker-images.yml` for real replaces this
-# with the genuine `ghcr.io/ballistics-lab/embedded_base@sha256:...`
-# digest that run prints -- until then this pin is correct in content,
-# not yet in provenance, and `[0096]`'s own record says so.
-embedded_base = "ghcr.io/ballistics-lab/arm_embedded@sha256:607f3163d2600e45e1dd25af5ed273a896d65433a82937940b77d061feae4a5a"
+# their build-time content identical but for one apt package. Published
+# for real by `publish-docker-images.yml` run 33852210645 (2026-09-04,
+# `only=embedded_base`), the digest below is the genuine
+# `ghcr.io/ballistics-lab/embedded_base` push, not the interim
+# `arm_embedded` reuse this pin carried immediately after [0096] landed.
+embedded_base = "ghcr.io/ballistics-lab/embedded_base@sha256:0b7d1b3a4704c6b3ec7835dfe6a2c67c4dbffbcbb8810c7548b7509b3b343c9f"
 xtensa_lx106 = "ghcr.io/ballistics-lab/xtensa_lx106@sha256:bd995c552089749441f038e7a20eacb60ea5af23c98d91cec60ae60aababc040"
 xtensa_esp = "ghcr.io/ballistics-lab/xtensa_esp@sha256:2b7985855597188faa2d3750ecbe144cbee814768620f96dccfa5dc2848cb638"
 natmod_host = "ghcr.io/ballistics-lab/natmod_host@sha256:05454c937c3d7d712d10631662592fa789570278dd47ee78b1eaf60f73894b35"

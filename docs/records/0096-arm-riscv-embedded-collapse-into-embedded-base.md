@@ -1,8 +1,10 @@
 # 0096 — `arm_embedded` and `riscv_embedded` collapse into one `embedded_base` image
 
-Status: Implemented — code, config and CI wiring land in this record; the real
-`ghcr.io/ballistics-lab/embedded_base` publish is still pending (see "What this does not
-solve").
+Status: Implemented — code, config, CI wiring, and the real
+`ghcr.io/ballistics-lab/embedded_base` publish (this record's own 2026-09-04 addendum) all
+land. Still open: [0090]'s own pre-existing checker gaps this record only avoided widening (see
+"What this does not solve"), and a fresh `bin/plan_test_matrix.py` measurement against the
+merged image.
 Related: [0044], [0058], [0085], [0086], [0087], [0089], [0090]
 
 ## The question this record answers was asked once already, and then lost
@@ -135,3 +137,20 @@ claim [0096] makes — not simulated, not inferred from the diff.
   `embedded_base: 50`, the real identifier-count-weighted average of the two
   (140 arm + 26 riscv non-`rp2` identifiers at the time of this merge). A real re-measurement
   from a batched run against the merged image would still be worth more than this estimate.
+
+## Addendum, 2026-09-04 — the real publish landed, closing the one open item above
+
+`publish-docker-images.yml` run 33852210645 (`only=embedded_base`, dispatched against this
+record's own branch since the merge had not reached `main` yet) built and pushed the real
+`docker/embedded_base.Dockerfile` for the first time under its own name. Every other matrix
+entry (`windows`, `webassembly`, `esp_idf_base`, `natmod_host`, `xtensa_esp`, `xtensa_lx106`,
+`ppc64le_linux`, `manylinux_2_41_mipsel`) correctly skipped, confirming `only=` narrows the
+matrix the way its own description says rather than rebuilding everything.
+
+`resources/pinned_docker_images.toml`'s `embedded_base` entry now holds the genuine
+`ghcr.io/ballistics-lab/embedded_base@sha256:0b7d1b3a4704c6b3ec7835dfe6a2c67c4dbffbcbb8810c7548b7509b3b343c9f`
+digest that run's own "Record the pinned digest" step printed, replacing the interim
+`arm_embedded` reuse above. The two remaining "What this does not solve" items
+(`refresh_toolchain_pins.py`/`update_toolchains.py`'s pre-existing gap, and
+`plan_test_matrix.py`'s arithmetic-estimate weight) are unaffected by this addendum and stay
+open, as [0090]'s own scope and a future re-measurement respectively.
