@@ -1,7 +1,9 @@
 # 0095 — `cache_root()` is not one cache: fetched source persists, build state dies with the container
 
 Status: In progress — **the plan below is superseded by addendum 2 (2026-09-04); read that
-first, then addendum 4, which closes the last thing that could have invalidated it.** Only item 5 (reports out of `cache_root()`) is settled and landed. Items 1-3 landed as
+first, then addendum 4 (the runner allows it) and addendum 5 (what is actually in the code).**
+One of six ports is migrated; the transitional dual path addendum 5 describes has to be deleted
+when the last one is. Only item 5 (reports out of `cache_root()`) is settled and landed. Items 1-3 landed as
 described and work, but answer the wrong question — they place a build tree on the host, which the
 tool has no reason to own; addendum 2 replaces them with a `:ro` bind plus an overlayfs upper
 inside the container, measured working. Item 4's instinct was right and its mechanism wrong. Item
@@ -372,3 +374,84 @@ The probe now prints `mount:` / `cflags:` / `build:` as separate lines and dumps
 failure, so a future failure names its stage instead of collapsing into one bit. **It stays in the
 repo rather than being deleted as a one-off**: the whole build model now rests on a runner-image
 property that nothing else in this project would notice changing.
+
+## Addendum 5, 2026-09-04 — what has actually landed, and what the half-migrated state costs
+
+Addenda 2-4 argued and measured the design. This one records the code, so the next reader is not
+left inferring it from four commits.
+
+### Landed
+
+- **`dockerrun.Container`** (`a5bb9e7`) — `docker create` → `exec`* → `rm --force`, upstream's own
+  shape. `OVERLAY_CREATE_ARGS` is the measured privilege pair and nothing more. The container is
+  created as root because the overlay mount needs `CAP_SYS_ADMIN`; **every other command runs under
+  `docker exec --user <uid>:<gid>`**, which is what keeps anything written to a read-write mount
+  owned by the invoking user. Verified: mount as root, `make` as the host user into the same
+  overlay, artifact out owned by `murphy`, mode 755, no `chown` anywhere.
+- **The overlay mounts at the checkout's own host path** (`7827335`), not a tidy `/mp`. The
+  read-only bind goes to `/cibuildmp-lower-N` instead. This was the difference between a mechanical
+  port migration and one where every driver rewrites `mpy_dir`, `BUILD=`, `USER_C_MODULES`,
+  `FROZEN_MANIFEST` and `MICROPY_MPYCROSS` — and where one missed path builds successfully against
+  the wrong tree.
+- **`unix` migrated** (`5059016`). One container for the whole build where there were six
+  `docker run --rm`, all of the same image (`ensure_image()` resolves it once and every step took
+  that same value — the six containers were never doing anything the one cannot). The gain is not
+  the five saved containers: the steps now share a filesystem, which is the only reason the build
+  tree ever had to be on a host mount at all. `deplibs` leaves `libffi.a` where the port's `make`
+  finds it, `mpy-cross` leaves a binary `MICROPY_MPYCROSS=` names, `repair` reaches the binary the
+  build left — none of which survived a `--rm` between steps.
+
+### The shape the artifact takes now
+
+`orchestrate.build_one()` creates `<output_dir>/.build-<identifier>/`, passes it to the driver as
+`staging`, and removes it once the artifact is collected. The container writes the finished binary
+there with an ordinary `cp` — it is the one read-write mount — and `repair_unix_binary()` then runs
+against *that* copy, so `ldd` resolves against the container's own libraries while the `lib/` it
+vendors lands beside the artifact where `unix_companions()` looks for it.
+
+`build_unix()` therefore returns a path in `staging`, not a path into a build tree. That is a
+contract change, and the tests now assert it.
+
+**`Container.copy_out()` has no production caller.** It exists, is tested, and carries the
+`docker cp` finding, but the `cp`-into-a-read-write-mount route turned out simpler for every case
+so far. If the remaining five ports do not need it either, it should go rather than sit as
+machinery nothing uses — the same judgement [0049] and [0050] applied.
+
+### What the half-migrated state costs, and when it has to end
+
+`probe_supported_cflags()`, `container_mpy_cross()`, `run_unix_deplibs()` and
+`repair_unix_binary()` all take an optional `container=` and keep their pre-[0095] `dockerrun.run()`
+path for the five ports still on it (`windows`, `webassembly`, `qemu`, `rp2`, `esp32`). That is a
+deliberate transition, not a design: **two ways to run a build command is exactly the kind of
+duplication that ossifies if it outlives the migration**, and the honest cost of not doing all six
+ports at once is that only `unix` is verified end to end.
+
+`sources.scratch_root()` is likewise still real, for those five. `_resolved_build_dir()` returns
+the same string for every port; for `unix` that path is now only ever created *inside* the
+container, so nothing lands on the host at it.
+
+**When the last port migrates, all of it goes**: the `container=` parameters, `dockerrun.run()`
+itself, `scratch_root()`, and `_resolved_build_dir()`'s scratch prefix.
+
+### Live-caught, not reviewed
+
+The first real end-to-end run failed at `docker create`:
+
+    invalid mount path: 'mpyhouse/.build-v1.29.0-manylinux_2_28_x86_64' mount path must be absolute
+
+`output_dir` defaults to a relative `"mpyhouse"` and `package_dir` to `"."`; Docker rejects a
+relative bind source outright. `staging` is `.resolve()`d now. Nothing in the unit tests could have
+caught this — they never reach a real `docker create`.
+
+After the fix: `examples/template`, `v1.29.0-manylinux_2_28_x86_64`, **24.5 s, 738024 bytes**, the
+collected binary runs and imports the module. The cached checkout afterwards holds no
+`ports/unix/build*`, no `lib/libffi/configure` and no `mpy-cross/build`; the staging directory is
+gone; `mpyhouse/` holds the artifact, `reports/` and `.gitignore`.
+
+### Next, in order
+
+1. `rp2` — already run through an overlay by hand (44.6 s, `firmware.uf2` 667648 B), so the
+   unknowns are cibuildmp's own plumbing rather than the model.
+2. `windows`, `webassembly`, `qemu`.
+3. `esp32` — the only port never run through an overlay at all.
+4. Delete the transition: `container=`, `run()`, `scratch_root()`.
