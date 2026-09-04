@@ -327,9 +327,10 @@ def build_windows(
     **`Container`/overlay, not `dockerrun.run()`** ([0095]): the checkout
     arrives read-only, `container.overlay(mpy_dir)` gives the build a
     writable view of it that dies with the container, and `BUILD=` (still
-    `opts.build_dir`, a `scratch_root()`-based path -- unchanged from
-    before this migration) is never mounted at all, so it is created and
-    lives purely inside the container's own ephemeral filesystem. The
+    `opts.build_dir`, a fixed container-internal label --
+    `orchestrate._resolved_build_dir()`) is never mounted at all, so it is
+    created and lives purely inside the container's own ephemeral
+    filesystem. The
     overlay is needed regardless: `container_mpy_cross()` writes its
     binary under `mpy_dir/mpy-cross/build` once a `container=` is given,
     which only exists if `mpy_dir` itself is writable inside. `staging` is

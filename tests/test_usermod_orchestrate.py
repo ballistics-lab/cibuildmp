@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from cibuildmp import dockerrun
-from cibuildmp.platforms.usermod import build_common, espidf
+from cibuildmp.platforms.usermod import build_common, espidf, orchestrate
 from cibuildmp.platforms.usermod.options import UsermodOptions
 from cibuildmp.platforms.usermod.orchestrate import (
     _dest_name,
@@ -16,7 +16,6 @@ from cibuildmp.platforms.usermod.orchestrate import (
     build_one,
 )
 from cibuildmp.platforms.usermod.targets import UsermodTarget
-from cibuildmp.sources import scratch_root
 
 
 # Every `unix` cell in resources/pinned_docker_images.toml is empty until
@@ -34,6 +33,26 @@ def _resolved_image(monkeypatch):
         build_common,
         "container_mpy_cross",
         lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build-stub" / "mpy-cross",
+    )
+
+
+@pytest.fixture(autouse=True)
+def _build_root_per_test(monkeypatch, tmp_path_factory):
+    """`orchestrate._BUILD_ROOT` is a fixed path in production now (record
+    0095's own closing addendum -- nothing on the host ever reads it, so
+    there is no more `CIBMP_SCRATCH_PATH` to redirect it with). These tests
+    still need per-test isolation, though: several mock a container's own
+    write by writing straight to `_resolved_build_dir()`'s own path on the
+    real host, and two tests naming the same (port, identifier) -- both
+    `qemu`/`build-qemu`, here -- collided on each other's leftover files
+    the moment the fixed path stopped being test-scoped
+    (`test_build_one_does_not_copy_a_non_unix_lib_directory`'s own
+    `lib/libm.mkdir(parents=True)`, no `exist_ok`, failing on a directory an
+    earlier test in this file had already created). Isolation belongs here,
+    at the test level, not as a production knob nothing else needs.
+    """
+    monkeypatch.setattr(
+        orchestrate, "_BUILD_ROOT", tmp_path_factory.mktemp("build-root")
     )
 
 
@@ -107,7 +126,7 @@ def make_module_dir(package_dir: Path, name: str = "usermod") -> None:
     (mod / "micropython.mk").write_text("SRC_USERMOD += mymod.c\n")
 
 
-def test_resolved_build_dir_is_under_scratch_root_not_the_checkout(tmp_path):
+def test_resolved_build_dir_is_under_build_root_not_the_checkout(tmp_path):
     """Record 0095. `mpy_dir` is `cache_root()/micropython/<tag>/` -- fetched
     input a CI job may restore from an earlier run -- and a build directory
     nested inside it rides along in that restore however narrowly the cache
@@ -118,7 +137,10 @@ def test_resolved_build_dir_is_under_scratch_root_not_the_checkout(tmp_path):
     build_dir = _resolved_build_dir("unix", "v1.29.0-manylinux_2_28_x86_64")
 
     assert build_dir == (
-        scratch_root() / "ports" / "unix" / "build-v1.29.0-manylinux_2_28_x86_64"
+        orchestrate._BUILD_ROOT
+        / "ports"
+        / "unix"
+        / "build-v1.29.0-manylinux_2_28_x86_64"
     )
     assert mpy_dir not in build_dir.parents
 
@@ -135,7 +157,10 @@ def test_build_one_unix_writes_into_output_dir_identifier(tmp_path, monkeypatch)
 
     def fake_run(cmd, **kwargs):
         build_dir = (
-            scratch_root() / "ports" / "unix" / "build-unix-manylinux_2_28_x86_64"
+            orchestrate._BUILD_ROOT
+            / "ports"
+            / "unix"
+            / "build-unix-manylinux_2_28_x86_64"
         )
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
@@ -168,7 +193,10 @@ def test_build_one_writes_a_gitignore_into_output_dir(tmp_path, monkeypatch):
 
     def fake_run(cmd, **kwargs):
         build_dir = (
-            scratch_root() / "ports" / "unix" / "build-unix-manylinux_2_28_x86_64"
+            orchestrate._BUILD_ROOT
+            / "ports"
+            / "unix"
+            / "build-unix-manylinux_2_28_x86_64"
         )
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
@@ -210,7 +238,10 @@ def test_build_one_substitutes_micropython_placeholder_in_user_c_modules(
         if any("USER_C_MODULES" in str(a) for a in cmd):
             captured["cmd"] = cmd
         build_dir = (
-            scratch_root() / "ports" / "unix" / "build-unix-manylinux_2_28_x86_64"
+            orchestrate._BUILD_ROOT
+            / "ports"
+            / "unix"
+            / "build-unix-manylinux_2_28_x86_64"
         )
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
@@ -244,7 +275,10 @@ def test_build_one_no_user_c_modules_passes_a_bare_empty_flag(tmp_path, monkeypa
         if any("USER_C_MODULES" in str(a) for a in cmd):
             captured["cmd"] = cmd
         build_dir = (
-            scratch_root() / "ports" / "unix" / "build-unix-manylinux_2_28_x86_64"
+            orchestrate._BUILD_ROOT
+            / "ports"
+            / "unix"
+            / "build-unix-manylinux_2_28_x86_64"
         )
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
@@ -305,7 +339,10 @@ def test_build_one_threads_name_and_version_into_the_output_filename(
 
     def fake_run(cmd, **kwargs):
         build_dir = (
-            scratch_root() / "ports" / "unix" / "build-unix-manylinux_2_28_x86_64"
+            orchestrate._BUILD_ROOT
+            / "ports"
+            / "unix"
+            / "build-unix-manylinux_2_28_x86_64"
         )
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
@@ -357,7 +394,7 @@ def test_build_one_qemu_uses_default_board_not_empty_string(tmp_path, monkeypatc
         # `docker exec` in one container since record 0095.
         if any("USER_C_MODULES" in str(a) for a in cmd):
             captured["cmd"] = cmd
-            build_dir = scratch_root() / "ports" / "qemu" / "build-qemu"
+            build_dir = orchestrate._BUILD_ROOT / "ports" / "qemu" / "build-qemu"
             build_dir.mkdir(parents=True, exist_ok=True)
             (build_dir / "firmware.elf").write_bytes(FAKE_X86_64_ELF)
             return
@@ -398,7 +435,10 @@ def test_build_one_writes_combined_manifest_when_present(tmp_path, monkeypatch):
                 written_manifest["path"] = path
                 written_manifest["text"] = path.read_text()
         build_dir = (
-            scratch_root() / "ports" / "unix" / "build-unix-manylinux_2_28_x86_64"
+            orchestrate._BUILD_ROOT
+            / "ports"
+            / "unix"
+            / "build-unix-manylinux_2_28_x86_64"
         )
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
@@ -536,7 +576,10 @@ def test_build_fetches_micropython_and_skips_the_host_mpy_cross(tmp_path, monkey
 
     def fake_run(cmd, **kwargs):
         build_dir = (
-            scratch_root() / "ports" / "unix" / "build-v1.29.0-manylinux_2_28_x86_64"
+            orchestrate._BUILD_ROOT
+            / "ports"
+            / "unix"
+            / "build-v1.29.0-manylinux_2_28_x86_64"
         )
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
@@ -738,7 +781,10 @@ def test_build_one_resolves_relative_output_dir_against_package_dir(
 
     def fake_run(cmd, **kwargs):
         build_dir = (
-            scratch_root() / "ports" / "unix" / "build-unix-manylinux_2_28_x86_64"
+            orchestrate._BUILD_ROOT
+            / "ports"
+            / "unix"
+            / "build-unix-manylinux_2_28_x86_64"
         )
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
@@ -772,7 +818,10 @@ def test_build_one_preserves_executable_bit(tmp_path, monkeypatch):
 
     def fake_run(cmd, **kwargs):
         build_dir = (
-            scratch_root() / "ports" / "unix" / "build-unix-manylinux_2_28_x86_64"
+            orchestrate._BUILD_ROOT
+            / "ports"
+            / "unix"
+            / "build-unix-manylinux_2_28_x86_64"
         )
         build_dir.mkdir(parents=True, exist_ok=True)
         produced = build_dir / "micropython"
@@ -817,7 +866,10 @@ def test_build_one_copies_repaired_unix_lib_sidecar_alongside_the_binary(
         # calls hit this same fake for one build (deplibs, the main
         # build, the repair) -- idempotent on purpose, not just once.
         build_dir = (
-            scratch_root() / "ports" / "unix" / "build-unix-manylinux_2_28_x86_64"
+            orchestrate._BUILD_ROOT
+            / "ports"
+            / "unix"
+            / "build-unix-manylinux_2_28_x86_64"
         )
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
@@ -862,7 +914,10 @@ def test_build_one_skips_lib_copy_when_no_sidecar_exists(tmp_path, monkeypatch):
 
     def fake_run(cmd, **kwargs):
         build_dir = (
-            scratch_root() / "ports" / "unix" / "build-unix-manylinux_2_28_x86_64"
+            orchestrate._BUILD_ROOT
+            / "ports"
+            / "unix"
+            / "build-unix-manylinux_2_28_x86_64"
         )
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
@@ -896,7 +951,10 @@ def test_build_one_collects_the_wasm_blob_beside_the_mjs(tmp_path, monkeypatch):
     def fake_run(cmd, **kwargs):
         if "make" in cmd:
             build_dir = (
-                scratch_root() / "ports" / "webassembly" / "build-webassembly-wasm32"
+                orchestrate._BUILD_ROOT
+                / "ports"
+                / "webassembly"
+                / "build-webassembly-wasm32"
             )
             build_dir.mkdir(parents=True, exist_ok=True)
             (build_dir / "micropython.mjs").write_text(
@@ -985,7 +1043,7 @@ def test_build_one_does_not_copy_a_non_unix_lib_directory(tmp_path, monkeypatch)
 
     def fake_run(cmd, **kwargs):
         if any("USER_C_MODULES" in str(a) for a in cmd):
-            build_dir = scratch_root() / "ports" / "qemu" / "build-qemu"
+            build_dir = orchestrate._BUILD_ROOT / "ports" / "qemu" / "build-qemu"
             build_dir.mkdir(parents=True, exist_ok=True)
             (build_dir / "firmware.elf").write_bytes(FAKE_X86_64_ELF)
             libm = build_dir / "lib" / "libm"
@@ -1028,7 +1086,10 @@ def test_build_one_collects_vendored_libs_without_the_port_object_tree(
         # calls hit this same fake for one build (deplibs, the main
         # build, the repair) -- idempotent on purpose, not just once.
         build_dir = (
-            scratch_root() / "ports" / "unix" / "build-unix-manylinux_2_28_x86_64"
+            orchestrate._BUILD_ROOT
+            / "ports"
+            / "unix"
+            / "build-unix-manylinux_2_28_x86_64"
         )
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)

@@ -42,6 +42,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recursive listing; `tree` is already an apt package on the `ubuntu-24.04`
   runner image both `ubuntu-latest` and `ubuntu-24.04-arm` use.
 
+### Removed
+
+- **`CIBMP_SCRATCH_PATH`.** Every usermod port has built through its own
+  `Container`/overlay since `0.6.x` (record 0095), so the directory this
+  variable named was never mounted or read by anything — setting it created a
+  real host directory nothing wrote to. Record 0095's own addendum had flagged
+  this as a live no-op and left "delete, repurpose, or keep as a no-op knob" as
+  an open question; deleting it won. `orchestrate._resolved_build_dir()` now
+  returns a fixed, container-internal path with no host directory, no env
+  override and no cleanup to manage.
+
 ## [0.7.0] - 2026-09-04
 
 ### Fixed

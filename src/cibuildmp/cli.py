@@ -105,7 +105,8 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Delete cibuildmp's cache (MicroPython checkouts, ESP-IDF and any "
         "other downloaded sources) and exit. Build state is not in there -- it "
-        "goes to CIBMP_SCRATCH_PATH and is removed when the run ends",
+        "lives only inside the ephemeral container each build runs in, and is "
+        "gone with it when the run ends",
     )
     parser.add_argument(
         "--dry-run",

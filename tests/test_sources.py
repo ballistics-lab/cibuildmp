@@ -60,32 +60,6 @@ def test_cache_root_honours_env(tmp_path, monkeypatch):
     assert cache_root() == tmp_path / "x" / "cibuildmp"
 
 
-def test_scratch_root_honours_env_and_is_created(tmp_path, monkeypatch):
-    target = tmp_path / "scratch" / "nested"
-    monkeypatch.setenv("CIBMP_SCRATCH_PATH", str(target))
-
-    root = sources.scratch_root()
-
-    assert root == target
-    # Created eagerly, not lazily: `dockerrun.run()` bind-mounts it, and a
-    # bind source Docker has to create itself comes out root-owned.
-    assert root.is_dir()
-
-
-def test_scratch_root_is_never_under_cache_root(tmp_path, monkeypatch):
-    """The whole point of record 0095: `cache_root()` is fetched input a CI
-    job may restore from an earlier run, and nothing compiled may live
-    inside it."""
-    monkeypatch.setenv("CIBMP_CACHE_PATH", str(tmp_path / "cache"))
-    monkeypatch.delenv("CIBMP_SCRATCH_PATH", raising=False)
-    monkeypatch.setattr(sources, "_SCRATCH_ROOT", None)
-
-    root = sources.scratch_root()
-
-    assert cache_root() not in root.parents
-    assert root != cache_root()
-
-
 def _tarball(dest: Path, top: str = "micropython-1.28.0") -> None:
     """A minimal stand-in for the 104 MiB release asset."""
     buf = io.BytesIO(HEADER.encode())

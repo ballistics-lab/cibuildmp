@@ -210,22 +210,22 @@ def container_mpy_cross(
     **Required, not optional** -- every usermod port builds through
     `Container` now (record 0095's own addenda 8-12 landed the last of the
     six), so there is no bare-host `dockerrun.run()` path left to fall
-    back to, and no `slug`-scoped `scratch_root()` directory to key a
-    cross-invocation cache on either: each `build_<port>()` call gets its
-    own fresh container, so `mpy_dir/mpy-cross/build` is written at most
-    once per container regardless of which port it is. `natmod`'s own
-    container-built binary is unaffected -- it has to stay at exactly that
-    path anyway, because `py/dynruntime.mk` hardcodes `MPY_CROSS =
+    back to, and no cross-invocation cache directory to key on either:
+    each `build_<port>()` call gets its own fresh container, so
+    `mpy_dir/mpy-cross/build` is written at most once per container
+    regardless of which port it is. `natmod`'s own container-built binary
+    is unaffected -- it has to stay at exactly that path anyway, because
+    `py/dynruntime.mk` hardcodes `MPY_CROSS =
     $(MPY_DIR)/mpy-cross/...` with no override (see `natmod/build.py`'s
     own `build_mpy_cross()`), and `natmod` never calls this function.
 
-    `mpy_dir/mpy-cross/build`, not `scratch_root()`: this binary lives
-    inside the container's own overlay, keyed on the image by construction
-    (a fresh container per build), so it needs no separate existence
-    check or cache key of its own the way the pre-[0095] host build did.
-    `MICROPY_MPYCROSS=` names it by path, which is why the path has to be
-    one the *container* can see -- the overlay puts the checkout at its
-    own host path, so `mpy_dir/mpy-cross/build` is exactly that.
+    `mpy_dir/mpy-cross/build`: this binary lives inside the container's
+    own overlay, keyed on the image by construction (a fresh container per
+    build), so it needs no separate existence check or cache key of its
+    own the way the pre-[0095] host build did. `MICROPY_MPYCROSS=` names
+    it by path, which is why the path has to be one the *container* can
+    see -- the overlay puts the checkout at its own host path, so
+    `mpy_dir/mpy-cross/build` is exactly that.
     """
     build_dir = mpy_dir / "mpy-cross" / "build"
     binary = build_dir / "mpy-cross"

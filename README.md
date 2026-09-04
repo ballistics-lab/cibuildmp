@@ -150,9 +150,8 @@ newest:
 ```
 
 This caches fetched *source* only. Compiled build state does not live on the
-host to cache at all any more — every usermod port builds inside its own
-container now (record 0095), and `CIBMP_SCRATCH_PATH` is read but currently
-redirects nothing.
+host at all any more — every usermod port builds inside its own container
+now (record 0095), so there is nothing to cache on that side.
 
 The action takes seven inputs, all optional — every one overrides the
 config file rather than replacing it:
@@ -757,7 +756,6 @@ the port**, because it is that port's own build axis:
 | Variable                                | Effect                                                                                                                                                                                                                            |
 | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `CIBMP_CACHE_PATH`                      | Where fetched MicroPython checkouts and ESP-IDF are cached. Defaults to `$XDG_CACHE_HOME/cibuildmp`, or `~/.cache/cibuildmp`. Pin it in CI when a later step needs the checkout by path — `<CIBMP_CACHE_PATH>/micropython/<tag>` |
-| `CIBMP_SCRATCH_PATH`                    | Read, but currently redirects nothing: every usermod port's compiled build state now lives inside its own container and never reaches the host (record 0095's own addendum 13). Left as a documented knob rather than removed outright |
 | `CIBMP_REPORT_PATH`                     | Where the JSON build report is written                                                                                                                                                                                            |
 | `CIBMP_TIMEOUT`                         | Seconds before a build container is killed (`docker kill`, not just the CLI). No limit by default. **usermod only** -- natmod's own container call does not consult it                                                            |
 | `CIBMP_<PORT>_<TARGET>_TIMEOUT`         | The same, for one container — `CIBMP_UNIX_MANYLINUX_2_28_X86_64_TIMEOUT`                                                                                                                                                          |
@@ -971,10 +969,10 @@ Nor is the build state: every usermod port builds inside a container's own
 overlay now (a `:ro` bind of the checkout plus a writable view on top), so
 object files, per-identifier `build-<identifier>/` trees and the
 container-built `mpy-cross` binaries never touch the host at all — they die
-with the container. `CIBMP_SCRATCH_PATH` is still read but currently has
-nothing to redirect, since nothing writes to the path it names any more;
-kept for now as a documented knob rather than removed outright (see record
-0095's own addendum 13 for the reasoning).
+with the container. There is no env var to point this anywhere any more
+either: `CIBMP_SCRATCH_PATH` named a host directory nothing had written to
+since that migration, and was removed once that was noticed rather than
+kept as a knob with nothing left to turn.
 
 ### Still stuck
 
