@@ -120,15 +120,58 @@ resolved; trust the container's own curl exit code over the status endpoint for 
 path, and tell the user the container-level route needs its own fix, distinct from whatever they
 just enabled at the session level.
 
-## 3. Plain HTTP needs nothing from the allowlist at all
+**Confirmed a second time, a different host, and this time `recentRelayFailures` *did* record
+it** — so the previous paragraph's "can come back empty" is a possibility to check for, not the
+only shape this takes. After a user added `dl-cdn.alpinelinux.org` (investigating whether Alpine
+carries `gcc-arm-none-eabi` with working C++ support, `docs/records/0085`'s own arm_embedded
+question), the session's own `curl` reached it immediately (`200`), but `docker build`'s `apk
+update` against the identical host kept failing — first `TLS: server certificate not trusted`
+(section 4's own class, before the CA fix), then, once the CA was fixed, a bare `HTTP 403:
+Forbidden` from `apk` itself. The status endpoint's `recentRelayFailures` this time did carry a
+live entry naming it exactly:
+
+```json
+{"kind": "connect_rejected", "detail": "gateway answered 403 to CONNECT (policy denial or upstream failure)", "host": "dl-cdn.alpinelinux.org:443"}
+```
+
+So check the status endpoint when a container-level 403 shows up, but do not treat its absence as
+clearance — both an empty list and a populated one have now been observed for a real, live block.
+Either way the fix is the same: tell the user the container network path needs the host added
+separately from whatever they just enabled at the session level, and wait for them to confirm
+rather than guessing at a workaround.
+
+**The block can outlive the session-level fix by more than a few seconds — re-verify with a live
+request, not a status snapshot, before declaring it resolved.** Same `dl-cdn.alpinelinux.org`
+incident, continued: minutes after `alpinelinux.org`/`*.alpinelinux.org` were both confirmed
+present in the session's own allowed-hosts list, a container-level `wget` still got a clean `HTTP
+403 Forbidden` (TLS trust already fixed per section 4, so this was the request itself being
+refused, not a cert problem) — reproduced twice, a few minutes apart. One intermediate `wget`
+attempt failed at the TLS-handshake stage before the CA fix had been applied *in that specific
+container invocation*, which briefly looked like "the 403 is gone, now it's just cert trust" —
+wrong: that run never reached the point where a 403 could show up at all, so it proved nothing
+about whether the block had lifted. Re-ran with the CA fix actually in place and got 403 again,
+immediately. **Don't infer resolution from one ambiguous data point** — confirm with a request
+that both trusts the cert *and* reaches the application-layer response before concluding either
+"still blocked" or "now fine".
+
+## 3. Plain HTTP needs nothing from the allowlist at all — for `archive.ubuntu.com` specifically, not as a universal rule
 
 `apt-get update`/`install` inside a `RUN` step reaches
 `http://archive.ubuntu.com` and friends over plain HTTP and just works,
 unconditionally, verified live inside a real pulled image with zero hosts
-added for it. The proxy/allowlist machinery is HTTPS-only; don't spend
-time adding apt mirror hosts to any allowlist, and don't assume an
-`apt-get` failure inside a container is a network policy problem — look
-elsewhere first.
+added for it. The proxy/allowlist machinery there is HTTPS-only for that
+host; don't spend time adding apt mirror hosts to any allowlist for a
+Ubuntu/Debian base, and don't assume an `apt-get` failure inside a
+container is a network policy problem — look elsewhere first.
+
+**Do not generalize this to "plain HTTP is always exempt" — confirmed live it is not, for
+`dl-cdn.alpinelinux.org`.** `apk`'s repositories default to HTTPS; rewriting
+`/etc/apk/repositories` to `http://` (the same trick that works for `archive.ubuntu.com`) still
+got a hard `HTTP 403: Forbidden` from the proxy for this host, not a pass-through. Whether a given
+host's plain-HTTP path is exempt is apparently a per-host policy choice on the proxy's own side,
+not a blanket HTTPS-only rule — check live (`curl -sS -o /dev/null -w '%{http_code}\n'
+http://<host>/<real-path>`) rather than assuming either answer from `archive.ubuntu.com`'s own
+precedent.
 
 ## 4. HTTPS *inside* a `RUN` step fails on cert trust, not on network
 
@@ -174,6 +217,35 @@ Once the image builds clean this way, the CA-injection was only ever a
 local-testing shim — nothing about the result implies the real Dockerfile
 needs changing.
 
+**Alpine needs a different two lines — `update-ca-certificates` is not there to run, and `apk add
+ca-certificates` is the chicken-and-egg trap.** Confirmed live probing whether Alpine carries a
+usable `gcc-arm-none-eabi` (a real question for `docs/records/0085`'s own arm_embedded
+investigation, not a hypothetical): the section-4 recipe above assumes Ubuntu/Debian's shape
+(`ca-certificates` package already present, `update-ca-certificates` merges a new cert into the
+system bundle) — Alpine's `alpine:3.24.1` base has neither. It *does* already ship a static,
+baked-in bundle at `/etc/ssl/certs/ca-certificates.crt` (no package install needed to have one at
+all), so appending to that file directly is the whole fix, no tool to run afterward:
+
+```dockerfile
+COPY ca-bundle.crt /tmp/agent-proxy.crt
+RUN cat /tmp/agent-proxy.crt >> /etc/ssl/certs/ca-certificates.crt
+```
+
+Reaching for `apk add --no-cache ca-certificates && update-ca-certificates` instead (the Alpine
+equivalent someone would reasonably try first) fails before it can help:
+
+```
+WARNING: fetching https://dl-cdn.alpinelinux.org/.../APKINDEX.tar.gz: TLS: server certificate not trusted
+ERROR: unable to select packages:
+  ca-certificates (no such package):
+    required by: world[ca-certificates]
+```
+
+`apk` itself needs the network to fetch the very package meant to make the network trusted —
+`apk`'s own package index fetch is not exempt from the same TLS-interception problem section 4
+describes, so the ordinary Debian/Ubuntu fix routes through the one thing that cannot succeed yet.
+Appending directly to the file already on disk sidesteps the whole cycle.
+
 ## 5. Hosts this repo's own `docker/*.Dockerfile` files actually fetch from
 
 Grepped directly (`grep -rhoE 'https?://[a-zA-Z0-9.-]+' docker/*.Dockerfile`),
@@ -183,7 +255,7 @@ trusting this table if it might have drifted:
 | Host | Used by |
 |---|---|
 | `toolchains.bootlin.com` | `manylinux_2_41_mipsel`, `ppc64le_linux` |
-| `github.com` (+ its release-asset redirect, `*.githubusercontent.com`) | `arm_embedded`/`riscv_embedded` (xpack), `xtensa_esp` (Espressif crosstool-NG), `windows` (llvm-mingw, `arm64` frontend) |
+| `github.com` (+ its release-asset redirect, `*.githubusercontent.com`) | `embedded_base` (xpack), `xtensa_esp` (Espressif crosstool-NG), `windows` (llvm-mingw, `arm64` frontend) |
 | `micropython.org` | `xtensa_lx106` |
 | `storage.googleapis.com` | `webassembly` (pinned emsdk tarball) |
 | `quay.io` (+ `*.quay.io`) | every `manylinux_2_28_*` and `pypa-tracker` base |

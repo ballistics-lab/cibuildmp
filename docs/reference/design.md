@@ -445,9 +445,9 @@ moved to containers entirely ([0050]): there is no host toolchain resolver
 left at all (`natmod/toolchains.py`, its `--toolchain` flag, and
 `resources/natmod.toml`'s own `[[toolchain]]` table were all deleted), and
 no bare-host natmod build path survives it. Every arch above now runs inside
-a pulled image — one of six toolchain-group images keyed by what they hold,
-not by port ([0058]), several shared across natmod arches and usermod ports
-alike. See [docs/reference/vendored-images.md](vendored-images.md) for the
+a pulled image — one of five toolchain-group images keyed by what they hold,
+not by port ([0058], thinned from six to five by [0096]), several shared
+across natmod arches and usermod ports alike. See [docs/reference/vendored-images.md](vendored-images.md) for the
 full group model: which arch/port/board resolves to which image, how a build
 actually picks one at runtime, and how those images get published.
 
@@ -455,9 +455,14 @@ actually picks one at runtime, and how those images get published.
 RISC-V needing a picolibc-shipping toolchain (`dynruntime.mk` probes
 `$(CROSS)gcc --print-file-name=picolibc.specs` and falls back to `nosys`
 otherwise, silently, if the toolchain lacks it) were both open questions
-here once; [0036] resolved and verified both, and [0050]'s own image build
-later baked the same prefix reconciliation in permanently, via symlinks
-rather than a `CROSS=` override on every make invocation.
+here once; [0036] resolved and verified both. The RISC-V prefix
+reconciliation itself (xpack's own `riscv-none-elf-*` binaries, symlinked
+to the `riscv64-unknown-elf-*` names `dynruntime.mk`/`ports/qemu` actually
+invoke, rather than a `CROSS=` override on every make invocation) moved
+twice since: [0050]'s own image build first baked it in permanently at
+image-build time, and [0087]/[0089] moved it again, to container-run time
+(`toolchain_fetch.rename_prefix_script()`), once the toolchain itself
+stopped being baked into the image at all.
 
 <!-- migrated verbatim from docs/BACKLOG.md lines 547-570 (Local use) -->
 
@@ -532,8 +537,11 @@ not a toolchain) are an open question — see
 [0051]: ../records/0051-usermod-identifiers-have-no-version-axis.md
 [0052]: ../records/0052-config-is-a-tree-not-a-selector-matrix.md
 [0058]: ../records/0058-image-groups-are-toolchains-not-ports.md
+[0087]: ../records/0087-arm-riscv-embedded-thin-out-toolchain-version-lands.md
+[0089]: ../records/0089-natmod-arm-riscv-embedded-toolchain-version.md
 [0067]: ../records/0067-user-c-modules-flat-shape-autodetect.md
 [0074]: ../records/0074-usermod-family-table-and-retired-table-messages-removed.md
 [0075]: ../records/0075-top-level-scalar-keys-are-validated.md
 [0076]: ../records/0076-the-mipsel-holdout-is-bclibc-and-wasm3-not-a7p.md
 [0077]: ../records/0077-docs-drift-is-a-failing-test-not-a-discipline-problem.md
+[0096]: ../records/0096-arm-riscv-embedded-collapse-into-embedded-base.md

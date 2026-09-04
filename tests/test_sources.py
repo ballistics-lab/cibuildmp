@@ -38,9 +38,18 @@ def test_read_mpy_abi_missing_header(tmp_path):
         read_mpy_abi(tmp_path)
 
 
+def test_read_mpy_abi_without_sub_version(tmp_path):
+    """`MPY_SUB_VERSION` is a `v1.20.0`-and-later define: `py/persistentcode.h`
+    carries `MPY_VERSION` alone on every tag before it, and the bare `"5"`/`"6"`
+    that yields is a real ABI, not a malformed header (record 0093 -- this test
+    asserted the opposite until a `v1.18` build actually reached this code)."""
+    assert read_mpy_abi(fake_checkout(tmp_path, "#define MPY_VERSION 6\n")) == "6"
+    assert read_mpy_abi(fake_checkout(tmp_path, "#define MPY_VERSION 5\n")) == "5"
+
+
 def test_read_mpy_abi_incomplete_header(tmp_path):
     with pytest.raises(SourceError, match="MPY_VERSION"):
-        read_mpy_abi(fake_checkout(tmp_path, "#define MPY_VERSION 6\n"))
+        read_mpy_abi(fake_checkout(tmp_path, "#define MPY_FEATURE_ARCH_FLAGS (0x40)\n"))
 
 
 def test_cache_root_honours_env(tmp_path, monkeypatch):
@@ -49,6 +58,32 @@ def test_cache_root_honours_env(tmp_path, monkeypatch):
     monkeypatch.delenv("CIBMP_CACHE_PATH")
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "x"))
     assert cache_root() == tmp_path / "x" / "cibuildmp"
+
+
+def test_scratch_root_honours_env_and_is_created(tmp_path, monkeypatch):
+    target = tmp_path / "scratch" / "nested"
+    monkeypatch.setenv("CIBMP_SCRATCH_PATH", str(target))
+
+    root = sources.scratch_root()
+
+    assert root == target
+    # Created eagerly, not lazily: `dockerrun.run()` bind-mounts it, and a
+    # bind source Docker has to create itself comes out root-owned.
+    assert root.is_dir()
+
+
+def test_scratch_root_is_never_under_cache_root(tmp_path, monkeypatch):
+    """The whole point of record 0095: `cache_root()` is fetched input a CI
+    job may restore from an earlier run, and nothing compiled may live
+    inside it."""
+    monkeypatch.setenv("CIBMP_CACHE_PATH", str(tmp_path / "cache"))
+    monkeypatch.delenv("CIBMP_SCRATCH_PATH", raising=False)
+    monkeypatch.setattr(sources, "_SCRATCH_ROOT", None)
+
+    root = sources.scratch_root()
+
+    assert cache_root() not in root.parents
+    assert root != cache_root()
 
 
 def _tarball(dest: Path, top: str = "micropython-1.28.0") -> None:
@@ -193,3 +228,23 @@ def test_failed_fetch_leaves_no_cache_entry(tmp_path, monkeypatch):
     # Nothing half-built left behind for the next run to trust.
     assert not micropython_dir("v1.28.0", tmp_path).exists()
     assert list((tmp_path / "micropython").iterdir()) == []
+
+
+def test_find_mpy_cross_handles_both_upstream_layouts(tmp_path):
+    """`py/mkrules.mk` links `all: $(PROG)` through `v1.19.1` and
+    `all: $(BUILD)/$(PROG)` from `v1.20.0` on, with `py/dynruntime.mk`'s own
+    hardcoded `MPY_CROSS =` moving in lockstep -- so the built binary is at
+    `mpy-cross/mpy-cross` on the nine ABI 5/6 tags and `mpy-cross/build/mpy-cross`
+    on everything newer (record 0093)."""
+    assert sources.find_mpy_cross(tmp_path) is None
+
+    old = tmp_path / "mpy-cross" / "mpy-cross"
+    old.parent.mkdir(parents=True)
+    old.touch()
+    assert sources.find_mpy_cross(tmp_path) == old
+
+    new = tmp_path / "mpy-cross" / "build" / "mpy-cross"
+    new.parent.mkdir(parents=True)
+    new.touch()
+    # Never both in one checkout; the newer layout wins if a tree ever has both.
+    assert sources.find_mpy_cross(tmp_path) == new

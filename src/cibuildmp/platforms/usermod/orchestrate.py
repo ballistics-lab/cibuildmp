@@ -104,12 +104,30 @@ class UsermodBuildResult:
         return self.output.stat().st_size
 
 
-def _resolved_build_dir(mpy_dir: Path, port: str, identifier: str) -> Path:
+def _resolved_build_dir(port: str, identifier: str) -> Path:
     # One build directory per identifier, not the port's own bare default
     # -- so building unix-manylinux_2_28_x86_64 and
     # unix-manylinux_2_28_aarch64 against the same checkout
     # in one invocation never has one overwrite the other mid-build.
-    return mpy_dir / "ports" / port / f"build-{identifier}"
+    #
+    # Under `sources.scratch_root()`, not under `mpy_dir`, since [0095]:
+    # `mpy_dir` is `cache_root()/micropython/<tag>/`, i.e. fetched input a
+    # CI job may legitimately restore from an earlier run, and a compiled
+    # tree nested inside it rides along in any such restore no matter how
+    # narrowly the cache step scopes its own `path:` -- `micropython/*/`
+    # already contains `micropython/*/ports/<port>/build-<identifier>/`.
+    # The `mpy_dir` parameter is gone rather than ignored: a build
+    # directory that no longer has anything to do with the checkout should
+    # not still be asking for it.
+    #
+    # For a port already on the container model ([0095]'s addendum 2,
+    # `unix` today) this path is never created on the host at all -- it is
+    # resolved the same way and then only ever exists *inside* the
+    # container, which has no host mount there, so the objects live and die
+    # with it. That is why this can stay one function for both: the string
+    # is the same, and what differs is only whether anything on the host
+    # ends up at it.
+    return sources.scratch_root() / "ports" / port / f"build-{identifier}"
 
 
 def _manifest_path(mpy_dir: Path, port: str, identifier: str) -> Path:
@@ -145,8 +163,8 @@ def _port_build_options(
     # real, resolved directory by the time this function runs (`build_one()`
     # receives it already fetched), for every port uniformly -- Make and
     # CMake alike, since this substitution happens before any per-port
-    # branching below and well before `usermod_mounts()` ever bind-mounts
-    # the result. Record 0069 named this exact gap ("no `{checkout}`-style
+    # branching below and well before each driver's own mount list ever
+    # binds the result. Record 0069 named this exact gap ("no `{checkout}`-style
     # template ... this record does not add one") until a real caller
     # needed it; docs/records/0069's own addendum is that caller.
     user_c_modules = build_options.user_c_modules.replace(
@@ -183,15 +201,16 @@ def _port_build_options(
             tag=target.tag,
             user_c_modules=resolved_user_c_modules,
             frozen_manifest=frozen_manifest,
-            build_dir=_resolved_build_dir(mpy_dir, port, identifier),
+            build_dir=_resolved_build_dir(port, identifier),
             extra_make_args=extra_make_args,
         )
     if port == "windows":
         return WindowsBuildOptions(
             arch=target.arch,
+            tag=target.tag,
             user_c_modules=resolved_user_c_modules,
             frozen_manifest=frozen_manifest,
-            build_dir=_resolved_build_dir(mpy_dir, port, identifier),
+            build_dir=_resolved_build_dir(port, identifier),
             extra_make_args=extra_make_args,
         )
     if port == "qemu":
@@ -206,15 +225,17 @@ def _port_build_options(
         return QemuBuildOptions(
             user_c_modules=resolved_user_c_modules,
             frozen_manifest=frozen_manifest,
-            build_dir=_resolved_build_dir(mpy_dir, port, identifier),
+            build_dir=_resolved_build_dir(port, identifier),
             board=target.arch or "MPS2_AN385",
+            tag=target.tag,
             extra_make_args=extra_make_args,
         )
     if port == "webassembly":
         return WebassemblyBuildOptions(
             user_c_modules=resolved_user_c_modules,
             frozen_manifest=frozen_manifest,
-            build_dir=_resolved_build_dir(mpy_dir, port, identifier),
+            build_dir=_resolved_build_dir(port, identifier),
+            tag=target.tag,
             extra_make_args=extra_make_args,
         )
     if port == "esp32":
@@ -231,6 +252,7 @@ def _port_build_options(
             user_c_modules=resolved_user_c_modules,
             frozen_manifest=frozen_manifest,
             board=target.arch,
+            tag=target.tag,
             extra_make_args=extra_make_args,
             extra_cmake_args=extra_cmake_args,
             **idf_kwargs,
@@ -243,6 +265,7 @@ def _port_build_options(
             user_c_modules=resolved_user_c_modules,
             frozen_manifest=frozen_manifest,
             board=target.arch or "PICO",
+            tag=target.tag,
             extra_make_args=extra_make_args,
             extra_cmake_args=extra_cmake_args,
         )
@@ -324,11 +347,41 @@ def build_one(
     build_options = options.build_options(target)
     port_opts = _port_build_options(build_options, mpy_dir, options.package_dir)
 
+    # Where a container-model port hands its finished artifact back
+    # ([0095]). Under that model the build tree lives inside the container
+    # and there is no host path to read a result from -- the container
+    # writes into this directory, which is the one read-write mount it
+    # gets, and the collection below then does exactly what it always did.
+    #
+    # Under `output_dir` rather than a system temp directory on purpose:
+    # this holds *output*, briefly, in the one place output already lives
+    # (already carrying its own `.gitignore` of `*`, written below), so a
+    # crashed run leaves the evidence next to the artifacts instead of
+    # somewhere the user has to be told about. Removed as soon as the
+    # artifact is collected -- `build-<identifier>` rather than a random
+    # name so a leftover names the build it came from.
+    # `.resolve()`, not the bare join: `output_dir` defaults to a *relative*
+    # "mpyhouse" (and `package_dir` to "."), while `dockerrun` bind-mounts
+    # this path and Docker rejects a relative mount source outright --
+    # `invalid mount path: 'mpyhouse/.build-...' mount path must be
+    # absolute`, live-caught on the first real build through this path.
+    staging = (
+        options.package_dir / options.output_dir / f".build-{target.identifier}"
+    ).resolve()
+    shutil.rmtree(staging, ignore_errors=True)
+    staging.mkdir(parents=True, exist_ok=True)
+
     # `build_dir` (unix/windows/qemu/webassembly only -- esp32 has none,
     # see Esp32BuildOptions, and uses ESP-IDF's own CMake-based staleness
-    # tracking instead of a raw Makefile) is `mpy_dir/ports/<port>/
-    # build-<identifier>/`, already scoped per identifier, but nothing
-    # ever removes it *between* separate `cibuildmp` invocations. Found
+    # tracking instead of a raw Makefile) is
+    # `scratch_root()/ports/<port>/build-<identifier>/` since [0095] (it
+    # was `mpy_dir/ports/<port>/build-<identifier>/`), already scoped per
+    # identifier, but nothing ever removes it *between* separate
+    # `cibuildmp` invocations. Still true, and still needed, after that
+    # move: the default `scratch_root()` is per-invocation and so cannot
+    # carry anything over, but `CIBMP_SCRATCH_PATH` is exactly the escape
+    # hatch that makes it persist, and that is the case this `rmtree`
+    # exists for. Found
     # for real: a leftover build-unix-x64/ from an earlier run (built
     # against a different, or no, USER_C_MODULES) carried a stale
     # genhdr/qstrdefs.generated.h missing this run's own module's QSTRs --
@@ -351,6 +404,7 @@ def build_one(
         toolchain_root=toolchain_root,
         quiet=quiet,
         package_dir=options.package_dir,
+        staging=staging,
     )
 
     # options.output_dir is deliberately relative ("mpyhouse" by default,
@@ -429,6 +483,12 @@ def build_one(
             shutil.copytree(companion, target_path, dirs_exist_ok=True)
         else:
             shutil.copy(companion, target_path)
+
+    # The staging directory has served its one purpose. Removed here rather
+    # than left for `--clean-cache`: it lives inside the user's own output
+    # directory, and an artifact plus a `.build-*` copy of it side by side
+    # is exactly the kind of thing someone would ship by accident.
+    shutil.rmtree(staging, ignore_errors=True)
 
     return UsermodBuildResult(
         identifier=target.identifier, output=dest, duration=time.time() - start
@@ -540,6 +600,11 @@ def build(
     finally:
         # Always, keep_going or not, fail-fast or not -- see the
         # docstring's own keep_going paragraph.
-        report.write_report(entries, total_duration=sum(e.duration for e in entries))
+        report.write_report(
+            entries,
+            total_duration=sum(e.duration for e in entries),
+            package_dir=options.package_dir,
+            output_dir=options.output_dir,
+        )
 
     return results

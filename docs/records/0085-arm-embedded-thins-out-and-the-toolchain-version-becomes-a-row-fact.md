@@ -1,8 +1,22 @@
 # 0085 — `arm_embedded` thins out: the toolchain version stops being the image's name and becomes a row fact
 
-Status: Proposed — the constraint arithmetic and the sizes below are measured; nothing is
-implemented.
-Related: [0025], [0031], [0046], [0058], [0068], [0082], [0084]
+Status: Implemented — all five child records landed 2026-09-04 ([0090]'s own item 2, a
+checker feature with no real board to exercise it yet, deliberately deferred rather than built
+speculative; see [0090]'s own Status line). **Split into five implementation records** —
+[0086] (the generic in-container fetch
+mechanism this decision needs and none of this project's own code has yet), [0087] (the six
+ordinary `usermod` ports' own cutover — the main body of this decision, landing), [0088]
+(`mimxrt`'s own disjoint floor, named below as unsolved by the rest), [0089] (`natmod`'s own
+`arm_embedded`/`riscv_embedded` rows, named in [0084]'s own text as needing the same fix), and
+[0090] (the checker/docs follow-up: `refresh_toolchain_pins.py` no longer has a Dockerfile `ARG`
+to read, the board-scoped-floor problem named below, and this record's own [0058]-text
+correction). This record stays as the argument and the measurements; the five above are where the
+work actually happens. **A sixth, [0091], sits beside this split rather than inside it**: moving
+the cross toolchain into a row fact does nothing about `mpy-cross` itself still failing on
+`arm_embedded`/`riscv_embedded`'s own *native* gcc for pre-`v1.26.0` tags — the same [0082]
+diagnostic already confirmed for `natmod_host`/`windows`, not yet checked live against this image
+family, and fixed independently of everything else this record's split covers.
+Related: [0025], [0031], [0046], [0058], [0068], [0082], [0084], [0086], [0087], [0088], [0089], [0090], [0091]
 
 ## The problem, counted rather than described
 

@@ -1,3 +1,7 @@
+import shlex
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -6,9 +10,39 @@ from cibuildmp.platforms.usermod import espidf
 from cibuildmp.platforms.usermod.build_common import UsermodBuildError
 from cibuildmp.platforms.usermod.build_esp32 import (
     Esp32BuildOptions,
-    build_esp32,
     esp32_make_command,
 )
+from cibuildmp.platforms.usermod.build_esp32 import build_esp32 as _build_esp32
+
+
+def build_esp32_fn(*args, staging=None, **kwargs):
+    """`build_esp32()` with a staging directory supplied -- see
+    `test_usermod_build_unix.py`'s own `build_unix_fn()` for why."""
+    if staging is None:
+        staging = Path(tempfile.mkdtemp(prefix="cibmp-test-staging-"))
+    return _build_esp32(*args, staging=staging, **kwargs)
+
+
+def _fake_docker_run(cmd, **kwargs):
+    """A `dockerrun.subprocess.run` stand-in. Since record 0095 the build
+    runs inside one long-lived container, so this also stands in for the
+    copy of `micropython.bin`/`firmware.bin` into `staging` -- a `sh -c`
+    script here (`[ -e <src> ] && cp <src> <dest> || true`, one line per
+    file, `build_esp32()`'s own comment), not a bare `cp` argv, so this
+    parses each line rather than pattern-matching `"cp" in cmd`."""
+    if cmd[:2] == ["docker", "exec"] and cmd[-2] == "-c":
+        for line in cmd[-1].splitlines():
+            line = line.strip()
+            if not line.startswith("[ -e "):
+                continue
+            tokens = shlex.split(line.split("||", 1)[0])
+            source, dest = Path(tokens[2]), Path(tokens[-1])
+            if source.exists():
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy(source, dest)
+    if kwargs.get("capture_output"):
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+    return None
 
 
 def esp32_opts(**overrides) -> Esp32BuildOptions:
@@ -51,7 +85,10 @@ def _mock_esp32_image(monkeypatch, image="cibuildmp-esp32:local"):
     already use. `container_mpy_cross()` is stubbed out for the same
     reason those do (record 0044's own live finding, now true for esp32
     too): it is a second real container, and these cases are about
-    build_esp32()'s own command/script shape."""
+    build_esp32()'s own command/script shape. `_probe_platform` is
+    stubbed the same way `test_usermod_build_rp2.py`'s own
+    `_mock_rp2_image()` stubs it, so `Container.__enter__` never runs a
+    real `docker run --pull missing` on a non-native test host."""
     monkeypatch.setenv("CIBMP_ESP32_DOCKER_IMAGE", image)
     monkeypatch.setattr(
         "cibuildmp.platforms.usermod.build_common.container_mpy_cross",
@@ -60,27 +97,37 @@ def _mock_esp32_image(monkeypatch, image="cibuildmp-esp32:local"):
     monkeypatch.setattr(
         espidf, "fetch_esp_idf", lambda version, **k: Path("/gh/ws/idf")
     )
+    monkeypatch.setattr("cibuildmp.dockerrun._probe_platform", lambda *a, **k: "")
 
 
 def test_esp32_docker_image_override_skips_own_dockerfile_build(monkeypatch, tmp_path):
     _mock_esp32_image(monkeypatch)
     build_dir = tmp_path / "mpy" / "ports" / "esp32" / "build-ESP32_GENERIC"
     build_dir.mkdir(parents=True)
-    (build_dir / "micropython.bin").write_bytes(b"")
+    (build_dir / "micropython.bin").write_bytes(b"bin")
 
     calls = []
     monkeypatch.setattr(
         "cibuildmp.dockerrun.subprocess.run",
-        lambda cmd, **k: calls.append(cmd) or None,
+        lambda cmd, **k: calls.append(cmd) or _fake_docker_run(cmd, **k),
     )
 
-    build_esp32(esp32_opts(), tmp_path / "mpy", toolchain_root=tmp_path / "cache")
+    staging = tmp_path / "staging"
+    result = build_esp32_fn(
+        esp32_opts(),
+        tmp_path / "mpy",
+        toolchain_root=tmp_path / "cache",
+        staging=staging,
+    )
 
-    assert len(calls) == 1
-    docker_command = calls[0]
-    assert docker_command[:3] == ["docker", "run", "--rm"]
-    assert "cibuildmp-esp32:local" in docker_command
-    assert "bash" in docker_command
+    assert result == staging / "micropython.bin"
+    assert result.read_bytes() == b"bin"
+    script_calls = [c for c in calls if "bash" in c]
+    assert len(script_calls) == 1
+    exec_command = script_calls[0]
+    assert exec_command[:2] == ["docker", "exec"]
+    create = next(c for c in calls if c[:2] == ["docker", "create"])
+    assert "cibuildmp-esp32:local" in create
 
 
 def test_esp32_no_docker_image_raises_clear_error(monkeypatch, tmp_path):
@@ -94,7 +141,26 @@ def test_esp32_no_docker_image_raises_clear_error(monkeypatch, tmp_path):
     )
 
     with pytest.raises(UsermodBuildError, match="no Docker image registered"):
-        build_esp32(esp32_opts(), tmp_path / "mpy", toolchain_root=tmp_path / "cache")
+        build_esp32_fn(
+            esp32_opts(), tmp_path / "mpy", toolchain_root=tmp_path / "cache"
+        )
+
+    assert calls == []
+
+
+def test_esp32_no_staging_is_a_clear_error(monkeypatch, tmp_path):
+    """Needs a real image resolved first but must still fail before any
+    container is created -- `_build_esp32()` directly, bypassing
+    `build_esp32_fn()`'s own default staging directory."""
+    _mock_esp32_image(monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        "cibuildmp.dockerrun.subprocess.run",
+        lambda cmd, **k: calls.append(cmd) or None,
+    )
+
+    with pytest.raises(UsermodBuildError, match="staging directory"):
+        _build_esp32(esp32_opts(), tmp_path / "mpy", toolchain_root=tmp_path / "cache")
 
     assert calls == []
 
@@ -106,17 +172,17 @@ def test_esp32_script_installs_once_then_makes(monkeypatch, tmp_path):
     _mock_esp32_image(monkeypatch)
     build_dir = tmp_path / "mpy" / "ports" / "esp32" / "build-ESP32_GENERIC"
     build_dir.mkdir(parents=True)
-    (build_dir / "micropython.bin").write_bytes(b"")
+    (build_dir / "micropython.bin").write_bytes(b"bin")
 
     calls = []
     monkeypatch.setattr(
         "cibuildmp.dockerrun.subprocess.run",
-        lambda cmd, **k: calls.append(cmd) or None,
+        lambda cmd, **k: calls.append(cmd) or _fake_docker_run(cmd, **k),
     )
 
-    build_esp32(esp32_opts(), tmp_path / "mpy", toolchain_root=tmp_path / "cache")
+    build_esp32_fn(esp32_opts(), tmp_path / "mpy", toolchain_root=tmp_path / "cache")
 
-    script = calls[0][-1]
+    script = next(c for c in calls if "bash" in c)[-1]
     assert "idf_tools.py install --targets=esp32" in script
     assert "idf_tools.py install-python-env" in script
     assert "idf_tools.py export --format key-value" in script
@@ -131,36 +197,74 @@ def test_esp32_script_installs_once_then_makes(monkeypatch, tmp_path):
     assert "ports/esp32" in script
 
 
-def test_esp32_mounts_idf_and_tools_dirs(monkeypatch, tmp_path):
+def test_esp32_container_binds_the_checkout_read_only_and_mounts_idf_and_tools_dirs(
+    monkeypatch, tmp_path
+):
+    """Record 0095: the checkout is an overlay lower layer, so it is bound
+    **read-only and out of the way**; the ESP-IDF checkout and its tools
+    cache stay ordinary read-write binds at their own paths -- persistent
+    input, not part of the ephemeral overlay."""
     _mock_esp32_image(monkeypatch)
     build_dir = tmp_path / "mpy" / "ports" / "esp32" / "build-ESP32_GENERIC"
     build_dir.mkdir(parents=True)
-    (build_dir / "micropython.bin").write_bytes(b"")
+    (build_dir / "micropython.bin").write_bytes(b"bin")
 
     calls = []
     monkeypatch.setattr(
         "cibuildmp.dockerrun.subprocess.run",
-        lambda cmd, **k: calls.append(cmd) or None,
+        lambda cmd, **k: calls.append(cmd) or _fake_docker_run(cmd, **k),
     )
 
     mpy_dir = tmp_path / "mpy"
-    build_esp32(esp32_opts(), mpy_dir, toolchain_root=tmp_path / "cache")
+    build_esp32_fn(esp32_opts(), mpy_dir, toolchain_root=tmp_path / "cache")
 
-    docker_command = calls[0]
-    assert f"{mpy_dir}:{mpy_dir}" in docker_command
-    assert "/gh/ws/idf:/gh/ws/idf" in docker_command
+    create = next(c for c in calls if c[:2] == ["docker", "create"])
+    assert f"{mpy_dir}:/cibuildmp-lower-1:ro" in create
+    assert f"{mpy_dir}:{mpy_dir}" not in create
+    assert "/gh/ws/idf:/gh/ws/idf" in create
     tools_dir = tmp_path / "cache" / "esp-idf" / "v5.5.1" / "tools" / "esp32"
-    assert f"{tools_dir}:{tools_dir}" in docker_command
+    assert f"{tools_dir}:{tools_dir}" in create
 
 
 def test_esp32_missing_bin_after_success_is_an_error(monkeypatch, tmp_path):
     _mock_esp32_image(monkeypatch)
     (tmp_path / "mpy" / "ports" / "esp32").mkdir(parents=True)
 
-    monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "cibuildmp.dockerrun.subprocess.run",
+        lambda cmd, **k: _fake_docker_run(cmd, **k),
+    )
 
     with pytest.raises(UsermodBuildError, match="build reported success but"):
-        build_esp32(esp32_opts(), tmp_path / "mpy", toolchain_root=tmp_path / "cache")
+        build_esp32_fn(
+            esp32_opts(), tmp_path / "mpy", toolchain_root=tmp_path / "cache"
+        )
+
+
+def test_esp32_collects_the_combined_firmware_when_present(monkeypatch, tmp_path):
+    """`firmware.bin` -- the flashable combined image ([0079]) -- is copied
+    into `staging` alongside the primary when the build produced one."""
+    _mock_esp32_image(monkeypatch)
+    build_dir = tmp_path / "mpy" / "ports" / "esp32" / "build-ESP32_GENERIC"
+    build_dir.mkdir(parents=True)
+    (build_dir / "micropython.bin").write_bytes(b"bin")
+    (build_dir / "firmware.bin").write_bytes(b"combined")
+
+    monkeypatch.setattr(
+        "cibuildmp.dockerrun.subprocess.run",
+        lambda cmd, **k: _fake_docker_run(cmd, **k),
+    )
+
+    staging = tmp_path / "staging"
+    result = build_esp32_fn(
+        esp32_opts(),
+        tmp_path / "mpy",
+        toolchain_root=tmp_path / "cache",
+        staging=staging,
+    )
+
+    assert result == staging / "micropython.bin"
+    assert (staging / "firmware.bin").read_bytes() == b"combined"
 
 
 def test_esp32_build_failure_names_the_command(monkeypatch, tmp_path):
@@ -174,7 +278,9 @@ def test_esp32_build_failure_names_the_command(monkeypatch, tmp_path):
     monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", fake_run)
 
     with pytest.raises(UsermodBuildError, match="failed with exit code"):
-        build_esp32(esp32_opts(), tmp_path / "mpy", toolchain_root=tmp_path / "cache")
+        build_esp32_fn(
+            esp32_opts(), tmp_path / "mpy", toolchain_root=tmp_path / "cache"
+        )
 
 
 def test_esp32_custom_board_and_target():
@@ -196,36 +302,37 @@ def test_esp32_extra_cmake_args_reach_the_container_as_idfpy_flags(
     _mock_esp32_image(monkeypatch)
     build_dir = tmp_path / "mpy" / "ports" / "esp32" / "build-ESP32_GENERIC"
     build_dir.mkdir(parents=True)
-    (build_dir / "micropython.bin").write_bytes(b"")
+    (build_dir / "micropython.bin").write_bytes(b"bin")
 
     calls = []
     monkeypatch.setattr(
         "cibuildmp.dockerrun.subprocess.run",
-        lambda cmd, **k: calls.append(cmd) or None,
+        lambda cmd, **k: calls.append(cmd) or _fake_docker_run(cmd, **k),
     )
 
-    build_esp32(
+    build_esp32_fn(
         esp32_opts(extra_cmake_args=("-DMICROPY_C_HEAP_SIZE=131072",)),
         tmp_path / "mpy",
         toolchain_root=tmp_path / "cache",
     )
 
-    docker_command = calls[0]
-    assert "IDFPY_FLAGS=-DMICROPY_C_HEAP_SIZE=131072" in docker_command
+    exec_command = next(c for c in calls if "bash" in c)
+    assert "IDFPY_FLAGS=-DMICROPY_C_HEAP_SIZE=131072" in exec_command
 
 
 def test_esp32_no_extra_cmake_args_means_no_idfpy_flags_env(monkeypatch, tmp_path):
     _mock_esp32_image(monkeypatch)
     build_dir = tmp_path / "mpy" / "ports" / "esp32" / "build-ESP32_GENERIC"
     build_dir.mkdir(parents=True)
-    (build_dir / "micropython.bin").write_bytes(b"")
+    (build_dir / "micropython.bin").write_bytes(b"bin")
 
     calls = []
     monkeypatch.setattr(
         "cibuildmp.dockerrun.subprocess.run",
-        lambda cmd, **k: calls.append(cmd) or None,
+        lambda cmd, **k: calls.append(cmd) or _fake_docker_run(cmd, **k),
     )
 
-    build_esp32(esp32_opts(), tmp_path / "mpy", toolchain_root=tmp_path / "cache")
+    build_esp32_fn(esp32_opts(), tmp_path / "mpy", toolchain_root=tmp_path / "cache")
 
-    assert not any(arg.startswith("IDFPY_FLAGS=") for arg in calls[0])
+    exec_command = next(c for c in calls if "bash" in c)
+    assert not any(arg.startswith("IDFPY_FLAGS=") for arg in exec_command)

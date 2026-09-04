@@ -23,8 +23,9 @@ from typing import Any
 # `"cibuildmp.natmod"` and sent every lookup at
 # `cibuildmp/natmod/resources/natmod.toml`, which does not exist. The data
 # directory never moved and never should: `cibuildmp/resources/` is shared
-# rather than natmod-only -- `usermod/portinfo.py` reads `usermod.toml`
-# and `usermod/dockerrun.py` reads both pin tables out of it. A literal
+# rather than natmod-only -- `usermod/portinfo.py` reads its own per-port
+# facts out of `build_platforms_data()["usermod"]` and `usermod/dockerrun.py`
+# reads both pin tables out of it. A literal
 # anchor is what makes this file's own location irrelevant to where the
 # data is found, which is precisely the property that was missing the last
 # time it moved.
@@ -39,10 +40,6 @@ def _load(resource: str) -> dict[str, Any]:
 
 def natmod_data() -> dict[str, Any]:
     return _load("natmod.toml")
-
-
-def usermod_data() -> dict[str, Any]:
-    return _load("usermod.toml")
 
 
 def build_platforms_data() -> dict[str, Any]:
@@ -89,3 +86,32 @@ def pinned_pypa_images() -> dict[str, Any]:
     a diff against one upstream file.
     """
     return _load("pinned_pypa_images.toml")
+
+
+def pinned_toolchains_data() -> dict[str, Any]:
+    """`resources/pinned_toolchains.toml` -- the `(url, sha256)` pair
+    behind each `(cross, toolchain_version)` pair a row's own `cross`/
+    `toolchain_version`/`gcc` fields can name (**record 0086**'s own
+    fetch mechanism; **record 0085** put the version string on the row).
+
+    Keyed by `cross` (a row's own real `CROSS_COMPILE` prefix, e.g.
+    `"arm-none-eabi-"` -- not `image`, a Docker-packaging fact rather
+    than a compiler one) then the literal version string, not by `(tag,
+    port)` -- see this file's own header for why: many rows across many
+    ports share one version, and a table keyed per row would repeat the
+    same pair dozens of times over.
+    """
+    return _load("pinned_toolchains.toml")
+
+
+def tag_cflags_data() -> dict[str, Any]:
+    """`resources/tag_cflags.toml` -- every `CFLAGS_EXTRA` flag a
+    MicroPython release needs, whatever port or family builds it
+    (`sources.tag_cflags()`'s own backing table, **record 0091**).
+
+    Was a `dict[str, tuple[str, ...]]` literal inside `sources.py` until
+    this record -- the same escape from **record 0010**'s own rule
+    `pinned_docker_images()`'s docstring already names for that table's
+    own history.
+    """
+    return _load("tag_cflags.toml")

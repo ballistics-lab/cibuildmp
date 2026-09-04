@@ -3,18 +3,34 @@
 Neither field comes from `mpbuild`'s board_database.py (D7 vendors that
 separately, in usermod/boards.py) -- USER_C_MODULES shape and manifest
 layout are cibuildmp's own concern, not something mpbuild ever resolves.
-The pinned table itself, and how each value was verified, lives in
-resources/usermod.toml (D10's own "pinned data lives in resources/, not in
-Python" pattern) -- see docs/0000-TRACKER.md D16 and D17.
+The pinned values themselves, and how each was verified, live at each
+`[usermod.<port>]` table's own top level in `build-platforms.toml` (D10's
+own "pinned data lives in resources/, not in Python" pattern) -- moved
+there from a separate, now-deleted per-port resource file by [0092], once both
+`build-system`/`default-manifest` were confirmed to be facts about the
+port itself (never varying by tag/board) the same shape `image`/
+`post_checkout` already were. See docs/0000-TRACKER.md D16 and D17 for
+the original decision.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from ...resources import usermod_data
+from ...resources import build_platforms_data
 
-_PORTS: dict[str, dict[str, str]] = usermod_data()["port"]
+# Only the ports that actually carry `build-system`/`default-manifest` --
+# deliberately just the six D16-D21 already has a working reference
+# implementation for, not every port `build-platforms.toml`'s own
+# `[usermod.*]` sections cover (fifteen, per [0053]: verified board/tag
+# facts but no build driver for the other nine). Presence of the key is
+# the signal, not a separate allowlist: adding a driver for a new port
+# means adding these two fields to its own table, nothing here.
+_PORTS: dict[str, dict[str, str]] = {
+    name: table
+    for name, table in build_platforms_data()["usermod"].items()
+    if "build-system" in table
+}
 
 
 class UnknownPortError(ValueError):
@@ -32,7 +48,8 @@ def _port(name: str) -> dict[str, str]:
 
 def build_system(port: str) -> str:
     """ "make" or "cmake" -- which USER_C_MODULES shape this port's build
-    expects (D16). See resources/usermod.toml for what each shape means.
+    expects (D16). See its own `[usermod.<port>]` table in
+    `build-platforms.toml` for what each shape means.
     """
     return _port(port)["build-system"]
 
@@ -46,17 +63,18 @@ def default_manifest(port: str) -> str | None:
     both build a specific, non-default variant there (their own
     mpconfigvariant.mk overrides the port-level Makefile default), so
     their values here are that override, not the port-level default the
-    other four ports resolve to unmodified. See resources/usermod.toml
-    for exactly which is which and why.
+    other four ports resolve to unmodified. See each port's own
+    `[usermod.<port>]` table in `build-platforms.toml` for exactly which
+    is which and why.
     """
     value = _port(port)["default-manifest"]
     return value or None
 
 
 def known_ports() -> tuple[str, ...]:
-    """Ports resources/usermod.toml has data for -- deliberately just the
-    six D16-D21 already has a working reference implementation for, not
-    every port MicroPython ships.
+    """Ports with a `build-system`/`default-manifest` fact -- deliberately
+    just the six D16-D21 already has a working reference implementation
+    for, not every port MicroPython ships.
     """
     return tuple(sorted(_PORTS))
 

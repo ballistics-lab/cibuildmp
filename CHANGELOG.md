@@ -7,6 +7,99 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`bin/refresh_toolchain_pins.py --check` had been a silent no-op since `[0087]` landed** —
+  it read a shared toolchain version straight out of `arm_embedded.Dockerfile`'s own `ARG
+  TOOLCHAIN_URL=` line, which `[0087]` deleted the moment the version became a per-row fact
+  instead; every check since then exited `0` regardless of what `build-platforms.toml` actually
+  held, confirmed live with a deliberately-broken row that passed clean. Rewritten to read the
+  row's own committed `gcc` field directly; deliberately re-broke the same row to confirm
+  `--check` now catches it (`v1.20.0 usermod.mimxrt: pinned 13.3.1 >= ceiling 13`) before
+  restoring it. `[0090]`.
+- **`mimxrt`'s eleven `v1.20.0` rows carried a toolchain version (`14.2.1-1.1`) that violates
+  their own `>= 13` ceiling** (`sdcard_cmd_set_bus_width()`, fixed upstream in `v1.21.0`) —
+  `[0087]`'s general per-row mechanism never special-cased this one disjoint window, exactly the
+  gap `[0088]` had scoped and left unimplemented. Now `12.3.1-1.2`, the newest xpack release
+  genuinely below the ceiling, sha256-verified live against the publisher's own sidecar.
+  `[0088]`.
+- **Every MicroPython tag before `v1.20.0` — the nine ABI 5 and ABI 6 identifiers
+  (`v1.12` through `v1.19.1`) — had never produced an artifact**, on any arch, for
+  reasons that outlived the gcc 15 diagnostic `[0082]` bisected. Four separate
+  pre-`v1.20.0` upstream facts this project had hardcoded the modern shape of:
+  `mpy-cross` links to `mpy-cross/mpy-cross`, not `mpy-cross/build/mpy-cross`
+  (`py/mkrules.mk` moved it in `v1.20.0`, and `py/dynruntime.mk`'s own
+  `MPY_CROSS =` with it); `py/persistentcode.h` has no `MPY_SUB_VERSION`, so the
+  ABI is the bare `"5"`/`"6"`; `py/stackctrl.c` and `mpy-cross/main.c` need
+  `-Wno-error=dangling-pointer` and `-Wno-error=enum-int-mismatch` on top of the
+  `-Wno-error=unterminated-string-initialization` those tags already needed; and
+  the example natmod Makefile scoped its object cache by arch but not by tag, so
+  one `--build 'mpy*-<arch>'` linked every tag after the first against the first
+  tag's objects. Live-verified on `arm_embedded`: `v1.12`, `v1.18` and `v1.19.1`
+  build end to end, `v1.29.0` unchanged beside them. `examples/wasm2mpy`'s own
+  Makefile carried the same arch-but-not-tag object scoping and is fixed with it,
+  and so did all three `BUILD = .obj/$(ARCH)` snippets in `README.md` — which also
+  claimed a header check catches this (it catches the arch axis; the tag axis
+  produces a correct arch header and no error) and that MicroPython v1.29.0's own
+  `BUILD ?= build-$(ARCH)` default makes it impossible (that default is arch-scoped,
+  never tag-scoped). `[0082]`, `[0093]`.
+- **`mpy-cross` (and, for every port but `natmod`, the port's own build) failed on every
+  MicroPython tag before `v1.26.0`, on `rp2`, `stm32`, `samd`, `nrf`, `cc3200`, `renesas-ra`,
+  `mimxrt`, `esp32`, `webassembly`, `windows`, and `natmod`'s own `arm_embedded`/`riscv_embedded`
+  cross arches** — `container_mpy_cross()` always builds `mpy-cross` with the image's own native
+  compiler, and every one of these images' native compiler is `ubuntu:26.04`'s own gcc 15, which
+  rejects `py/emitinlinethumb.c`'s pre-`v1.26.0` string initializers
+  (`-Werror=unterminated-string-initialization`, [0082]) the same way it already broke
+  `natmod_host`/`windows`'s own `x64`/`x86` builds. `[0091]` threads the tag-keyed relaxation
+  already fixed for `unix` ([0082]) through every other port's own `container_mpy_cross()` call
+  and make invocation. Live-verified: `natmod`'s `armv7emsp`/`rv32imc`/`rv64imc` (CI, run
+  33697330722) and, locally, `rp2`'s own full firmware build on `v1.20.0` (the one tag needing two
+  stacked relaxations at once).
+- **`windows`'s own `win_arm64` build would have failed the moment `[0091]`'s fix reached it**:
+  `win_arm64`'s cross compiler is Clang (`llvm-mingw`), not GCC, and it rejects
+  `-Wno-error=dangling-pointer` as an unrecognized diagnostic name — a hard `error: unknown
+  warning option`, not a no-op. Caught by building `v1.20.0-win_arm64` locally before it ever
+  reached CI: `build_windows()` now probes its own `CFLAGS_EXTRA` candidates against the real
+  cross compiler first, the same `probe_supported_cflags()` mechanism `unix` already uses for its
+  own gcc version ladder.
+- **A container-per-build port could link a wrong-architecture `libffi`, silently, on an arm64 CI
+  runner** — `dockerrun.Container`'s own `linux32` decision reused a throwaway `docker run` to ask
+  whether the kernel needed the wrap, but every real command reaches the container through
+  `docker exec` into an already-running one, and Docker's `--platform` personality translation
+  applies to a container's own PID 1, not to a process `exec` starts fresh — the two answers can
+  disagree. Caught live on `ubuntu-24.04-arm` building `manylinux_2_31_armv7l`: `libffi`'s own
+  `configure` picked its `aarch64` sources and the port linked against a `libffi.a` with no
+  `ffi_call` in it, despite the create-time probe itself reporting the 32-bit-safe answer.
+  `Container.__enter__` now asks `docker exec <name> uname -m` on itself instead of a `docker run`
+  standing in for it. `[0095]`'s own addendum 7.
+
+### Changed
+
+- **Every usermod port now builds through one long-lived `Container` and its own overlay, not a
+  `docker run --rm` per build step.** `rp2`, `windows`, `webassembly`, `qemu` and `esp32` migrate
+  to the model `unix` adopted first — each live-verified building the real upstream
+  `examples/usercmodule` fixture through its migrated driver, not merely unit-tested. The
+  transition machinery every driver carried meanwhile (`container=None` fallbacks in
+  `probe_supported_cflags()`, `container_mpy_cross()`, `run_unix_deplibs()` and
+  `repair_unix_binary()`, plus `usermod_mounts()`, their now-unreachable pre-migration
+  `dockerrun.run()` path) is deleted now that every real caller always passes a container.
+  `CIBMP_SCRATCH_PATH` is left in place but currently redirects nothing — no usermod port writes
+  compiled build state to the host any more, an open question flagged rather than resolved by
+  quietly removing the variable. `[0095]`'s addenda 8-13.
+- **`arm_embedded` and `riscv_embedded` collapse into one Docker image, `embedded_base`.**
+  `[0087]`/`[0089]` already moved both toolchains' cross compilers to a container-run-time
+  fetch (`toolchain_fetch.py`, `[0086]`), leaving the two Dockerfiles' own build-time layers
+  identical but for one apt package (`cmake`, `rp2`-only) — an open question `[0044]`'s own
+  addendum had sketched but never tracked, closed once nothing was left to reconcile. Every
+  `image`/`images.<arch/board>` field naming the two groups, `resources/
+  pinned_docker_images.toml`'s `[image_group]` table, and both `publish-docker-images.yml`'s
+  and `verify-docker-images.yml`'s own matrices now name the one merged group. Fixed the one
+  real functional dependency the merge would otherwise have broken silently:
+  `natmod/targets.py`'s `natmod_toolchain()` used to resolve which cross toolchain an arch
+  needs by looking up its image-group name, which stops disambiguating once both toolchains
+  share one image — it now resolves from a direct, fixed `arch -> toolchain family` table
+  instead. `[0096]`.
+
 ## [0.6.2] - 2026-09-03
 
 ### Fixed
@@ -1518,3 +1611,12 @@ than restarting (see the 0.3.0a1 entry). -->
 [0066]: docs/records/0066-extra-cmake-args.md
 [0069]: docs/records/0069-upstream-usercmodule-narrow-ci-slice.md
 [0082]: docs/records/0082-natmod-old-tags-fail-mpy-cross-under-gcc-15.md
+[0091]: docs/records/0091-tag-cflags-into-every-ports-mpy-cross.md
+[0093]: docs/records/0093-pre-v1-20-0-tags-had-never-built.md
+[0086]: docs/records/0086-generic-in-container-toolchain-tarball-fetch.md
+[0087]: docs/records/0087-arm-riscv-embedded-thin-out-toolchain-version-lands.md
+[0089]: docs/records/0089-natmod-arm-riscv-embedded-toolchain-version.md
+[0088]: docs/records/0088-mimxrt-own-floor.md
+[0090]: docs/records/0090-toolchain-pins-checker-and-0058-text-followup.md
+[0095]: docs/records/0095-cache-root-splits-source-from-build-state.md
+[0096]: docs/records/0096-arm-riscv-embedded-collapse-into-embedded-base.md

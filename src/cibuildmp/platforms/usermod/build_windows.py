@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import build_common
-from .build_common import UsermodBuildError, usermod_mounts
+from .build_common import UsermodBuildError
 
 
 @dataclass(frozen=True)
@@ -62,10 +62,10 @@ class WindowsArchSettings:
     #                          uninitialized" to Clang; GCC does not
     #                          apply this diagnosis to a bare asm-tied
     #                          register declaration the way Clang does.
-    # (Migrated here from resources/usermod.toml's own [llvm-mingw]
-    # table, deleted along with usermod/llvmmingw.py once windows went
-    # Docker-only -- these are Make-level flags and belong with the rest
-    # of them, not with a toolchain download pin.)
+    # (Migrated here from a now-deleted per-port resource file's own
+    # [llvm-mingw] table, dropped along with usermod/llvmmingw.py once
+    # windows went Docker-only -- these are Make-level flags and belong
+    # with the rest of them, not with a toolchain download pin.)
     extra_cflags: str = ""
     # COMPILER_TARGET=/STRIP=/SIZE= -- the same overrides MSYS2's own
     # CLANGARM64 environment already needed (D18's own history): this
@@ -136,6 +136,7 @@ class WindowsBuildOptions:
     frozen_manifest: str
     build_dir: Path
     variant: str = "standard"
+    tag: str = ""
     extra_make_args: tuple[str, ...] = ()
 
 
@@ -143,9 +144,40 @@ def _windows_dir(mpy_dir: Path) -> Path:
     return mpy_dir / "ports" / "windows"
 
 
+def windows_raw_cflags(opts: WindowsBuildOptions) -> tuple[str, ...]:
+    """The un-probed `CFLAGS_EXTRA` candidate list: `settings.extra_cflags`
+    (a fixed, per-arch mingw flag, `win_arm64` only) plus whatever
+    `opts.tag` needs in every port ([0091]). Raw because `win_arm64`'s own
+    cross compiler is Clang (llvm-mingw), not GCC, unlike every other
+    candidate in `tag_cflags()`'s own table -- confirmed live (a real
+    `v1.20.0-win_arm64` build): `-Wno-error=dangling-pointer` is a GCC-only
+    diagnostic name, and Clang rejects an unrecognized one as a hard
+    `error: unknown warning option`, not a no-op, the same class of failure
+    `probe_supported_cflags()`'s own docstring already documents for
+    `unix`'s pypa gcc ladder. `build_windows()` probes this list against
+    the real cross compiler before it ever reaches `windows_make_command()`
+    -- see its own call site.
+    """
+    settings = WINDOWS_ARCH_SETTINGS[opts.arch]
+    return tuple(settings.extra_cflags.split() if settings.extra_cflags else ()) + (
+        build_common.tag_cflags(opts.tag)
+    )
+
+
 def windows_make_command(
-    opts: WindowsBuildOptions, mpy_dir: Path, *, mpy_cross: Path | None = None
+    opts: WindowsBuildOptions,
+    mpy_dir: Path,
+    *,
+    mpy_cross: Path | None = None,
+    extra_cflags: tuple[str, ...] | None = None,
 ) -> list[str]:
+    """`extra_cflags`, when given, overrides `windows_raw_cflags()`'s own
+    raw candidate list -- `build_windows()` passes the already
+    `probe_supported_cflags()`-filtered set (the same reason
+    `unix_make_command()`'s own `extra_cflags` parameter exists), so this
+    stays the raw candidates only for a caller (a test, a hand invocation)
+    that has not done that filtering itself.
+    """
     settings = WINDOWS_ARCH_SETTINGS[opts.arch]
     command = [
         "make",
@@ -165,8 +197,12 @@ def windows_make_command(
         *([f"MICROPY_MPYCROSS={mpy_cross.as_posix()}"] if mpy_cross else []),
         *settings.extra_make_args,
     ]
-    if settings.extra_cflags:
-        command.append(f"CFLAGS_EXTRA={settings.extra_cflags}")
+    # Combined into one `CFLAGS_EXTRA=`, never two -- GNU Make keeps only
+    # the last one named on a command line, so a second would silently
+    # drop the first.
+    cflags = extra_cflags if extra_cflags is not None else windows_raw_cflags(opts)
+    if cflags:
+        command.append(f"CFLAGS_EXTRA={' '.join(cflags)}")
     command += [
         f"USER_C_MODULES={opts.user_c_modules}",
         f"FROZEN_MANIFEST={opts.frozen_manifest}",
@@ -216,6 +252,20 @@ def verify_windows_output(arch: str, binary: Path) -> None:
         )
 
 
+def _windows_project_mounts(
+    opts: WindowsBuildOptions, package_dir: Path | None
+) -> list[Path]:
+    """The user's own project, mounted so a module whose sources reach
+    outside `USER_C_MODULES` still resolves -- `build_unix.py`'s own
+    `_project_mounts()`, unchanged for a Make port: `USER_C_MODULES` here
+    is a directory, mounted directly, same as the pre-[0095]
+    `usermod_mounts()` call this replaces."""
+    mounts = [Path(opts.user_c_modules)]
+    if package_dir is not None:
+        mounts.append(package_dir.resolve())
+    return mounts
+
+
 def build_windows(
     opts: WindowsBuildOptions,
     mpy_dir: Path,
@@ -223,6 +273,7 @@ def build_windows(
     toolchain_root: Path | None = None,
     quiet: bool = False,
     package_dir: Path | None = None,
+    staging: Path | None = None,
 ) -> Path:
     """Build ports/windows for `opts.arch`, returning the produced `.exe`.
 
@@ -266,22 +317,38 @@ def build_windows(
     uncalled scaffolding, along with `usermod/emsdk.py` and its own
     table for the identical reason.
 
-    mpy-cross is not built here either, same as every other port:
-    it is a host tool (freezes the manifest at build time, is not part of
-    the target binary), so it needs no cross-compiling at all --
-    sources.build_mpy_cross() already builds a native one, shared with
-    every other port.
+    mpy-cross is built inside this image too (`container_mpy_cross()`,
+    matching `unix`/`webassembly`/`esp32`), not on the host: this image is
+    amd64, so an arm64 host's own host-built mpy-cross could not run
+    inside it, the same reasoning `webassembly_make_command()`'s own
+    comment gives.
+
+    **`Container`/overlay, not `dockerrun.run()`** ([0095]): the checkout
+    arrives read-only, `container.overlay(mpy_dir)` gives the build a
+    writable view of it that dies with the container, and `BUILD=` (still
+    `opts.build_dir`, a `scratch_root()`-based path -- unchanged from
+    before this migration) is never mounted at all, so it is created and
+    lives purely inside the container's own ephemeral filesystem. The
+    overlay is needed regardless: `container_mpy_cross()` writes its
+    binary under `mpy_dir/mpy-cross/build` once a `container=` is given,
+    which only exists if `mpy_dir` itself is writable inside. `staging` is
+    the one thing that survives -- the finished `.exe` is `cp`'d there
+    before the container exits, which is why this needs a real staging
+    directory (`orchestrate.build_one()` provides one). Modeled directly
+    on `build_unix()`'s own shape; see its comments for the reasoning
+    this file does not repeat.
 
     `toolchain_root`/`quiet` are accepted only for the same call shape
     every `build_<port>()` shares (`orchestrate.py`'s `build_one()`
     passes them uniformly); neither is used on this Docker-only path --
     the same vestigial-but-uniform pair build_unix()/build_webassembly()
     already carry. `package_dir`, when given, is bind-mounted alongside
-    `USER_C_MODULES` itself -- see `build_common.usermod_mounts()`.
+    `USER_C_MODULES` itself -- see `_windows_project_mounts()`.
 
-    The output path is `opts.build_dir / "micropython.exe"` --
-    ports/windows/Makefile's own `PROG ?= micropython` plus the `.exe`
-    suffix `py/mkrules.mk` appends for this port specifically.
+    The output path is `staging / "micropython.exe"` -- copied out of
+    `opts.build_dir / "micropython.exe"`, `ports/windows/Makefile`'s own
+    `PROG ?= micropython` plus the `.exe` suffix `py/mkrules.mk` appends
+    for this port specifically, before the container that built it exits.
     """
     if opts.arch not in WINDOWS_ARCH_SETTINGS:
         raise UsermodBuildError(
@@ -300,33 +367,72 @@ def build_windows(
             f"wait for publish-docker-images.yml to publish one and "
             f"register it in resources/pinned_docker_images.toml"
         )
+    oci_platform = dockerrun.platform_for("windows", opts.arch)
+    timeout = dockerrun.timeout_for("windows", opts.arch)
 
-    command = windows_make_command(
-        opts,
+    if staging is None:
+        msg = (
+            "windows builds need a staging directory to hand the artifact "
+            "back through ([0095]); orchestrate.build_one() provides one"
+        )
+        raise UsermodBuildError(msg)
+
+    with dockerrun.overlay_container(
         mpy_dir,
-        mpy_cross=build_common.container_mpy_cross(
-            mpy_dir,
-            slug="windows",
-            image=docker_image,
-            oci_platform=dockerrun.platform_for("windows", opts.arch),
-            timeout=dockerrun.timeout_for("windows", opts.arch),
-        ),
-    )
-    dockerrun.run(
-        command,
-        mounts=usermod_mounts(
-            mpy_dir, Path(opts.user_c_modules), package_dir=package_dir
-        ),
-        workdir=_windows_dir(mpy_dir),
         image=docker_image,
-        timeout=dockerrun.timeout_for("windows", opts.arch),
-        # Same as webassembly's above (**0043**): an amd64 Linux
-        # cross-compile host targeting Windows. All three arches share
-        # one image (D42/D28 step 3), so all three share its platform.
-        oci_platform=dockerrun.platform_for("windows", opts.arch),
-    )
+        oci_platform=oci_platform,
+        mounts=[staging, *_windows_project_mounts(opts, package_dir)],
+    ) as container:
+        container.overlay(mpy_dir)
 
-    binary = opts.build_dir / "micropython.exe"
+        # Probed, not passed raw -- live-caught (a real `v1.20.0-win_arm64`
+        # build): `win_arm64`'s own cross compiler is Clang (llvm-mingw), and
+        # `tag_cflags()`'s own `-Wno-error=dangling-pointer` is a GCC-only
+        # diagnostic name. Clang's response to a name it does not know is a
+        # hard `error: unknown warning option`, not a no-op -- the exact
+        # failure mode `probe_supported_cflags()`'s own docstring already
+        # documents for `unix`'s pypa gcc ladder, now real for the one port
+        # here that mixes compiler families in a single image. `win32`/
+        # `win_amd64` are real apt GCC and would probe every candidate
+        # supported regardless; probing them too costs one cheap `exec`
+        # rather than a special case for "which arch is Clang".
+        cross_cflags = build_common.probe_supported_cflags(
+            windows_raw_cflags(opts),
+            compiler=f"{WINDOWS_ARCH_SETTINGS[opts.arch].cross_compile}gcc",
+            timeout=timeout,
+            container=container,
+        )
+
+        mpy_cross = build_common.container_mpy_cross(
+            mpy_dir,
+            timeout=timeout,
+            # Unprobed, unlike the cross build above: mpy-cross always
+            # builds with this image's own *native* compiler (a host
+            # tool, never cross-compiled -- `container_mpy_cross()`'s own
+            # docstring), which is the same real apt GCC every other
+            # port's native build already uses unprobed.
+            extra_cflags=build_common.tag_cflags(opts.tag),
+            container=container,
+        )
+
+        command = windows_make_command(
+            opts, mpy_dir, mpy_cross=mpy_cross, extra_cflags=cross_cflags
+        )
+        container.call(command, workdir=_windows_dir(mpy_dir), timeout=timeout)
+
+        # The `.exe` exists only inside the container until this copy --
+        # see `build_unix()`'s identical reasoning.
+        binary = staging / "micropython.exe"
+        container.call(
+            [
+                "cp",
+                (opts.build_dir / "micropython.exe").as_posix(),
+                binary.as_posix(),
+            ],
+            workdir=_windows_dir(mpy_dir),
+            timeout=timeout,
+        )
+
     if not binary.exists():
         raise UsermodBuildError(
             f"windows/{opts.arch}: build reported success but {binary} is missing"

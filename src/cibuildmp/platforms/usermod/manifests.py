@@ -8,7 +8,7 @@ the class of hand-copied-and-drifting logic Positioning says `cibuildmp`
 exists to absorb.
 
 Verified byte-for-byte against that workflow's own literal `cat <<EOF`
-bodies, not just against resources/usermod.toml's own paths -- see
+bodies, not just against portinfo.default_manifest()'s own paths -- see
 tests/test_manifests.py.
 """
 

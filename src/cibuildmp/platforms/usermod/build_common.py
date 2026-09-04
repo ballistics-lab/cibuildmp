@@ -21,73 +21,19 @@ from __future__ import annotations
 import os
 import shlex
 from pathlib import Path
+from typing import Any
+
+# `natmod` needed this same per-tag `CFLAGS_EXTRA` fact for its own
+# `mpy-cross` build ([0091]) and cannot import `usermod` (the established
+# one-way dependency), so it lives in the shared module both families
+# already import `fetch_micropython()`/`read_mpy_abi()` from. Re-exported
+# here, unchanged, so `build_common.tag_cflags(...)`/`build_common.TAG_CFLAGS`
+# keep resolving for every existing caller in this package.
+from ...sources import TAG_CFLAGS, tag_cflags  # noqa: F401
 
 
 class UsermodBuildError(Exception):
     pass
-
-
-def usermod_mounts(
-    mpy_dir: Path, user_c_modules_mount: Path, *, package_dir: Path | None
-) -> list[Path]:
-    """The bind mounts every `build_<port>()` gives its own `dockerrun.run()`
-    call: `mpy_dir`, `user_c_modules_mount`, and -- when the caller has one
-    to give -- the whole `package_dir` too.
-
-    `user_c_modules_mount` is a `Path`, not a bare `USER_C_MODULES` string,
-    because what actually needs mounting differs by build system: Make
-    ports mount `USER_C_MODULES` itself (`opts.user_c_modules`, a real
-    directory `py/py.mk`'s own glob reads); CMake ports (`esp32`/`rp2`)
-    resolve `USER_C_MODULES` to a *file* (`portinfo.resolve_user_c_modules()`
-    appends `/micropython.cmake`), so their own callers pass that file's
-    `.parent` instead -- both already did before `package_dir` existed
-    here, unchanged by this helper.
-
-    `dockerrun.run()` bind-mounts each of these at its own identical host
-    path (its own docstring), so a module whose sources reach *outside*
-    `USER_C_MODULES` via a relative path (`../src`, `../../natmod/nanopb`,
-    a sibling directory two levels up, whatever the consumer's own layout
-    actually is) previously saw nothing there at all -- confirmed live
-    against a real consumer (`o-murphy/a7p`'s own `usermod/a7p/
-    micropython.mk`, `../../src`/`../../natmod/nanopb` both invisible
-    in-container, "No such file or directory" on a path that existed on the
-    host the whole time), and independently already known: `examples/
-    template`'s own `usermod/micropython.mk` carries the identical warning
-    for the identical reason, worked around there by setting
-    `user-c-modules = "."` so `USER_C_MODULES` itself resolves to
-    `package_dir` -- a real fix, but one that requires restructuring the
-    consumer's own module to sit exactly one level under its own project
-    root, which cibuildwheel does not ask of a `setup.py`/`pyproject.toml`
-    and this project should not ask of a module either.
-
-    `package_dir` is mounted instead, unconditionally, the same way
-    `natmod/build.py` already mounts it for every natmod target
-    (`mounts=[mpy_dir, package_dir.resolve()]` there, unchanged) --
-    consistent with cibuildwheel's own principle that nothing about the
-    project being built should be invisible to the container it builds in,
-    even though the mechanism here (an extra bind mount at the project's
-    own identical host path) is simpler than cibuildwheel's own `docker cp`/
-    tar-pipe copy-in (`OCIContainer.copy_into()`) -- this project already
-    bind-mounts everything else at identical host paths, and one more
-    mount at the same convention costs nothing where a wholesale change of
-    mechanism would.
-
-    `USER_C_MODULES` itself stays in the list even though `package_dir`
-    (when given) already contains it -- a strict subdirectory of an
-    already-mounted tree bind-mounts for free either way, and dropping it
-    would make this helper's own list depend on `package_dir` always being
-    given, which it is not (see the `None` default: called directly, in a
-    handful of tests, with no `package_dir` in scope at all).
-
-    `package_dir=None` (its own tests, or a direct API caller with no
-    project directory in scope) keeps today's narrower behaviour exactly,
-    rather than raising or guessing one -- there is no sane default to
-    invent for "no project directory was given."
-    """
-    mounts = [mpy_dir, user_c_modules_mount]
-    if package_dir is not None:
-        mounts.append(package_dir.resolve())
-    return mounts
 
 
 def cmake_extra_args_env(
@@ -130,75 +76,12 @@ def cmake_extra_args_env(
     return {var: " ".join(extra_cmake_args)}
 
 
-# `CFLAGS_EXTRA` a MicroPython *release* needs, whatever port is being
-# built. The fourth axis beside `build_unix.py`'s own libc, architecture
-# and platform-tag tables, and the only one of the four that is a fact
-# about the tag rather than about the cell.
-#
-# It lives here rather than in a `build-platforms.toml` row because the
-# code it protects is `py/`, which every port compiles twice -- once into
-# `mpy-cross` (below) and once into the port itself. A row in
-# `[usermod.unix]` cannot say that: `rp2` at the same tag hits the same
-# diagnostic in the same file. Record 0084 tried the row first and moved
-# it here; a per-row override can come back the day a tag needs different
-# treatment in different ports, which nothing does today.
-#
-# `v1.20.0` -- `-Wno-error=dangling-pointer`. gcc 14 reports
-# `py/stackctrl.c:32` storing `&stack_dummy` into
-# `mp_state_ctx.thread.stack_top`, which is exactly what
-# `mp_stack_ctrl_init()` is for: the address is used as a *limit*, never
-# dereferenced after return. Upstream later rewrote it; this project is
-# not going to hold a 2023 release to a 2025 diagnostic. Live-caught in
-# CI (run 33636118022) rather than predicted: both `unix` x86_64 cells
-# failed inside the `mpy-cross` build, not the port's own.
-#
-# `-Wno-error=unterminated-string-initialization` -- gcc 15.1 rejects
-# `py/emitinlinethumb.c`'s register mnemonics (`{0, "r0\0"}`, ...), each a
-# 3-4 character string packed into a fixed 3-byte array with no room left
-# for the trailing NUL. Upstream's own fix landed in `v1.26.0`, bisected
-# exactly in [0082]: `v1.25.0` still fails, `v1.26.0` does not -- the same
-# boundary [0085] found for `arm_embedded`'s own xpack pin. Live-caught
-# here too, not just on `natmod_host`/`arm_embedded`: `manylinux_2_31_armv7l`
-# and `manylinux_2_41_mipsel`'s own published images carry gcc>=15.1 while
-# `manylinux_2_28_*` (AlmaLinux 8) does not, so `unix`'s own per-tag sweep
-# hit this on those two cells specifically, on `v1.20.0`/`v1.21.0`/`v1.22.0`
-# (0084's own sweep, run ids 33642989476-33643188693). Applied tag-wide
-# rather than per-cell: a suppressed warning that never fires on a cell
-# that does not hit it is a no-op, and `py/` is compiled by every port
-# alike (this dict's own header).
-_UNTERMINATED_STRING_INIT_TAGS = (
-    "v1.20.0",
-    "v1.21.0",
-    "v1.22.0",
-    "v1.22.1",
-    "v1.22.2",
-    "v1.23.0",
-    "v1.24.0",
-    "v1.24.1",
-    "v1.25.0",
-)
-
-TAG_CFLAGS: dict[str, tuple[str, ...]] = {
-    tag: ("-Wno-error=unterminated-string-initialization",)
-    for tag in _UNTERMINATED_STRING_INIT_TAGS
-}
-TAG_CFLAGS["v1.20.0"] += ("-Wno-error=dangling-pointer",)
-
-
-def tag_cflags(tag: str) -> tuple[str, ...]:
-    """Every `CFLAGS_EXTRA` flag this MicroPython release needs, in any
-    port. Empty for a tag that needs none, and for no tag at all."""
-    return TAG_CFLAGS.get(tag, ())
-
-
 def probe_supported_cflags(
     candidates: tuple[str, ...],
     *,
-    image: str,
     compiler: str = "gcc",
-    oci_platform: str | None = None,
-    linux32: bool = False,
     timeout: float | None = None,
+    container: Any,
 ) -> tuple[str, ...]:
     """Every `-Wno-error=<diagnostic>` in `candidates` this image's own
     `compiler` actually recognizes, in the same order -- live-checked
@@ -242,20 +125,26 @@ def probe_supported_cflags(
     list), the same "let the tool that actually knows answer" principle
     CLAUDE.md's own top rule already applies to reading cibuildwheel
     instead of guessing at it. Empty `candidates` short-circuits with no
-    container run at all -- true for every `v1.26.0`-and-later, non-musl
+    container call at all -- true for every `v1.26.0`-and-later, non-musl
     build, the common case.
+
+    **`container`** is a `dockerrun.Container` already running the image
+    whose compiler this probes ([0095]) -- one `docker exec`, in the same
+    container the build itself will use, so a probe can never disagree
+    with the compiler that runs later. Required, not optional: every
+    usermod port builds through `Container` now (record 0095's own
+    addenda 8-12 landed the last of the six), so there is no bare-host
+    `dockerrun.run()` path left to fall back to.
     """
     if not candidates:
         return ()
-    from ... import dockerrun
 
-    # `dockerrun.run()` runs this with `check=True` -- a `;`-joined shell
-    # script's own exit status is whatever its *last* statement leaves
-    # behind, so without the trailing `; true` a probe would raise
-    # `CalledProcessError` (crashing the whole build, not just reporting
-    # one unsupported flag) purely because the *last* candidate in the
-    # list happened to be the one this gcc rejects, regardless of how
-    # every earlier candidate actually probed.
+    # A `;`-joined shell script's own exit status is whatever its *last*
+    # statement leaves behind, so without the trailing `; true` a probe
+    # would raise (crashing the whole build, not just reporting one
+    # unsupported flag) purely because the *last* candidate in the list
+    # happened to be the one this gcc rejects, regardless of how every
+    # earlier candidate actually probed.
     quoted_compiler = shlex.quote(compiler)
     probe = (
         "; ".join(
@@ -265,14 +154,10 @@ def probe_supported_cflags(
         )
         + "; true"
     )
-    output = dockerrun.run(
+    output = container.call(
         ["sh", "-c", probe],
-        mounts=[],
         workdir=Path("/"),
-        image=image,
         timeout=timeout,
-        oci_platform=oci_platform,
-        linux32=linux32,
         capture_output=True,
     )
     supported = set((output or "").split())
@@ -282,15 +167,12 @@ def probe_supported_cflags(
 def container_mpy_cross(
     mpy_dir: Path,
     *,
-    slug: str,
-    image: str,
-    oci_platform: str | None = None,
-    linux32: bool = False,
     timeout: float | None = None,
     extra_cflags: tuple[str, ...] = (),
+    container: Any,
 ) -> Path:
-    """Build `mpy-cross` **inside `image`** and return the binary, for the
-    port build to pass as `MICROPY_MPYCROSS=`.
+    """Build `mpy-cross` **inside `container`** and return the binary, for
+    the port build to pass as `MICROPY_MPYCROSS=`.
 
     Found the hard way, on the first real build under record 0043's native
     images -- not anticipated by that record, and the reason it needed a
@@ -325,48 +207,45 @@ def container_mpy_cross(
     either host architecture" property 0043 exists to provide, so they
     use this too.
 
-    `slug` scopes the build directory (`mpy-cross/build-<slug>/`) so each
-    image gets its own binary and none of them collide with the host
-    build at `mpy-cross/build/` that natmod still uses -- natmod is
-    unaffected by all of this, since it never runs mpy-cross anywhere but
-    the host.
+    **Required, not optional** -- every usermod port builds through
+    `Container` now (record 0095's own addenda 8-12 landed the last of the
+    six), so there is no bare-host `dockerrun.run()` path left to fall
+    back to, and no `slug`-scoped `scratch_root()` directory to key a
+    cross-invocation cache on either: each `build_<port>()` call gets its
+    own fresh container, so `mpy_dir/mpy-cross/build` is written at most
+    once per container regardless of which port it is. `natmod`'s own
+    container-built binary is unaffected -- it has to stay at exactly that
+    path anyway, because `py/dynruntime.mk` hardcodes `MPY_CROSS =
+    $(MPY_DIR)/mpy-cross/...` with no override (see `natmod/build.py`'s
+    own `build_mpy_cross()`), and `natmod` never calls this function.
 
-    Cached by existence, like `sources.build_mpy_cross()`: a rebuilt
-    container binary is only needed when the image itself changes, and the
-    image is digest-pinned.
+    `mpy_dir/mpy-cross/build`, not `scratch_root()`: this binary lives
+    inside the container's own overlay, keyed on the image by construction
+    (a fresh container per build), so it needs no separate existence
+    check or cache key of its own the way the pre-[0095] host build did.
+    `MICROPY_MPYCROSS=` names it by path, which is why the path has to be
+    one the *container* can see -- the overlay puts the checkout at its
+    own host path, so `mpy_dir/mpy-cross/build` is exactly that.
     """
-    from ... import dockerrun
-
-    build_dir = mpy_dir / "mpy-cross" / f"build-{slug}"
+    build_dir = mpy_dir / "mpy-cross" / "build"
     binary = build_dir / "mpy-cross"
-    if binary.exists():
-        return binary
-
-    dockerrun.run(
-        [
-            "make",
-            "-C",
-            (mpy_dir / "mpy-cross").as_posix(),
-            f"BUILD={build_dir.as_posix()}",
-            # `mpy-cross` compiles `py/` too, so a diagnostic that stops a
-            # port build stops this one first -- live-caught in CI
-            # (33636118022): `v1.20.0`'s `-Werror=dangling-pointer=` in
-            # `py/stackctrl.c` failed here, before the port's own make ever
-            # ran, while the row's `cflags_extra` was reaching only the
-            # port. Anything the caller needs relaxed for its own sources
-            # has to be relaxed for this build as well.
-            *([f"CFLAGS_EXTRA={' '.join(extra_cflags)}"] if extra_cflags else []),
-            f"-j{os.cpu_count() or 1}",
-        ],
-        mounts=[mpy_dir],
-        workdir=mpy_dir / "mpy-cross",
-        image=image,
-        timeout=timeout,
-        oci_platform=oci_platform,
-        linux32=linux32,
-    )
-    if not binary.exists():
-        raise UsermodBuildError(
-            f"mpy-cross build inside {image} reported success but {binary} is missing"
-        )
+    make_command = [
+        "make",
+        "-C",
+        (mpy_dir / "mpy-cross").as_posix(),
+        f"BUILD={build_dir.as_posix()}",
+        # `mpy-cross` compiles `py/` too, so a diagnostic that stops a
+        # port build stops this one first -- live-caught in CI
+        # (33636118022): `v1.20.0`'s `-Werror=dangling-pointer=` in
+        # `py/stackctrl.c` failed here, before the port's own make ever
+        # ran, while the row's `cflags_extra` was reaching only the
+        # port. Anything the caller needs relaxed for its own sources
+        # has to be relaxed for this build as well.
+        *([f"CFLAGS_EXTRA={' '.join(extra_cflags)}"] if extra_cflags else []),
+        f"-j{os.cpu_count() or 1}",
+    ]
+    container.call(make_command, workdir=mpy_dir / "mpy-cross", timeout=timeout)
+    # No host-side existence check: the binary is inside the container.
+    # `make` exiting non-zero is already a `UsermodBuildError`, which is
+    # the signal a missing binary would otherwise stand in for.
     return binary

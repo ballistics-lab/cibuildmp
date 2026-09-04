@@ -9,7 +9,7 @@
 #
 # **The apt cross-toolchain (`gcc-powerpc64le-linux-gnu` +
 # `libc6-dev-ppc64el-cross`) is gone, replaced by a pinned Bootlin
-# tarball -- the same model `arm_embedded`/`riscv_embedded`/
+# tarball -- the same model `embedded_base`/
 # `xtensa_esp`/`xtensa_lx106` (record 0025) and `manylinux_2_41_mipsel`
 # (record 0068) already use.** Not because the apt packages disappeared
 # the way mipsel's did -- both are still in Ubuntu's `26.04` archive --

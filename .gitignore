@@ -40,3 +40,9 @@ mpyhouse/
 # mpy_ld.py's own per-arch cache.
 examples/*/.wabt/
 examples/*/.mpy_ld_cache-*/
+
+# lv_binding_micropython itself (LVGL + pycparser submodules included) --
+# never vendored, same as examples/usercmodule's own real upstream source.
+# .github/workflows/verify-lv-binding-micropython.yml clones it fresh every
+# run; record 0097 is the account of why this directory exists at all.
+examples/lv_binding_micropython/lv_binding_micropython/

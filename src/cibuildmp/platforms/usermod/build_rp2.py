@@ -13,11 +13,13 @@ this file's own split from a single `build.py`.
 
 from __future__ import annotations
 
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import build_common
-from .build_common import UsermodBuildError, usermod_mounts
+from ... import toolchain_fetch
+from . import build_common, targets
+from .build_common import UsermodBuildError
 
 
 @dataclass(frozen=True)
@@ -25,6 +27,7 @@ class Rp2BuildOptions:
     user_c_modules: str
     frozen_manifest: str
     board: str = "PICO"
+    tag: str = ""
     extra_make_args: tuple[str, ...] = ()
     extra_cmake_args: tuple[str, ...] = ()
 
@@ -37,6 +40,12 @@ def rp2_make_command(
     # risks the identical FROZEN_MANIFEST-via-MAKEFLAGS leak into the
     # port's own internal mpy-cross sub-build. Simplest to just not pass
     # one, matching the esp32 driver this one is modeled on.
+    #
+    # `CFLAGS_EXTRA` here too, not just on `container_mpy_cross()` below:
+    # `ports/rp2` recompiles `py/` into the firmware itself, live-confirmed
+    # to hit the identical gcc-15 diagnostic on `arm_embedded`'s own native
+    # compiler ([0091], run 33697330722).
+    cflags = build_common.tag_cflags(opts.tag)
     return [
         "make",
         "-C",
@@ -44,9 +53,23 @@ def rp2_make_command(
         f"BOARD={opts.board}",
         f"USER_C_MODULES={opts.user_c_modules}",
         f"FROZEN_MANIFEST={opts.frozen_manifest}",
+        *([f"CFLAGS_EXTRA={' '.join(cflags)}"] if cflags else []),
         *([f"MICROPY_MPYCROSS={mpy_cross.as_posix()}"] if mpy_cross else []),
         *opts.extra_make_args,
     ]
+
+
+def _rp2_project_mounts(opts: Rp2BuildOptions, package_dir: Path | None) -> list[Path]:
+    """The user's own project, mounted so a module whose sources reach
+    outside `USER_C_MODULES` still resolves -- `build_unix.py`'s own
+    `_project_mounts()`, for a CMake port: `USER_C_MODULES` resolves to a
+    *file* here (`portinfo.resolve_user_c_modules()`'s own
+    `/micropython.cmake`), so the mount is that file's `.parent`, same as
+    the pre-[0095] `usermod_mounts()` call this replaces."""
+    mounts = [Path(opts.user_c_modules).parent]
+    if package_dir is not None:
+        mounts.append(package_dir.resolve())
+    return mounts
 
 
 def build_rp2(
@@ -56,6 +79,7 @@ def build_rp2(
     toolchain_root: Path | None = None,
     quiet: bool = False,
     package_dir: Path | None = None,
+    staging: Path | None = None,
 ) -> Path:
     """Build ports/rp2 for `opts.board`, returning the produced
     `firmware.uf2`.
@@ -79,17 +103,42 @@ def build_rp2(
     `v1.29.0-rp2-RPI_PICO` producing a genuine, correctly-sized
     `firmware.uf2` with the fixture's own C module linked in.
 
-    The output path is `mpy_dir / "ports" / "rp2" / "build-<BOARD>" /
-    "firmware.uf2"` -- the port's own unmodified default build directory,
-    since nothing here overrides `BUILD=`.
+    **`Container`/overlay, not `dockerrun.run()`** ([0095]'s addendum 2):
+    the checkout arrives read-only, `container.overlay(mpy_dir)` gives the
+    build a writable view of it that dies with the container, and
+    `ports/rp2`'s own `build-<BOARD>/` (CMake, no `BUILD=` override --
+    see `rp2_make_command()`'s own comment) lands in that ephemeral upper
+    layer rather than on the host. `staging` is the one thing that
+    survives: the finished `firmware.uf2` is `cp`'d there before the
+    container exits, which is why this needs a real staging directory
+    (`orchestrate.build_one()` provides one) rather than reading the
+    build tree back off a host mount that no longer exists. Modeled
+    directly on `build_unix()`'s own shape -- see its comments for the
+    reasoning this file does not repeat.
 
-    `toolchain_root`/`quiet` are accepted only for the same call shape
-    every `build_<port>()` shares (`orchestrate.py`'s `build_one()`
-    passes them uniformly); neither is used on this Docker-only path.
-    `package_dir`, when given, is bind-mounted alongside `USER_C_MODULES`
-    itself -- see `build_common.usermod_mounts()`.
+    The toolchain cache (`toolchain_root`, or `sources.cache_root()` when
+    omitted) is **not** part of the overlay: unlike the build tree, it is
+    fetched input meant to persist across runs ([0095]'s own category A),
+    so it stays a plain, real read-write host mount the way it always
+    was -- only the mechanism carrying it into the container changed.
+
+    `toolchain_root`/`quiet`: `toolchain_root` is no longer a no-op --
+    since [0087], `arm_embedded.Dockerfile` no longer bakes a cross
+    compiler, so `rp2`'s own real one ([0086]/`targets.rp2_toolchain()`)
+    is fetched at container time into `toolchain_root` (or
+    `sources.cache_root()` when omitted), the same cache directory
+    `espidf.fetch_esp_idf()` already keys off for `esp32`. `quiet` is
+    still accepted only for the shared `build_<port>()` call shape and
+    still unused here. `package_dir`, when given, is bind-mounted
+    alongside `USER_C_MODULES` itself -- see `_rp2_project_mounts()`.
     """
     from ... import dockerrun
+
+    if not opts.tag:
+        raise UsermodBuildError(
+            "rp2: a real MicroPython tag is required to resolve which "
+            "cross toolchain to fetch (targets.rp2_toolchain()) -- got none"
+        )
 
     docker_image = dockerrun.ensure_image("rp2")
     if docker_image is None:
@@ -102,32 +151,81 @@ def build_rp2(
     timeout = dockerrun.timeout_for("rp2")
     rp2_dir = mpy_dir / "ports" / "rp2"
 
-    mpy_cross = build_common.container_mpy_cross(
+    if staging is None:
+        msg = (
+            "rp2 builds need a staging directory to hand the artifact back "
+            "through ([0095]); orchestrate.build_one() provides one"
+        )
+        raise UsermodBuildError(msg)
+
+    cross, version = targets.rp2_toolchain(opts.tag)
+    toolchain_dir, fetch = toolchain_fetch.resolve_toolchain(
+        cross, version, root=toolchain_root
+    )
+
+    with dockerrun.overlay_container(
         mpy_dir,
-        slug="rp2",
         image=docker_image,
         oci_platform=oci_platform,
-        timeout=timeout,
-    )
+        # `toolchain_dir.parent`, not `toolchain_dir` itself -- found live,
+        # not assumed: `toolchain_dir` (the fetched cache's own version
+        # directory) does not exist on the host until the fetch script
+        # below creates it, so mounting it directly leaves Docker to
+        # synthesize every missing path component up to it *inside the
+        # container's own filesystem*, root-owned, since only the exact
+        # bind-mounted leaf inode is backed by the host at all -- the very
+        # first `mkdir -p` the fetch script runs then fails with a bare
+        # "mkdir: Permission denied", before curl is ever reached. Mounting
+        # the parent (`resolve_toolchain()` already creates it host-side,
+        # host-owned) gives the container a real, already-owned directory
+        # to stage and `mv` into instead.
+        mounts=[staging, toolchain_dir.parent, *_rp2_project_mounts(opts, package_dir)],
+    ) as container:
+        container.overlay(mpy_dir)
 
-    command = rp2_make_command(opts, mpy_dir, mpy_cross=mpy_cross)
-    dockerrun.run(
-        command,
-        # Same directory-level mount `build_esp32()` uses (`.parent`, not
-        # the bare `.cmake` file) -- see that function's own comment for
-        # the sibling-manifest bug this avoids. `package_dir`, when given,
-        # is appended on top -- see `build_common.usermod_mounts()`.
-        mounts=usermod_mounts(
-            mpy_dir, Path(opts.user_c_modules).parent, package_dir=package_dir
-        ),
-        workdir=rp2_dir,
-        image=docker_image,
-        timeout=timeout,
-        oci_platform=oci_platform,
-        env=build_common.cmake_extra_args_env(opts.extra_cmake_args, var="CMAKE_ARGS"),
-    )
+        mpy_cross = build_common.container_mpy_cross(
+            mpy_dir,
+            timeout=timeout,
+            extra_cflags=build_common.tag_cflags(opts.tag),
+            container=container,
+        )
 
-    firmware = rp2_dir / f"build-{opts.board}" / "firmware.uf2"
+        make_command = rp2_make_command(opts, mpy_dir, mpy_cross=mpy_cross)
+        # One `bash -c` script, not a separate `call()` for the fetch:
+        # there is nothing to hand back to a second one, and the point is
+        # that the toolchain's own `bin/` is on `PATH` before `make` runs,
+        # in the same container invocation ([0086]'s own `fetch_script()`
+        # docstring). `export PATH=` here, not `env=`, because `call()`'s
+        # own `env=` only ever sets `-e KEY=VALUE` (replace, not append)
+        # -- it has no way to prepend onto the image's own existing
+        # `$PATH`.
+        script = (
+            f"{fetch}"
+            f'export PATH="{(toolchain_dir / "bin").as_posix()}:$PATH"\n'
+            f"{shlex.join(make_command)}\n"
+        )
+        container.call(
+            ["bash", "-c", script],
+            workdir=rp2_dir,
+            timeout=timeout,
+            env=build_common.cmake_extra_args_env(
+                opts.extra_cmake_args, var="CMAKE_ARGS"
+            ),
+        )
+
+        # The firmware exists only inside the container's own overlay
+        # until this copy -- see `build_unix()`'s identical reasoning.
+        firmware = staging / "firmware.uf2"
+        container.call(
+            [
+                "cp",
+                (rp2_dir / f"build-{opts.board}" / "firmware.uf2").as_posix(),
+                firmware.as_posix(),
+            ],
+            workdir=rp2_dir,
+            timeout=timeout,
+        )
+
     if not firmware.exists():
         raise UsermodBuildError(
             f"rp2/{opts.board}: build reported success but {firmware} is missing"

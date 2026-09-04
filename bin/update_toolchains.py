@@ -17,8 +17,9 @@ in the same scheduled job.
 Three upstream shapes, which is why [0046] asked for one script per shape
 rather than one generic checker:
 
-- **GitHub releases** (`arm_embedded`, `riscv_embedded`, `xtensa_esp`,
-  `windows`) -- the pinned tag is in the URL; compare against the repo's
+- **GitHub releases** (`arm-none-eabi`, `riscv-none-elf` -- both now
+  `embedded_base`, record 0096 --, `xtensa_esp`, `windows`) -- the pinned
+  tag is in the URL; compare against the repo's
   own latest release.
 - **emsdk** (`webassembly`) -- pinned by *build hash*, which looks
   uncomparable and is not: `emscripten-core/emsdk` publishes
@@ -63,17 +64,30 @@ class Pin:
     upstream: str = ""  # owner/repo for "github"
 
 
+# `arm-none-eabi`/`riscv-none-elf` below point at `embedded_base.Dockerfile`
+# (record 0096 merged what used to be `arm_embedded.Dockerfile`/
+# `riscv_embedded.Dockerfile`) purely so `_pinned()` reads a file that
+# exists -- **neither actually matches any more.** [0087]/[0089] already
+# deleted the `ARG TOOLCHAIN_URL=` line this regex needs from both former
+# files (the tarball is fetched at container run time now, per-row, not
+# baked at image-build time), so `_pinned()` has raised
+# `SystemExit(f"{pin.name}: no pin found...")` for both entries since
+# [0087] landed -- a real, pre-existing gap this record does not close,
+# only avoids widening into a harder `FileNotFoundError` by keeping the
+# filename real. The actual fix (reading `resources/pinned_toolchains.toml`'s
+# own per-cross pin instead of grepping a Dockerfile `ARG`) is [0090]'s own
+# scope, not this Dockerfile-merge's.
 PINS = (
     Pin(
         "arm-none-eabi",
-        "arm_embedded.Dockerfile",
+        "embedded_base.Dockerfile",
         r"xpack-dev-tools/arm-none-eabi-gcc-xpack/releases/download/v([^/]+)/",
         "github",
         "xpack-dev-tools/arm-none-eabi-gcc-xpack",
     ),
     Pin(
         "riscv-none-elf",
-        "riscv_embedded.Dockerfile",
+        "embedded_base.Dockerfile",
         r"xpack-dev-tools/riscv-none-elf-gcc-xpack/releases/download/v([^/]+)/",
         "github",
         "xpack-dev-tools/riscv-none-elf-gcc-xpack",

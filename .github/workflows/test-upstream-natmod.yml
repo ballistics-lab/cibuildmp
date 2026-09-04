@@ -114,7 +114,7 @@ jobs:
   # "natmod_host"`) -- the cheapest possible leg.
   #
   # armv7emsp: a real cross-compiled arch (`arm-none-eabi-`, `images.
-  # armv7emsp = "arm_embedded"`) sharing this same checkout and this same
+  # armv7emsp = "embedded_base"`) sharing this same checkout and this same
   # `cibuildmp` invocation with x64 above -- the leg that actually exercises
   # [0055]'s own finding, not just a second easy arch for breadth's sake.
   build-features0:

@@ -164,7 +164,13 @@ def test_run_make_failure_names_the_target(tmp_path, monkeypatch):
         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("exit code 2")),
     )
     with pytest.raises(BuildError, match="exit code 2"):
-        run_make(build_options(), tmp_path / "mpy", tmp_path, tmp_path)
+        run_make(
+            build_options(),
+            tmp_path / "mpy",
+            tmp_path,
+            tmp_path,
+            toolchain_root=tmp_path / "toolchains",
+        )
 
 
 def test_run_make_mounts_the_package_root_not_the_module_dir(tmp_path, monkeypatch):
@@ -177,7 +183,13 @@ def test_run_make_mounts_the_package_root_not_the_module_dir(tmp_path, monkeypat
     package_dir = tmp_path / "project"
     module_root = package_dir / "natmod"
     module_root.mkdir(parents=True)
-    run_make(build_options(), tmp_path / "mpy", module_root, package_dir)
+    run_make(
+        build_options(),
+        tmp_path / "mpy",
+        module_root,
+        package_dir,
+        toolchain_root=tmp_path / "toolchains",
+    )
 
     _command, kwargs = calls[0]
     assert package_dir.resolve() in kwargs["mounts"]
@@ -190,11 +202,93 @@ def test_run_make_resolves_relative_paths(tmp_path, monkeypatch):
     # `package_dir / module_dir` and `package_dir` defaults to ".". The
     # bare-host `subprocess.run` this replaced never cared.
     calls = _capture_docker(monkeypatch)
-    run_make(build_options(), Path("mpy"), Path("natmod"), Path("."))
+    run_make(
+        build_options(),
+        Path("mpy"),
+        Path("natmod"),
+        Path("."),
+        toolchain_root=tmp_path / "toolchains",
+    )
 
     _command, kwargs = calls[0]
     assert all(m.is_absolute() for m in kwargs["mounts"])
     assert kwargs["workdir"].is_absolute()
+
+
+def test_run_make_fetches_the_arm_toolchain_and_puts_it_on_path(tmp_path, monkeypatch):
+    # [0086]/[0089]: `armv7emsp` is on `embedded_base` (`arm_embedded`
+    # before record 0096 merged it with `riscv_embedded`), which no longer
+    # bakes a cross compiler -- run_make() must fetch it and prepend it
+    # onto PATH in the same container invocation as the real build.
+    calls = _capture_docker(monkeypatch)
+    toolchain_root = tmp_path / "toolchains"
+
+    run_make(
+        build_options(),  # arch="armv7emsp", tag="v1.30.0-preview"
+        tmp_path / "mpy",
+        tmp_path,
+        tmp_path,
+        toolchain_root=toolchain_root,
+    )
+
+    command, kwargs = calls[0]
+    assert command[:2] == ["bash", "-c"]
+    script = command[2]
+    expected_dir = (
+        toolchain_root / "toolchains" / "arm-none-eabi-" / "cross" / "15.2.1-1.1"
+    )
+    assert expected_dir.parent.is_dir()  # created host-side
+    # `.parent`, not `expected_dir` itself -- see run_make()'s own
+    # comment: mounting the not-yet-existing leaf would leave Docker to
+    # synthesize its own path up to it, root-owned, inside the container.
+    assert expected_dir.parent in kwargs["mounts"]
+    assert f'export PATH="{(expected_dir / "bin").as_posix()}:$PATH"' in script
+    assert "xpack-arm-none-eabi-gcc-15.2.1-1.1-linux-x64.tar.gz" in script
+    assert "riscv" not in script  # no rename step for the arm family
+
+
+def test_run_make_riscv_arch_also_renames_the_xpack_prefix(tmp_path, monkeypatch):
+    # [0089]: `rv32imc` is on `embedded_base` (`riscv_embedded` before
+    # record 0096) -- xpack's own `riscv-none-elf-*` binaries must also be
+    # symlinked to the `riscv64-unknown-elf-*` names `py/dynruntime.mk`
+    # invokes, at container run time now that the old
+    # `riscv_embedded.Dockerfile`'s own build-time symlink loop is gone.
+    calls = _capture_docker(monkeypatch)
+    toolchain_root = tmp_path / "toolchains"
+
+    run_make(
+        build_options(target=Target(abi="6.3", arch="rv32imc", tag="v1.29.0")),
+        tmp_path / "mpy",
+        tmp_path,
+        tmp_path,
+        toolchain_root=toolchain_root,
+    )
+
+    command, kwargs = calls[0]
+    script = command[2]
+    expected_dir = (
+        toolchain_root / "toolchains" / "riscv64-unknown-elf-" / "cross" / "14.3.0-1"
+    )
+    assert expected_dir.parent in kwargs["mounts"]
+    assert "for src in" in script and "riscv-none-elf-*" in script
+    assert "riscv64-unknown-elf-" in script
+
+
+def test_run_make_native_arch_needs_no_toolchain_fetch(tmp_path, monkeypatch):
+    # `x64` builds on `natmod_host`, apt-provisioned and native -- no
+    # tarball to fetch, so run_make() must run exactly as it always did.
+    calls = _capture_docker(monkeypatch)
+    run_make(
+        build_options(target=Target(abi="6.3", arch="x64", tag="v1.29.0")),
+        tmp_path / "mpy",
+        tmp_path,
+        tmp_path,
+        toolchain_root=tmp_path / "toolchains",
+    )
+
+    command, _kwargs = calls[0]
+    assert command[:2] != ["bash", "-c"]  # the plain make command, untouched
+    assert not (tmp_path / "toolchains").exists()  # nothing fetched, nothing created
 
 
 # -- collect_output -----------------------------------------------------------

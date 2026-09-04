@@ -75,12 +75,12 @@ jobs:
           - { image: manylinux_2_41_mipsel, platform: linux/amd64 }
           - { image: windows, platform: linux/amd64 }
           - { image: webassembly, platform: linux/amd64 }
-          # The six toolchain-group images record 0058 splits
+          # The five toolchain-group images record 0058 splits
           # natmod.Dockerfile/qemu.Dockerfile into -- see
           # publish-docker-images.yml's own matrix for why each is
-          # linux/amd64.
-          - { image: arm_embedded, platform: linux/amd64 }
-          - { image: riscv_embedded, platform: linux/amd64 }
+          # linux/amd64. `arm_embedded`/`riscv_embedded` merged into
+          # `embedded_base` in record 0096.
+          - { image: embedded_base, platform: linux/amd64 }
           - { image: xtensa_lx106, platform: linux/amd64 }
           - { image: xtensa_esp, platform: linux/amd64 }
           - { image: natmod_host, platform: linux/amd64 }

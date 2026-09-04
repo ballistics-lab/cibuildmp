@@ -23,7 +23,7 @@ does.
   by **group name**, not by port. Most unix groups are a thin `FROM` over a
   `pinned_pypa_images.toml` base plus the handful of dev packages `ports/unix`
   needs (`pkg-config --libs libffi` fails to resolve on a stock
-  `manylinux_2_28` image — [0043] has the full argument); the rest (the six
+  `manylinux_2_28` image — [0043] has the full argument); the rest (the five
   toolchain groups, `windows`, `webassembly`, `esp_idf_base`) have no pypa
   counterpart at all.
 
@@ -104,19 +104,25 @@ isolation argument that drives `unix`'s split does not apply.
 
 **3. `webassembly`** — one shared image, no per-build axis.
 
-**4. Six toolchain-group images ([0058]).** Five of the six cover natmod's
-own ten arches; `ppc64le_linux` is `qemu`-only and reaches no natmod arch,
-which is why README counts five and this file counts six. Before [0058], `natmod.Dockerfile`
+**4. Five toolchain-group images ([0058], thinned from six by [0096]).**
+Four of the five cover natmod's own ten arches; `ppc64le_linux` is
+`qemu`-only and reaches no natmod arch, which is why README counts four
+and this file counts five. Before [0058], `natmod.Dockerfile`
 baked all ten `dynruntime.mk` toolchains into one image, and `qemu.Dockerfile`
 carried one board's worth of `arm-none-eabi`. Both are gone: an **image group
 is a toolchain, not a port** — ten of the fifteen usermod ports and four of
 natmod's ten arches share one of these across port boundaries, so a group is
-routinely pulled in by more than one (port, target) pair.
+routinely pulled in by more than one (port, target) pair. `arm_embedded` and
+`riscv_embedded` were two separate images through [0087]; [0096] merged them
+into `embedded_base` once neither baked a cross compiler any more
+(`toolchain_fetch.py`, [0086], fetches both families into the same image at
+container run time, keyed by the row's own toolchain fact, not by which
+image it runs in) and their own build-time apt layers had nothing left to
+tell them apart.
 
 | Group | Holds | Named for |
 | --- | --- | --- |
-| `arm_embedded` | `arm-none-eabi-` | nine usermod ports (`rp2`, `mimxrt`, `samd`, `stm32`, `psoc-edge`, `alif`, `cc3200`, `renesas-ra`, `nrf`) + natmod's four Cortex-M arches + six `qemu` boards |
-| `riscv_embedded` | `riscv64-unknown-elf-`/`riscv-none-elf-` | natmod's `rv32imc`/`rv64imc` + `qemu`'s `VIRT_RV32`/`VIRT_RV64` |
+| `embedded_base` | `arm-none-eabi-` and `riscv64-unknown-elf-`/`riscv-none-elf-` | nine usermod ports (`rp2`, `mimxrt`, `samd`, `stm32`, `psoc-edge`, `alif`, `cc3200`, `renesas-ra`, `nrf`) + natmod's four Cortex-M arches and `rv32imc`/`rv64imc` + all eight ARM/RISC-V `qemu` boards |
 | `xtensa_lx106` | `xtensa-lx106-elf-` (standalone tarball, micropython.org) | natmod's `xtensa` + usermod's `esp8266` |
 | `xtensa_esp` | `xtensa-esp32-elf-`/`xtensa-esp-elf-` (Espressif crosstool-NG) | natmod's `xtensawin` only |
 | `natmod_host` | plain host-arch gcc (+ `-m32` multilib for `x86`) | natmod's `x64`/`x86` — a container's own `linux/amd64` *is* amd64 by construction, whatever machine is underneath, which is what frees `x86` from needing an amd64 runner |
@@ -179,12 +185,12 @@ than quietly resolving to nothing at build time.
 
 | Arch | Group |
 | --- | --- |
-| `armv6m` | `arm_embedded` |
-| `armv7emdp` | `arm_embedded` |
-| `armv7emsp` | `arm_embedded` |
-| `armv7m` | `arm_embedded` |
-| `rv32imc` | `riscv_embedded` |
-| `rv64imc` | `riscv_embedded` |
+| `armv6m` | `embedded_base` |
+| `armv7emdp` | `embedded_base` |
+| `armv7emsp` | `embedded_base` |
+| `armv7m` | `embedded_base` |
+| `rv32imc` | `embedded_base` |
+| `rv64imc` | `embedded_base` |
 | `x64` | `natmod_host` |
 | `x86` | `natmod_host` |
 | `xtensa` | `xtensa_lx106` |
@@ -194,17 +200,17 @@ than quietly resolving to nothing at build time.
 
 | Port | Group |
 | --- | --- |
-| `alif` | `arm_embedded` |
-| `cc3200` | `arm_embedded` |
+| `alif` | `embedded_base` |
+| `cc3200` | `embedded_base` |
 | `esp32` | `esp_idf_base` |
 | `esp8266` | `xtensa_lx106` |
-| `mimxrt` | `arm_embedded` |
-| `nrf` | `arm_embedded` |
-| `psoc-edge` | `arm_embedded` |
-| `renesas-ra` | `arm_embedded` |
-| `rp2` | `arm_embedded` |
-| `samd` | `arm_embedded` |
-| `stm32` | `arm_embedded` |
+| `mimxrt` | `embedded_base` |
+| `nrf` | `embedded_base` |
+| `psoc-edge` | `embedded_base` |
+| `renesas-ra` | `embedded_base` |
+| `rp2` | `embedded_base` |
+| `samd` | `embedded_base` |
+| `stm32` | `embedded_base` |
 | `webassembly` | `webassembly` |
 | `windows` | `windows` |
 
@@ -212,15 +218,15 @@ than quietly resolving to nothing at build time.
 
 | Board | Group |
 | --- | --- |
-| `MICROBIT` | `arm_embedded` |
-| `MPS2_AN385` | `arm_embedded` |
-| `MPS2_AN500` | `arm_embedded` |
-| `MPS3_AN547` | `arm_embedded` |
-| `NETDUINO2` | `arm_embedded` |
+| `MICROBIT` | `embedded_base` |
+| `MPS2_AN385` | `embedded_base` |
+| `MPS2_AN500` | `embedded_base` |
+| `MPS3_AN547` | `embedded_base` |
+| `NETDUINO2` | `embedded_base` |
 | `POWERNV9` | `ppc64le_linux` |
-| `SABRELITE` | `arm_embedded` |
-| `VIRT_RV32` | `riscv_embedded` |
-| `VIRT_RV64` | `riscv_embedded` |
+| `SABRELITE` | `embedded_base` |
+| `VIRT_RV32` | `embedded_base` |
+| `VIRT_RV64` | `embedded_base` |
 
 **usermod `unix` (`images.<target>`)**
 
@@ -273,3 +279,6 @@ layers.
 [0050]: ../records/0050-natmod-is-docker-only.md
 [0058]: ../records/0058-image-groups-are-toolchains-not-ports.md
 [0068]: ../records/0068-docker-dependabot-grouping-and-mipsel-ubuntu-26-04.md
+[0086]: ../records/0086-generic-in-container-toolchain-tarball-fetch.md
+[0087]: ../records/0087-arm-riscv-embedded-thin-out-toolchain-version-lands.md
+[0096]: ../records/0096-arm-riscv-embedded-collapse-into-embedded-base.md

@@ -13,6 +13,7 @@ dependency tree resolved before it can fetch anything is harder to trust.
 
 from __future__ import annotations
 
+import atexit
 import hashlib
 import os
 import shutil
@@ -24,6 +25,8 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 from pathlib import Path
+
+from . import resources
 
 # The release *asset*, not GitHub's auto-generated archive: only the former
 # vendors every port's lib/ submodules, which is what makes a submodule init
@@ -41,13 +44,64 @@ class SourceError(Exception):
 
 
 def cache_root() -> Path:
-    """Where downloaded sources and toolchains live."""
+    """Where downloaded sources and toolchains live -- **fetched input only**
+    ([0095]). Compiled build state goes to `scratch_root()` instead; the
+    two were one directory until that record, which is why the split has
+    to be stated here rather than left to each caller's own judgement."""
     env = os.environ.get("CIBMP_CACHE_PATH")
     if env:
         return Path(env).expanduser()
     xdg = os.environ.get("XDG_CACHE_HOME")
     base = Path(xdg).expanduser() if xdg else Path.home() / ".cache"
     return base / "cibuildmp"
+
+
+_SCRATCH_ROOT: Path | None = None
+
+
+def scratch_root() -> Path:
+    """Names where **compiled build state** would go: per-identifier port
+    build directories, record [0095]'s category C.
+
+    Deliberately *not* under `cache_root()`, and deliberately not merely a
+    sibling directory there either. `cache_root()` holds fetched source a
+    CI job can legitimately restore from a previous run; anything compiled
+    is keyed on a toolchain image, an identifier and a `USER_C_MODULES`
+    set that a restore knows nothing about. The two were the same tree
+    until [0095], and the cost was already paid once inside a *single*
+    job: a leftover `build-unix-x64/` carried a stale
+    `genhdr/qstrdefs.generated.h` and failed the next build with
+    `'MP_QSTR_mymod' undeclared`. Persisting that across runs would have
+    turned a one-run bug into a permanent one.
+
+    **Its own directory is no longer mounted or written to by anything**,
+    now that every usermod port builds through `Container`/overlay
+    (record 0095's own addenda 8-12): `orchestrate._resolved_build_dir()`
+    still calls this to name a `BUILD=` value, but that value is never
+    bind-mounted any more, so it exists only as a path *string* a
+    container's own `make` writes inside its own ephemeral filesystem.
+    `CIBMP_SCRATCH_PATH` (below) is consequently a no-op in practice today
+    -- still real, still read, but with nothing left to redirect. Flagged
+    here rather than silently assumed still load-bearing; whether to
+    delete the env var, repurpose it, or leave it as a documented knob
+    with no current effect is an open question this function does not
+    answer.
+
+    `CIBMP_SCRATCH_PATH` overrides the location **and disables the
+    cleanup**: the path then belongs to the caller, not to this function.
+    On a GitHub runner `runner.temp` is the natural value -- job-scoped,
+    never an `actions/cache` target.
+    """
+    global _SCRATCH_ROOT
+    env = os.environ.get("CIBMP_SCRATCH_PATH")
+    if env:
+        root = Path(env).expanduser()
+        root.mkdir(parents=True, exist_ok=True)
+        return root
+    if _SCRATCH_ROOT is None:
+        _SCRATCH_ROOT = Path(tempfile.mkdtemp(prefix="cibuildmp-build-"))
+        atexit.register(shutil.rmtree, _SCRATCH_ROOT, ignore_errors=True)
+    return _SCRATCH_ROOT
 
 
 # -- Shared primitives ----------------------------------------------------
@@ -299,6 +353,14 @@ def read_mpy_abi(mpy_dir: Path) -> str:
 
     The authoritative answer, as opposed to targets.MPY_ABI's table, which
     exists only so identifiers can be produced with no checkout at all.
+
+    **`MPY_SUB_VERSION` is itself a `v1.20.0`-and-later define** -- upstream
+    added it in the same release that introduced ABI 6.1, and
+    `py/persistentcode.h` before that carries `MPY_VERSION` alone (record
+    0093). So a missing sub-version is a real, valid ABI here, not a
+    malformed header: it yields the bare `"5"`/`"6"` that
+    `build-platforms.toml`'s own `mpy` column already records for exactly
+    those nine tags.
     """
     header = mpy_dir / "py" / "persistentcode.h"
     try:
@@ -312,18 +374,95 @@ def read_mpy_abi(mpy_dir: Path) -> str:
         if len(parts) == 3 and parts[0] == "#define" and parts[1] in _ABI_DEFINES:
             found[parts[1]] = parts[2]
 
-    if len(found) != len(_ABI_DEFINES):
-        raise SourceError(f"could not find MPY_VERSION/MPY_SUB_VERSION in {header}")
+    if "MPY_VERSION" not in found:
+        raise SourceError(f"could not find MPY_VERSION in {header}")
+    if "MPY_SUB_VERSION" not in found:
+        return found["MPY_VERSION"]
     return f"{found['MPY_VERSION']}.{found['MPY_SUB_VERSION']}"
+
+
+# -- per-tag CFLAGS_EXTRA --------------------------------------------------
+
+# `resources/tag_cflags.toml` -- record 0010's own rule (pinned data lives
+# in resources/, not in Python) applied to the fact record 0084 first put
+# in a `usermod/build_common.py` dict literal. Two reasons it moved here,
+# to the module both families already import `fetch_micropython()`/
+# `read_mpy_abi()` from, rather than staying `usermod`'s own: [0091] found
+# the identical diagnostic hitting `natmod`'s own `mpy-cross` build too,
+# and `natmod` never imports `usermod` (the established one-way
+# dependency); and once a tag-keyed fact is confirmed to apply "in any
+# port", per [0091]'s own live verification, it stops being resolver logic
+# and becomes exactly the kind of "goes stale on someone else's schedule"
+# data record 0010 already has a rule for -- bumping this file for a newly
+# released tag is a reviewable data diff, not a source change. See that
+# file's own header for the full reasoning and per-entry citations.
+TAG_CFLAGS: dict[str, tuple[str, ...]] = {
+    tag: tuple(flags) for tag, flags in resources.tag_cflags_data()["cflags"].items()
+}
+
+
+def tag_cflags(tag: str) -> tuple[str, ...]:
+    """Every `CFLAGS_EXTRA` flag this MicroPython release needs, in any
+    port or family. Empty for a tag that needs none, and for no tag at
+    all."""
+    return TAG_CFLAGS.get(tag, ())
 
 
 # -- mpy-cross ------------------------------------------------------------
 
 
+# `mpy-cross`'s own output path is a fact about the MicroPython tag, not a
+# constant. Upstream's `py/mkrules.mk` links `all: $(PROG)` --
+# `mpy-cross/mpy-cross` -- through `v1.19.1`, and `all: $(BUILD)/$(PROG)`
+# from `v1.20.0` on; `py/dynruntime.mk`'s own hardcoded `MPY_CROSS =`
+# moves with it in the same release. Checked against every tag
+# `build-platforms.toml` knows, not inferred from the two ends -- record
+# 0093, found while closing 0082's own ABI 5/6 gap. The two candidates are
+# disjoint in practice (a tag produces one or the other, never both), so
+# taking the first that exists needs no tag comparison of its own.
+def mpy_cross_candidates(mpy_dir: Path, build_dir: str = "build") -> tuple[Path, ...]:
+    """Every path `make -C mpy-cross` may have written the binary to, newest
+    layout first."""
+    root = mpy_dir / "mpy-cross"
+    return (root / build_dir / "mpy-cross", root / "mpy-cross")
+
+
+def find_mpy_cross(mpy_dir: Path, build_dir: str = "build") -> Path | None:
+    """The built `mpy-cross` binary, or `None` if no layout has one."""
+    for path in mpy_cross_candidates(mpy_dir, build_dir):
+        if path.exists():
+            return path
+    return None
+
+
 def build_mpy_cross(mpy_dir: Path, *, force: bool = False, quiet: bool = False) -> Path:
-    """Build mpy-cross in the checkout, once, and return the binary."""
-    binary = mpy_dir / "mpy-cross" / "build" / "mpy-cross"
-    if binary.exists() and not force:
+    """Build mpy-cross on the host, once, and return the binary.
+
+    **In the checkout, at `mpy-cross/build/`, deliberately** -- [0095]
+    moved this under `scratch_root()` and CI caught why it cannot go there
+    within the day (`build-examples.yml`, `v1.29.0-qemu-MPS2_AN385`). This
+    function's one caller is `usermod`'s `qemu` (`_HOST_MPY_CROSS_PORTS`),
+    which passes **no** `MICROPY_MPYCROSS=` and so reaches this binary
+    through `py/mkrules.mk`'s own default path. Move it and that path is
+    simply empty, at which point `mkrules.mk`'s own
+    `$(MICROPY_MPYCROSS_DEPENDENCY)` rule builds mpy-cross *itself*, as a
+    sub-make of the port build -- which compiles the **port's** own
+    `genhdr/qstrdefs.generated.h` against mpy-cross's qstr pool and fails:
+
+        qstrdefs.generated.h:666:21: error: unsigned conversion from 'int'
+        to 'unsigned char' changes value from '2791' to '231'
+        [-Werror=overflow]
+        make: *** [py/mkrules.mk:209: ../../mpy-cross/build/mpy-cross]
+
+    That makes this the same class as `natmod`'s own container-built
+    mpy-cross (`py/dynruntime.mk` hardcodes `MPY_CROSS`) and `rp2`/`esp32`'s
+    CMake trees: a path upstream fixes and cibuildmp cannot redirect. It
+    stops being a write into `cache_root()` when `qemu` moves to the
+    container model, not before -- there the checkout is an overlay and
+    this path exists only inside the container.
+    """
+    binary = find_mpy_cross(mpy_dir)
+    if binary is not None and not force:
         if not quiet:
             print(f"  mpy-cross: cached at {binary}")
         return binary
@@ -336,6 +475,10 @@ def build_mpy_cross(mpy_dir: Path, *, force: bool = False, quiet: bool = False) 
     except subprocess.CalledProcessError as exc:
         raise SourceError(f"building mpy-cross failed: {exc}") from exc
 
-    if not binary.exists():
-        raise SourceError(f"mpy-cross build reported success but {binary} is missing")
+    binary = find_mpy_cross(mpy_dir)
+    if binary is None:
+        raise SourceError(
+            "mpy-cross build reported success but no binary at "
+            + " or ".join(str(p) for p in mpy_cross_candidates(mpy_dir))
+        )
     return binary

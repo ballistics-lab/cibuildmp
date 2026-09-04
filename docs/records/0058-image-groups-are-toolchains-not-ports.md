@@ -368,6 +368,24 @@ time (`gcc-$(gcc -dumpversion | cut -d. -f1)-multilib`) rather than typed by han
 first attempt (the unversioned `gcc-multilib` metapackage) turned out to conflict with
 `gcc-i686-linux-gnu`, the other package this image has always installed alongside it.
 
+**Correction, 2026-09-04 — this record's own headline stops being true for the
+`arm_embedded`/`riscv_embedded` group, twice, in two different records.** "The image axis is
+the toolchain, not the port" assumed one image held exactly one toolchain, baked in. [0085]/
+[0087]/[0089] broke that first: the toolchain *version* moved off the image entirely, into a
+per-row `gcc` fact fetched at container run time ([0086]) -- the image still named one toolchain
+*family*, just no longer one fixed *version* of it. [0090]'s own item 3 named this as the
+revision this record's text owed itself, not a silent drift. [0096] broke it a second, larger
+way: `arm_embedded` and `riscv_embedded`, the two Dockerfiles this record's own body cites as
+its working example of "one shared group, one Dockerfile" (`ten of the fifteen usermod ports
+compile with the same arm-none-eabi GCC ... they name one shared group and there is one
+Dockerfile"`), merged into `embedded_base` -- one image now holding *two* toolchain families
+(`arm-none-eabi-` and `riscv64-unknown-elf-`), told apart at fetch time by the row's own `cross`
+fact, not by the image at all. `docs/reference/vendored-images.md`'s own generated table and
+prose, `README.md`'s group counts, and `docs/reference/design.md` are already current as of
+[0096]; this correction is this record's own acknowledgment, per [0090]'s item 3, rather than
+leaving a later reader to find the gap between this file's title and what the image axis
+actually encodes today.
+
 [0010]: 0010-pinned-data-in-resources.md
 [0012]: 0012-pyelftools-ar-own-deps.md
 [0026]: 0026-one-docker-image-per-port.md

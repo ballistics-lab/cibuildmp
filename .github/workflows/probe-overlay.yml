@@ -1,0 +1,167 @@
+name: Probe overlayfs
+
+# The single blocking unknown left by record 0095's own addendum 3.
+#
+# That record's new design mounts the cached MicroPython checkout `:ro` and
+# gives the container a writable overlay on top, so every build writes into
+# the container's own upper layer and the host keeps a pristine, shareable
+# checkout with no duplication. Verified working on a developer workstation
+# (a cold `mpy-cross`, a full `unix` build including libffi's in-tree
+# `autogen.sh`, and `rp2`'s CMake tree -- all three left the host checkout
+# byte-identical). What that verification cannot answer is whether a
+# GitHub-hosted runner permits the `mount -t overlay` at all: cibuildmp
+# launches *sibling* containers against the runner's own Docker daemon
+# (record 0028), and nothing about that daemon's seccomp/apparmor defaults
+# was checked there.
+#
+# If the answer is no, addendum 1's host scratch directory
+# (`sources.scratch_root()`) stays as the fallback and both paths have to
+# coexist -- which is exactly why that code has not been reverted. So this
+# is not a nice-to-have probe; it decides whether one mechanism or two get
+# maintained.
+#
+# Deliberately non-fatal per privilege level. "SYS_ADMIN alone is refused
+# but SYS_ADMIN plus unconfined apparmor works" is a *result*, and a job
+# that red-crosses on the first refusal reports one bit where the useful
+# answer is which rung of the ladder is the lowest that works. The job only
+# fails if the summary could not be produced at all.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/probe-overlay.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: overlay on ${{ matrix.runner }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both architectures this project builds on. `ubuntu-24.04-arm` is
+        # not a formality here: it is a different runner image with its own
+        # daemon configuration, and the two reporting the same `runner.os`
+        # has already hidden a real difference once (see action.yml's own
+        # apt-cache key comment on `runner.arch`).
+        #
+        # The image is per-runner, learned the hard way: the first version
+        # of this probe used `embedded_base` for both and the arm job failed
+        # all five levels in two seconds with `no matching manifest for
+        # linux/arm64/v8` -- that image is published amd64-only, so the arm
+        # half of the run measured nothing at all. The pypa manylinux images
+        # are separate per-architecture repositories that cibuildmp already
+        # pins (`resources/pinned_docker_images.toml`), and both carry a gcc
+        # and a make, so the real build below runs on either side.
+        include:
+          - runner: ubuntu-latest
+            image: quay.io/pypa/manylinux_2_28_x86_64@sha256:94c816d38ad56d2dc1df2f28007d18d306b0f5d05096c6f6b9141345df504d3e
+          - runner: ubuntu-24.04-arm
+            image: quay.io/pypa/manylinux_2_28_aarch64@sha256:45ea412cfbd2cc5e51323cecab614ea8e4e5522b4d4f668946c54056b40152f6
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Docker and kernel facts
+        run: |
+          uname -a
+          docker version --format '{{.Server.Version}}'
+          docker info --format 'storage={{.Driver}} rootless={{.ClientInfo.Context}}'
+          grep -c overlay /proc/filesystems || true
+
+      # A real MicroPython checkout, fetched the way cibuildmp fetches one,
+      # so the probe runs against the actual thing rather than a synthetic
+      # tree. v1.24.1 specifically: it is the tag the workstation runs used,
+      # so a difference here is a difference in the runner, not in the input.
+      - name: Fetch a real checkout
+        run: |
+          mkdir -p "$RUNNER_TEMP/src"
+          curl -sL -o "$RUNNER_TEMP/mp.tar.xz" \
+            https://github.com/micropython/micropython/releases/download/v1.24.1/micropython-1.24.1.tar.xz
+          tar -xJf "$RUNNER_TEMP/mp.tar.xz" -C "$RUNNER_TEMP/src" --strip-components=1
+          rm "$RUNNER_TEMP/mp.tar.xz"
+          # The state the design depends on: no build output anywhere in it.
+          find "$RUNNER_TEMP/src" -maxdepth 2 -name build -o -maxdepth 2 -name 'build-*' | head
+
+      - name: Probe each privilege level
+        id: probe
+        run: |
+          set -u
+          IMG='${{ matrix.image }}'
+          SRC="$RUNNER_TEMP/src"
+
+          # Pull once, up front and loudly. The first version of this probe
+          # let each level's own `docker run` pull, so an image that simply
+          # does not exist for the runner's architecture looked exactly like
+          # five overlay refusals -- five FAILs in two seconds, and a
+          # conclusion about overlays that the run had not measured.
+          docker pull "$IMG"
+
+          # `make -C mpy-cross` with **no** BUILD= override -- the exact
+          # command that fails under a plain `:ro` bind with
+          # "Read-only file system: build/genhdr/mpversion.h". Building it
+          # rather than just mounting is the point: a successful mount that
+          # then cannot write is not an answer.
+          #
+          # The flag is v1.24.1's own TAG_CFLAGS value (record 0082) and is
+          # **asked for, not assumed** -- `build_common.probe_supported_cflags()`
+          # does the same thing for the same reason, and skipping it here
+          # cost a whole run: `-Wunterminated-string-initialization` is a
+          # gcc 15 option, manylinux_2_28 ships gcc 14.2.1, and gcc does not
+          # ignore `-Wno-error=` for a warning it has never heard of -- it
+          # errors (`no option '-Wunterminated-string-initialization'`). Five
+          # builds failed after five *successful* mounts, and the summary
+          # read as five overlay refusals.
+          SCRIPT='set -e
+            mkdir -p /ovl/up /ovl/wd /mp
+            mount -t overlay overlay -o lowerdir=/src-ro,upperdir=/ovl/up,workdir=/ovl/wd /mp
+            echo "  mount: ok"
+            FLAG=-Wno-error=unterminated-string-initialization
+            printf "" | gcc "$FLAG" -x c -c -o /dev/null - >/dev/null 2>&1 || FLAG=
+            echo "  cflags: ${FLAG:-<none needed, gcc predates the warning>}"
+            make -C /mp/mpy-cross ${FLAG:+CFLAGS_EXTRA="$FLAG"} -j"$(nproc)" >/tmp/build.log 2>&1 \
+              || { echo "  build: FAILED"; tail -15 /tmp/build.log; exit 1; }
+            echo "  build: ok ($(stat -c %s /mp/mpy-cross/build/mpy-cross) bytes)"
+            echo "  upper: $(du -sh /ovl/up | cut -f1)"'
+
+          run_level() {
+            name="$1"; shift
+            echo "::group::$name"
+            if docker run --rm "$@" -v "$SRC:/src-ro:ro" -v /ovl "$IMG" bash -c "$SCRIPT"; then
+              echo "$name: PASS" >> "$RUNNER_TEMP/results"
+            else
+              echo "$name: FAIL" >> "$RUNNER_TEMP/results"
+            fi
+            echo "::endgroup::"
+          }
+
+          : > "$RUNNER_TEMP/results"
+          run_level "1-default"                     # no extra privileges at all
+          run_level "2-sys_admin"                   --cap-add SYS_ADMIN
+          run_level "3-sys_admin+apparmor"          --cap-add SYS_ADMIN --security-opt apparmor=unconfined
+          run_level "4-sys_admin+apparmor+seccomp"  --cap-add SYS_ADMIN --security-opt apparmor=unconfined --security-opt seccomp=unconfined
+          run_level "5-privileged"                  --privileged
+
+          # The whole reason for the probe: the host tree must be untouched
+          # by whichever levels did run. Checked once, after all of them.
+          if find "$SRC" -maxdepth 2 \( -name build -o -name 'build-*' \) | grep -q .; then
+            echo "host-clean: FAIL (build output leaked into the :ro checkout)" >> "$RUNNER_TEMP/results"
+          else
+            echo "host-clean: PASS" >> "$RUNNER_TEMP/results"
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### overlay probe -- ${{ matrix.runner }}"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/results"
+            echo '```'
+            echo
+            echo "Lowest passing level is what record 0095's design needs \`dockerrun.run()\` to request."
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/results"

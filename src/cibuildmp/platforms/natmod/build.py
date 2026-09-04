@@ -26,13 +26,15 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shlex
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from ... import toolchain_fetch
 from .options import BuildOptions
-from .targets import NATIVE_ARCH_CODE
+from .targets import NATIVE_ARCH_CODE, natmod_toolchain
 
 MPY_HEADER_MAGIC = ord("M")
 MPY_ARCH_FLAGS_BIT = 0x40
@@ -180,14 +182,20 @@ def _run_in_image(
         raise BuildError(f"{what}: {exc}") from exc
 
 
-def build_mpy_cross(mpy_dir: Path, arch: str) -> Path:
+def build_mpy_cross(mpy_dir: Path, arch: str, tag: str = "") -> Path:
     """Build mpy-cross **inside `arch`'s own natmod image** and return the
     binary.
 
-    `py/dynruntime.mk` hardcodes `MPY_CROSS = $(MPY_DIR)/mpy-cross/build/mpy-cross`
+    `py/dynruntime.mk` hardcodes `MPY_CROSS = $(MPY_DIR)/mpy-cross/...`
     with no override (unlike ports/unix's `MICROPY_MPYCROSS=`) -- confirmed
     directly against v1.29.0's own dynruntime.mk, not assumed -- so the
     binary must exist at that exact path before `run_make()` invokes it.
+    **Which path that is, is a fact about the tag**: `build/mpy-cross` from
+    `v1.20.0` on, plain `mpy-cross/mpy-cross` before it, moving in lockstep
+    with `py/mkrules.mk`'s own `all:` target (record 0093 -- the v1.29.0
+    check above was right about v1.29.0 and wrong as a constant, which is
+    why `sources.find_mpy_cross()` resolves it rather than this module
+    naming one layout).
 
     Building it on the host (`sources.build_mpy_cross()`, still used for
     usermod's `qemu`) worked here only because host glibc happened to
@@ -203,22 +211,48 @@ def build_mpy_cross(mpy_dir: Path, arch: str) -> Path:
     binary, at the fixed path dynruntime.mk itself expects, and no
     `MPY_CROSS=` override to pass, unlike `MICROPY_MPYCROSS=`.
 
+    `tag` reaches `sources.tag_cflags()` the same way `unix`'s own
+    `container_mpy_cross()` call already does ([0084]/[0091]): `mpy-cross`
+    compiles `py/` regardless of which family calls it, so a diagnostic a
+    MicroPython release needs suppressed there is not specific to
+    `usermod`. Live-confirmed for `natmod` itself (run 33697330722): every
+    pre-`v1.26.0` tag tested failed this build on `arm_embedded`'s own
+    native gcc with no relaxation, on the identical
+    `-Werror=unterminated-string-initialization` diagnostic [0082] first
+    named for `natmod_host`/`windows`. `natmod`'s own per-target make
+    (`make_command()`) needs no equivalent: unlike a usermod port, it never
+    recompiles `py/` -- only the module's own sources against an already-
+    built `mpy-cross`.
+
     Cached by existence, like `sources.build_mpy_cross()`/
     `usermod.build.container_mpy_cross()`: rebuilt only when the image
     itself changes (the image is digest-pinned).
     """
-    binary = mpy_dir / "mpy-cross" / "build" / "mpy-cross"
-    if binary.exists():
+    from ... import sources
+
+    binary = sources.find_mpy_cross(mpy_dir)
+    if binary is not None:
         return binary
+    extra_cflags = sources.tag_cflags(tag)
     _run_in_image(
-        ["make", "-C", (mpy_dir / "mpy-cross").as_posix(), f"-j{os.cpu_count() or 1}"],
+        [
+            "make",
+            "-C",
+            (mpy_dir / "mpy-cross").as_posix(),
+            *([f"CFLAGS_EXTRA={' '.join(extra_cflags)}"] if extra_cflags else []),
+            f"-j{os.cpu_count() or 1}",
+        ],
         mounts=[mpy_dir],
         workdir=mpy_dir / "mpy-cross",
         what="mpy-cross",
         arch=arch,
     )
-    if not binary.exists():
-        raise BuildError(f"mpy-cross build reported success but {binary} is missing")
+    binary = sources.find_mpy_cross(mpy_dir)
+    if binary is None:
+        raise BuildError(
+            "mpy-cross build reported success but no binary at "
+            + " or ".join(str(p) for p in sources.mpy_cross_candidates(mpy_dir))
+        )
     return binary
 
 
@@ -260,6 +294,8 @@ def run_make(
     mpy_dir: Path,
     module_root: Path,
     package_dir: Path,
+    *,
+    toolchain_root: Path | None = None,
 ) -> None:
     # Both paths are mounted at their own identical absolute paths inside
     # the container (dockerrun's own contract), so the command built for a
@@ -284,9 +320,57 @@ def run_make(
     #
     # `module_root` is not mounted separately: it is underneath this.
     command = make_command(build_options, mpy_dir, module_root)
+    mounts = [mpy_dir, package_dir.resolve()]
+
+    # [0086]/[0089]: `arm_embedded`/`riscv_embedded` no longer bake a
+    # cross compiler -- fetch it at container time, the same mechanism
+    # [0087] wires into `usermod`'s own `rp2`. `None` means this arch
+    # needs no fetch at all (`x86`/`x64`'s native `natmod_host`,
+    # `xtensawin`/`xtensa`'s still-baked images) -- run exactly as
+    # before.
+    resolved = natmod_toolchain(build_options.target.tag, build_options.target.arch)
+    if resolved is None:
+        _run_in_image(
+            command,
+            mounts=mounts,
+            workdir=module_root,
+            what=build_options.identifier,
+            arch=build_options.target.arch,
+        )
+        return
+
+    cross, version = resolved
+    toolchain_dir, fetch = toolchain_fetch.resolve_toolchain(
+        cross, version, root=toolchain_root
+    )
+    rename_from = toolchain_fetch.CROSS_RENAME_FROM.get(cross)
+    rename = (
+        toolchain_fetch.rename_prefix_script(toolchain_dir / "bin", rename_from, cross)
+        if rename_from
+        else ""
+    )
+    # One `bash -c` script, not a separate `dockerrun.run()` call for the
+    # fetch -- see `toolchain_fetch.fetch_script()`'s own docstring for
+    # why. `export PATH=`, not `env=`: `dockerrun.run()`'s `env=` only
+    # ever sets `-e KEY=VALUE` (replace, not append), with no way to
+    # prepend onto the image's own existing `$PATH`.
+    script = (
+        f"{fetch}{rename}"
+        f'export PATH="{(toolchain_dir / "bin").as_posix()}:$PATH"\n'
+        f"{shlex.join(command)}\n"
+    )
     _run_in_image(
-        command,
-        mounts=[mpy_dir, package_dir.resolve()],
+        ["bash", "-c", script],
+        # `.parent`, not `toolchain_dir` itself -- found live against a
+        # real image: `toolchain_dir` does not exist on the host until
+        # the fetch script above creates it, so mounting it directly
+        # leaves Docker to synthesize every path component up to it
+        # *inside the container*, root-owned (only the exact bind-mounted
+        # leaf is host-backed) -- the fetch script's own first `mkdir -p`
+        # then fails outright. `resolve_toolchain()` already creates the
+        # parent host-side, host-owned, which the container can actually
+        # stage and `mv` into.
+        mounts=[*mounts, toolchain_dir.parent],
         workdir=module_root,
         what=build_options.identifier,
         arch=build_options.target.arch,
@@ -480,6 +564,7 @@ def build_target(
     extra_files: Sequence[Path] = (),
     name: str = "",
     version: str = "",
+    toolchain_root: Path | None = None,
 ) -> BuildResult:
     """Run one target's build end to end: pre-build-command, make, collect,
     verify, package.
@@ -491,6 +576,12 @@ def build_target(
     on (abi, mode, arch, tag, arch_flags), and natmod_targets()/tag_groups()
     both dedupe by construction, so distinct targets always get distinct
     identifiers and therefore distinct directories.
+
+    `toolchain_root` -- passed straight through to `run_make()` -- is
+    `None` for every real caller today (the fetched cache then lands
+    under `sources.cache_root()`, the same default every other cache
+    this project keys off uses); it exists as a parameter at all only so
+    a test can redirect it away from that real, shared directory.
     """
     start = time.time()
 
@@ -501,7 +592,9 @@ def build_target(
         package_dir,
         build_options.target.arch,
     )
-    run_make(build_options, mpy_dir, module_root, package_dir)
+    run_make(
+        build_options, mpy_dir, module_root, package_dir, toolchain_root=toolchain_root
+    )
 
     produced = collect_output(build_options, module_root)
     verify_output(build_options, produced)

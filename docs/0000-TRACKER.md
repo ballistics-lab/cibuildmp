@@ -55,9 +55,8 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### In progress / Proposed
 
-- [ ] [0085] `arm_embedded` thins out: the toolchain version stops being the image's name and becomes a row fact
+- [ ] [0094] Arm's own GNU toolchain registry is the third choice [0085] said did not exist
 - [ ] [0083] replace `windows.Dockerfile`'s apt `gcc-mingw-w64` split with one fully prebuilt llvm-mingw toolchain
-- [ ] [0082] nine MicroPython tags fail `mpy-cross` under gcc 15, on every image whose native compiler is unpinned — bisected exactly
 - [ ] [0047] the run output works, but it is not cibuildwheel's
 - [ ] [0046] nothing notices when a pin goes stale, except container images
 - [ ] [0022] zephyr is a third selector axis, not a board-based port that just needs its boards added
@@ -68,6 +67,19 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### Implemented
 
+- [x] [0097] a real, external, heavy usermod module builds through cibuildmp unmodified
+- [x] [0095] `cache_root()` is not one cache: fetched source persists, build state dies with the container
+- [x] [0096] `arm_embedded` and `riscv_embedded` collapse into one `embedded_base` image
+- [x] [0090] the checker stops reading a Dockerfile `ARG`, and [0058]'s own text gets its correction
+- [x] [0088] `mimxrt`'s own `>= 13` ceiling gets its own `toolchain_version` row, once [0087] exists
+- [x] [0085] `arm_embedded` thins out: the toolchain version stops being the image's name and becomes a row fact
+- [x] [0089] `natmod`'s own `arm_embedded`/`riscv_embedded` rows get `toolchain_version` too
+- [x] [0087] `arm_embedded`/`riscv_embedded` lose their baked cross toolchain; `toolchain_version` becomes a real, read field
+- [x] [0086] a generic in-container tarball toolchain fetch, generalized out of `arm_embedded.Dockerfile`'s own build-time recipe
+- [x] [0093] the nine ABI 5/6 tags had never built, and none of the three reasons was the gcc 15 diagnostic
+- [x] [0082] nine MicroPython tags fail `mpy-cross` under gcc 15, on every image whose native compiler is unpinned — bisected exactly
+- [x] [0092] two "should this live in `build-platforms.toml` instead" questions, answered differently
+- [x] [0091] `TAG_CFLAGS` reaches every port's `mpy-cross`, not just `unix`'s
 - [x] [0084] unix's pypa image pin moves from the architecture to the row, and the end of shared/floating compilers
 - [x] [0068] docker Dependabot grouping, and what the first grouped bump exposed
 - [x] [0081] `output-dir` gets its own `.gitignore` the first time cibuildmp writes into it
@@ -252,3 +264,15 @@ record is added.
 [0083]: records/0083-windows-fully-prebuilt-mingw-toolchain.md
 [0084]: records/0084-per-identifier-toolchain-tarballs-and-the-end-of-shared-images.md
 [0085]: records/0085-arm-embedded-thins-out-and-the-toolchain-version-becomes-a-row-fact.md
+[0086]: records/0086-generic-in-container-toolchain-tarball-fetch.md
+[0087]: records/0087-arm-riscv-embedded-thin-out-toolchain-version-lands.md
+[0088]: records/0088-mimxrt-own-floor.md
+[0089]: records/0089-natmod-arm-riscv-embedded-toolchain-version.md
+[0090]: records/0090-toolchain-pins-checker-and-0058-text-followup.md
+[0091]: records/0091-tag-cflags-into-every-ports-mpy-cross.md
+[0092]: records/0092-usermod-toml-and-tag-cflags-against-build-platforms.md
+[0093]: records/0093-pre-v1-20-0-tags-had-never-built.md
+[0094]: records/0094-arm-gnu-toolchain-is-a-real-third-choice-for-arm-embedded.md
+[0095]: records/0095-cache-root-splits-source-from-build-state.md
+[0096]: records/0096-arm-riscv-embedded-collapse-into-embedded-base.md
+[0097]: records/0097-lv-binding-micropython-builds-through-cibuildmp.md

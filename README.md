@@ -2,7 +2,8 @@
 
 [![SWUbanner]][SWUBadge]
 [![license]][license-url]
-![micropython-tag]
+![natmod-abi]
+![usermod-tag]
 [![pypi version]][PyPiUrl]
 [![python versions]][PyPiUrl]
 [![pre-commit]][pre-commit-workflow]
@@ -20,6 +21,21 @@ MicroPython.
 Covers **natmod** (dynamically loadable native `.mpy` modules, built against
 `py/dynruntime.mk`) and **usermod** (`USER_C_MODULES`, compiled straight
 into a port's own firmware build) C extensions.
+
+The two halves reach different distances back: **natmod** builds every
+release from `v1.12` on (ABI 5 through 6.3), **usermod** every port from
+`v1.20.0` on (`qemu` from `v1.24.0`). Both run to the newest preview release
+the pinned tag table knows.
+
+> [!TIP]
+> **We can build even this.** [`lv_binding_micropython`](https://github.com/lvgl/lv_binding_micropython)
+> — LVGL's own real MicroPython bindings, a heavy external module this
+> project neither wrote nor controls, code generation and all — builds
+> clean through cibuildmp's usermod path with zero changes to cibuildmp
+> itself, and the result actually renders a frame, not just links. See
+> [`examples/lv_binding_micropython/`](examples/lv_binding_micropython/),
+> [`.github/workflows/verify-lv-binding-micropython.yml`](.github/workflows/verify-lv-binding-micropython.yml),
+> and record [0097][0097] for the live proof.
 
 ## Why
 
@@ -81,7 +97,7 @@ are pypa's own `quay.io/pypa/<target>` directly; the handful cibuildmp
 adds a thin layer to publish as `ghcr.io/ballistics-lab/<target>`) and
 launches sibling containers, one per target, the same way cibuildwheel's
 own container runtime does. That
-covers natmod (five of the six toolchain-group images cover all ten
+covers natmod (four of the five toolchain-group images cover all ten
 arches — see [`docs/reference/vendored-images.md`](docs/reference/vendored-images.md))
 and every usermod port, `esp32` included — only the ESP-IDF `git clone` itself
 stays on the host (source, not a binary, the same reasoning `mpy_dir`
@@ -224,8 +240,10 @@ and the `ambiguous output` error below:
 MOD = mymod
 SRC = mymod.c
 
-# Keep make's own object files out of build/, and scope them per arch.
-BUILD = .obj/$(ARCH)
+# Keep make's own object files out of build/, and scope them per MicroPython
+# release and per arch -- an object file depends on neither, so anything
+# shared here gets silently reused across both.
+BUILD = .obj/$(notdir $(patsubst %/,%,$(MPY_DIR)))/$(ARCH)
 
 include $(MPY_DIR)/py/dynruntime.mk
 
@@ -433,9 +451,10 @@ outcome rather than stop at the first one that fails.
 
 Every attempted target — success or failure, `--keep-going` or not — is
 written to a JSON report, one file per invocation, under
-`~/.cache/cibuildmp/reports/` by default (`CIBMP_REPORT_PATH` to redirect
-it). Each entry carries the identifier, how long it took, and either the
-built artifact's directory/size/file listing or the error that stopped it:
+`<output-dir>/reports/` by default — `mpyhouse/reports/`, beside the
+artifacts of the same run (`CIBMP_REPORT_PATH` to redirect it). Each entry
+carries the identifier, how long it took, and either the built artifact's
+directory/size/file listing or the error that stopped it:
 
 ```json
 {
@@ -644,7 +663,8 @@ the port**, because it is that port's own build axis:
 
 | Variable                                | Effect                                                                                                                                                                                                                            |
 | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CIBMP_CACHE_PATH`                      | Where MicroPython checkouts and mpy-cross builds are cached. Defaults to `$XDG_CACHE_HOME/cibuildmp`, or `~/.cache/cibuildmp`. Pin it in CI when a later step needs the checkout by path — `<CIBMP_CACHE_PATH>/micropython/<tag>` |
+| `CIBMP_CACHE_PATH`                      | Where fetched MicroPython checkouts and ESP-IDF are cached. Defaults to `$XDG_CACHE_HOME/cibuildmp`, or `~/.cache/cibuildmp`. Pin it in CI when a later step needs the checkout by path — `<CIBMP_CACHE_PATH>/micropython/<tag>` |
+| `CIBMP_SCRATCH_PATH`                    | Read, but currently redirects nothing: every usermod port's compiled build state now lives inside its own container and never reaches the host (record 0095's own addendum 13). Left as a documented knob rather than removed outright |
 | `CIBMP_REPORT_PATH`                     | Where the JSON build report is written                                                                                                                                                                                            |
 | `CIBMP_TIMEOUT`                         | Seconds before a build container is killed (`docker kill`, not just the CLI). No limit by default. **usermod only** -- natmod's own container call does not consult it                                                            |
 | `CIBMP_<PORT>_<TARGET>_TIMEOUT`         | The same, for one container — `CIBMP_UNIX_MANYLINUX_2_28_X86_64_TIMEOUT`                                                                                                                                                          |
@@ -717,6 +737,7 @@ naming a scalar option in `inherit` is a config error, not a silent no-op.
 [0075]: docs/records/0075-top-level-scalar-keys-are-validated.md
 [0076]: docs/records/0076-the-mipsel-holdout-is-bclibc-and-wasm3-not-a7p.md
 [0077]: docs/records/0077-docs-drift-is-a-failing-test-not-a-discipline-problem.md
+[0097]: docs/records/0097-lv-binding-micropython-builds-through-cibuildmp.md
 
 ## When a build fails
 
@@ -800,15 +821,25 @@ does not put its output where `cibuildmp` looks. It looks in
 
 Two arches shared one build directory, so the second one reused the first
 one's object files and the `.mpy` is the *first* arch's binary.
-`cibuildmp` catches this rather than shipping it. Scope `BUILD` by arch in
-your Makefile, before the `include`:
+`cibuildmp` catches this rather than shipping it. Scope `BUILD` in your
+Makefile, before the `include`:
 
 ```make
-BUILD = .obj/$(ARCH)
+BUILD = .obj/$(notdir $(patsubst %/,%,$(MPY_DIR)))/$(ARCH)
 ```
 
-(MicroPython v1.29.0 and later already default to `build-$(ARCH)`, so this
-only matters on older tags or if you set `BUILD` yourself.)
+(MicroPython v1.29.0 and later already default to `build-$(ARCH)`, so the
+`$(ARCH)` half only matters on older tags or if you set `BUILD` yourself.)
+
+**The `$(MPY_DIR)` half is the same bug across MicroPython releases, and
+that one produces no error at all.** An object file depends on the tag no
+more than it depends on the arch, so two tags built back to back in one
+tree link the first tag's objects against the second's `py/` — and the
+arch header the check above reads is *correct* in that case, so nothing
+fails. It surfaces as a `LinkError` about an undefined symbol when the two
+releases straddle a `py/` change, and as a quietly mislabelled `.mpy` when
+they do not. No default in any `dynruntime.mk` scopes by tag; only your own
+`BUILD` can.
 
 ### `no image registered for …` / `… is not published for linux/…`
 
@@ -834,10 +865,20 @@ it runs to several GB. `cibuildmp --clean-cache` deletes the lot
 (`$XDG_CACHE_HOME/cibuildmp`, or wherever `CIBMP_CACHE_PATH` points);
 Docker images are Docker's own to prune.
 
-That includes the JSON build reports: one per invocation, never
-overwritten, under the same cache root — so they accumulate until you clean
-the cache, and cleaning the cache takes them with it. Set
-`CIBMP_REPORT_PATH` if you want one kept somewhere you control.
+The JSON build reports are **not** in there — they live beside the
+artifacts, under `<output-dir>/reports/`, so `--clean-cache` never takes
+them with it. They are one file per invocation and never overwritten, so
+they accumulate in the output directory instead; set `CIBMP_REPORT_PATH`
+if you want them somewhere else.
+
+Nor is the build state: every usermod port builds inside a container's own
+overlay now (a `:ro` bind of the checkout plus a writable view on top), so
+object files, per-identifier `build-<identifier>/` trees and the
+container-built `mpy-cross` binaries never touch the host at all — they die
+with the container. `CIBMP_SCRATCH_PATH` is still read but currently has
+nothing to redirect, since nothing writes to the path it names any more;
+kept for now as a documented knob rather than removed outright (see record
+0095's own addendum 13 for the reasoning).
 
 ### Still stuck
 
@@ -859,10 +900,10 @@ All ten `ARCH=` values `py/dynruntime.mk` accepts, each running inside a
 pulled `linux/amd64` image — natmod builds no bare-host toolchain of any
 kind any more, `x86`'s 32-bit multilib included, which is exactly what makes
 it buildable on an arm64 runner too. There is no single `natmod` image any
-more either: five of the six toolchain-group images cover all ten arches
-(`arm_embedded`, `riscv_embedded`, `xtensa_lx106`, `xtensa_esp`,
-`natmod_host`), and three of those five are shared with several usermod
-ports too, keyed by toolchain rather than by port — see
+more either: four of the five toolchain-group images cover all ten arches
+(`embedded_base`, `xtensa_lx106`, `xtensa_esp`, `natmod_host`), and two of
+those four are shared with several usermod ports too, keyed by toolchain
+rather than by port — see
 [`docs/reference/vendored-images.md`](docs/reference/vendored-images.md) for
 the full group model. Adopted in all three consuming repos and verified on
 real CI, arch by arch, not just `--dry-run`.
@@ -1121,7 +1162,7 @@ scheduled `test-all-platforms.yml` run since.
   <td>
     every board across <code>v1.20.0</code>-<code>v1.30.0-preview</code>
   </td>
-  <td><code>arm_embedded</code> (Docker) -- Pico SDK + every <code>lib/</code> it needs are vendored by the MicroPython release tarball itself[^rp2ci]</td>
+  <td><code>embedded_base</code> (Docker) -- Pico SDK + every <code>lib/</code> it needs are vendored by the MicroPython release tarball itself[^rp2ci]</td>
   <td>✅</td>
 </tr>
 <tr>
@@ -1206,28 +1247,37 @@ specific module name, precision scheme, or test framework — those stay in
 the consuming repo.
 
 **One more requirement for the `cibuildmp` CLI specifically:** scope
-`dynruntime.mk`'s `BUILD` variable by `$(ARCH)` — `BUILD = .obj/$(ARCH)`
-before the `include`, kept outside `build/` so it does not collide with
-the `dist` output the CLI globs for (see
-`examples/template/natmod/Makefile`). `cibuildmp` runs every selected
-target sequentially in one `natmod/` tree, so a `BUILD` shared across
-arches makes a second `ARCH=` in the same invocation find the previous
-arch's own object files "up to date" and skip rebuilding — the merged
-`.mpy` silently stays the *first* arch's binary. `cibuildmp` catches that
-itself (a header-arch verification step fails loudly instead), but scoping
-`BUILD` avoids paying for the failed build at all.
+`dynruntime.mk`'s `BUILD` variable by the MicroPython release *and* the
+arch — `BUILD = .obj/$(notdir $(patsubst %/,%,$(MPY_DIR)))/$(ARCH)` before
+the `include`, kept outside `build/` so it does not collide with the `dist`
+output the CLI globs for (see `examples/template/natmod/Makefile`).
+`cibuildmp` runs every selected target sequentially in one `natmod/` tree,
+and an object file depends on neither the arch nor the tag, so anything
+those targets share in `BUILD` gets silently reused across them.
 
-**How much this matters depends on the tag**, which this paragraph did not
-used to say: `dynruntime.mk` defaulted to an unscoped `BUILD ?= build` up
-to v1.28.0, and to `BUILD ?= build-$(ARCH)` from v1.29.0 — arch-scoped
-already. On v1.29.0 and later the collision cannot happen by default, so
-scoping `BUILD` yourself is only needed to put the objects somewhere other
-than beside the `dist` output, or to support an older `MPY_DIR`.
+**The arch axis is caught; the tag axis is not.** A `BUILD` shared across
+arches makes a second `ARCH=` in the same invocation find the previous
+arch's object files "up to date" and skip rebuilding — the merged `.mpy`
+silently stays the *first* arch's binary, and `cibuildmp`'s own header-arch
+verification fails loudly rather than shipping it, so scoping `$(ARCH)`
+only saves you the failed build. A `BUILD` shared across *tags* produces an
+artifact whose arch header is perfectly correct and whose `py/` is the
+wrong release's, so nothing fails: it shows up as a `LinkError` about an
+undefined symbol when the two releases straddle a `py/` change, and as a
+quietly mislabelled `.mpy` when they do not.
+
+**No `dynruntime.mk` default covers either axis fully**, which this
+paragraph did not used to say: `BUILD` defaulted to an unscoped `build` up
+to v1.28.0 and to `build-$(ARCH)` from v1.29.0 — arch-scoped from that tag
+on, tag-scoped in no release at all, since `MPY_DIR` is the only thing that
+knows which release is being built. So on v1.29.0 and later the arch
+collision cannot happen by default; the tag one still can, and only your
+own `BUILD` prevents it.
 
 If the module also builds `rv32imc` with more than one `arch-flags` value
 in the same invocation, `BUILD` needs `$(ARCH_FLAGS)` folded in too —
-`BUILD = .obj/$(ARCH)$(if $(ARCH_FLAGS),+$(ARCH_FLAGS))`, for the same
-reason on that second axis.
+`BUILD = .obj/$(notdir $(patsubst %/,%,$(MPY_DIR)))/$(ARCH)$(if $(ARCH_FLAGS),+$(ARCH_FLAGS))`,
+for the same reason on a third axis.
 
 None of this cares what produced the `.c` files `SRC` lists —
 [`examples/wasm2mpy`](examples/wasm2mpy) compiles WebAssembly to C via
@@ -1323,8 +1373,11 @@ PyPI unless you pin a version there too.
 
 <!-- REUSABLE LINKS -->
 
-[micropython-tag]:
-https://img.shields.io/badge/v1.20.0%2B-orange?logo=micropython&label=micropython
+[natmod-abi]:
+https://img.shields.io/badge/mpy_v5%2B-orange?logo=micropython&label=natmod
+
+[usermod-tag]:
+https://img.shields.io/badge/v1.20%2B-orange?logo=micropython&label=usermod
 
 [license]:
 https://img.shields.io/github/license/ballistics-lab/cibuildmp

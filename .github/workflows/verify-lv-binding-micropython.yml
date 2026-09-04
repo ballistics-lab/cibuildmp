@@ -1,0 +1,85 @@
+name: Verify lv_binding_micropython
+
+# Record 0097's own living proof, not a hypothetical: LVGL's real
+# MicroPython bindings (github.com/lvgl/lv_binding_micropython) -- a heavy
+# external usermod module this project neither wrote nor controls -- build
+# clean through cibuildmp's real usermod path, and actually run: a display,
+# a widget tree, one rendered frame, not merely a link that reports success.
+#
+# workflow_dispatch, not on every push: this clones a real external repo
+# with two of its own submodules (lvgl itself, pycparser) fresh every run
+# and compiles several hundred LVGL source files on top of the usual unix
+# build -- real weight examples/template's own thin fixture doesn't carry,
+# not something every push to a dev branch should pay for. Re-runs when its
+# own files change, the same reasoning probe-overlay.yml's own header gives
+# for its file.
+#
+# The two pins below are not arbitrary. `LV_BINDING_COMMIT` is the exact
+# commit `lv_micropython` (LVGL's own MicroPython fork) pins as its own
+# `user_modules/lv_binding_micropython` submodule -- the pairing LVGL's own
+# CI actually tests, not `lv_binding_micropython`'s unpinned `master`.
+# `CIBMP_UPSTREAM_TAG` is the MicroPython version `lv_micropython`'s own
+# `py/mpconfig.h` reports at that same commit. Record 0097 found the
+# difference matters: `master` against any plain upstream tag fails --
+# `gen_mpy.py`'s generated `lv_mpy.c` calls a MicroPython-internal helper
+# (`mp_obj_int_to_bytes_impl`) that has never existed under that name in
+# real upstream MicroPython. Bumping either pin needs a real re-run of this
+# workflow, not a guess that the pairing still holds.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/verify-lv-binding-micropython.yml"
+      - "examples/lv_binding_micropython/**"
+
+concurrency:
+  group: verify-lv-binding-micropython-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  LV_BINDING_COMMIT: c4b04696ce375f259a69eae33ae51446f332df7e
+  CIBMP_UPSTREAM_TAG: v1.24.1
+
+jobs:
+  build-unix:
+    runs-on: ubuntu-latest
+    env:
+      CIBMP_VERSION: 0.0.0-ci
+    steps:
+      - uses: actions/checkout@v7
+
+      # A full clone, not shallow: the pinned commit is behind the default
+      # branch tip by real history, and a shallow clone has no guarantee of
+      # reaching it at all. Submodules are initialized *after* the checkout
+      # below, not with `--recurse-submodules` here, so they resolve to the
+      # pinned commit's own `lvgl`/`pycparser` versions, not the default
+      # branch's.
+      - name: Clone lv_binding_micropython at the pinned commit
+        run: |
+          set -euo pipefail
+          git clone https://github.com/lvgl/lv_binding_micropython.git \
+            examples/lv_binding_micropython/lv_binding_micropython
+          cd examples/lv_binding_micropython/lv_binding_micropython
+          git checkout "$LV_BINDING_COMMIT"
+          git submodule update --init --recursive
+
+      - name: Build lv_binding_micropython (unix)
+        uses: ./
+        with:
+          package-dir: examples/lv_binding_micropython
+          build: ${{ env.CIBMP_UPSTREAM_TAG }}-manylinux_2_28_x86_64
+
+      - name: List built artifacts
+        run: ls -laR examples/lv_binding_micropython/mpyhouse
+
+      # Not just that it links: this registers a real (headless) LVGL
+      # display, builds a widget tree, and renders a frame through it. See
+      # smoke_test.py's own header for why the display has to be created
+      # explicitly first.
+      - name: "Smoke test: create a display, build a widget tree, render a frame"
+        run: |
+          set -euo pipefail
+          identifier="${CIBMP_UPSTREAM_TAG}-manylinux_2_28_x86_64"
+          bin="examples/lv_binding_micropython/mpyhouse/${identifier}/micropython-${identifier}"
+          "$bin" examples/lv_binding_micropython/smoke_test.py

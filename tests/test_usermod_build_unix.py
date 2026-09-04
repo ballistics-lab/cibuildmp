@@ -1,5 +1,7 @@
 import os
+import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -16,7 +18,22 @@ from cibuildmp.platforms.usermod.build_unix import (
     run_unix_deplibs,
     unix_make_command,
 )
-from cibuildmp.platforms.usermod.build_unix import build_unix as build_unix_fn
+from cibuildmp.platforms.usermod.build_unix import build_unix as _build_unix
+
+
+def build_unix_fn(*args, staging=None, **kwargs):
+    """`build_unix()` with a staging directory supplied.
+
+    Record 0095 made `staging` part of the contract -- the build tree lives
+    inside the container now, so there is no host path to read a result
+    from and the artifact is copied into this directory instead.
+    `orchestrate.build_one()` supplies it in production; a test that does
+    not care where it lands gets a throwaway one, and a test that does
+    passes its own.
+    """
+    if staging is None:
+        staging = Path(tempfile.mkdtemp(prefix="cibmp-test-staging-"))
+    return _build_unix(*args, staging=staging, **kwargs)
 
 
 def fake_elf(target: str = "manylinux_2_28_x86_64") -> bytes:
@@ -48,7 +65,24 @@ def _fake_docker_run(cmd, **kwargs):
     `.stdout` off whatever it gets back, and a real `subprocess.run` never
     returns `None`. Every candidate "passes" (empty stdout, so
     `probe_supported_cflags()` would normally drop it -- callers that care
-    about which flags survive stub this out themselves)."""
+    about which flags survive stub this out themselves).
+
+    Since record 0095 the build runs inside one long-lived container, so
+    this also stands in for the one step that used to happen implicitly on
+    a bind mount: the `cp` of the finished binary into `staging`. Without
+    it the artifact would exist nowhere a host-side check could read, which
+    is exactly the real behaviour -- the container is the only place it
+    lives until that copy.
+    """
+    if cmd[:2] == ["docker", "exec"] and "cp" in cmd:
+        # Perform the copy for real. These tests already write a stub ELF at
+        # the build directory the options name, and copying *that* is what
+        # keeps a non-x86 target's own header (which `verify_unix_output()`
+        # checks) rather than a default this helper would have to guess.
+        source, dest = (Path(p) for p in cmd[cmd.index("cp") + 1 :][:2])
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if source.exists():
+            shutil.copy(source, dest)
     if kwargs.get("capture_output"):
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
     return None
@@ -216,15 +250,17 @@ def test_deplibs_command_shape(monkeypatch):
         "cibuildmp.dockerrun.subprocess.run",
         lambda cmd, **k: calls.append(cmd),
     )
-    run_unix_deplibs(
-        opts("manylinux_2_41_mipsel"), Path("/gh/ws/mpy"), docker_image=_FAKE_UNIX_IMAGE
-    )
+    with dockerrun.Container(image=_FAKE_UNIX_IMAGE) as container:
+        run_unix_deplibs(
+            opts("manylinux_2_41_mipsel"), Path("/gh/ws/mpy"), container=container
+        )
 
     # Wrapped in `sh -c` now, not a bare argv: the fixup that follows
     # `make ... deplibs` (see run_unix_deplibs()'s own docstring) has to
     # run in the same container invocation.
-    assert calls[0][-3:-1] == ["sh", "-c"]
-    script = calls[0][-1]
+    exec_call = next(c for c in calls if c[:2] == ["docker", "exec"])
+    assert exec_call[-3:-1] == ["sh", "-c"]
+    script = exec_call[-1]
     assert "deplibs" in script
     assert "MICROPY_STANDALONE=1" in script
 
@@ -238,24 +274,21 @@ def test_deplibs_fixup_queries_the_real_multi_os_directory(monkeypatch):
     # only checked for `out/lib64/libffi.a` missed it entirely. The
     # script asks the compiler that will actually be used, not one
     # value predicted in advance.
-    # riscv64 is non-native on this (x86_64) test host, so dockerrun.run()
-    # would otherwise start a real emulation probe first -- irrelevant to
-    # what this test checks (record 0043's own probe, its own coverage
-    # in test_usermod_dockerrun.py).
-    monkeypatch.setattr("cibuildmp.dockerrun._probe_platform", lambda *a, **k: "")
     calls = []
     monkeypatch.setattr(
         "cibuildmp.dockerrun.subprocess.run",
         lambda cmd, **k: calls.append(cmd),
     )
 
-    run_unix_deplibs(
-        opts("manylinux_2_39_riscv64"),
-        Path("/gh/ws/mpy"),
-        docker_image=_FAKE_UNIX_IMAGE,
-    )
+    with dockerrun.Container(image=_FAKE_UNIX_IMAGE) as container:
+        run_unix_deplibs(
+            opts("manylinux_2_39_riscv64"),
+            Path("/gh/ws/mpy"),
+            container=container,
+        )
 
-    script = calls[0][-1]
+    exec_call = next(c for c in calls if c[:2] == ["docker", "exec"])
+    script = exec_call[-1]
     assert "gcc -print-multi-os-directory" in script
     assert "multi_os_dir" in script
     assert "lib64" not in script  # no hardcoded fallback value anywhere
@@ -327,7 +360,7 @@ def test_mipsel_runs_deplibs_before_build(monkeypatch, tmp_path, arch):
     run_calls = []
     monkeypatch.setattr(
         "cibuildmp.dockerrun.subprocess.run",
-        lambda cmd, **k: run_calls.append(cmd),
+        lambda cmd, **k: run_calls.append(cmd) or _fake_docker_run(cmd, **k),
     )
     build_dir = tmp_path / f"build-{arch}"
     build_dir.mkdir()
@@ -335,9 +368,14 @@ def test_mipsel_runs_deplibs_before_build(monkeypatch, tmp_path, arch):
 
     build_unix_fn(opts(arch, build_dir=build_dir), tmp_path / "mpy")
 
-    assert run_calls[0][-3:-1] == ["sh", "-c"]
-    assert "deplibs" in run_calls[0][-1]
-    assert any("USER_C_MODULES" in arg for arg in run_calls[1])
+    # Ordering, not position: every step is a `docker exec` in one
+    # container since record 0095, with `create`/`start`/the overlay mount
+    # ahead of them, so `run_calls[0]` is no longer the first build step.
+    deplibs = next(i for i, c in enumerate(run_calls) if "deplibs" in str(c[-1]))
+    port_make = next(
+        i for i, c in enumerate(run_calls) if any("USER_C_MODULES" in a for a in c)
+    )
+    assert deplibs < port_make
 
 
 @pytest.mark.parametrize("arch", ["manylinux_2_41_mipsel"])
@@ -346,11 +384,16 @@ def test_mipsel_builds_and_returns_binary_path(monkeypatch, tmp_path, arch):
     build_dir = tmp_path / f"build-{arch}"
     build_dir.mkdir()
     (build_dir / "micropython").write_bytes(fake_elf(arch))
-    monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", lambda *a, **k: None)
+    monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", _fake_docker_run)
 
-    result = build_unix_fn(opts(arch, build_dir=build_dir), tmp_path / "mpy")
+    staging = tmp_path / "staging"
+    result = build_unix_fn(
+        opts(arch, build_dir=build_dir), tmp_path / "mpy", staging=staging
+    )
 
-    assert result == build_dir / "micropython"
+    # Record 0095: the build tree lives inside the container, so what comes
+    # back is the staged copy, not a path into it.
+    assert result == staging / "micropython"
 
 
 def test_mipsel_probes_its_cross_compiler_not_the_images_native_gcc(
@@ -397,10 +440,11 @@ def test_x86_64_builds_and_returns_binary_path(tmp_path, monkeypatch):
     build_dir.mkdir()
     (build_dir / "micropython").write_bytes(fake_elf())
 
-    monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", lambda *a, **k: None)
-    result = build_unix_fn(opts(build_dir=build_dir), tmp_path / "mpy")
+    monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", _fake_docker_run)
+    staging = tmp_path / "staging"
+    result = build_unix_fn(opts(build_dir=build_dir), tmp_path / "mpy", staging=staging)
 
-    assert result == build_dir / "micropython"
+    assert result == staging / "micropython"
 
 
 def test_missing_binary_after_success_is_an_error(tmp_path, monkeypatch):
@@ -455,10 +499,12 @@ def test_aarch64_builds_and_returns_binary_path(monkeypatch, tmp_path):
     monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", _fake_docker_run)
 
     result = build_unix_fn(
-        opts("manylinux_2_28_aarch64", build_dir=build_dir), tmp_path / "mpy"
+        opts("manylinux_2_28_aarch64", build_dir=build_dir),
+        tmp_path / "mpy",
+        staging=tmp_path / "staging",
     )
 
-    assert result == build_dir / "micropython"
+    assert result == tmp_path / "staging" / "micropython"
 
 
 # ── docker strategy (D26 proof-of-concept) ──────────────────────────────
@@ -499,33 +545,45 @@ def test_unix_docker_image_skips_host_toolchain_probe(monkeypatch, tmp_path):
     monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", fake_run)
 
     result = build_unix_fn(
-        opts("manylinux_2_28_aarch64", build_dir=build_dir), tmp_path / "mpy"
+        opts("manylinux_2_28_aarch64", build_dir=build_dir),
+        tmp_path / "mpy",
+        staging=tmp_path / "staging",
     )
 
-    assert result == build_dir / "micropython"
-    # Three calls now: `run_unix_deplibs()` runs first (standalone=True on
-    # every arch), then aarch64's real `-Wno-error=array-bounds` candidate
-    # (`_ARCH_CFLAGS`) gets probed against this image's own gcc, then the
-    # main build -- all three against the same resolved image.
-    assert len(calls) == 3
-    for docker_command in calls:
-        assert docker_command[:3] == ["docker", "run", "--rm"]
-        assert "manylinux_2_28_aarch64:local" in docker_command
-    # calls[0] (deplibs) is `sh -c "make ... && <fixup>"`; calls[1] is the
-    # cflags probe; calls[2] (the main build) is a bare `make` argv -- see
-    # run_unix_deplibs()'s own docstring for why only deplibs needs the
-    # wrapper.
-    assert "make" in calls[0][-1]
-    assert "make" in calls[2]
+    assert result == tmp_path / "staging" / "micropython"
+    # Since record 0095 the image is named once, at `docker create`, and
+    # every step is a `docker exec` into that one container -- which is the
+    # stronger version of what this used to assert by checking the image
+    # appeared in all three `docker run`s: they now *cannot* disagree.
+    create = [c for c in calls if c[:2] == ["docker", "create"]]
+    assert len(create) == 1
+    assert "manylinux_2_28_aarch64:local" in create[0]
+    assert not any(c[:2] == ["docker", "run"] for c in calls)
+
+    execs = [c for c in calls if c[:2] == ["docker", "exec"]]
+    # deplibs (standalone=True on every arch), aarch64's own
+    # `-Wno-error=array-bounds` candidate probed against this image's gcc,
+    # and the main build -- in that order, with the overlay mount ahead of
+    # them and the staging copy after.
+    assert any("deplibs" in str(c[-1]) for c in execs)
+    assert any("array-bounds" in str(c[-1]) for c in execs)
+    assert any(c[-1].startswith("make") or "make" in c for c in execs)
 
 
-def test_unix_docker_image_mounts_mpy_dir_and_user_c_modules(monkeypatch, tmp_path):
+def test_unix_container_binds_the_checkout_read_only_and_the_project_rw(
+    monkeypatch, tmp_path
+):
+    """Record 0095: the checkout is an overlay lower layer, so it is bound
+    **read-only and out of the way** while the writable view goes over its
+    own host path; the user's own module tree stays an ordinary read-write
+    bind at its own path, since a module whose sources reach outside
+    `USER_C_MODULES` has to resolve."""
     monkeypatch.setenv(
         "CIBMP_UNIX_MANYLINUX_2_28_X86_64_DOCKER_IMAGE", "manylinux_2_28_x86_64:local"
     )
     monkeypatch.setattr(
         "cibuildmp.platforms.usermod.build_common.container_mpy_cross",
-        lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build-stub" / "mpy-cross",
+        lambda mpy_dir, **k: mpy_dir / "mpy-cross" / "build" / "mpy-cross",
     )
     build_dir = tmp_path / "build-x86_64"
     build_dir.mkdir()
@@ -534,15 +592,20 @@ def test_unix_docker_image_mounts_mpy_dir_and_user_c_modules(monkeypatch, tmp_pa
     calls = []
     monkeypatch.setattr(
         "cibuildmp.dockerrun.subprocess.run",
-        lambda cmd, **k: calls.append(cmd) or None,
+        lambda cmd, **k: calls.append(cmd) or _fake_docker_run(cmd, **k),
     )
 
     mpy_dir = tmp_path / "mpy"
-    build_unix_fn(opts(build_dir=build_dir), mpy_dir)
+    staging = tmp_path / "staging"
+    build_unix_fn(opts(build_dir=build_dir), mpy_dir, staging=staging)
 
-    docker_command = calls[0]
-    assert f"{mpy_dir}:{mpy_dir}" in docker_command
-    assert "/gh/ws/micropython/usermod:/gh/ws/micropython/usermod" in docker_command
+    create = next(c for c in calls if c[:2] == ["docker", "create"])
+    assert f"{mpy_dir}:/cibuildmp-lower-1:ro" in create
+    assert "/gh/ws/micropython/usermod:/gh/ws/micropython/usermod" in create
+    assert f"{staging}:{staging}" in create
+    # The old bind of the checkout at its own path is exactly what would
+    # let a build write into the cache again.
+    assert f"{mpy_dir}:{mpy_dir}" not in create
 
 
 # test_unix_no_image_registered_is_a_clear_error (above) already covers
@@ -747,14 +810,13 @@ def test_repair_is_a_noop_when_nothing_non_baseline(monkeypatch, tmp_path):
         "cibuildmp.dockerrun.subprocess.run", lambda *a, **k: calls.append(a)
     )
 
+    # Never reaches `container` at all -- the no-op return happens before
+    # anything would call it, so a real one is not needed here.
     repair_unix_binary(
         "manylinux_2_28_x86_64",
         tmp_path / "micropython",
-        docker_image=_FAKE_UNIX_IMAGE,
-        oci_platform=None,
-        linux32=False,
         timeout=None,
-        mounts=[tmp_path],
+        container=None,
     )
 
     assert calls == []
@@ -772,21 +834,16 @@ def test_repair_runs_ldd_and_patchelf_inside_the_container(monkeypatch, tmp_path
     )
     binary = tmp_path / "build-manylinux_2_28_x86_64" / "micropython"
 
-    repair_unix_binary(
-        "manylinux_2_28_x86_64",
-        binary,
-        docker_image=_FAKE_UNIX_IMAGE,
-        oci_platform="linux/amd64",
-        linux32=False,
-        timeout=30,
-        mounts=[tmp_path],
-    )
+    with dockerrun.Container(image=_FAKE_UNIX_IMAGE) as container:
+        repair_unix_binary(
+            "manylinux_2_28_x86_64",
+            binary,
+            timeout=30,
+            container=container,
+        )
 
-    assert len(calls) == 1
-    docker_command = calls[0]
-    assert docker_command[0] == "docker"
-    assert _FAKE_UNIX_IMAGE in docker_command
-    script = docker_command[-1]
+    exec_call = next(c for c in calls if c[:2] == ["docker", "exec"])
+    script = exec_call[-1]
     assert "ldd" in script
     assert "libffi.so.6" in script
     # $ORIGIN is patchelf's/the loader's own runtime token, not a shell
@@ -804,19 +861,22 @@ def test_build_unix_calls_repair_when_libffi_is_needed(monkeypatch, tmp_path):
     calls = []
     monkeypatch.setattr(
         "cibuildmp.dockerrun.subprocess.run",
-        lambda cmd, **k: calls.append(cmd),
+        lambda cmd, **k: calls.append(cmd) or _fake_docker_run(cmd, **k),
     )
     build_dir = tmp_path / "build-x86_64"
     build_dir.mkdir()
     (build_dir / "micropython").write_bytes(fake_elf())
+    staging = tmp_path / "staging"
 
-    build_unix_fn(opts(build_dir=build_dir), tmp_path / "mpy")
+    build_unix_fn(opts(build_dir=build_dir), tmp_path / "mpy", staging=staging)
 
-    # Three dockerrun.run() calls now: deplibs first (`standalone=True` on
-    # every arch, this one included), then the main build, then the
-    # repair -- only the last one runs patchelf.
-    assert len(calls) == 3
-    assert "patchelf" in calls[-1][-1]
+    # Counting `docker run`s stopped meaning anything once record 0095 put
+    # every step in one container -- what matters is that a repair ran, and
+    # that it ran against the *staged* copy, which is the one both sides can
+    # see. (`repair_unix_binary()`'s own script test covers its content.)
+    patchelf = [c for c in calls if c and "patchelf" in str(c[-1])]
+    assert len(patchelf) == 1
+    assert str(staging / "micropython") in patchelf[0][-1]
 
 
 def test_build_unix_skips_repair_when_nothing_non_baseline(monkeypatch, tmp_path):
@@ -827,7 +887,7 @@ def test_build_unix_skips_repair_when_nothing_non_baseline(monkeypatch, tmp_path
     calls = []
     monkeypatch.setattr(
         "cibuildmp.dockerrun.subprocess.run",
-        lambda cmd, **k: calls.append(cmd),
+        lambda cmd, **k: calls.append(cmd) or _fake_docker_run(cmd, **k),
     )
     build_dir = tmp_path / "build-x86_64"
     build_dir.mkdir()
@@ -835,5 +895,6 @@ def test_build_unix_skips_repair_when_nothing_non_baseline(monkeypatch, tmp_path
 
     build_unix_fn(opts(build_dir=build_dir), tmp_path / "mpy")
 
-    # deplibs, then the main build -- no repair call, and no third one.
-    assert len(calls) == 2
+    # Counting calls stopped meaning anything once every step became a
+    # `docker exec` in one container -- the claim is that no repair ran.
+    assert not any("patchelf" in str(c[-1]) for c in calls)

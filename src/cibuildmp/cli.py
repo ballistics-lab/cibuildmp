@@ -103,8 +103,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--clean-cache",
         action="store_true",
-        help="Delete cibuildmp's cache (MicroPython checkouts, mpy-cross builds "
-        "and any downloaded sources) and exit",
+        help="Delete cibuildmp's cache (MicroPython checkouts, ESP-IDF and any "
+        "other downloaded sources) and exit. Build state is not in there -- it "
+        "goes to CIBMP_SCRATCH_PATH and is removed when the run ends",
     )
     parser.add_argument(
         "--dry-run",
