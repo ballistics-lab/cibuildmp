@@ -103,13 +103,26 @@ jobs:
           # command that fails under a plain `:ro` bind with
           # "Read-only file system: build/genhdr/mpversion.h". Building it
           # rather than just mounting is the point: a successful mount that
-          # then cannot write is not an answer. CFLAGS_EXTRA is v1.24.1's
-          # own TAG_CFLAGS value (record 0082), unrelated to the overlay.
+          # then cannot write is not an answer.
+          #
+          # The flag is v1.24.1's own TAG_CFLAGS value (record 0082) and is
+          # **asked for, not assumed** -- `build_common.probe_supported_cflags()`
+          # does the same thing for the same reason, and skipping it here
+          # cost a whole run: `-Wunterminated-string-initialization` is a
+          # gcc 15 option, manylinux_2_28 ships gcc 14.2.1, and gcc does not
+          # ignore `-Wno-error=` for a warning it has never heard of -- it
+          # errors (`no option '-Wunterminated-string-initialization'`). Five
+          # builds failed after five *successful* mounts, and the summary
+          # read as five overlay refusals.
           SCRIPT='set -e
             mkdir -p /ovl/up /ovl/wd /mp
             mount -t overlay overlay -o lowerdir=/src-ro,upperdir=/ovl/up,workdir=/ovl/wd /mp
             echo "  mount: ok"
-            make -C /mp/mpy-cross CFLAGS_EXTRA=-Wno-error=unterminated-string-initialization -j"$(nproc)" >/dev/null 2>&1
+            FLAG=-Wno-error=unterminated-string-initialization
+            printf "" | gcc "$FLAG" -x c -c -o /dev/null - >/dev/null 2>&1 || FLAG=
+            echo "  cflags: ${FLAG:-<none needed, gcc predates the warning>}"
+            make -C /mp/mpy-cross ${FLAG:+CFLAGS_EXTRA="$FLAG"} -j"$(nproc)" >/tmp/build.log 2>&1 \
+              || { echo "  build: FAILED"; tail -15 /tmp/build.log; exit 1; }
             echo "  build: ok ($(stat -c %s /mp/mpy-cross/build/mpy-cross) bytes)"
             echo "  upper: $(du -sh /ovl/up | cut -f1)"'
 
