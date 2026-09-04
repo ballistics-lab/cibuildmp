@@ -539,10 +539,11 @@ that answer -- the exact process type every subsequent `call()` uses. `_kernel_i
 `_probe_platform()` are unchanged and still used by `run()`, which still asks the right question
 for its own process model.
 
-Not yet re-verified live on the arm runner -- this addendum records the fix and the reasoning;
-whoever picks this up next should treat the arm leg of `build-examples.yml` as unverified until a
-run after this lands is read directly, the same caution addendum 6 itself asked for and the same
-one that caught it not having been followed.
+**Verified live**, `build-examples.yml` run 33886911279 (`f6fe906`): every job green, including
+`build-usermod (ubuntu-24.04-arm, ...)` (4m17s -- the exact leg that was failing) and
+`build-usermod (ubuntu-latest, ...manylinux_2_28_x86_64...)` (9m12s). `unix` is now genuinely green
+end to end, on both the native and the `linux32`-wrapped leg -- not just locally, and not just
+"pushed."
 
 ### One unrelated thing noticed on the way
 
