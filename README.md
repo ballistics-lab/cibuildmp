@@ -378,6 +378,45 @@ comments record three separate ways a shared `BUILD` directory silently
 produces the *wrong* arch's binary. Read it when your own build starts
 doing something strange, not before.
 
+### More than one module
+
+**natmod: one module per config, one config per directory.** `module-dir`
+names where *one* module's Makefile lives — pointing it at a parent
+directory holding several is a mis-scoped config, not a multi-module
+mechanism, and `collect_output()`'s refusal of an ambiguous two-`.mpy`
+result is exactly the guard that catches it. A project with two natmod
+modules gives each its own directory and config and runs `cibuildmp` once
+per module, into its own `output-dir` — [`examples/template`](examples/template)
+and [`examples/wasm2mpy`](examples/wasm2mpy) are already two modules, two
+configs, two invocations, two independent trees, side by side in this
+repo. Composing the results into one artifact set is your own workflow's
+job, the same way running `cibuildmp` twice is ([0057][0057]).
+
+**usermod: `user-c-modules` stays one path; N modules are your own
+layout.** `cibuildmp` never grows a list here — MicroPython's own two
+build systems already have a convention for it, and it differs by port:
+
+- **Make ports** put every module in its own subdirectory under the path
+  `user-c-modules` names, each with its own `micropython.mk`. `py/py.mk`
+  globs `<user-c-modules>/*/micropython.mk` on its own; nothing else to
+  write.
+- **CMake ports** point `user-c-modules` at one `micropython.cmake` that
+  `include()`s the others. [`examples/usercmodule/micropython.cmake`](examples/usercmodule/micropython.cmake)
+  is a real, working one, built by this project's own CI across all six
+  ports ([0069][0069]).
+
+The two forms are not symmetric, and that asymmetry is upstream's, not
+`cibuildmp`'s: pointed at the same directory, a Make port's glob picks up
+every subdirectory it finds, while a CMake port only builds what its
+`micropython.cmake` explicitly `include()`s. Upstream's own
+`examples/usercmodule/` shows exactly this — three real modules
+(`cexample`, `cppexample`, `subpackage`) reachable via the Make glob with
+no aggregator file at all, but upstream's own aggregator only lists the
+first two. `examples/usercmodule/micropython.cmake` above is this
+project's own file for that reason: it `include()`s upstream's aggregator
+*and* `subpackage`, so the fixture builds the same three modules on every
+port ([0057][0057]/[0069][0069]).
+
 ## Identifiers and selectors
 
 Every buildable thing — one natmod arch, one usermod port/board/arch cell —
@@ -730,7 +769,9 @@ naming a scalar option in `inherit` is a config error, not a silent no-op.
 [0038]: docs/records/0038-m5-adopt-in-three-repos.md
 [0043]: docs/records/0043-unix-adopts-cibuildwheel-native-image-model.md
 [0052]: docs/records/0052-config-is-a-tree-not-a-selector-matrix.md
+[0057]: docs/records/0057-multiple-modules-per-build.md
 [0058]: docs/records/0058-image-groups-are-toolchains-not-ports.md
+[0069]: docs/records/0069-upstream-usercmodule-narrow-ci-slice.md
 [0071]: docs/records/0071-micropython-placeholder-in-user-c-modules.md
 [0072]: docs/records/0072-natmod-micropython-placeholder-and-upstream-natmod-ci.md
 [0074]: docs/records/0074-usermod-family-table-and-retired-table-messages-removed.md
