@@ -285,3 +285,40 @@ removed with `--rm`) or a tmpfs works.
 - **Whether `mpy_dir` stops being a host path in cibuildmp's own API.** Every build driver takes
   it as one today and embeds it in `make` command lines; under the overlay the container-side path
   (`/mp`) is what those commands need, and the host path is only what gets bind-mounted.
+
+## Addendum 3, 2026-09-04 — every port that could not redirect `BUILD=` builds through the overlay
+
+Addendum 2 left "a full port build through the overlay" open, naming `unix` and `rp2` as the two
+that mattered. Both were run, on a clean `v1.24.1` checkout mounted `:ro`, upper on an anonymous
+volume:
+
+| build | result | host checkout afterwards |
+| --- | --- | --- |
+| `mpy-cross`, no `BUILD=` | 4.7 s, 407760 B | unchanged |
+| `unix` `MICROPY_STANDALONE=1` (libffi from source) | **24 s**, 709416 B, binary runs — `MicroPython v1.24.1` | unchanged |
+| `rp2` `BOARD=RPI_PICO` (CMake, no `BUILD=`) | **44.6 s**, `firmware.uf2` 667648 B | unchanged |
+
+`unix` is the decisive one. `ports/unix/Makefile:299` ran libffi's `autogen.sh` and wrote
+`configure` into the source tree — verified by printing `/mp/lib/libffi/configure` from inside the
+container — and the host's own `lib/libffi/configure` still did not exist afterwards. The write
+that made a plain `:ro` bind impossible now happens, in the right place, and evaporates with the
+container. Overlay upper: 72 MB for `unix`, 101 MB for `rp2`.
+
+Two things this did **not** settle:
+
+- **`esp32`.** Untested; it needs the ESP-IDF image and its own toolchain provisioning, and
+  nothing about its shape suggests a different answer, but that is an expectation, not a result.
+- **The GitHub Actions runner.** Still the one blocking unknown, and now the *only* one:
+  everything else in addendum 2's open list is answered. If `--cap-add SYS_ADMIN` with relaxed
+  apparmor/seccomp is refused there, addendum 1's scratch directory is the fallback and both paths
+  have to coexist — which is why that code stays rather than being reverted now.
+
+**A cleanup mistake worth recording, since the next person will reach for the same command.**
+Clearing build state from a cached checkout with a name pattern (`find -type d -name "build" -o
+-name "build-*"`) destroys upstream *source*: the release tarball vendors submodules that ship
+directories called exactly that — `lib/protobuf-c/build-cmake`,
+`lib/alif-security-toolkit/toolkit/build`, `lib/CMSIS_5/CMSIS/DSP/SDFTools/examples/build`,
+`lib/tinyusb/.claude/skills/build-doc`. Six cached tags were damaged this way this session, and
+`.cibuildmp-complete` went on marking them valid, so `sources.py:152` would have kept serving
+them. The recovery is to delete the stamp, not to repair the tree. Delete only the paths cibuildmp
+itself creates, named explicitly, and never below `lib/`.
