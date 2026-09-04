@@ -1129,6 +1129,7 @@ def build_unix(
         mpy_dir,
         image=docker_image,
         oci_platform=oci_platform,
+        linux32=linux32,
         mounts=[staging, *_project_mounts(opts, package_dir)],
     ) as container:
         container.overlay(mpy_dir)

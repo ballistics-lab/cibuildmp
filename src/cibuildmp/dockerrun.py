@@ -824,9 +824,12 @@ class Container:
         ro_mounts: list[Path] | None = None,
         env: dict[str, str] | None = None,
         overlay: bool = True,
+        linux32: bool = False,
     ) -> None:
         self.image = image
         self.oci_platform = oci_platform
+        self.linux32 = linux32
+        self._linux32_prefix: list[str] = []
         self.mounts = list(mounts or [])
         # Separate from `mounts` rather than a `(path, mode)` tuple list:
         # every read-only mount here is a *lowerdir* for `overlay()`, which
@@ -868,6 +871,25 @@ class Container:
         self._docker(command, what="create", quiet=True)
         self._docker(["docker", "start", self.name], what="start", quiet=True)
         self._started = True
+        # `linux32`, resolved once for the container rather than per command
+        # -- `run()` does the same probe per invocation, which is the only
+        # difference a long-lived container makes here.
+        #
+        # **Not optional, and not cosmetic.** Live CI failure on an
+        # `ubuntu-24.04-arm` runner building `manylinux_2_31_armv7l`: with
+        # no `linux32`, `uname -m` inside a correctly-selected 32-bit
+        # container still reports the *kernel's* `aarch64`, libffi's own
+        # `configure` picks the wrong machine-dependent sources, and the
+        # port links against a `libffi.a` with no `ffi_call` in it at all
+        # (`undefined reference to 'ffi_call'`, `ffi_prep_cif_machdep`, …).
+        # Omitting it here is what that failure was -- the first version of
+        # this class simply did not carry the flag `run()` already had.
+        if (
+            self.linux32
+            and self.oci_platform is not None
+            and _kernel_is_64bit(self.image, self.oci_platform)
+        ):
+            self._linux32_prefix = ["linux32"]
         return self
 
     def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
@@ -981,7 +1003,7 @@ class Container:
             exec_command += ["--user", str(_host_user())]
         for key, value in (env or {}).items():
             exec_command += ["-e", f"{key}={value}"]
-        exec_command += [self.name, *command]
+        exec_command += [self.name, *self._linux32_prefix, *command]
         return self._docker(
             exec_command,
             what=" ".join(command),
@@ -1119,6 +1141,7 @@ def overlay_container(
     oci_platform: str | None = None,
     mounts: list[Path] | None = None,
     env: dict[str, str] | None = None,
+    linux32: bool = False,
 ) -> Container:
     """A `Container` with `lower` already declared as a read-only bind, ready
     for `overlay(lower)` once entered.
@@ -1135,4 +1158,5 @@ def overlay_container(
         ro_mounts=[lower],
         env=env,
         overlay=True,
+        linux32=linux32,
     )

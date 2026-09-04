@@ -280,3 +280,39 @@ def test_copy_out_uses_exec_tar_not_docker_cp(monkeypatch, tmp_path):
     extractor = next(c for c in recorded if c[0] == "tar")
     assert "--no-same-owner" in extractor
     assert (tmp_path / "out" / "bin").read_bytes() == b"ELF"
+
+
+def test_linux32_wraps_every_command_when_the_kernel_is_64_bit(calls, monkeypatch):
+    """Live CI failure on `ubuntu-24.04-arm` building
+    `manylinux_2_31_armv7l`: without `linux32`, `uname -m` inside a
+    correctly-selected 32-bit container still reports the kernel's
+    `aarch64`, libffi's `configure` picks the wrong machine-dependent
+    sources, and the port links against a `libffi.a` with no `ffi_call` in
+    it. The first version of this class simply did not carry the flag
+    `run()` already had."""
+    monkeypatch.setattr(dockerrun, "_kernel_is_64bit", lambda image, platform: True)
+    monkeypatch.setattr(dockerrun, "host_oci_platform", lambda: "linux/arm64")
+
+    with dockerrun.Container(
+        image="img", oci_platform="linux/arm/v7", linux32=True
+    ) as container:
+        container.call(["make"], workdir=PurePosixPath("/"))
+
+    exec_call = next(c for c in calls if c[:2] == ["docker", "exec"])
+    assert exec_call[-2:] == ["linux32", "make"]
+
+
+def test_no_linux32_when_the_kernel_is_already_32_bit(calls, monkeypatch):
+    """Wrapping unconditionally would be wrong on a genuinely 32-bit
+    kernel, where `linux32` may not exist at all -- upstream probes rather
+    than assuming, and so does this."""
+    monkeypatch.setattr(dockerrun, "_kernel_is_64bit", lambda image, platform: False)
+    monkeypatch.setattr(dockerrun, "host_oci_platform", lambda: "linux/arm64")
+
+    with dockerrun.Container(
+        image="img", oci_platform="linux/arm/v7", linux32=True
+    ) as container:
+        container.call(["make"], workdir=PurePosixPath("/"))
+
+    exec_call = next(c for c in calls if c[:2] == ["docker", "exec"])
+    assert "linux32" not in exec_call
