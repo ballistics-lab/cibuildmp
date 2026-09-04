@@ -119,6 +119,14 @@ def _resolved_build_dir(port: str, identifier: str) -> Path:
     # The `mpy_dir` parameter is gone rather than ignored: a build
     # directory that no longer has anything to do with the checkout should
     # not still be asking for it.
+    #
+    # For a port already on the container model ([0095]'s addendum 2,
+    # `unix` today) this path is never created on the host at all -- it is
+    # resolved the same way and then only ever exists *inside* the
+    # container, which has no host mount there, so the objects live and die
+    # with it. That is why this can stay one function for both: the string
+    # is the same, and what differs is only whether anything on the host
+    # ends up at it.
     return sources.scratch_root() / "ports" / port / f"build-{identifier}"
 
 
@@ -339,6 +347,30 @@ def build_one(
     build_options = options.build_options(target)
     port_opts = _port_build_options(build_options, mpy_dir, options.package_dir)
 
+    # Where a container-model port hands its finished artifact back
+    # ([0095]). Under that model the build tree lives inside the container
+    # and there is no host path to read a result from -- the container
+    # writes into this directory, which is the one read-write mount it
+    # gets, and the collection below then does exactly what it always did.
+    #
+    # Under `output_dir` rather than a system temp directory on purpose:
+    # this holds *output*, briefly, in the one place output already lives
+    # (already carrying its own `.gitignore` of `*`, written below), so a
+    # crashed run leaves the evidence next to the artifacts instead of
+    # somewhere the user has to be told about. Removed as soon as the
+    # artifact is collected -- `build-<identifier>` rather than a random
+    # name so a leftover names the build it came from.
+    # `.resolve()`, not the bare join: `output_dir` defaults to a *relative*
+    # "mpyhouse" (and `package_dir` to "."), while `dockerrun` bind-mounts
+    # this path and Docker rejects a relative mount source outright --
+    # `invalid mount path: 'mpyhouse/.build-...' mount path must be
+    # absolute`, live-caught on the first real build through this path.
+    staging = (
+        options.package_dir / options.output_dir / f".build-{target.identifier}"
+    ).resolve()
+    shutil.rmtree(staging, ignore_errors=True)
+    staging.mkdir(parents=True, exist_ok=True)
+
     # `build_dir` (unix/windows/qemu/webassembly only -- esp32 has none,
     # see Esp32BuildOptions, and uses ESP-IDF's own CMake-based staleness
     # tracking instead of a raw Makefile) is
@@ -372,6 +404,7 @@ def build_one(
         toolchain_root=toolchain_root,
         quiet=quiet,
         package_dir=options.package_dir,
+        staging=staging,
     )
 
     # options.output_dir is deliberately relative ("mpyhouse" by default,
@@ -450,6 +483,12 @@ def build_one(
             shutil.copytree(companion, target_path, dirs_exist_ok=True)
         else:
             shutil.copy(companion, target_path)
+
+    # The staging directory has served its one purpose. Removed here rather
+    # than left for `--clean-cache`: it lives inside the user's own output
+    # directory, and an artifact plus a `.build-*` copy of it side by side
+    # is exactly the kind of thing someone would ship by accident.
+    shutil.rmtree(staging, ignore_errors=True)
 
     return UsermodBuildResult(
         identifier=target.identifier, output=dest, duration=time.time() - start

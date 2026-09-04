@@ -65,6 +65,7 @@ def build_webassembly(
     toolchain_root: Path | None = None,
     quiet: bool = False,
     package_dir: Path | None = None,
+    staging: Path | None = None,
 ) -> Path:
     """Build ports/webassembly for `opts.variant`, returning the produced
     `micropython.mjs`.

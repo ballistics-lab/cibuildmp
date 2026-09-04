@@ -125,6 +125,7 @@ def build_esp32(
     toolchain_root: Path | None = None,
     quiet: bool = False,
     package_dir: Path | None = None,
+    staging: Path | None = None,
 ) -> Path:
     """Build ports/esp32 for `opts.board`, returning the produced
     `micropython.bin`.

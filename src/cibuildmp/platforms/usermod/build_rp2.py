@@ -66,6 +66,7 @@ def build_rp2(
     toolchain_root: Path | None = None,
     quiet: bool = False,
     package_dir: Path | None = None,
+    staging: Path | None = None,
 ) -> Path:
     """Build ports/rp2 for `opts.board`, returning the produced
     `firmware.uf2`.

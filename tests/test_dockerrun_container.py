@@ -187,6 +187,36 @@ def test_call_passes_workdir_and_env_to_exec(calls):
     assert exec_call[-3:] == ["make", "-C", "/mp"]
 
 
+def test_call_runs_as_the_host_user_not_root(calls, monkeypatch):
+    """The container is created as root because `mount -t overlay` needs
+    CAP_SYS_ADMIN, but a build that stays root writes root-owned files into
+    every read-write mount -- the user cannot then delete their own
+    `mpyhouse/` without sudo. Exactly one command needs the capability."""
+    monkeypatch.setattr(dockerrun.os, "getuid", lambda: 1000, raising=False)
+    monkeypatch.setattr(dockerrun.os, "getgid", lambda: 1000, raising=False)
+
+    with dockerrun.Container(image="img") as container:
+        container.call(["make"], workdir=PurePosixPath("/"))
+
+    exec_call = next(c for c in calls if c[:2] == ["docker", "exec"])
+    assert "--user" in exec_call
+    assert exec_call[exec_call.index("--user") + 1] == "1000:1000"
+
+
+def test_the_overlay_mount_is_the_one_command_that_stays_root(calls, monkeypatch):
+    monkeypatch.setattr(dockerrun.os, "getuid", lambda: 1000, raising=False)
+    monkeypatch.setattr(dockerrun.os, "getgid", lambda: 1000, raising=False)
+
+    with dockerrun.overlay_container(Path("/checkout"), image="img") as container:
+        container.overlay(Path("/checkout"))
+        container.call(["make"], workdir=PurePosixPath("/"))
+
+    mount_call = next(c for c in calls if "lowerdir=" in c[-1])
+    build_call = next(c for c in calls if c[-1] == "make")
+    assert "--user" not in mount_call
+    assert "--user" in build_call
+
+
 def test_a_timed_out_call_kills_the_container_rather_than_only_the_cli(
     monkeypatch, calls
 ):

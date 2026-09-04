@@ -21,6 +21,7 @@ from __future__ import annotations
 import os
 import shlex
 from pathlib import Path
+from typing import Any
 
 # `natmod` needed this same per-tag `CFLAGS_EXTRA` fact for its own
 # `mpy-cross` build ([0091]) and cannot import `usermod` (the established
@@ -162,6 +163,7 @@ def probe_supported_cflags(
     oci_platform: str | None = None,
     linux32: bool = False,
     timeout: float | None = None,
+    container: Any = None,
 ) -> tuple[str, ...]:
     """Every `-Wno-error=<diagnostic>` in `candidates` this image's own
     `compiler` actually recognizes, in the same order -- live-checked
@@ -228,16 +230,29 @@ def probe_supported_cflags(
         )
         + "; true"
     )
-    output = dockerrun.run(
-        ["sh", "-c", probe],
-        mounts=[],
-        workdir=Path("/"),
-        image=image,
-        timeout=timeout,
-        oci_platform=oci_platform,
-        linux32=linux32,
-        capture_output=True,
-    )
+    # `container`, when given, is a `dockerrun.Container` already running
+    # this exact image ([0095]) -- one `docker exec` instead of a whole
+    # `docker run --rm`, and the same container the build itself will use,
+    # so a probe can never disagree with the compiler that runs later.
+    # `None` keeps the pre-[0095] path for the ports not migrated yet.
+    if container is not None:
+        output = container.call(
+            ["sh", "-c", probe],
+            workdir=Path("/"),
+            timeout=timeout,
+            capture_output=True,
+        )
+    else:
+        output = dockerrun.run(
+            ["sh", "-c", probe],
+            mounts=[],
+            workdir=Path("/"),
+            image=image,
+            timeout=timeout,
+            oci_platform=oci_platform,
+            linux32=linux32,
+            capture_output=True,
+        )
     supported = set((output or "").split())
     return tuple(flag for flag in candidates if flag in supported)
 
@@ -251,6 +266,7 @@ def container_mpy_cross(
     linux32: bool = False,
     timeout: float | None = None,
     extra_cflags: tuple[str, ...] = (),
+    container: Any = None,
 ) -> Path:
     """Build `mpy-cross` **inside `image`** and return the binary, for the
     port build to pass as `MICROPY_MPYCROSS=`.
@@ -311,27 +327,45 @@ def container_mpy_cross(
     """
     from ... import dockerrun
 
-    build_dir = scratch_root() / "mpy-cross" / f"build-{slug}"
+    # Inside the container's own overlay when one is running ([0095]), so
+    # this binary lives and dies with the build that needs it: it is keyed
+    # on the image, and the pre-[0095] existence check under
+    # `scratch_root()` could not tell one image's binary from another's.
+    # `MICROPY_MPYCROSS=` still names it by path, which is why the path has
+    # to be one the *container* can see -- the overlay puts the checkout at
+    # its own host path, so `mpy_dir/mpy-cross/build` is exactly that.
+    build_dir = (
+        mpy_dir / "mpy-cross" / "build"
+        if container is not None
+        else scratch_root() / "mpy-cross" / f"build-{slug}"
+    )
     binary = build_dir / "mpy-cross"
-    if binary.exists():
+    if container is None and binary.exists():
         return binary
 
+    make_command = [
+        "make",
+        "-C",
+        (mpy_dir / "mpy-cross").as_posix(),
+        f"BUILD={build_dir.as_posix()}",
+        # `mpy-cross` compiles `py/` too, so a diagnostic that stops a
+        # port build stops this one first -- live-caught in CI
+        # (33636118022): `v1.20.0`'s `-Werror=dangling-pointer=` in
+        # `py/stackctrl.c` failed here, before the port's own make ever
+        # ran, while the row's `cflags_extra` was reaching only the
+        # port. Anything the caller needs relaxed for its own sources
+        # has to be relaxed for this build as well.
+        *([f"CFLAGS_EXTRA={' '.join(extra_cflags)}"] if extra_cflags else []),
+        f"-j{os.cpu_count() or 1}",
+    ]
+    if container is not None:
+        container.call(make_command, workdir=mpy_dir / "mpy-cross", timeout=timeout)
+        # No host-side existence check: the binary is inside the container.
+        # `make` exiting non-zero is already a `UsermodBuildError`, which is
+        # the same signal the check below was standing in for.
+        return binary
     dockerrun.run(
-        [
-            "make",
-            "-C",
-            (mpy_dir / "mpy-cross").as_posix(),
-            f"BUILD={build_dir.as_posix()}",
-            # `mpy-cross` compiles `py/` too, so a diagnostic that stops a
-            # port build stops this one first -- live-caught in CI
-            # (33636118022): `v1.20.0`'s `-Werror=dangling-pointer=` in
-            # `py/stackctrl.c` failed here, before the port's own make ever
-            # ran, while the row's `cflags_extra` was reaching only the
-            # port. Anything the caller needs relaxed for its own sources
-            # has to be relaxed for this build as well.
-            *([f"CFLAGS_EXTRA={' '.join(extra_cflags)}"] if extra_cflags else []),
-            f"-j{os.cpu_count() or 1}",
-        ],
+        make_command,
         # `scratch_root()` alongside `mpy_dir`: `make -C <mpy_dir>/mpy-cross`
         # reads its sources from the checkout and writes every object into
         # `BUILD=`, which is no longer inside it ([0095]).

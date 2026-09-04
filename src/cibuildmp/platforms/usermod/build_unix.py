@@ -46,7 +46,7 @@ import os
 import shlex
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Literal
+from typing import Any, Literal
 
 from . import build_common
 from .build_common import UsermodBuildError, usermod_mounts
@@ -503,6 +503,7 @@ def run_unix_deplibs(
     *,
     docker_image: str,
     package_dir: Path | None = None,
+    container: Any = None,
 ) -> None:
     """MICROPY_STANDALONE=1 only makes libffi a DEPLIBS entry, not a
     prerequisite of the default build target -- must run as its own step
@@ -577,6 +578,13 @@ def run_unix_deplibs(
     ]
     from ... import dockerrun
 
+    if container is not None:
+        container.call(
+            command,
+            workdir=_unix_dir(mpy_dir),
+            timeout=dockerrun.timeout_for("unix", opts.target),
+        )
+        return
     dockerrun.run(
         command,
         mounts=usermod_mounts(
@@ -832,6 +840,7 @@ def repair_unix_binary(
     linux32: bool,
     timeout: float | None,
     mounts: list[Path],
+    container: Any = None,
 ) -> None:
     """`cibuildmp`'s own `auditwheel repair`, for the one artifact type
     `auditwheel` cannot touch at all: a bare executable rather than a
@@ -897,6 +906,9 @@ for lib in {libs_q}; do
 done
 patchelf --set-rpath '$ORIGIN/lib' {bin_q}
 """
+    if container is not None:
+        container.call(["bash", "-c", script], workdir=binary.parent, timeout=timeout)
+        return
     dockerrun.run(
         ["bash", "-c", script],
         mounts=mounts,
@@ -1003,6 +1015,7 @@ def build_unix(
     toolchain_root: Path | None = None,
     quiet: bool = False,
     package_dir: Path | None = None,
+    staging: Path | None = None,
 ) -> Path:
     """Build ports/unix for `opts.target`, returning the produced binary.
 
@@ -1092,6 +1105,73 @@ def build_unix(
     linux32 = dockerrun.needs_linux32("unix", opts.target)
     timeout = dockerrun.timeout_for("unix", opts.target)
 
+    if staging is None:
+        msg = (
+            "unix builds need a staging directory to hand the artifact back "
+            "through ([0095]); orchestrate.build_one() provides one"
+        )
+        raise UsermodBuildError(msg)
+
+    # One container for the whole build ([0095]), where there used to be a
+    # separate `docker run --rm` per step -- deplibs, two `cflags` probes,
+    # `mpy-cross`, the port's own `make`, and `repair_unix_binary()`, six in
+    # all. Beyond the obvious saving, it is what makes the probes *mean*
+    # something: they now ask the very compiler that is about to run,
+    # inside the same filesystem, rather than a fresh container of the same
+    # image and a hope that nothing differs.
+    #
+    # `mpy_dir` is the overlay's lower layer, so the checkout is visible at
+    # its own host path and writable *inside*, and the host copy is never
+    # touched. `staging` and the user's own project are ordinary read-write
+    # and read-only mounts respectively: the build reads the module's
+    # sources and writes exactly one thing outward, the finished artifact.
+    with dockerrun.overlay_container(
+        mpy_dir,
+        image=docker_image,
+        oci_platform=oci_platform,
+        mounts=[staging, *_project_mounts(opts, package_dir)],
+    ) as container:
+        container.overlay(mpy_dir)
+        return _build_unix_in(
+            opts,
+            mpy_dir,
+            container=container,
+            staging=staging,
+            settings=settings,
+            docker_image=docker_image,
+            oci_platform=oci_platform,
+            linux32=linux32,
+            timeout=timeout,
+            package_dir=package_dir,
+        )
+
+
+def _project_mounts(opts: UnixBuildOptions, package_dir: Path | None) -> list[Path]:
+    """The user's own project, mounted so a module whose sources reach
+    outside `USER_C_MODULES` still resolves -- `usermod_mounts()`'s own
+    reasoning, minus `mpy_dir`, which arrives through the overlay instead."""
+    mounts = [Path(opts.user_c_modules)]
+    if package_dir is not None:
+        mounts.append(package_dir.resolve())
+    return mounts
+
+
+def _build_unix_in(
+    opts: UnixBuildOptions,
+    mpy_dir: Path,
+    *,
+    container: Any,
+    staging: Path,
+    settings: UnixArchSettings,
+    docker_image: str,
+    oci_platform: str | None,
+    linux32: bool,
+    timeout: float | None,
+    package_dir: Path | None,
+) -> Path:
+    """`build_unix()`'s own body, once the container exists."""
+    from ... import dockerrun  # noqa: F401  -- re-exported names used below
+
     # `_riscv64_ffi_unported()`'s own comment: `deplibs`' entire job is
     # building `lib/libffi`, which is a hard `configure: error` on these
     # (tag, riscv64) pairs regardless of anything cibuildmp does --
@@ -1099,7 +1179,11 @@ def build_unix(
     # gets a chance to make it unnecessary.
     if settings.standalone and not _riscv64_ffi_unported(opts.target, opts.tag):
         run_unix_deplibs(
-            opts, mpy_dir, docker_image=docker_image, package_dir=package_dir
+            opts,
+            mpy_dir,
+            docker_image=docker_image,
+            package_dir=package_dir,
+            container=container,
         )
 
     # `unix_extra_cflags()`'s own candidates include `-Wno-error=
@@ -1129,6 +1213,7 @@ def build_unix(
         oci_platform=oci_platform,
         linux32=linux32,
         timeout=timeout,
+        container=container,
     )
     build_cflags = (
         mpy_cross_cflags
@@ -1140,6 +1225,7 @@ def build_unix(
             oci_platform=oci_platform,
             linux32=linux32,
             timeout=timeout,
+            container=container,
         )
     )
 
@@ -1151,29 +1237,42 @@ def build_unix(
         oci_platform=oci_platform,
         linux32=linux32,
         timeout=timeout,
+        container=container,
     )
-    command = unix_make_command(
-        opts, mpy_dir, mpy_cross=mpy_cross, extra_cflags=build_cflags
-    )
-    dockerrun.run(
-        command,
-        mounts=usermod_mounts(
-            mpy_dir, Path(opts.user_c_modules), package_dir=package_dir
+    container.call(
+        unix_make_command(
+            opts, mpy_dir, mpy_cross=mpy_cross, extra_cflags=build_cflags
         ),
         workdir=_unix_dir(mpy_dir),
-        image=docker_image,
         timeout=timeout,
-        oci_platform=oci_platform,
-        linux32=linux32,
     )
 
-    binary = opts.build_dir / "micropython"
+    # The binary exists only inside the container until this copy. `staging`
+    # is the one read-write mount, so a plain `cp` inside is all it takes --
+    # no `docker cp`, which cannot see a mount the container made itself
+    # (see `Container.copy_out()`), and no host-side temporary directory.
+    #
+    # Copied *before* the checks below rather than after, because every one
+    # of them reads the ELF with Python on the host, and there is no host
+    # path to read until now.
+    binary = staging / "micropython"
+    container.call(
+        ["cp", (opts.build_dir / "micropython").as_posix(), binary.as_posix()],
+        workdir=_unix_dir(mpy_dir),
+        timeout=timeout,
+    )
     if not binary.exists():
         raise UsermodBuildError(
             f"unix/{opts.target}: build reported success but {binary} is missing"
         )
     verify_unix_output(opts.target, binary)
     verify_unix_floor(opts.target, binary)
+    # Repair operates on the staged copy, not on the build tree: `staging`
+    # is visible at the same path on both sides, so `ldd` resolves against
+    # the container's own libraries (which is the whole point -- they are
+    # the ones the binary was linked against) while the `lib/` it vendors
+    # lands straight on the host beside the artifact, where
+    # `unix_companions()` looks for it.
     repair_unix_binary(
         opts.target,
         binary,
@@ -1181,9 +1280,8 @@ def build_unix(
         oci_platform=oci_platform,
         linux32=linux32,
         timeout=timeout,
-        mounts=usermod_mounts(
-            mpy_dir, Path(opts.user_c_modules), package_dir=package_dir
-        ),
+        mounts=[],
+        container=container,
     )
     return binary
 

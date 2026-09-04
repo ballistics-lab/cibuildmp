@@ -1,5 +1,6 @@
 import json
 import re
+import shutil
 from pathlib import Path
 
 import pytest
@@ -47,6 +48,29 @@ FAKE_X86_64_ELF = (
 )
 
 
+def stage_on_cp(cmd, payload: bytes = b"") -> None:
+    """Record 0095: a `unix` build's artifact exists only inside the
+    container until one `cp` into the staging directory, so a fake
+    `subprocess.run` has to perform that copy or nothing on the host ever
+    appears. `payload` defaults to whatever the source file holds, so a test
+    that wrote a stub at the build directory gets that stub through.
+    """
+    if cmd[:2] != ["docker", "exec"] or "cp" not in cmd:
+        return
+    source, dest = (Path(p) for p in cmd[cmd.index("cp") + 1 :][:2])
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if payload:
+        dest.write_bytes(payload)
+    elif source.exists():
+        shutil.copy(source, dest)
+    else:
+        # The fake `make` above writes its stub at one fixed identifier's
+        # build directory; a test using another identifier still needs an
+        # artifact to come out, and what matters to these tests is that one
+        # exists, not which bytes it holds.
+        dest.write_bytes(FAKE_X86_64_ELF)
+
+
 def write_config(tmp_path: Path, text: str) -> Path:
     path = tmp_path / "cibuildmp.toml"
     path.write_text(text)
@@ -92,6 +116,7 @@ def test_build_one_unix_writes_into_output_dir_identifier(tmp_path, monkeypatch)
         )
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
+        stage_on_cp(cmd)
 
     monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
     (mpy_dir / "ports" / "unix").mkdir(parents=True)
@@ -124,6 +149,7 @@ def test_build_one_writes_a_gitignore_into_output_dir(tmp_path, monkeypatch):
         )
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
+        stage_on_cp(cmd)
 
     monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
     (mpy_dir / "ports" / "unix").mkdir(parents=True)
@@ -155,12 +181,17 @@ def test_build_one_substitutes_micropython_placeholder_in_user_c_modules(
     captured = {}
 
     def fake_run(cmd, **kwargs):
-        captured["cmd"] = cmd
+        # The port's own `make`, not whatever ran last: every step is a
+        # `docker exec` in one container since record 0095, and teardown
+        # (`docker rm`) is now the final call.
+        if any("USER_C_MODULES" in str(a) for a in cmd):
+            captured["cmd"] = cmd
         build_dir = (
             scratch_root() / "ports" / "unix" / "build-unix-manylinux_2_28_x86_64"
         )
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
+        stage_on_cp(cmd)
 
     monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
     (mpy_dir / "ports" / "unix").mkdir(parents=True)
@@ -217,6 +248,7 @@ def test_build_one_threads_name_and_version_into_the_output_filename(
         )
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
+        stage_on_cp(cmd)
 
     monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
     (mpy_dir / "ports" / "unix").mkdir(parents=True)
@@ -260,7 +292,11 @@ def test_build_one_qemu_uses_default_board_not_empty_string(tmp_path, monkeypatc
     captured = {}
 
     def fake_run(cmd, **kwargs):
-        captured["cmd"] = cmd
+        # The port's own `make`, not whatever ran last: every step is a
+        # `docker exec` in one container since record 0095, and teardown
+        # (`docker rm`) is now the final call.
+        if any("USER_C_MODULES" in str(a) for a in cmd):
+            captured["cmd"] = cmd
         build_dir = scratch_root() / "ports" / "qemu" / "build-qemu"
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "firmware.elf").write_bytes(FAKE_X86_64_ELF)
@@ -304,6 +340,7 @@ def test_build_one_writes_combined_manifest_when_present(tmp_path, monkeypatch):
         )
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
+        stage_on_cp(cmd)
 
     monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
     (mpy_dir / "ports" / "unix").mkdir(parents=True)
@@ -335,7 +372,11 @@ def test_build_one_esp32_passes_board_through(tmp_path, monkeypatch):
     captured = {}
 
     def fake_run(cmd, **kwargs):
-        captured["cmd"] = cmd
+        # The port's own `make`, not whatever ran last: every step is a
+        # `docker exec` in one container since record 0095, and teardown
+        # (`docker rm`) is now the final call.
+        if any("USER_C_MODULES" in str(a) for a in cmd):
+            captured["cmd"] = cmd
         build_dir = mpy_dir / "ports" / "esp32" / "build-ESP32_GENERIC_S3"
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython.bin").write_bytes(FAKE_X86_64_ELF)
@@ -373,7 +414,11 @@ def test_build_one_esp32_threads_real_idf_version_and_target(tmp_path, monkeypat
     captured = {}
 
     def fake_run(cmd, **kwargs):
-        captured["cmd"] = cmd
+        # The port's own `make`, not whatever ran last: every step is a
+        # `docker exec` in one container since record 0095, and teardown
+        # (`docker rm`) is now the final call.
+        if any("USER_C_MODULES" in str(a) for a in cmd):
+            captured["cmd"] = cmd
         build_dir = mpy_dir / "ports" / "esp32" / "build-ESP32_GENERIC_C3"
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython.bin").write_bytes(FAKE_X86_64_ELF)
@@ -431,6 +476,7 @@ def test_build_fetches_micropython_and_skips_the_host_mpy_cross(tmp_path, monkey
         )
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
+        stage_on_cp(cmd)
 
     monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
 
@@ -483,12 +529,16 @@ def test_build_groups_by_tag_and_fetches_once_per_group(tmp_path, monkeypatch):
         # mpy_dirs (one per tag). Two different shapes reach here now:
         # the main build's own bare argv, and run_unix_deplibs()'s own
         # `sh -c "make ... BUILD=... && <fixup>"` (its own docstring) --
-        # a regex over the joined command covers both.
+        # a regex over the joined command covers both. Since record 0095
+        # a third shape reaches here -- `docker create`/`start`/`rm` and the
+        # overlay mount, none of which carry a `BUILD=` -- so a missing
+        # match is now ordinary rather than a broken assumption.
         match = re.search(r"BUILD=(\S+)", " ".join(cmd))
-        assert match
-        build_dir = Path(match.group(1))
-        build_dir.mkdir(parents=True, exist_ok=True)
-        (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
+        if match:
+            build_dir = Path(match.group(1))
+            build_dir.mkdir(parents=True, exist_ok=True)
+            (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
+        stage_on_cp(cmd)
 
     monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
 
@@ -628,6 +678,7 @@ def test_build_one_resolves_relative_output_dir_against_package_dir(
         )
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
+        stage_on_cp(cmd)
 
     monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
     (mpy_dir / "ports" / "unix").mkdir(parents=True)
@@ -663,6 +714,10 @@ def test_build_one_preserves_executable_bit(tmp_path, monkeypatch):
         produced = build_dir / "micropython"
         produced.write_bytes(FAKE_X86_64_ELF)
         produced.chmod(0o755)
+        # `shutil.copy` preserves the mode, which is the thing under test:
+        # the bit has to survive the container-to-staging hop as well as
+        # the collection copy after it.
+        stage_on_cp(cmd)
 
     monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
     (mpy_dir / "ports" / "unix").mkdir(parents=True)
@@ -702,14 +757,21 @@ def test_build_one_copies_repaired_unix_lib_sidecar_alongside_the_binary(
         )
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
+        stage_on_cp(cmd)
         # What a real repair_unix_binary() run leaves behind -- this test
         # stubs dockerrun.subprocess.run entirely, so the real ldd/patchelf
         # invocation never runs; simulating its own output directly is what
         # lets this test exercise build_one()'s own collection step without
         # a real container.
-        lib_dir = build_dir / "lib"
-        lib_dir.mkdir(exist_ok=True)
-        (lib_dir / "libffi.so.6").write_bytes(b"\x7fELF-stub-shared-object")
+        #
+        # Beside the *staged* binary since record 0095, not in the build
+        # tree: repair runs against the staging copy, which is the one both
+        # the container and the host can see, and `unix_companions()` looks
+        # for `lib/` next to the artifact it is given.
+        if cmd[:2] == ["docker", "exec"] and "cp" in cmd:
+            lib_dir = Path(cmd[cmd.index("cp") + 2]).parent / "lib"
+            lib_dir.mkdir(parents=True, exist_ok=True)
+            (lib_dir / "libffi.so.6").write_bytes(b"\x7fELF-stub-shared-object")
 
     monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
     (mpy_dir / "ports" / "unix").mkdir(parents=True)
@@ -740,6 +802,7 @@ def test_build_one_skips_lib_copy_when_no_sidecar_exists(tmp_path, monkeypatch):
         )
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
+        stage_on_cp(cmd)
 
     monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
     (mpy_dir / "ports" / "unix").mkdir(parents=True)
@@ -896,11 +959,20 @@ def test_build_one_collects_vendored_libs_without_the_port_object_tree(
         )
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "micropython").write_bytes(FAKE_X86_64_ELF)
-        lib_dir = build_dir / "lib"
-        (lib_dir / "mbedtls").mkdir(parents=True, exist_ok=True)
-        (lib_dir / "mbedtls" / "aes.o").write_bytes(b"object-file")
-        (lib_dir / "mbedtls" / "aes.P").write_bytes(b"depfile")
-        (lib_dir / "libffi.so.6").write_bytes(b"\x7fELF-stub-shared-object")
+        stage_on_cp(cmd)
+        # The port's own object tree stays in the build directory, which
+        # since record 0095 lives inside the container and is never staged
+        # -- simulated here at the build directory for exactly that reason.
+        port_lib = build_dir / "lib"
+        (port_lib / "mbedtls").mkdir(parents=True, exist_ok=True)
+        (port_lib / "mbedtls" / "aes.o").write_bytes(b"object-file")
+        (port_lib / "mbedtls" / "aes.P").write_bytes(b"depfile")
+        # What `repair_unix_binary()` vendors lands beside the *staged*
+        # binary, which is what `unix_companions()` reads.
+        if cmd[:2] == ["docker", "exec"] and "cp" in cmd:
+            staged_lib = Path(cmd[cmd.index("cp") + 2]).parent / "lib"
+            staged_lib.mkdir(parents=True, exist_ok=True)
+            (staged_lib / "libffi.so.6").write_bytes(b"\x7fELF-stub-shared-object")
 
     monkeypatch.setattr(dockerrun.subprocess, "run", fake_run)
     (mpy_dir / "ports" / "unix").mkdir(parents=True)

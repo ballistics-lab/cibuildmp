@@ -861,11 +861,12 @@ class Container:
         # See this module's own section comment for why the keep-alive is a
         # `sleep` loop rather than `sleep infinity` or an attached bash.
         command += [self.image, "sh", "-c", "while :; do sleep 3600; done"]
-        # `capture_output=True` purely to swallow the container id/name both
-        # commands echo -- neither is useful to a caller watching a build,
-        # and `run()`'s own output has never carried it.
-        self._docker(command, what="create", capture_output=True)
-        self._docker(["docker", "start", self.name], what="start", capture_output=True)
+        # `quiet` purely to swallow the container id/name both commands
+        # echo -- neither is useful to a caller watching a build, and
+        # `run()`'s own output has never carried it. Not `capture_output`,
+        # which would mean claiming to want the output back.
+        self._docker(command, what="create", quiet=True)
+        self._docker(["docker", "start", self.name], what="start", quiet=True)
         self._started = True
         return self
 
@@ -937,6 +938,7 @@ class Container:
                 ),
             ],
             workdir=PurePosixPath("/"),
+            as_root=True,
         )
 
     def call(
@@ -947,17 +949,36 @@ class Container:
         env: dict[str, str] | None = None,
         timeout: float | None = None,
         capture_output: bool = False,
+        as_root: bool = False,
     ) -> str | None:
         """Run one command inside the container and wait for it.
 
         `docker exec` rather than a shell kept open on stdin, so the exit
         code, the timeout and stderr are all the real ones -- see this
         module's own section comment.
+
+        **Runs as the invoking host user unless `as_root`.** The container
+        is *created* as root because `mount -t overlay` needs
+        `CAP_SYS_ADMIN`, which a non-root user does not keep -- but that is
+        needed for exactly one command, `overlay()`'s own mount, and
+        `docker exec --user` lets everything after it drop back down.
+
+        That matters as soon as anything the build produces is written to a
+        read-write mount: a root-built artifact lands root-owned on the
+        host, and the user who ran `cibuildmp` cannot delete their own
+        `mpyhouse/` without `sudo`. `run()` solved the same problem with a
+        container-wide `--user`, which is not available here. Verified
+        live, not assumed: mount as root, `make` under `--user
+        <uid>:<gid>` into the same overlay, copy the result into a
+        read-write mount -- the file arrives on the host owned by the
+        invoking user, mode 755, with no `chown` step anywhere.
         """
         if not self._started:
             msg = "Container.call() outside the `with` block"
             raise UsermodBuildError(msg)
         exec_command = ["docker", "exec", "--workdir", str(workdir)]
+        if not as_root and _host_user() is not None:
+            exec_command += ["--user", str(_host_user())]
         for key, value in (env or {}).items():
             exec_command += ["-e", f"{key}={value}"]
         exec_command += [self.name, *command]
@@ -1043,6 +1064,7 @@ class Container:
         what: str,
         timeout: float | None = None,
         capture_output: bool = False,
+        quiet: bool = False,
     ) -> str | None:
         try:
             result = subprocess.run(
@@ -1051,6 +1073,7 @@ class Container:
                 timeout=timeout,
                 capture_output=capture_output,
                 text=capture_output,
+                stdout=subprocess.DEVNULL if quiet else None,
             )
             return result.stdout if capture_output else None
         except subprocess.TimeoutExpired as exc:
@@ -1070,6 +1093,16 @@ class Container:
                 "the docker CLI itself is not on PATH"
             )
             raise UsermodBuildError(msg) from exc
+
+
+def _host_user() -> str | None:
+    """`uid:gid` for `docker exec --user`, or `None` where the host has no
+    such notion. `os.getuid`/`getgid` do not exist on native Windows Python;
+    Docker itself is Linux-container-only for every port here regardless of
+    host OS (D30), so this only needs to be skipped, not ported."""
+    if not hasattr(os, "getuid"):
+        return None
+    return f"{os.getuid()}:{os.getgid()}"
 
 
 def _lower_path(index: int) -> str:
