@@ -125,7 +125,7 @@ On CI, use the action instead of installing the CLI yourself — it already
 runs on a bare runner with the runner's own Docker daemon reachable:
 
 ```yaml
-- uses: ballistics-lab/cibuildmp@v0.6.2
+- uses: ballistics-lab/cibuildmp@v0.7.0
   with:
     build: "mpy6.3-* v1.29.0-manylinux_2_28_x86_64"
 ```
@@ -180,7 +180,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ballistics-lab/cibuildmp@v0.6.2
+      - uses: ballistics-lab/cibuildmp@v0.7.0
         with:
           build: "mpy6.3-v1.29.0-*"
       - uses: actions/upload-artifact@v4
