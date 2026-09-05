@@ -9,6 +9,7 @@ from cibuildmp import dockerrun
 from cibuildmp.platforms.usermod.build_common import UsermodBuildError
 from cibuildmp.platforms.usermod.build_qemu import (
     QemuBuildOptions,
+    _qemu_project_mounts,
     qemu_make_command,
 )
 from cibuildmp.platforms.usermod.build_qemu import build_qemu as _build_qemu
@@ -59,6 +60,16 @@ def qemu_opts(**overrides) -> QemuBuildOptions:
     }
     defaults.update(overrides)
     return QemuBuildOptions(**defaults)
+
+
+def test_qemu_project_mounts_omits_user_c_modules_when_empty():
+    assert _qemu_project_mounts(qemu_opts(user_c_modules=""), None) == []
+
+
+def test_qemu_project_mounts_includes_user_c_modules_when_set():
+    assert _qemu_project_mounts(qemu_opts(user_c_modules="/gh/ws/mymod"), None) == [
+        Path("/gh/ws/mymod")
+    ]
 
 
 def test_qemu_command_matches_build_usermod_armv7m_shape():

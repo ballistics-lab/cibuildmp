@@ -10,6 +10,7 @@ from cibuildmp.platforms.usermod import espidf
 from cibuildmp.platforms.usermod.build_common import UsermodBuildError
 from cibuildmp.platforms.usermod.build_esp32 import (
     Esp32BuildOptions,
+    _esp32_project_mounts,
     esp32_make_command,
 )
 from cibuildmp.platforms.usermod.build_esp32 import build_esp32 as _build_esp32
@@ -52,6 +53,19 @@ def esp32_opts(**overrides) -> Esp32BuildOptions:
     }
     defaults.update(overrides)
     return Esp32BuildOptions(**defaults)
+
+
+def test_esp32_project_mounts_omits_user_c_modules_when_empty():
+    # `.parent` of an empty string is still relative ("." itself), so the
+    # empty case has to be checked before `.parent` is ever taken -- see
+    # `_esp32_project_mounts()`'s own comment.
+    assert _esp32_project_mounts(esp32_opts(user_c_modules=""), None) == []
+
+
+def test_esp32_project_mounts_includes_user_c_modules_parent_when_set():
+    assert _esp32_project_mounts(
+        esp32_opts(user_c_modules="/gh/ws/mymod/micropython.cmake"), None
+    ) == [Path("/gh/ws/mymod")]
 
 
 def test_esp32_command_matches_build_usermod_esp32_shape():

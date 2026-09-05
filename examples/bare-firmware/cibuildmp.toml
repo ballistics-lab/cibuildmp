@@ -1,0 +1,26 @@
+# cibuildmp's own integration test for record 0056: a stock, unmodified
+# upstream MicroPython, built through the usermod path with no C module
+# of any kind linked in -- no natmod/, no usermod/, nothing of this repo
+# vendored into the result. That is the whole point of this directory:
+# unlike examples/template (natmod/, usermod/ and src/ as siblings,
+# wrapping one real module), there is no module source here at all,
+# because no-user-c-modules needs none.
+#
+# One target per build system `USER_C_MODULES=` (empty) has to no-op
+# cleanly on, per record 0056's own two-build-system split: `unix` is
+# Make-driven (`py/py.mk`'s `ifneq ($(USER_C_MODULES),)`), `rp2` is
+# CMake-driven (`ports/rp2/Makefile`'s `ifdef USER_C_MODULES` guarding
+# the `-DUSER_C_MODULES=` forward into `cmake`). Both were verified live
+# against a real v1.29.0 checkout before this config was written -- see
+# that record's own addenda.
+#
+# `no-user-c-modules` is deliberately **not** set here. This config's own
+# job is only to name the two targets; activating the no-module path is
+# .github/workflows/build-examples.yml's own `build-bare-firmware` job,
+# through `CIBMP_NO_USER_C_MODULES=1` -- so this example also stays a
+# working demonstration of the environment-variable activation path
+# (build_options()'s own opt() cascade, env beats file), not only the
+# TOML key. Point at a real cibuildmp.toml of your own and set
+# `no-user-c-modules = true` directly if a plain file value is what you
+# want instead.
+build = "v1.29.0-manylinux_2_28_x86_64 v1.29.0-rp2-RPI_PICO"

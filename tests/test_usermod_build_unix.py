@@ -14,6 +14,7 @@ from cibuildmp.platforms.usermod.build_unix import (
     UnixBuildOptions,
     _dynamic_needed_libs,
     _non_baseline_needed_libs,
+    _project_mounts,
     repair_unix_binary,
     run_unix_deplibs,
     unix_make_command,
@@ -97,6 +98,19 @@ def opts(target: str = "manylinux_2_28_x86_64", **overrides) -> UnixBuildOptions
     }
     defaults.update(overrides)
     return UnixBuildOptions(**defaults)
+
+
+def test_project_mounts_omits_user_c_modules_when_empty():
+    # Record 0056's no-module build: `Path("")` is `Path(".")`, a
+    # relative path `docker run -v` rejects outright -- the mount must be
+    # dropped, not passed through.
+    assert _project_mounts(opts(user_c_modules=""), None) == []
+
+
+def test_project_mounts_includes_user_c_modules_when_set():
+    assert _project_mounts(opts(user_c_modules="/gh/ws/mymod"), None) == [
+        Path("/gh/ws/mymod")
+    ]
 
 
 def test_native_command_passes_an_empty_cross_compile():

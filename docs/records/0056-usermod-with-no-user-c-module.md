@@ -1,10 +1,12 @@
 # 0056 — building upstream MicroPython through the usermod path with no user C module at all
 
-- Status: Accepted in intent, open in shape. Wanted, and the driver work is settled:
-  the five port drivers stop passing `USER_C_MODULES=` unconditionally, the mount list
-  is rebuilt rather than shortened, `verify_output()`'s module-symbol assertions become
-  conditional. **Undecided: how absence is expressed** — two options below, both from
-  the user, neither chosen. Nothing built yet. Upstream needs nothing either way
+- Status: Implemented, 2026-09-04 (this record's own addendum below) — Option A
+  (`no-user-c-modules`, mutually exclusive with `user-c-modules`) chosen over Option B.
+  All six port drivers, the config cascade, and `examples/bare-firmware` (one Make
+  target, one CMake target, built in CI via the `CIBMP_NO_USER_C_MODULES` env form)
+  landed together. `verify_output()`'s own conditional-check item turned out to be
+  moot: neither `verify_unix_output()` nor `verify_windows_output()` ever asserted
+  module symbols in the first place, only architecture.
 - Related: [0021], [0023], [0051], [0053]
 
 ## What this is
@@ -357,3 +359,75 @@ The opening paragraph says "the five port drivers" and cites
 `rp2` as the sixth. The substantive claim is unchanged and was re-checked
 against each of the six — all pass `USER_C_MODULES=` unconditionally, which is
 what this record is about.
+
+## Addendum, 2026-09-04 — Option A landed, verified live, and given a real example
+
+**Option A chosen over Option B.** The blast-radius argument for B (a one-line
+migration, confined to this repo) held up, but B still changes behaviour for any
+config relying on `user-c-modules`'s own default silently the day it lands, and that
+was reason enough to prefer the explicit, additive flag instead.
+
+**Verified against a real `micropython@v1.29.0` checkout before any code changed**,
+not assumed from reading `py/py.mk`/`py/usermod.cmake` alone: built `ports/unix` with
+`USER_C_MODULES=` (empty) — a clean stock binary, `import cexample` correctly raising
+`ImportError` — and, separately, with a real module directory — `import cexample`
+succeeding, calling into it, real output. Confirmed the CMake-port half (`ports/rp2`,
+`ports/esp32`) with an isolated `ifdef USER_C_MODULES` test against a real GNU Make: an
+empty command-line value and an entirely absent one are indistinguishable to `ifdef`,
+exactly as `ports/rp2/Makefile:39`/`ports/esp32/Makefile:48` need. One correction to
+this record's own upstream reading surfaced in the process: "Make ports take exactly
+one path, must be a directory" is no longer true on `v1.29.0` — `py/py.mk` now globs
+`$(foreach _UDIR, $(USER_C_MODULES), ...)`, a space-separated list, the same shape
+CMake ports always had. Does not change this record's own conclusion (empty is still a
+clean no-op either way).
+
+**A real, live bug in the mount list, worse than this record's own "mounts the
+project root for no reason" prediction.** `orchestrate.py`'s per-port mount helpers
+(`_project_mounts()` and five siblings) build `mounts = [Path(opts.user_c_modules)]`
+unconditionally. `Path("")` is `Path(".")` — a *relative* path, and `docker run -v`
+rejects a relative mount source outright (the same class of failure
+`build_one()`'s own `output_dir` comment already names). An empty `user_c_modules`
+would have crashed every no-module build at the mount step, not merely over-mounted.
+Fixed by dropping the mount entry entirely when `opts.user_c_modules` is empty, in
+all six per-port helpers.
+
+**`verify_output()` needed no conditional logic at all** — the one prediction in this
+record that turned out not to hold. Neither `verify_unix_output()` nor
+`verify_windows_output()` ever asserted a module's own symbols; both check only that
+the produced binary's architecture matches the identifier (`e_machine`/`EI_CLASS`/
+`EI_DATA` for ELF, the COFF `Machine` field for PE) — a check that applies identically
+whether a module is linked in or not. The docstring text this record's own analysis
+was reading (`build_windows.py`, "a real `USER_C_MODULES`'s own symbols confirmed
+present via `strings`") describes a one-off manual verification session, not a live
+runtime assertion.
+
+**Landed**: `no-user-c-modules` (TOML key + `CIBMP_NO_USER_C_MODULES` env, no CLI
+flag — checked against real precedent first: neither `user-c-modules` nor `manifest`
+nor any other per-target key has one, only the family-wide `--build`/`--skip`/
+`--output-dir` do, so a dedicated CLI flag would have been invented rather than
+matched to this project's own real shape). Mutual-exclusion check in
+`UsermodOptions.build_options()`, tested against *explicitly set*, not *has a value*,
+exactly as this record's own "the check has to test explicitly set" section demands.
+Mount-list fix in all six `build_<port>.py` drivers. 20 new tests (options resolution,
+mutual exclusion, env override, all six mount helpers, one full `build_one()` path
+through the mocked-Docker harness).
+
+**[`examples/bare-firmware`](../../examples/bare-firmware)** is the real example this
+record's own "cheapest possible bring-up path for [0053]'s ten portless ports" argument
+was written for: no `natmod/`, no `usermod/`, no `src/`, just a `cibuildmp.toml` naming
+one Make target (`v1.29.0-manylinux_2_28_x86_64`) and one CMake target
+(`v1.29.0-rp2-RPI_PICO`). `.github/workflows/build-examples.yml`'s own
+`build-bare-firmware` job builds it on every push, activating the flag through
+`CIBMP_NO_USER_C_MODULES=1` rather than the TOML key — deliberately, so the job also
+demonstrates the environment-variable form live, not only the config-file one.
+`README.md` gained its own "Building stock upstream firmware" section rather than a
+one-line bullet, framing this as a real capability (a cross-toolchain/board regression
+check with no C module needed at all) rather than an obscure config negation — this
+project's own consumers are one audience, but MicroPython's own maintainers, checking
+whether a tag still builds across a real board/toolchain matrix, are arguably the more
+natural one.
+
+Still open, unchanged from this record's original text: whether a no-module build is
+ever a *deliverable* rather than only a check (the identifier-collision question), and
+whether it should run on every push across every port `build-examples.yml` covers, or
+stay the two-target smoke test it landed as.

@@ -166,6 +166,101 @@ def test_build_options_carries_user_c_modules_and_manifest(tmp_path):
     assert build_options.manifest == "extra.py"
 
 
+def test_no_user_c_modules_defaults_to_false(tmp_path):
+    write_config(tmp_path, 'build = "v1.29.0-manylinux_2_28_x86_64"\n')
+    options = UsermodOptions.load(tmp_path)
+    build_options = options.build_options(options.targets()[0])
+
+    assert build_options.no_user_c_modules is False
+    assert build_options.user_c_modules == "."
+
+
+def test_no_user_c_modules_resolves_user_c_modules_to_empty(tmp_path):
+    # Record 0056's Option A: the flag, not the empty string, is the
+    # signal -- `user_c_modules` is folded to "" rather than left at
+    # DEFAULT_USER_C_MODULES ("."), which is what lets every
+    # `USER_C_MODULES=` command line stay unconditional and still no-op.
+    write_config(
+        tmp_path,
+        """
+        no-user-c-modules = true
+        build = "v1.29.0-manylinux_2_28_x86_64"
+        """,
+    )
+    options = UsermodOptions.load(tmp_path)
+    build_options = options.build_options(options.targets()[0])
+
+    assert build_options.no_user_c_modules is True
+    assert build_options.user_c_modules == ""
+
+
+def test_no_user_c_modules_and_user_c_modules_together_is_an_error(tmp_path):
+    write_config(
+        tmp_path,
+        """
+        no-user-c-modules = true
+        user-c-modules = "mymod"
+        build = "v1.29.0-manylinux_2_28_x86_64"
+        """,
+    )
+    options = UsermodOptions.load(tmp_path)
+    with pytest.raises(UsermodConfigError, match="mutually exclusive"):
+        options.build_options(options.targets()[0])
+
+
+def test_no_user_c_modules_true_alone_is_not_an_error(tmp_path):
+    # The trap the record itself flags: `user-c-modules` always has a
+    # *value* (it defaults to "."), so the mutual-exclusion check has to
+    # test "explicitly set", not "is truthy" -- a naive version would
+    # fire on every single use of the flag.
+    write_config(
+        tmp_path,
+        """
+        no-user-c-modules = true
+        build = "v1.29.0-manylinux_2_28_x86_64"
+        """,
+    )
+    options = UsermodOptions.load(tmp_path)
+    options.build_options(options.targets()[0])  # must not raise
+
+
+def test_no_user_c_modules_via_env_conflicts_with_file_user_c_modules(tmp_path):
+    write_config(
+        tmp_path,
+        """
+        user-c-modules = "mymod"
+        build = "v1.29.0-manylinux_2_28_x86_64"
+        """,
+    )
+    options = UsermodOptions.load(tmp_path)
+    target = options.targets()[0]
+    with pytest.raises(UsermodConfigError, match="mutually exclusive"):
+        options.build_options(target, env={"CIBMP_NO_USER_C_MODULES": "true"})
+
+
+def test_no_user_c_modules_via_env_var(tmp_path):
+    write_config(tmp_path, 'build = "v1.29.0-manylinux_2_28_x86_64"\n')
+    options = UsermodOptions.load(tmp_path)
+    target = options.targets()[0]
+    build_options = options.build_options(target, env={"CIBMP_NO_USER_C_MODULES": "1"})
+
+    assert build_options.no_user_c_modules is True
+    assert build_options.user_c_modules == ""
+
+
+def test_no_user_c_modules_rejects_a_non_boolean_value(tmp_path):
+    write_config(
+        tmp_path,
+        """
+        no-user-c-modules = "sure"
+        build = "v1.29.0-manylinux_2_28_x86_64"
+        """,
+    )
+    options = UsermodOptions.load(tmp_path)
+    with pytest.raises(UsermodConfigError, match="no-user-c-modules"):
+        options.build_options(options.targets()[0])
+
+
 def test_extra_make_args_shared_across_targets(tmp_path):
     write_config(
         tmp_path,

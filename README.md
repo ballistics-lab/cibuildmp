@@ -125,10 +125,33 @@ On CI, use the action instead of installing the CLI yourself — it already
 runs on a bare runner with the runner's own Docker daemon reachable:
 
 ```yaml
-- uses: ballistics-lab/cibuildmp@v0.7.0
+- uses: ballistics-lab/cibuildmp@v0.7.1
   with:
     build: "mpy6.3-* v1.29.0-manylinux_2_28_x86_64"
 ```
+
+**Cache fetched MicroPython checkouts (and ESP-IDF) between runs** with a plain
+`actions/cache` step before the action, pointed at `CIBMP_CACHE_PATH`'s own
+default (`~/.cache/cibuildmp`, `$XDG_CACHE_HOME/cibuildmp` if that's set) — a
+prefix key rather than one hashed to a single config, since a checkout is
+addressed by MicroPython tag inside the cache directory and the same cache
+usefully accumulates every tag a repo's history ever built, not just the
+newest:
+
+```yaml
+- uses: actions/cache@v4
+  with:
+    path: ~/.cache/cibuildmp
+    key: cibuildmp-${{ runner.os }}
+    restore-keys: cibuildmp-${{ runner.os }}
+- uses: ballistics-lab/cibuildmp@v0.7.1
+  with:
+    build: "mpy6.3-* v1.29.0-manylinux_2_28_x86_64"
+```
+
+This caches fetched *source* only. Compiled build state does not live on the
+host at all any more — every usermod port builds inside its own container
+now (record 0095), so there is nothing to cache on that side.
 
 The action takes seven inputs, all optional — every one overrides the
 config file rather than replacing it:
@@ -180,7 +203,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ballistics-lab/cibuildmp@v0.7.0
+      - uses: ballistics-lab/cibuildmp@v0.7.1
         with:
           build: "mpy6.3-v1.29.0-*"
       - uses: actions/upload-artifact@v4
@@ -601,6 +624,7 @@ onto each other rather than the first winning.
 | `pre-build-command`      | natmod  | `""`                   |                                ✓                                 |
 | `extra-make-args`        | both    | `[]`                   |                                ✓                                 |
 | `user-c-modules`         | usermod | `"."`                  |                                ✓                                 |
+| `no-user-c-modules`      | usermod | `false`                |                                ✓                                 |
 | `manifest`               | usermod | `""`                   |                                ✓                                 |
 | `extra-cmake-args`       | usermod | `[]`                   |                                ✓                                 |
 
@@ -663,6 +687,35 @@ Two notes on individual keys:
   So an override for the flagged variant is `[override."*rv32imc+0x3"]`, and
   a plain `skip = "*-rv32imc"` will *not* match it — `*-rv32imc*` does.
 
+### Building stock upstream firmware
+
+`cibuildmp` is not only for building *your own* C module into a port — set
+`no-user-c-modules = true` and it builds a stock, unmodified upstream
+MicroPython through the exact same usermod path instead: no
+`USER_C_MODULES`, nothing of your own in the result. Mutually exclusive
+with `user-c-modules`; setting both is a load-time error, not a precedence
+rule ([0056]).
+
+That makes the whole matrix this project already resolves — every port,
+every board, every pinned toolchain — usable as a plain "does upstream
+still build here" check, with no C module involved at all. Useful for this
+project's own consumers, but arguably more useful to MicroPython's own
+maintainers: a regression check across a real cross-toolchain/board matrix
+that costs nothing to run beyond pointing `--build` at the tags and
+identifiers you care about, e.g.:
+
+```console
+$ CIBMP_NO_USER_C_MODULES=1 cibuildmp --build "v1.29.0-manylinux_2_28_x86_64 v1.29.0-rp2-RPI_PICO"
+```
+
+[`examples/bare-firmware`](examples/bare-firmware) is exactly this — no
+`natmod/`, no `usermod/`, no `src/`, just a `cibuildmp.toml` naming two
+targets (one Make-driven port, one CMake-driven one — record 0056's own
+two build systems). `.github/workflows/build-examples.yml`'s own
+`build-bare-firmware` job builds it on every push, activating the flag via
+`CIBMP_NO_USER_C_MODULES` rather than the TOML key, so it doubles as a
+live demonstration of the environment-variable form.
+
 ### Environment variables
 
 Every option key above has an environment form: `CIBMP_` + the key in
@@ -703,7 +756,6 @@ the port**, because it is that port's own build axis:
 | Variable                                | Effect                                                                                                                                                                                                                            |
 | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `CIBMP_CACHE_PATH`                      | Where fetched MicroPython checkouts and ESP-IDF are cached. Defaults to `$XDG_CACHE_HOME/cibuildmp`, or `~/.cache/cibuildmp`. Pin it in CI when a later step needs the checkout by path — `<CIBMP_CACHE_PATH>/micropython/<tag>` |
-| `CIBMP_SCRATCH_PATH`                    | Read, but currently redirects nothing: every usermod port's compiled build state now lives inside its own container and never reaches the host (record 0095's own addendum 13). Left as a documented knob rather than removed outright |
 | `CIBMP_REPORT_PATH`                     | Where the JSON build report is written                                                                                                                                                                                            |
 | `CIBMP_TIMEOUT`                         | Seconds before a build container is killed (`docker kill`, not just the CLI). No limit by default. **usermod only** -- natmod's own container call does not consult it                                                            |
 | `CIBMP_<PORT>_<TARGET>_TIMEOUT`         | The same, for one container — `CIBMP_UNIX_MANYLINUX_2_28_X86_64_TIMEOUT`                                                                                                                                                          |
@@ -769,6 +821,7 @@ naming a scalar option in `inherit` is a config error, not a silent no-op.
 [0038]: docs/records/0038-m5-adopt-in-three-repos.md
 [0043]: docs/records/0043-unix-adopts-cibuildwheel-native-image-model.md
 [0052]: docs/records/0052-config-is-a-tree-not-a-selector-matrix.md
+[0056]: docs/records/0056-usermod-with-no-user-c-module.md
 [0057]: docs/records/0057-multiple-modules-per-build.md
 [0058]: docs/records/0058-image-groups-are-toolchains-not-ports.md
 [0069]: docs/records/0069-upstream-usercmodule-narrow-ci-slice.md
@@ -916,10 +969,10 @@ Nor is the build state: every usermod port builds inside a container's own
 overlay now (a `:ro` bind of the checkout plus a writable view on top), so
 object files, per-identifier `build-<identifier>/` trees and the
 container-built `mpy-cross` binaries never touch the host at all — they die
-with the container. `CIBMP_SCRATCH_PATH` is still read but currently has
-nothing to redirect, since nothing writes to the path it names any more;
-kept for now as a documented knob rather than removed outright (see record
-0095's own addendum 13 for the reasoning).
+with the container. There is no env var to point this anywhere any more
+either: `CIBMP_SCRATCH_PATH` named a host directory nothing had written to
+since that migration, and was removed once that was noticed rather than
+kept as a knob with nothing left to turn.
 
 ### Still stuck
 

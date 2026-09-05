@@ -110,8 +110,8 @@ jobs:
 
       - name: List built artifacts
         run: |
-          ls -laR examples/template/mpyhouse
-          ls -laR examples/wasm2mpy/mpyhouse
+          tree -a examples/template/mpyhouse
+          tree -a examples/wasm2mpy/mpyhouse
           cat examples/template/mpyhouse/*/package.json
 
   # Split from `build` above rather than added as one more step there:
@@ -265,7 +265,38 @@ jobs:
           build: ${{ matrix.build }}
 
       - name: List built artifacts
-        run: ls -laR examples/template/mpyhouse
+        run: tree -a examples/template/mpyhouse
+
+  # ── usermod: stock upstream firmware, no C module at all ───────────
+  #
+  # examples/bare-firmware/cibuildmp.toml (record 0056's Option A): one
+  # Make-driven target (`unix`) and one CMake-driven one (`rp2`), the two
+  # build-system shapes `USER_C_MODULES=` (empty) has to no-op on cleanly.
+  # `CIBMP_NO_USER_C_MODULES=1` here, not `no-user-c-modules = true` in
+  # that file -- this job is also the live proof the environment-variable
+  # activation path works, not just the TOML key (README's own "Building
+  # stock upstream firmware" section links back to this job).
+  #
+  # Both targets are native to an amd64 runner (dockerrun.platform_for():
+  # `unix`'s own x86_64 image, every other port's `linux/amd64` cross
+  # host) -- no docker/setup-qemu-action needed, unlike build-usermod's
+  # own qemu leg.
+  build-bare-firmware:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build examples/bare-firmware (stock upstream, no C module)
+        uses: ./
+        env:
+          CIBMP_NO_USER_C_MODULES: "1"
+        with:
+          package-dir: examples/bare-firmware
+
+      - name: List built artifacts
+        run: tree -a examples/bare-firmware/mpyhouse
 
   # ── the same build on the runner it would not have chosen ──────────
   #
@@ -323,7 +354,7 @@ jobs:
           build: ${{ matrix.build }}
 
       - name: List built artifacts
-        run: ls -laR examples/template/mpyhouse
+        run: tree -a examples/template/mpyhouse
 
   # ── usermod: the six emulated-everywhere cells ──────────────────────
   #
@@ -383,4 +414,4 @@ jobs:
           build: ${{ matrix.build }}
 
       - name: List built artifacts
-        run: ls -laR examples/template/mpyhouse
+        run: tree -a examples/template/mpyhouse

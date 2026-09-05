@@ -104,30 +104,25 @@ class UsermodBuildResult:
         return self.output.stat().st_size
 
 
+# The `BUILD=` value four port drivers (unix/windows/qemu/webassembly) pass
+# to `make` -- a fixed, container-internal label, nothing more. Every usermod
+# port builds through `Container`/overlay now (record 0095's own addenda
+# 8-12), so this path is never created, mounted or read on the host: `make`
+# inside the container writes under it, inside that container's own
+# ephemeral filesystem, and it dies with the container. `sources.
+# scratch_root()`/`CIBMP_SCRATCH_PATH` used to name a real host directory
+# for this before that migration landed; both were removed once the last
+# real reader of the value they redirected (a host-side bind mount) was
+# gone -- see `sources.cache_root()`'s own docstring.
+_BUILD_ROOT = Path("/tmp/cibuildmp-build")
+
+
 def _resolved_build_dir(port: str, identifier: str) -> Path:
-    # One build directory per identifier, not the port's own bare default
-    # -- so building unix-manylinux_2_28_x86_64 and
-    # unix-manylinux_2_28_aarch64 against the same checkout
-    # in one invocation never has one overwrite the other mid-build.
-    #
-    # Under `sources.scratch_root()`, not under `mpy_dir`, since [0095]:
-    # `mpy_dir` is `cache_root()/micropython/<tag>/`, i.e. fetched input a
-    # CI job may legitimately restore from an earlier run, and a compiled
-    # tree nested inside it rides along in any such restore no matter how
-    # narrowly the cache step scopes its own `path:` -- `micropython/*/`
-    # already contains `micropython/*/ports/<port>/build-<identifier>/`.
-    # The `mpy_dir` parameter is gone rather than ignored: a build
-    # directory that no longer has anything to do with the checkout should
-    # not still be asking for it.
-    #
-    # For a port already on the container model ([0095]'s addendum 2,
-    # `unix` today) this path is never created on the host at all -- it is
-    # resolved the same way and then only ever exists *inside* the
-    # container, which has no host mount there, so the objects live and die
-    # with it. That is why this can stay one function for both: the string
-    # is the same, and what differs is only whether anything on the host
-    # ends up at it.
-    return sources.scratch_root() / "ports" / port / f"build-{identifier}"
+    # One build directory per identifier, not the port's own bare default,
+    # purely so a build log's own paths stay legible per target -- nothing
+    # on the host ever collides, since each build_<port>() call gets its
+    # own fresh container ([0095]'s addenda 8-12).
+    return _BUILD_ROOT / "ports" / port / f"build-{identifier}"
 
 
 def _manifest_path(mpy_dir: Path, port: str, identifier: str) -> Path:
@@ -167,13 +162,25 @@ def _port_build_options(
     # binds the result. Record 0069 named this exact gap ("no `{checkout}`-style
     # template ... this record does not add one") until a real caller
     # needed it; docs/records/0069's own addendum is that caller.
-    user_c_modules = build_options.user_c_modules.replace(
-        "{micropython}", mpy_dir.as_posix()
-    )
-    module_root = (package_dir / user_c_modules).resolve()
-    resolved_user_c_modules = portinfo.resolve_user_c_modules(
-        port, module_root.as_posix()
-    )
+    # `no_user_c_modules` (record 0056's Option A): skip
+    # `resolve_user_c_modules()` entirely rather than feeding it an empty
+    # path -- its cmake branch appends `/micropython.cmake` unconditionally,
+    # which would turn "" into a bogus `<package_dir>/micropython.cmake`
+    # instead of staying empty. `USER_C_MODULES=` (empty) is the verified
+    # no-op driver command lines already produce unmodified; the mount
+    # helpers below (`_project_mounts()` and its per-port siblings) drop
+    # the corresponding mount rather than pass a relative `Path("")` to
+    # `docker run -v` (a hard failure, not a harmless over-mount).
+    if build_options.no_user_c_modules:
+        resolved_user_c_modules = ""
+    else:
+        user_c_modules = build_options.user_c_modules.replace(
+            "{micropython}", mpy_dir.as_posix()
+        )
+        module_root = (package_dir / user_c_modules).resolve()
+        resolved_user_c_modules = portinfo.resolve_user_c_modules(
+            port, module_root.as_posix()
+        )
 
     module_manifest = (
         (package_dir / build_options.manifest).resolve().as_posix()
@@ -370,32 +377,6 @@ def build_one(
     ).resolve()
     shutil.rmtree(staging, ignore_errors=True)
     staging.mkdir(parents=True, exist_ok=True)
-
-    # `build_dir` (unix/windows/qemu/webassembly only -- esp32 has none,
-    # see Esp32BuildOptions, and uses ESP-IDF's own CMake-based staleness
-    # tracking instead of a raw Makefile) is
-    # `scratch_root()/ports/<port>/build-<identifier>/` since [0095] (it
-    # was `mpy_dir/ports/<port>/build-<identifier>/`), already scoped per
-    # identifier, but nothing ever removes it *between* separate
-    # `cibuildmp` invocations. Still true, and still needed, after that
-    # move: the default `scratch_root()` is per-invocation and so cannot
-    # carry anything over, but `CIBMP_SCRATCH_PATH` is exactly the escape
-    # hatch that makes it persist, and that is the case this `rmtree`
-    # exists for. Found
-    # for real: a leftover build-unix-x64/ from an earlier run (built
-    # against a different, or no, USER_C_MODULES) carried a stale
-    # genhdr/qstrdefs.generated.h missing this run's own module's QSTRs --
-    # `'MP_QSTR_mymod' undeclared` -- the exact same "nothing cleans
-    # between invocations" bug natmod's own build/ scratch space had (see
-    # natmod.build_all()'s own comment), just one layer deeper (MicroPython's own
-    # qstr pipeline, not cibuildmp's glob). Only safe to delete host-side
-    # now that dockerrun.run() passes --user (see its own comment) --
-    # every port build here runs in a sibling container as root otherwise,
-    # which leaves build-<identifier>/ root-owned and unremovable by a
-    # plain host-side rmtree.
-    build_dir = getattr(port_opts, "build_dir", None)
-    if build_dir is not None:
-        shutil.rmtree(build_dir, ignore_errors=True)
 
     build_fn = _BUILD_FN[target.port]
     produced = build_fn(

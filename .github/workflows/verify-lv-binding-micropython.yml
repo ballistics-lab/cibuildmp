@@ -71,7 +71,7 @@ jobs:
           build: ${{ env.CIBMP_UPSTREAM_TAG }}-manylinux_2_28_x86_64
 
       - name: List built artifacts
-        run: ls -laR examples/lv_binding_micropython/mpyhouse
+        run: tree -a examples/lv_binding_micropython/mpyhouse
 
       # Not just that it links: this registers a real (headless) LVGL
       # display, builds a widget tree, and renders a frame through it. See

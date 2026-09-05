@@ -815,3 +815,24 @@ silently carried forward the way the pre-addendum docstring's stale mpy-cross/`s
 re-verified by a fresh CI push at the time of writing -- this addendum's own commit should get one
 before anyone trusts that the signature changes above did not silently break a real build path
 unit tests do not reach.
+
+## Addendum, 2026-09-04 -- the open question above answered: deleted
+
+`scratch_root()`/`CIBMP_SCRATCH_PATH` are gone. `orchestrate._resolved_build_dir()` now returns a
+plain fixed `Path("/tmp/cibuildmp-build") / "ports" / port / f"build-{identifier}"` -- a
+container-internal label only, no host directory created, no env override, no `atexit` cleanup.
+`build_one()`'s own `shutil.rmtree(build_dir, ...)` is deleted with it -- it was removing a
+directory nothing had created since this record's own item 4 landed.
+
+The addendum above already named the three options ("deleting the env var, repurposing it, or
+leaving it as a documented knob with no current effect") and left the choice open. Deleting it won
+on the same reasoning [0056]'s own Option A/B choice used: a knob nobody can turn is worse than no
+knob, and every mount site this whole record touched (`_project_mounts()` and its five per-port
+siblings) makes the same call already -- an empty value gets no entry, not a placeholder one.
+
+`cli.py --help`, `README.md`'s environment-variable table and its two narrative mentions, and
+`tests/conftest.py`'s `_scratch_root_per_test`/`tests/test_sources.py`'s two `scratch_root()`
+tests all update or drop with it. `tests/test_usermod_orchestrate.py`'s own seventeen
+`scratch_root() / "ports" / ...` expected-path expressions now read `_BUILD_ROOT` (imported from
+`orchestrate.py`, no longer from `sources.py`) instead -- same shape, no `sources` import needed
+there for this any more.

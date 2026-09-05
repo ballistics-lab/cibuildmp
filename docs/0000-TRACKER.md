@@ -55,6 +55,7 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### In progress / Proposed
 
+- [ ] [0098] `BUILD=` may be as unnecessary for unix/windows/qemu/webassembly as `scratch_root()` was
 - [ ] [0094] Arm's own GNU toolchain registry is the third choice [0085] said did not exist
 - [ ] [0083] replace `windows.Dockerfile`'s apt `gcc-mingw-w64` split with one fully prebuilt llvm-mingw toolchain
 - [ ] [0047] the run output works, but it is not cibuildwheel's
@@ -62,10 +63,10 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 - [ ] [0022] zephyr is a third selector axis, not a board-based port that just needs its boards added
 - [ ] [0040] usermod's own test-runner axis, deferred
 - [ ] [0053] usermod ports with verified facts but no build driver
-- [ ] [0056] building upstream MicroPython through the usermod path with no user C module at all
 
 ### Implemented
 
+- [x] [0056] building upstream MicroPython through the usermod path with no user C module at all
 - [x] [0057] more than one module per build, in both modes
 - [x] [0097] a real, external, heavy usermod module builds through cibuildmp unmodified
 - [x] [0095] `cache_root()` is not one cache: fetched source persists, build state dies with the container
@@ -276,3 +277,4 @@ record is added.
 [0095]: records/0095-cache-root-splits-source-from-build-state.md
 [0096]: records/0096-arm-riscv-embedded-collapse-into-embedded-base.md
 [0097]: records/0097-lv-binding-micropython-builds-through-cibuildmp.md
+[0098]: records/0098-build-override-may-be-as-unnecessary-as-scratch-root-was.md

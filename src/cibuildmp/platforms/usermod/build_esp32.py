@@ -135,8 +135,14 @@ def _esp32_project_mounts(
     the same directory-level coverage every Make port already has, not a
     new guarantee beyond that. `package_dir`, when given, is appended on
     top -- `build_unix.py`'s own `_project_mounts()`.
+
+    No entry at all when `opts.user_c_modules` is empty (record 0056's
+    no-module build): `Path("").parent` is still `Path(".")`, the same
+    relative-mount problem `_project_mounts()`'s own comment names, and
+    there is no `micropython.cmake` sibling to reach once
+    `USER_C_MODULES=` goes out empty.
     """
-    mounts = [Path(opts.user_c_modules).parent]
+    mounts = [Path(opts.user_c_modules).parent] if opts.user_c_modules else []
     if package_dir is not None:
         mounts.append(package_dir.resolve())
     return mounts

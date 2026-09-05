@@ -88,7 +88,7 @@ jobs:
           build: ${{ env.CIBMP_UPSTREAM_TAG }}-manylinux_2_28_x86_64
 
       - name: List built artifacts
-        run: ls -laR examples/usercmodule/mpyhouse
+        run: tree -a examples/usercmodule/mpyhouse
 
       # A linked binary is not the same claim as one whose modules actually
       # run -- unix is the one port here whose own output this runner can
@@ -140,7 +140,7 @@ jobs:
           build: ${{ env.CIBMP_UPSTREAM_TAG }}-rp2-RPI_PICO
 
       - name: List built artifacts
-        run: ls -laR examples/usercmodule/mpyhouse
+        run: tree -a examples/usercmodule/mpyhouse
 
   # ── esp32: the second CMake port, and the second bare-metal toolchain ──
   #
@@ -172,7 +172,7 @@ jobs:
           build: ${{ env.CIBMP_UPSTREAM_TAG }}-esp32-ESP32_GENERIC
 
       - name: List built artifacts
-        run: ls -laR examples/usercmodule/mpyhouse
+        run: tree -a examples/usercmodule/mpyhouse
 
   # ── windows, webassembly, qemu: the remaining three Make ports ──────────
   #
@@ -216,7 +216,7 @@ jobs:
           build: ${{ env.CIBMP_UPSTREAM_TAG }}-win_amd64
 
       - name: List built artifacts
-        run: ls -laR examples/usercmodule/mpyhouse
+        run: tree -a examples/usercmodule/mpyhouse
 
       # Both the apt install and the run itself are in
       # `.github/actions/run-with-wine` -- see that action's own header for
@@ -249,7 +249,7 @@ jobs:
           build: ${{ env.CIBMP_UPSTREAM_TAG }}-wasm32
 
       - name: List built artifacts
-        run: ls -laR examples/usercmodule/mpyhouse
+        run: tree -a examples/usercmodule/mpyhouse
 
       # The same smoke_test.py the unix job runs, unmodified -- the wasm
       # build's own CLI takes a .py path exactly like the unix binary
@@ -291,7 +291,7 @@ jobs:
           build: ${{ env.CIBMP_UPSTREAM_TAG }}-qemu-MPS2_AN385
 
       - name: List built artifacts
-        run: ls -laR examples/usercmodule/mpyhouse
+        run: tree -a examples/usercmodule/mpyhouse
 
       # `docker/setup-qemu-action` above only registers binfmt_misc
       # handlers for cross-arch *container* builds -- unrelated to

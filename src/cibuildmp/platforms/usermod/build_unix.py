@@ -1114,10 +1114,16 @@ def _project_mounts(opts: UnixBuildOptions, package_dir: Path | None) -> list[Pa
     """The user's own project, mounted so a module whose sources reach
     outside `USER_C_MODULES` still resolves -- the same reasoning the
     pre-[0095] `usermod_mounts()` helper had for the same mount, minus
-    `mpy_dir`, which arrives through the overlay instead (and minus
-    `scratch_root()`, no longer mounted at all once every port stopped
-    needing a host-visible build tree)."""
-    mounts = [Path(opts.user_c_modules)]
+    `mpy_dir`, which arrives through the overlay instead (and minus the
+    old scratch build-dir mount, gone once every port stopped needing a
+    host-visible build tree).
+
+    No entry for `opts.user_c_modules` at all when it is empty (record
+    0056's no-module build): `Path("")` is `Path(".")`, a *relative*
+    path, and `docker run -v` rejects a relative mount source outright --
+    there is also nothing there worth mounting once `USER_C_MODULES=`
+    goes out empty."""
+    mounts = [Path(opts.user_c_modules)] if opts.user_c_modules else []
     if package_dir is not None:
         mounts.append(package_dir.resolve())
     return mounts

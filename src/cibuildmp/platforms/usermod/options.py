@@ -92,6 +92,20 @@ from .targets import KNOWN_PORTS, UsermodTarget, all_usermod_targets
 # usermod) that the narrower default's own bind-mount could not reach.
 DEFAULT_USER_C_MODULES = "."
 
+# `no-user-c-modules = true` is record 0056's Option A: a stock,
+# no-module build of upstream MicroPython through this same usermod
+# path. Mutually exclusive with `user-c-modules` (checked in
+# `build_options()` below) rather than a precedence rule between them --
+# either choice of winner would silently ignore whichever key the config
+# also wrote, and there is no sensible reading of "build with no
+# modules, using these modules". Resolving it to `user_c_modules = ""`
+# (never `DEFAULT_USER_C_MODULES`) is deliberate: `USER_C_MODULES=`
+# (empty) is a real, verified no-op on both build systems this project
+# drives (`ifneq ($(USER_C_MODULES),)` on the four Make ports, `ifdef
+# USER_C_MODULES` on the two CMake ports -- confirmed live against a
+# real v1.29.0 checkout, not assumed from source alone), not a sentinel
+# a driver has to special-case.
+#
 # The three per-target option keys usermod's own `[override]` entries
 # read. `user-c-modules`, not `module-dir`
 # -- natmod's own `module-dir` names the directory `make -C` runs in
@@ -106,7 +120,13 @@ DEFAULT_USER_C_MODULES = "."
 # literal Makefile variable it feeds, the same principle `extra-make-args`
 # already follows.
 USERMOD_PORT_BASE: frozenset[str] = frozenset(
-    {"user-c-modules", "manifest", "extra-make-args", "extra-cmake-args"}
+    {
+        "user-c-modules",
+        "no-user-c-modules",
+        "manifest",
+        "extra-make-args",
+        "extra-cmake-args",
+    }
 )
 
 # `USERMOD_ONLY_GENERIC_KEYS`'s own counterpart to `user-c-modules`/
@@ -120,7 +140,7 @@ USERMOD_PORT_BASE: frozenset[str] = frozenset(
 # `GENERIC_KEYS`, being real, identically-named, identically-meant keys on
 # both sides.
 USERMOD_ONLY_GENERIC_KEYS: frozenset[str] = frozenset(
-    {"user-c-modules", "manifest", "extra-cmake-args"}
+    {"user-c-modules", "no-user-c-modules", "manifest", "extra-cmake-args"}
 )
 
 # Every scalar key this family reads from the bare top level, natmod's own
@@ -158,6 +178,22 @@ def _as_list_or_str(value: Any, key: str) -> list[str]:
     return _as_list(value, key)
 
 
+def _as_bool(value: Any, key: str) -> bool:
+    """`no-user-c-modules`'s own type -- a real TOML `true`/`false` reads
+    back as a Python `bool` already, but `CIBMP_NO_USER_C_MODULES` (like
+    every env override here) can only ever be a string, so this is the
+    one place that has to accept both shapes."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes"}:
+            return True
+        if lowered in {"0", "false", "no", ""}:
+            return False
+    raise UsermodConfigError(f"{key}: expected a boolean, got {value!r}")
+
+
 @dataclass
 class UsermodBuildOptions:
     """Ingredients for one target's build, not yet the port-specific
@@ -171,6 +207,12 @@ class UsermodBuildOptions:
     target: UsermodTarget
     micropython: str
     user_c_modules: str
+    # Already folded into `user_c_modules` above (`""` when true, never
+    # `DEFAULT_USER_C_MODULES`) -- kept as its own field anyway so
+    # `orchestrate.py`'s `_port_build_options()` can tell "explicitly no
+    # modules" apart from "a config that happens to resolve to an empty
+    # path" without re-deriving it from a string.
+    no_user_c_modules: bool
     manifest: str
     extra_make_args: list[str] = field(default_factory=list)
     # CMake-only, unlike extra_make_args above: no `[esp32]`/`[rp2]` table
@@ -494,10 +536,35 @@ class UsermodOptions:
                 extra_layers=override_extra_layers(matching, key),
             )
 
+        # `opt("user-c-modules")` with no `default=` -- not the real
+        # resolution below -- so this reads `None` when the key is unset
+        # at every layer (file, override, env) and a real, empty-string
+        # config value is never confused with "unset" (record 0056's own
+        # "the check has to test explicitly set, not has a value").
+        no_user_c_modules = _as_bool(
+            opt("no-user-c-modules", False), "no-user-c-modules"
+        )
+        user_c_modules_explicit = opt("user-c-modules")
+        if no_user_c_modules and user_c_modules_explicit is not None:
+            raise UsermodConfigError(
+                f"{target.identifier}: no-user-c-modules and user-c-modules "
+                "are mutually exclusive -- set one or the other, not both"
+            )
+        user_c_modules = (
+            ""
+            if no_user_c_modules
+            else str(
+                user_c_modules_explicit
+                if user_c_modules_explicit is not None
+                else DEFAULT_USER_C_MODULES
+            )
+        )
+
         return UsermodBuildOptions(
             target=target,
             micropython=target.tag,
-            user_c_modules=str(opt("user-c-modules", DEFAULT_USER_C_MODULES)),
+            user_c_modules=user_c_modules,
+            no_user_c_modules=no_user_c_modules,
             manifest=str(opt("manifest", "")),
             extra_make_args=_as_list_or_str(opt("extra-make-args"), "extra-make-args"),
             extra_cmake_args=_as_list_or_str(

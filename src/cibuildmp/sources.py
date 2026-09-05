@@ -13,7 +13,6 @@ dependency tree resolved before it can fetch anything is harder to trust.
 
 from __future__ import annotations
 
-import atexit
 import hashlib
 import os
 import shutil
@@ -44,64 +43,22 @@ class SourceError(Exception):
 
 
 def cache_root() -> Path:
-    """Where downloaded sources and toolchains live -- **fetched input only**
-    ([0095]). Compiled build state goes to `scratch_root()` instead; the
-    two were one directory until that record, which is why the split has
-    to be stated here rather than left to each caller's own judgement."""
+    """Where downloaded sources and toolchains live -- **fetched input
+    only** ([0095]). Compiled build state has no host location at all any
+    more: every usermod port builds through `Container`/overlay now
+    (record 0095's own addenda 8-12), so a `BUILD=` value
+    (`orchestrate._resolved_build_dir()`) is only ever a path *string* a
+    container's own `make` writes inside its own ephemeral filesystem,
+    never bind-mounted, never read back from the host. `scratch_root()`
+    and `CIBMP_SCRATCH_PATH` named that non-existent host location until
+    this record's own addendum removed them -- there was nothing left for
+    either to redirect."""
     env = os.environ.get("CIBMP_CACHE_PATH")
     if env:
         return Path(env).expanduser()
     xdg = os.environ.get("XDG_CACHE_HOME")
     base = Path(xdg).expanduser() if xdg else Path.home() / ".cache"
     return base / "cibuildmp"
-
-
-_SCRATCH_ROOT: Path | None = None
-
-
-def scratch_root() -> Path:
-    """Names where **compiled build state** would go: per-identifier port
-    build directories, record [0095]'s category C.
-
-    Deliberately *not* under `cache_root()`, and deliberately not merely a
-    sibling directory there either. `cache_root()` holds fetched source a
-    CI job can legitimately restore from a previous run; anything compiled
-    is keyed on a toolchain image, an identifier and a `USER_C_MODULES`
-    set that a restore knows nothing about. The two were the same tree
-    until [0095], and the cost was already paid once inside a *single*
-    job: a leftover `build-unix-x64/` carried a stale
-    `genhdr/qstrdefs.generated.h` and failed the next build with
-    `'MP_QSTR_mymod' undeclared`. Persisting that across runs would have
-    turned a one-run bug into a permanent one.
-
-    **Its own directory is no longer mounted or written to by anything**,
-    now that every usermod port builds through `Container`/overlay
-    (record 0095's own addenda 8-12): `orchestrate._resolved_build_dir()`
-    still calls this to name a `BUILD=` value, but that value is never
-    bind-mounted any more, so it exists only as a path *string* a
-    container's own `make` writes inside its own ephemeral filesystem.
-    `CIBMP_SCRATCH_PATH` (below) is consequently a no-op in practice today
-    -- still real, still read, but with nothing left to redirect. Flagged
-    here rather than silently assumed still load-bearing; whether to
-    delete the env var, repurpose it, or leave it as a documented knob
-    with no current effect is an open question this function does not
-    answer.
-
-    `CIBMP_SCRATCH_PATH` overrides the location **and disables the
-    cleanup**: the path then belongs to the caller, not to this function.
-    On a GitHub runner `runner.temp` is the natural value -- job-scoped,
-    never an `actions/cache` target.
-    """
-    global _SCRATCH_ROOT
-    env = os.environ.get("CIBMP_SCRATCH_PATH")
-    if env:
-        root = Path(env).expanduser()
-        root.mkdir(parents=True, exist_ok=True)
-        return root
-    if _SCRATCH_ROOT is None:
-        _SCRATCH_ROOT = Path(tempfile.mkdtemp(prefix="cibuildmp-build-"))
-        atexit.register(shutil.rmtree, _SCRATCH_ROOT, ignore_errors=True)
-    return _SCRATCH_ROOT
 
 
 # -- Shared primitives ----------------------------------------------------

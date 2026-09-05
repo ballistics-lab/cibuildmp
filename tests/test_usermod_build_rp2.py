@@ -6,7 +6,11 @@ from pathlib import Path
 import pytest
 
 from cibuildmp.platforms.usermod.build_common import UsermodBuildError
-from cibuildmp.platforms.usermod.build_rp2 import Rp2BuildOptions, rp2_make_command
+from cibuildmp.platforms.usermod.build_rp2 import (
+    Rp2BuildOptions,
+    _rp2_project_mounts,
+    rp2_make_command,
+)
 from cibuildmp.platforms.usermod.build_rp2 import build_rp2 as _build_rp2
 
 
@@ -37,6 +41,16 @@ def rp2_opts(**overrides) -> Rp2BuildOptions:
     }
     defaults.update(overrides)
     return Rp2BuildOptions(**defaults)
+
+
+def test_rp2_project_mounts_omits_user_c_modules_when_empty():
+    assert _rp2_project_mounts(rp2_opts(user_c_modules=""), None) == []
+
+
+def test_rp2_project_mounts_includes_user_c_modules_parent_when_set():
+    assert _rp2_project_mounts(
+        rp2_opts(user_c_modules="/gh/ws/mymod/micropython.cmake"), None
+    ) == [Path("/gh/ws/mymod")]
 
 
 def _fake_docker_run(cmd, **kwargs):
