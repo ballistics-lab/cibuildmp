@@ -30,7 +30,11 @@ class Esp32BuildOptions:
 
 
 def esp32_make_command(
-    opts: Esp32BuildOptions, mpy_dir: Path, *, mpy_cross: Path | None = None
+    opts: Esp32BuildOptions,
+    mpy_dir: Path,
+    *,
+    mpy_cross: Path | None = None,
+    extra_cflags: tuple[str, ...] | None = None,
 ) -> list[str]:
     # No BUILD= override, even resolving to the exact value the port
     # already defaults to: build-usermod-esp32's own comment documents a
@@ -45,7 +49,19 @@ def esp32_make_command(
     # firmware itself, so a diagnostic a MicroPython release needs
     # suppressed for `mpy-cross` hits this build the same way ([0091],
     # mirroring `build_unix.py`'s own two-call-site pattern).
-    cflags = build_common.tag_cflags(opts.tag)
+    #
+    # `extra_cflags`, when given, overrides `tag_cflags()`'s own raw
+    # candidate list -- the same override `rp2_make_command()` gained
+    # ([0060]'s own correction addendum) after `resources/tag_cflags.toml`'s
+    # `-Wno-error=unterminated-string-initialization` (a real gcc-15
+    # diagnostic name) turned out to be a hard `cc1: error` on any
+    # pre-`v1.26.0`-era cross compiler that does not recognize it at all.
+    # `build_esp32()` discovers the real cross compiler ESP-IDF's own
+    # `idf_tools.py export` put on `PATH` and probes against it with
+    # `build_common.probe_supported_cflags()` before calling this -- see
+    # that function's own comment for why esp32 cannot just reuse
+    # `rp2`'s/`samd`'s plain `<prefix>gcc` full-path probe.
+    cflags = extra_cflags if extra_cflags is not None else build_common.tag_cflags(opts.tag)
     return [
         "make",
         "-C",
@@ -63,24 +79,19 @@ def esp32_make_command(
     ]
 
 
-def _esp32_container_script(
-    opts: Esp32BuildOptions,
-    mpy_dir: Path,
-    idf_dir: Path,
-    tools_dir: Path,
-    mpy_cross: Path,
-) -> str:
-    """The one shell invocation `build_esp32()` runs inside the container:
-    install ESP-IDF's own tools (only once -- `.installed` marks a cache
+def _esp32_env_script(opts: Esp32BuildOptions, idf_dir: Path, tools_dir: Path) -> str:
+    """Install ESP-IDF's own tools (only once -- `.installed` marks a cache
     hit, the same "cached by existence" rule `container_mpy_cross()` and
-    `sources.build_mpy_cross()` both already use), export the environment
-    `idf_tools.py export` computes, then `make`. One invocation, not
-    several `dockerrun.run()` calls, because `dockerrun.run()` has no
-    stdout-capturing mode to hand `export`'s own key=value lines back to a
-    second call -- letting bash itself `eval` them, in the same shell that
-    then runs `make`, needs no such plumbing at all, and gets `$PATH`-style
-    substitutions in exported values (`ResolvedEspIdf.env()`'s own old
-    special case) for free from the shell instead of a bespoke replace.
+    `sources.build_mpy_cross()` both already use) and export the
+    environment `idf_tools.py export` computes -- the half of the old
+    single `_esp32_container_script()` that both `make` and a cross-compiler
+    probe need identically. Split out ([0100]'s own rp2 correction, applied
+    here too): a probe needs this environment exported to find the real
+    compiler on `PATH` *before* `esp32_make_command()`'s own `CFLAGS_EXTRA`
+    is built, and there is no cheaper way to get there than running this
+    same, idempotent sequence twice (once to discover, once to build) --
+    `idf_tools.py export` itself does no network I/O once `.installed`
+    exists, so the repeat costs nothing but a fast local read.
 
     Every path here is `.as_posix()` and already bind-mounted at its own
     identical host path (`build_esp32()`'s own `mounts=`), the same
@@ -103,7 +114,6 @@ def _esp32_container_script(
     marker = shlex.quote((tools_dir / ".installed").as_posix())
     idf_tools_path = shlex.quote(tools_dir.as_posix())
     idf_path = shlex.quote(idf_dir.as_posix())
-    make_command = shlex.join(esp32_make_command(opts, mpy_dir, mpy_cross=mpy_cross))
     return f"""set -eux
 export HOME={idf_tools_path}
 export IDF_TOOLS_PATH={idf_tools_path}
@@ -114,7 +124,45 @@ if [ ! -e {marker} ]; then
 fi
 eval "$(python3 {tools_py} export --format key-value | sed 's/^/export /')"
 export IDF_PATH={idf_path}
-{make_command}
+"""
+
+
+def _esp32_discover_cross_gcc_script(
+    opts: Esp32BuildOptions, idf_dir: Path, tools_dir: Path
+) -> str:
+    """`_esp32_env_script()`'s own environment, plus one line that finds
+    the real cross compiler `idf_tools.py export` just put on `PATH` and
+    prints its full path -- nothing else on stdout, so
+    `build_esp32()` can use the container's own `capture_output=True`
+    return value directly.
+
+    No static `idf_target -> cross prefix` table (`xtensa-esp32-elf-`,
+    `riscv32-esp-elf-`, `xtensa-esp32s3-elf-`, ...) to keep in sync: this
+    module's own docstring already explains why `espidf.py` is not shaped
+    like `toolchain_fetch.py`'s `TOOLCHAIN_CROSS_PREFIX` -- "there is no
+    single `<prefix>gcc` to find on `PATH` here" applies just as much to a
+    guessed name as to a hand-maintained resolver, and ESP-IDF's own
+    `idf_tools.py export` already exports exactly the one toolchain
+    `--targets=` installed onto `PATH`, so asking the shell to find the
+    one `*-elf-gcc` binary there is the same "let the tool that actually
+    knows answer" principle `probe_supported_cflags()`'s own docstring
+    already applies to gcc itself. Empty output means none was found (an
+    ESP-IDF layout this glob does not anticipate) -- `build_esp32()`
+    falls back to unprobed `tag_cflags()` rather than failing the whole
+    build over a probe that could not run.
+    """
+    env_script = _esp32_env_script(opts, idf_dir, tools_dir)
+    return f"""{env_script}
+CROSS_GCC=""
+for _dir in $(echo "$PATH" | tr ':' '\\n'); do
+    for _candidate in "$_dir"/*-elf-gcc; do
+        if [ -x "$_candidate" ]; then
+            CROSS_GCC="$_candidate"
+            break 2
+        fi
+    done
+done
+echo "$CROSS_GCC"
 """
 
 
@@ -165,8 +213,13 @@ def build_esp32(
     step refused to run from inside cibuildmp's own `uv tool install`
     venv). Only the `git clone` (`espidf.fetch_esp_idf()`, source, portable)
     stays on the host; installing ESP-IDF's own tools, and `make` itself,
-    both run inside `esp_idf_base` ([0058]) via `_esp32_container_script()`
-    above, in one `container.call()`.
+    both run inside `esp_idf_base` ([0058]), via `_esp32_env_script()`'s
+    shared install+export sequence -- run twice now, not once, since the
+    cross-compiler probe below (a live-caught correction, mirroring
+    [0060]'s own addendum for `rp2`) needs that same environment exported
+    a second time before `make` itself runs. Both runs are cheap once
+    ESP-IDF's own tools are installed: `idf_tools.py export` does no
+    network I/O by itself.
 
     mpy-cross is built inside the same container too now
     (`container_mpy_cross()`, matching `unix`/`windows`/`webassembly`) --
@@ -243,7 +296,42 @@ def build_esp32(
             container=container,
         )
 
-        script = _esp32_container_script(opts, mpy_dir, idf_dir, tools_dir, mpy_cross)
+        # Discover the real cross compiler `idf_tools.py export` puts on
+        # `PATH` and probe against it, the same live-caught fix [0060]'s
+        # own correction addendum gave `rp2` -- `tag_cflags()`'s own
+        # `-Wno-error=unterminated-string-initialization` is a hard `cc1:
+        # error` on any pre-`v1.26.0`-era cross compiler that does not
+        # recognize it. See `_esp32_discover_cross_gcc_script()`'s own
+        # docstring for why this discovers the binary rather than naming
+        # it from a static `idf_target -> prefix` table.
+        discover_script = _esp32_discover_cross_gcc_script(opts, idf_dir, tools_dir)
+        cross_gcc = container.call(
+            ["bash", "-c", discover_script],
+            workdir=mpy_dir / "ports" / "esp32",
+            timeout=timeout,
+            capture_output=True,
+        )
+        cross_gcc = (cross_gcc or "").strip()
+        probed_cflags = (
+            build_common.probe_supported_cflags(
+                build_common.tag_cflags(opts.tag),
+                compiler=cross_gcc,
+                timeout=timeout,
+                container=container,
+            )
+            if cross_gcc
+            # No compiler found by the glob -- fall back to the raw,
+            # unprobed list rather than failing the whole build over a
+            # probe that could not run at all (see the discover script's
+            # own docstring).
+            else build_common.tag_cflags(opts.tag)
+        )
+
+        make_command = esp32_make_command(
+            opts, mpy_dir, mpy_cross=mpy_cross, extra_cflags=probed_cflags
+        )
+        env_script = _esp32_env_script(opts, idf_dir, tools_dir)
+        script = f"{env_script}{shlex.join(make_command)}\n"
         container.call(
             ["bash", "-c", script],
             workdir=mpy_dir / "ports" / "esp32",

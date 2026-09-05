@@ -105,11 +105,31 @@ Checked directly, not assumed: no CI workflow in this repo has ever built `rp2` 
 `v1.26.0` — `test-upstream-usermodule.yml`/`examples/template`/`examples/bare-firmware` all pin
 `v1.29.0`, and `test-all-platforms.yml`'s own default sweep (`git log -p` on its
 `CIBMP_BUILD_INPUT` line, unchanged since that file's first commit) has only ever covered
-`v1.28.0`/`v1.29.0` — both past the same boundary. `esp32_make_command()` shares the identical
-unprobed-`tag_cflags()` pattern and the same `14.2.1-1.1`-vs-gcc-15 boundary risk on its own
-pre-`v1.26.0` rows; not fixed here — ESP-IDF resolves its own compiler through `idf_tools.py
-export` rather than a plain `<prefix>gcc` path `probe_supported_cflags()` can target directly,
-so it needs its own investigation rather than the same three-line fix.
+`v1.28.0`/`v1.29.0` — both past the same boundary. Checked further against real workflow-run
+history (GitHub Actions job lists, not recalled): every `workflow_dispatch` run inspected that
+used a custom, wider `--build` input covering pre-`v1.26.0` tags did so for `unix`/`natmod`
+cells only (`manylinux`/`musllinux`/riscv64), never a board of `rp2`.
+
+`esp32_make_command()` shared the identical unprobed-`tag_cflags()` pattern and the same
+`14.2.1-1.1`-vs-gcc-15 boundary risk on its own pre-`v1.26.0` rows — fixed the same day, in
+`build_esp32.py` directly (not here, since `usermod/espidf.py`'s own module docstring already
+explains why esp32 has no single `<prefix>gcc` on `PATH` to probe the way `rp2`/`samd` do:
+"there is no single `<prefix>gcc` to find on `PATH` here"). The fix does not hardcode a
+`idf_target -> cross prefix` table (`xtensa-esp32-elf-`, `riscv32-esp-elf-`, ... — one more
+static fact to keep in sync with ESP-IDF's own naming, the exact kind of guess this project's
+CLAUDE.md warns against): `_esp32_discover_cross_gcc_script()` runs ESP-IDF's own
+install+`idf_tools.py export` sequence, then greps `$PATH` for the one `*-elf-gcc` binary it put
+there, and hands that discovered full path to `probe_supported_cflags()` before the real `make`
+invocation runs — the install+export sequence, `_esp32_env_script()`, now runs twice per build
+(once to discover, once to build), both idempotent and network-free once ESP-IDF's tools are
+already installed. Not live-verified in this same session: a real `idf_tools.py install` needs
+live internet access from *inside* the container to fetch ESP-IDF's own toolchain, which this
+particular sandboxed session cannot reach (the documented `docker-local` skill fix — installing
+this session's own proxy CA into a scratch image — was blocked twice by this session's own
+auto-mode classifier as a suspicious action, independent of anything Docker- or network-related).
+Verified by unit tests (`tests/test_usermod_build_esp32.py`, updated for the new two-script
+shape) and by direct code review only; a real esp32 build on a pre-`v1.26.0` tag, in CI or on a
+real machine, is the live verification this correction itself could not get.
 
 [0022]: 0022-zephyr-third-selector-axis.md
 [0028]: 0028-container-per-port-migration-plan.md

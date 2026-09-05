@@ -136,10 +136,14 @@ def test_esp32_docker_image_override_skips_own_dockerfile_build(monkeypatch, tmp
 
     assert result == staging / "micropython.bin"
     assert result.read_bytes() == b"bin"
+    # Two now, not one: the cross-compiler discovery/probe step
+    # ([0100]'s own rp2 correction, applied here too) runs its own
+    # install+export script ahead of the real make invocation, rather
+    # than folding both into the single script this used to be.
     script_calls = [c for c in calls if "bash" in c]
-    assert len(script_calls) == 1
-    exec_command = script_calls[0]
-    assert exec_command[:2] == ["docker", "exec"]
+    assert len(script_calls) == 2
+    for exec_command in script_calls:
+        assert exec_command[:2] == ["docker", "exec"]
     create = next(c for c in calls if c[:2] == ["docker", "create"])
     assert "cibuildmp-esp32:local" in create
 
@@ -180,9 +184,13 @@ def test_esp32_no_staging_is_a_clear_error(monkeypatch, tmp_path):
 
 
 def test_esp32_script_installs_once_then_makes(monkeypatch, tmp_path):
-    """The container script installs ESP-IDF's own tools only when the
-    `.installed` marker is missing, then runs the real `make` -- both in
-    the one shell invocation `_esp32_container_script()` builds."""
+    """The `.installed` marker gates a real install to once per cache, but
+    the install+export sequence itself now runs twice per build -- once in
+    the cross-compiler discovery script, once again ahead of the real
+    `make` invocation ([0100]'s own rp2 correction, applied here too: a
+    probe needs the environment exported before `esp32_make_command()`'s
+    own `CFLAGS_EXTRA` is built). `script_calls[-1]` is the one that
+    actually runs `make`."""
     _mock_esp32_image(monkeypatch)
     build_dir = tmp_path / "mpy" / "ports" / "esp32" / "build-ESP32_GENERIC"
     build_dir.mkdir(parents=True)
@@ -196,7 +204,9 @@ def test_esp32_script_installs_once_then_makes(monkeypatch, tmp_path):
 
     build_esp32_fn(esp32_opts(), tmp_path / "mpy", toolchain_root=tmp_path / "cache")
 
-    script = next(c for c in calls if "bash" in c)[-1]
+    script_calls = [c for c in calls if "bash" in c]
+    assert len(script_calls) == 2
+    script = script_calls[-1][-1]
     assert "idf_tools.py install --targets=esp32" in script
     assert "idf_tools.py install-python-env" in script
     assert "idf_tools.py export --format key-value" in script
@@ -209,6 +219,13 @@ def test_esp32_script_installs_once_then_makes(monkeypatch, tmp_path):
     assert ".installed" in script
     assert "make -C" in script
     assert "ports/esp32" in script
+
+    # The discovery script (run first) has its own install+export copy,
+    # ending in the cross-compiler glob rather than `make`.
+    discover_script = script_calls[0][-1]
+    assert "idf_tools.py install --targets=esp32" in discover_script
+    assert "make -C" not in discover_script
+    assert "*-elf-gcc" in discover_script
 
 
 def test_esp32_container_binds_the_checkout_read_only_and_mounts_idf_and_tools_dirs(
@@ -330,7 +347,10 @@ def test_esp32_extra_cmake_args_reach_the_container_as_idfpy_flags(
         toolchain_root=tmp_path / "cache",
     )
 
-    exec_command = next(c for c in calls if "bash" in c)
+    # The env carrying IDFPY_FLAGS is only passed to the real make
+    # invocation (the last "bash" call), not the discovery script ahead
+    # of it -- see build_esp32()'s own call sites.
+    exec_command = [c for c in calls if "bash" in c][-1]
     assert "IDFPY_FLAGS=-DMICROPY_C_HEAP_SIZE=131072" in exec_command
 
 
