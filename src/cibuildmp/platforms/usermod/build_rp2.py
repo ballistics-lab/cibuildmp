@@ -33,7 +33,11 @@ class Rp2BuildOptions:
 
 
 def rp2_make_command(
-    opts: Rp2BuildOptions, mpy_dir: Path, *, mpy_cross: Path | None = None
+    opts: Rp2BuildOptions,
+    mpy_dir: Path,
+    *,
+    mpy_cross: Path | None = None,
+    extra_cflags: tuple[str, ...] | None = None,
 ) -> list[str]:
     # No BUILD= override, same reason `esp32_make_command()`'s own comment
     # gives: `ports/rp2` is CMake-driven too, and a mismatched BUILD=
@@ -45,7 +49,23 @@ def rp2_make_command(
     # `ports/rp2` recompiles `py/` into the firmware itself, live-confirmed
     # to hit the identical gcc-15 diagnostic on `arm_embedded`'s own native
     # compiler ([0091], run 33697330722).
-    cflags = build_common.tag_cflags(opts.tag)
+    #
+    # `extra_cflags`, when given, overrides `tag_cflags()`'s own raw
+    # candidate list -- live-caught building [0100]'s own `samd` driver,
+    # then reproduced here directly (`v1.24.0-rp2-ADAFRUIT_FEATHER_RP2040`,
+    # 2026-09-05): this table's own `-Wno-error=unterminated-string-
+    # initialization` names a real gcc-15 diagnostic for every tag before
+    # `v1.26.0`, with no regard for which toolchain that row's own `gcc`
+    # field resolves to -- and `rp2`'s pre-`v1.26.0` rows resolve to
+    # `14.2.1-1.1`, which does not recognize that diagnostic name at all
+    # (`cc1: error: ... no option '-Wunterminated-string-initialization'`).
+    # [0060]'s own live verification was `v1.29.0` only, past the boundary
+    # where `15.2.1-1.1` genuinely supports it, so this was never caught
+    # until a different port's driver hit the identical table on an older
+    # tag. `build_rp2()` probes against the real fetched
+    # `arm-none-eabi-gcc` before calling this now, the same way
+    # `build_unix()`'s own cross-compile branch already does.
+    cflags = extra_cflags if extra_cflags is not None else build_common.tag_cflags(opts.tag)
     return [
         "make",
         "-C",
@@ -186,6 +206,27 @@ def build_rp2(
     ) as container:
         container.overlay(mpy_dir)
 
+        # Fetched first, on its own -- not folded into the same script as
+        # `make` the way this used to run -- because
+        # `probe_supported_cflags()` below needs the real cross compiler
+        # to already exist on disk to probe against it by full path.
+        # Idempotent either way (`fetch_script()`'s own marker check), so
+        # running it as a standalone step costs nothing on a warm cache.
+        container.call(["bash", "-c", fetch], workdir=rp2_dir, timeout=timeout)
+
+        # Probed against the *cross* compiler this row's own toolchain
+        # resolves to, not mpy-cross's native one -- see
+        # `rp2_make_command()`'s own docstring for the live-caught bug
+        # this fixes (found via [0100]'s own `samd` driver, reproduced
+        # here directly on `v1.24.0-rp2-ADAFRUIT_FEATHER_RP2040`).
+        cross_gcc = (toolchain_dir / "bin" / f"{cross}gcc").as_posix()
+        probed_cflags = build_common.probe_supported_cflags(
+            build_common.tag_cflags(opts.tag),
+            compiler=cross_gcc,
+            timeout=timeout,
+            container=container,
+        )
+
         mpy_cross = build_common.container_mpy_cross(
             mpy_dir,
             timeout=timeout,
@@ -193,17 +234,13 @@ def build_rp2(
             container=container,
         )
 
-        make_command = rp2_make_command(opts, mpy_dir, mpy_cross=mpy_cross)
-        # One `bash -c` script, not a separate `call()` for the fetch:
-        # there is nothing to hand back to a second one, and the point is
-        # that the toolchain's own `bin/` is on `PATH` before `make` runs,
-        # in the same container invocation ([0086]'s own `fetch_script()`
-        # docstring). `export PATH=` here, not `env=`, because `call()`'s
-        # own `env=` only ever sets `-e KEY=VALUE` (replace, not append)
-        # -- it has no way to prepend onto the image's own existing
-        # `$PATH`.
+        make_command = rp2_make_command(
+            opts, mpy_dir, mpy_cross=mpy_cross, extra_cflags=probed_cflags
+        )
+        # `export PATH=` here, not `env=`, because `call()`'s own `env=`
+        # only ever sets `-e KEY=VALUE` (replace, not append) -- it has no
+        # way to prepend onto the image's own existing `$PATH`.
         script = (
-            f"{fetch}"
             f'export PATH="{(toolchain_dir / "bin").as_posix()}:$PATH"\n'
             f"{shlex.join(make_command)}\n"
         )

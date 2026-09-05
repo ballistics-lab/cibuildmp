@@ -241,7 +241,17 @@ def test_rp2_fetches_its_own_toolchain_and_puts_it_on_path(monkeypatch, tmp_path
     )
     script = script_call[-1]
     assert f'export PATH="{(expected_dir / "bin").as_posix()}:$PATH"' in script
-    assert "xpack-arm-none-eabi-gcc-15.2.1-1.1-linux-x64.tar.gz" in script
+    # The fetch now runs as its own container.call() ahead of the make
+    # script -- see build_rp2()'s own comment: probe_supported_cflags()
+    # needs the real cross compiler already fetched to disk, by full
+    # path, before it can probe against it. So the tarball URL lives in a
+    # separate call now, not inside the "BOARD=PICO" script itself.
+    assert any(
+        "xpack-arm-none-eabi-gcc-15.2.1-1.1-linux-x64.tar.gz" in " ".join(
+            str(part) for part in c
+        )
+        for c in calls
+    )
 
 
 def test_rp2_extra_cmake_args_reach_the_container_as_cmake_args(monkeypatch, tmp_path):

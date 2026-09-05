@@ -81,7 +81,40 @@ project's later emphasis on running things for real (see CLAUDE.md's own opening
 Worth doing as a fast follow if `rp2`'s command shape starts drifting silently, but not
 required to close this item.
 
+## Correction, 2026-09-05 — pre-`v1.26.0` tags were never live-verified, and one failed
+
+"Live-verified" above means `v1.29.0-rp2-RPI_PICO` only. Found while building [0100]'s own
+`samd` driver: `rp2_make_command()` passes `build_common.tag_cflags(opts.tag)` straight into
+`CFLAGS_EXTRA` with no probing, and `resources/tag_cflags.toml` names a real gcc-15 diagnostic
+(`-Wno-error=unterminated-string-initialization`) for every tag `v1.12`–`v1.25.0` — with no
+regard for which toolchain a given port/row actually resolves to at that tag. `rp2`'s own
+pre-`v1.26.0` rows resolve to `14.2.1-1.1` ([0094]'s addendum), which does not recognize that
+diagnostic name at all. Reproduced directly: `v1.24.0-rp2-ADAFRUIT_FEATHER_RP2040` failed with
+`cc1: error: '-Wno-error=unterminated-string-initialization': no option
+'-Wunterminated-string-initialization'`, the identical failure `probe_supported_cflags()` was
+originally built to prevent for `unix` ([0082]) — that fix never reached this driver.
+
+Fixed the same way: the toolchain fetch now runs as its own `container.call()` ahead of the
+make invocation, so `build_rp2()` can probe the real fetched `arm-none-eabi-gcc` (by full path)
+via `build_common.probe_supported_cflags()` before building `CFLAGS_EXTRA`, mirroring
+`build_unix()`'s own cross-compile-branch pattern. `rp2_make_command()` gained an
+`extra_cflags` override parameter for it. Re-verified live against the same identifier that
+failed above, now producing a genuine `firmware.uf2`.
+
+Checked directly, not assumed: no CI workflow in this repo has ever built `rp2` below
+`v1.26.0` — `test-upstream-usermodule.yml`/`examples/template`/`examples/bare-firmware` all pin
+`v1.29.0`, and `test-all-platforms.yml`'s own default sweep (`git log -p` on its
+`CIBMP_BUILD_INPUT` line, unchanged since that file's first commit) has only ever covered
+`v1.28.0`/`v1.29.0` — both past the same boundary. `esp32_make_command()` shares the identical
+unprobed-`tag_cflags()` pattern and the same `14.2.1-1.1`-vs-gcc-15 boundary risk on its own
+pre-`v1.26.0` rows; not fixed here — ESP-IDF resolves its own compiler through `idf_tools.py
+export` rather than a plain `<prefix>gcc` path `probe_supported_cflags()` can target directly,
+so it needs its own investigation rather than the same three-line fix.
+
 [0022]: 0022-zephyr-third-selector-axis.md
 [0028]: 0028-container-per-port-migration-plan.md
 [0053]: 0053-usermod-ports-without-a-build-driver.md
 [0058]: 0058-image-groups-are-toolchains-not-ports.md
+[0082]: 0082-natmod-old-tags-fail-mpy-cross-under-gcc-15.md
+[0094]: 0094-arm-gnu-toolchain-is-a-real-third-choice-for-arm-embedded.md
+[0100]: 0100-samd-build-driver-plan.md
