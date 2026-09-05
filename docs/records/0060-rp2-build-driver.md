@@ -156,12 +156,40 @@ those two specific tags were never actually exposed), but 217 real `esp32` rows 
 through `v1.25.0`) sit inside `tag_cflags()`'s flagged range and bundle toolchains at least as
 old — the fix was live-needed, not a defensive guess.
 
-**What this does not cover**: a full firmware build still needs `idf_tools.py
-install-python-env` (a `pip install` from PyPI) to succeed, which this session's container
-network still cannot reach — not investigated further here, since it is a separate, unrelated
-gap from the one this correction fixes. The discovery-and-probe mechanism itself, and the bug it
-fixes, are both now verified against real artifacts; the very last mile (a genuine linked
-firmware binary) is not.
+**Update: `install-python-env` completed too, offline, and the real `cibuildmp` CLI got
+further still.** The paragraph above turned out to be solvable the same way as the toolchain
+archives: `idf_tools.py install-python-env`'s own two hardcoded `pip install --upgrade
+pip`/`--upgrade setuptools` calls don't accept `--find-links`/`--no-index` as CLI flags at all
+(only the final combined `requirements.core.txt` install does) — but pip itself honors
+`PIP_NO_INDEX`/`PIP_FIND_LINKS` as **environment variables** for every subprocess call
+regardless, so exporting those before invoking `install-python-env` (with wheels for all ~60
+`requirements.core.txt` entries pre-downloaded on the host, plus `esptool` — which ships no
+wheel on PyPI at all, only an sdist — built locally with a plain `pip wheel esptool --no-deps`)
+installed the entire venv with zero network calls from inside the container.
+
+With that in place and `.installed` touched, a real `uv run cibuildmp examples/template --build
+'v1.27.0-esp32-ESP32_GENERIC'` (a genuine board with `mcu == "esp32"`, matching the pre-seeded
+`idf_target`, not e.g. `ARDUINO_NANO_ESP32`'s `esp32s3`) ran the actual `build_esp32()` driver
+end to end: real `mpy-cross` build, the discovery script finding the exact same
+`xtensa-esp-elf-gcc` (crosstool-NG `esp-14.2.0_20241119`) by the same `$PATH` glob the driver
+itself uses, `cmake` correctly reporting `The C compiler identification is GNU 14.2.0` and
+configuring against it, no `cc1: error` anywhere in the log — the fix holds under the real
+driver, not just a hand-run probe command.
+
+It then failed on a **third, genuinely separate, unrelated** gap: `ports/esp32/main/idf_component.yml`
+declares real, non-optional dependencies for target `esp32` at `idf_version >= 5.3`
+(`espressif/mdns`, `espressif/lan867x`) that ESP-IDF's Component Manager fetches from its own
+static registry (`components-file.espressif.com`), not from the `tools.json`/PyPI paths already
+solved above — a third distinct network surface (crosstool-NG archives, PyPI wheels, and now a
+component-registry CDN), each with its own cache-by-existence shape
+(`idf_component_tools.file_cache.FileCache`, keyed by a per-component content hash only knowable
+after querying the registry, unlike the other two which are keyed by a fact already in
+`tools.json`/`requirements.core.txt` up front). Not pursued further here: it is unrelated to the
+`tag_cflags()` bug this correction fixes, and confirming this driver reaches real `cmake`
+configuration against the exact right, correctly-probed compiler is what this correction set out
+to prove. The very last mile (a genuine linked `firmware.bin`) is the one thing still not
+reached for `esp32`, gated on this separate, real registry-network gap — not on anything this
+correction's own fix touches.
 
 [0022]: 0022-zephyr-third-selector-axis.md
 [0028]: 0028-container-per-port-migration-plan.md
