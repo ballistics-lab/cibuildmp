@@ -66,3 +66,12 @@ including `rp2` since. The real list here is **nine** ports, not ten:
 
 The tracker's own conventions call this exact claim out as a repeat offender,
 and [0022]'s status line was corrected while this record's was not.
+
+## Correction, 2026-09-05 — `samd` is not one of these ports either
+
+[0100] shipped `build_samd()`, chosen from this record's own remaining nine as
+the easiest to implement now that `esp8266`'s tags were found too old. `KNOWN_PORTS`
+now holds seven entries. The real list here is **eight** ports, not nine:
+`mimxrt`, `stm32`, `psoc-edge`, `alif`, `esp8266`, `cc3200`, `renesas-ra`, `nrf`.
+
+[0100]: 0100-samd-build-driver-plan.md

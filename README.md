@@ -833,6 +833,9 @@ naming a scalar option in `inherit` is a config error, not a silent no-op.
 [0076]: docs/records/0076-the-mipsel-holdout-is-bclibc-and-wasm3-not-a7p.md
 [0077]: docs/records/0077-docs-drift-is-a-failing-test-not-a-discipline-problem.md
 [0097]: docs/records/0097-lv-binding-micropython-builds-through-cibuildmp.md
+[0053]: docs/records/0053-usermod-ports-without-a-build-driver.md
+[0060]: docs/records/0060-rp2-build-driver.md
+[0100]: docs/records/0100-samd-build-driver-plan.md
 
 ## When a build fails
 
@@ -1074,10 +1077,10 @@ real CI, arch by arch, not just `--dry-run`.
 Upstream MicroPython has 20 ports (`ports/*` in a real checkout); every one
 is listed below for orientation, not just the ones this project covers.
 `resources/build-platforms.toml` carries independently-verified
-`(tag, arch/board)` rows for 15 of them; only 6 (`unix`, `windows`, `qemu`,
-`webassembly`, `esp32`, `rp2`) have a real build driver wired into the CLI
-at all — the other 9 have verified facts a config can already *name*, but
-nothing yet to actually build them. Every ✅ row below is live-verified
+`(tag, arch/board)` rows for 15 of them; only 7 (`unix`, `windows`, `qemu`,
+`webassembly`, `esp32`, `rp2`, `samd`) have a real build driver wired into
+the CLI at all — the other 8 have verified facts a config can already
+*name*, but nothing yet to actually build them. Every ✅ row below is live-verified
 against a real MicroPython checkout, including a real custom
 `USER_C_MODULES` module, Docker-only. `unix`, `windows`, `webassembly` and
 `qemu` are exercised through `build-examples.yml`'s own small integration
@@ -1261,9 +1264,16 @@ scheduled `test-all-platforms.yml` run since.
   <td>✅</td>
 </tr>
 <tr>
+  <td><code>samd</code></td>
+  <td>
+    every board across <code>v1.20.0</code>-<code>v1.30.0-preview</code>
+  </td>
+  <td><code>embedded_base</code> (Docker) -- plain Make, no provisioning step, same shape as <code>rp2</code>[^samdci]</td>
+  <td>✅</td>
+</tr>
+<tr>
   <td>
     <code>mimxrt</code><br>
-    <code>samd</code><br>
     <code>stm32</code><br>
     <code>psoc-edge</code><br>
     <code>alif</code><br>
@@ -1313,6 +1323,8 @@ scheduled `test-all-platforms.yml` run since.
 
 [^nodriver]: `resources/build-platforms.toml` has real, independently-verified rows for each of these ports (walked against a real MicroPython checkout the same way every ✅ row above was); a config can name their identifiers today. What's missing is a `build_<port>()` driver (`platforms/usermod/build_<port>.py`) to actually run one — not a scope decision, just not built yet.
 [^rp2ci]: `build_rp2()` runs no provisioning step inside the container at all — the Pico SDK and everything it needs (`lib/pico-sdk`/`lib/tinyusb`/`lib/lwip`/`lib/btstack`/`lib/cyw43-driver`) are plain git submodules of the MicroPython checkout, already vendored as real files by the release tarball this project prefers. Running the port's own `make ... submodules` target was tried first and failed live against a real tarball checkout ("fatal: not a git repository", since a release tarball is not a git checkout at all); those submodules are threaded into `sources.fetch_micropython()` instead, reached only on its clone path (a preview tag with no tarball). Live-verified: a real `examples/template` build against `v1.29.0-rp2-RPI_PICO` producing a genuine 681984-byte `firmware.uf2` with the project's own C module linked in. Record 0060.
+
+[^samdci]: `build_samd()` ([0100]), the ninth of [0053]'s originally driverless usermod ports to get one and the first picked up after `rp2` — chosen over the other eight once `esp8266` was ruled out for tags too old to be worth it. No `SAMD_SUBMODULES`-style plumbing was needed: `orchestrate.build()` already threads `sources.fetch_micropython(tag, ports=group_ports)` generically enough to cover it. Live-verified against real identifiers spanning `v1.20.0` through the current tag, producing genuine linked firmware; a full sweep of every real `(tag, board)` row this project has verified facts for is how that was confirmed, not a spot check.
 
 [^esp32ci]: `build_esp32()` went Docker 2026-08-28 (`esp_idf_base`, [0058]), closing the venv conflict that made every real esp32 build fail on the bare host; `idf_version`/`idf_target` are threaded from each board's own real row rather than a fixed default, and `HOME` is exported explicitly for the same reason `esp32`'s own `ports/esp32` needs a real per-user cache dir that `dockerrun.run()`'s `--user <uid>:<gid>` doesn't otherwise give it (unmapped on GitHub's own runners specifically, live-caught on real CI). `test-all-platforms.yml`'s own broad sweep is what actually proves this across the whole board matrix, not a spot check — Xtensa and RISC-V both, both MicroPython tags this project currently tracks.
 

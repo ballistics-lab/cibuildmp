@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`samd` gets a real `build_samd()` driver** — the easiest of [0053]'s
+  remaining nine driverless usermod ports to pick up next (`esp8266` ruled
+  out for tags too old to be worth it), modeled on `rp2`'s own plain-Make
+  shape rather than esp32/rp2's cmake one. No new provisioning step needed:
+  like `rp2`, `orchestrate.build()` already generalizes `sources.
+  fetch_micropython()` for it. Live-verified against real identifiers
+  spanning `v1.20.0` through the current tag; `KNOWN_PORTS` now carries
+  seven wired drivers, not six. `[0100]`.
+
+### Fixed
+
+- **`rp2` and `esp32` both passed `tag_cflags()`'s candidate `CFLAGS_EXTRA`
+  straight into their build command with no probing**, unlike every other
+  cross-compiling port here — `-Wno-error=unterminated-string-initialization`
+  (a gcc-15-only diagnostic, flagged for every tag `v1.12`-`v1.25.0`
+  regardless of which toolchain a given row actually resolves to) hard-failed
+  `cc1: error: ... no option '-Wunterminated-string-initialization'` on every
+  pre-`v1.26.0` row of either port, since both resolve to a sub-gcc-15
+  toolchain there. Live-reproduced on `v1.24.0-rp2-ADAFRUIT_FEATHER_RP2040`
+  (now producing a genuine `firmware.uf2`) and against a real ESP-IDF
+  `xtensa-esp-elf-gcc 14.2.0`. Fixed the same way `unix` already was
+  ([0082]): fetch/discover the real compiler first, then probe it with
+  `build_common.probe_supported_cflags()` before building `CFLAGS_EXTRA`.
+  `esp32` has no static `<prefix>gcc` to point at, so its own fix discovers
+  the real cross-compiler dynamically (a `$PATH` glob for `*-elf-gcc`, run
+  after ESP-IDF's own install+export sequence) rather than guessing an
+  `idf_target -> prefix` table. Neither bug had ever been exercised by CI --
+  no workflow in this repo has built `rp2`/`esp32` below `v1.26.0`. `[0060]`.
+
 ## [0.7.1] - 2026-09-04
 
 ### Added
@@ -1671,3 +1702,6 @@ than restarting (see the 0.3.0a1 entry). -->
 [0095]: docs/records/0095-cache-root-splits-source-from-build-state.md
 [0096]: docs/records/0096-arm-riscv-embedded-collapse-into-embedded-base.md
 [0056]: docs/records/0056-usermod-with-no-user-c-module.md
+[0053]: docs/records/0053-usermod-ports-without-a-build-driver.md
+[0060]: docs/records/0060-rp2-build-driver.md
+[0100]: docs/records/0100-samd-build-driver-plan.md
