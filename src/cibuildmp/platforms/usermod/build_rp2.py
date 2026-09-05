@@ -65,7 +65,9 @@ def rp2_make_command(
     # tag. `build_rp2()` probes against the real fetched
     # `arm-none-eabi-gcc` before calling this now, the same way
     # `build_unix()`'s own cross-compile branch already does.
-    cflags = extra_cflags if extra_cflags is not None else build_common.tag_cflags(opts.tag)
+    cflags = (
+        extra_cflags if extra_cflags is not None else build_common.tag_cflags(opts.tag)
+    )
     return [
         "make",
         "-C",

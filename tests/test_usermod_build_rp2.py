@@ -247,9 +247,8 @@ def test_rp2_fetches_its_own_toolchain_and_puts_it_on_path(monkeypatch, tmp_path
     # path, before it can probe against it. So the tarball URL lives in a
     # separate call now, not inside the "BOARD=PICO" script itself.
     assert any(
-        "xpack-arm-none-eabi-gcc-15.2.1-1.1-linux-x64.tar.gz" in " ".join(
-            str(part) for part in c
-        )
+        "xpack-arm-none-eabi-gcc-15.2.1-1.1-linux-x64.tar.gz"
+        in " ".join(str(part) for part in c)
         for c in calls
     )
 

@@ -79,7 +79,9 @@ def samd_make_command(
     # `build_unix()`'s own cross-compile branch already does; this stays
     # the raw candidates only for a caller (a test, a hand invocation)
     # that has not done that filtering itself.
-    cflags = extra_cflags if extra_cflags is not None else build_common.tag_cflags(opts.tag)
+    cflags = (
+        extra_cflags if extra_cflags is not None else build_common.tag_cflags(opts.tag)
+    )
     return [
         "make",
         "-C",
@@ -182,7 +184,11 @@ def build_samd(
         mpy_dir,
         image=docker_image,
         oci_platform=oci_platform,
-        mounts=[staging, toolchain_dir.parent, *_samd_project_mounts(opts, package_dir)],
+        mounts=[
+            staging,
+            toolchain_dir.parent,
+            *_samd_project_mounts(opts, package_dir),
+        ],
     ) as container:
         container.overlay(mpy_dir)
 

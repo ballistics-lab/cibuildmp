@@ -61,7 +61,9 @@ def esp32_make_command(
     # `build_common.probe_supported_cflags()` before calling this -- see
     # that function's own comment for why esp32 cannot just reuse
     # `rp2`'s/`samd`'s plain `<prefix>gcc` full-path probe.
-    cflags = extra_cflags if extra_cflags is not None else build_common.tag_cflags(opts.tag)
+    cflags = (
+        extra_cflags if extra_cflags is not None else build_common.tag_cflags(opts.tag)
+    )
     return [
         "make",
         "-C",
