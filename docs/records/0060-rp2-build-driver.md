@@ -122,14 +122,46 @@ install+`idf_tools.py export` sequence, then greps `$PATH` for the one `*-elf-gc
 there, and hands that discovered full path to `probe_supported_cflags()` before the real `make`
 invocation runs — the install+export sequence, `_esp32_env_script()`, now runs twice per build
 (once to discover, once to build), both idempotent and network-free once ESP-IDF's tools are
-already installed. Not live-verified in this same session: a real `idf_tools.py install` needs
-live internet access from *inside* the container to fetch ESP-IDF's own toolchain, which this
-particular sandboxed session cannot reach (the documented `docker-local` skill fix — installing
-this session's own proxy CA into a scratch image — was blocked twice by this session's own
-auto-mode classifier as a suspicious action, independent of anything Docker- or network-related).
-Verified by unit tests (`tests/test_usermod_build_esp32.py`, updated for the new two-script
-shape) and by direct code review only; a real esp32 build on a pre-`v1.26.0` tag, in CI or on a
-real machine, is the live verification this correction itself could not get.
+already installed.
+
+**Live-verified after all, against a genuinely real ESP-IDF toolchain — no CA injection needed.**
+This sandboxed session cannot reach the internet from *inside* a container (the documented
+`docker-local` skill fix, installing this session's own proxy CA into a scratch image, was
+blocked twice by this session's own auto-mode classifier), but `idf_tools.py`'s own `download()`
+already implements the identical "already fetched, skip the network" check
+`toolchain_fetch.fetch_script()` uses elsewhere in this project: it looks for
+`$IDF_TOOLS_PATH/dist/<archive_name>`, verifies its sha256/size against `tools.json`, and returns
+immediately if it matches — no different from `container_mpy_cross()`'s own cache-by-existence
+rule. Fetched all five `install: always` esp32 tools directly from `tools.json`'s own pinned URLs
+(`xtensa-esp-elf`, `xtensa-esp-elf-gdb`, `esp32ulp-elf`, `openocd-esp32`, `esp-rom-elfs` — for
+ESP-IDF `v5.5.1`) on the host, where this session's own TLS trust already works, verified each
+against its own `tools.json` sha256, and placed them at that exact `dist/` path (already one of
+`build_esp32()`'s own bind mounts, so the container sees them at the identical path with zero
+config change). Running the real `_esp32_env_script()` sequence — `idf_tools.py install
+--targets=esp32` then `idf_tools.py export` — inside the real, unmodified `esp_idf_base` image
+then completed **with no network call from inside the container at all**: every tool reported
+"already downloaded", extraction and `check_binary_valid()` both succeeded for real, and `export`
+put a genuine `xtensa-esp-elf-gcc` (crosstool-NG `esp-14.2.0_20241119`, gcc 14.2.0) on `PATH`.
+`_esp32_discover_cross_gcc_script()`'s own glob found that exact binary by the same mechanism the
+real driver uses.
+
+**And the bug itself is confirmed live, not just theorized**: probing that real binary with the
+exact command `probe_supported_cflags()` runs —
+`printf "" | xtensa-esp-elf-gcc -Wno-error=unterminated-string-initialization -x c -c -o /dev/null -`
+— reproduces the identical failure rp2 hit: `cc1: error: '-Wno-error=unterminated-string-
+initialization': no option '-Wunterminated-string-initialization'`. `idf_version = "v5.5.1"`
+itself only appears on `v1.27.0`/`v1.28.0` rows (past `tag_cflags()`'s own flagged range, so
+those two specific tags were never actually exposed), but 217 real `esp32` rows across five
+*older* `idf_version`s (`v4.0.2`, `v4.4`, `v5.0.2`, `v5.0.4`, `v5.2.2`, spanning `v1.20.0`
+through `v1.25.0`) sit inside `tag_cflags()`'s flagged range and bundle toolchains at least as
+old — the fix was live-needed, not a defensive guess.
+
+**What this does not cover**: a full firmware build still needs `idf_tools.py
+install-python-env` (a `pip install` from PyPI) to succeed, which this session's container
+network still cannot reach — not investigated further here, since it is a separate, unrelated
+gap from the one this correction fixes. The discovery-and-probe mechanism itself, and the bug it
+fixes, are both now verified against real artifacts; the very last mile (a genuine linked
+firmware binary) is not.
 
 [0022]: 0022-zephyr-third-selector-axis.md
 [0028]: 0028-container-per-port-migration-plan.md
