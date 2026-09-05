@@ -56,6 +56,7 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 ### In progress / Proposed
 
 - [ ] [0099] `variant` becomes a real, per-target-overridable option — not an identifier axis, not a global key
+- [ ] [0100] samd build driver: implementation plan, chosen over the other eight [0053] ports
 - [ ] [0098] `BUILD=` may be as unnecessary for unix/windows/qemu/webassembly as `scratch_root()` was
 - [ ] [0094] Arm's own GNU toolchain registry is the third choice [0085] said did not exist
 - [ ] [0083] replace `windows.Dockerfile`'s apt `gcc-mingw-w64` split with one fully prebuilt llvm-mingw toolchain
@@ -280,3 +281,4 @@ record is added.
 [0097]: records/0097-lv-binding-micropython-builds-through-cibuildmp.md
 [0098]: records/0098-build-override-may-be-as-unnecessary-as-scratch-root-was.md
 [0099]: records/0099-variant-becomes-a-real-per-target-override-not-an-identifier-axis.md
+[0100]: records/0100-samd-build-driver-plan.md
