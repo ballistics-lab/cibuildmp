@@ -1,6 +1,8 @@
 # 0100 — samd build driver: implementation plan, chosen over the other eight [0053] ports
 
-Status: Proposed — plan only, no code written yet.
+Status: In progress — `build_samd.py` written and live-verified against two real identifiers
+(`v1.29.0-samd-SEEED_XIAO_SAMD21`, `v1.20.0-samd-ADAFRUIT_FEATHER_M0_EXPRESS`); a full sweep of
+all 211 rows is running to confirm every board/tag. See the addendum below.
 Related: [0053], [0060], [0058], [0087], [0093], [0094], [0096], [0099]
 
 ## Why `samd`, not the other eight
@@ -147,6 +149,55 @@ checked here against MicroPython's own port, not cibuildwheel, but the same prin
   `rp2` too, treating a live build as sufficient to close the record; whether the same call
   applies here is for whoever implements this to decide against what they actually find, not
   pre-declared.
+
+## Addendum, 2026-09-05 — implemented, and two things the plan above got wrong
+
+Code landed close to the plan above, with two real corrections found only by building for real
+(the exact discipline this project's own CLAUDE.md asks for), plus one simplification the plan
+did not anticipate:
+
+- **No `SAMD_SUBMODULES` needed at all.** Step 5's own plan assumed a per-port submodule-path
+  tuple, mirroring what looked like `rp2`'s own mechanism. Reading `orchestrate.build()` before
+  writing anything found it already generalized past that: `sources.fetch_micropython(tag,
+  ports=group_ports)` takes port *names* and runs each one's own `make -C ports/<port>
+  MICROPY_STANDALONE=1 submodules` directly (`_clone()`), on the clone path only. Adding `"samd"`
+  to `KNOWN_PORTS` was enough — no new submodule-path list, no new orchestrate.py plumbing beyond
+  the `_port_build_options()` branch.
+- **`samd_make_command()` needed `-j{os.cpu_count()}`.** Neither `rp2_make_command()` nor
+  `esp32_make_command()` passes one, and plain `make` (no wrapper doing its own parallelism)
+  compiles `ports/samd`'s ~150-file tree fully serially without it — measured at ~80s/board on
+  this session's 4-core sandbox before adding it, ~30-35s/board after. Directly answers the "this
+  shouldn't take hours" concern raised when a 211-row full sweep was scoped.
+- **A real, live-caught bug, not samd-specific in cause:** `v1.20.0-samd-ADAFRUIT_FEATHER_M0_EXPRESS`
+  failed hard —
+  `cc1: error: '-Wno-error=unterminated-string-initialization': no option
+  '-Wunterminated-string-initialization'` — because `samd_make_command()` (following the plan's
+  own step 3, and `rp2_make_command()`/`esp32_make_command()`'s existing pattern) passed
+  `build_common.tag_cflags(tag)` straight into `CFLAGS_EXTRA` with no probing.
+  `resources/tag_cflags.toml` names that exact gcc-15 diagnostic for every tag `v1.12`–`v1.25.0`,
+  with no regard for which toolchain a given port/row actually resolves to at that tag — and
+  `samd`'s own `gcc` field is `14.2.1-1.1` for that entire range ([0094]'s addendum). Fixed by
+  fetching the toolchain as its own container step first, then calling
+  `build_common.probe_supported_cflags()` against the real fetched `arm-none-eabi-gcc` by full
+  path (mirroring `build_unix()`'s own cross-compile-branch pattern) before building the make
+  command — `samd_make_command()` gained an `extra_cflags` override parameter for exactly this,
+  the same shape `unix_make_command()`'s own parameter already has.
+
+  **This same bug most likely also affects `rp2` and `esp32` on pre-`v1.26.0` tags** — neither
+  driver calls `probe_supported_cflags()` at all, both share the identical `14.2.1-1.1`/
+  `15.2.1-1.1` split at the same `v1.26.0` boundary, and [0060]'s own live verification for `rp2`
+  was `v1.29.0` only (past the boundary, where `15.2.1-1.1` genuinely supports the diagnostic).
+  Not fixed here — flagged as a real, likely-live gap in two already-shipped drivers, found as a
+  side effect of writing a third one, not investigated further in this record.
+
+Live-verified beyond the plan's own one-build bar: both `v1.29.0-samd-SEEED_XIAO_SAMD21`
+(376832-byte `firmware.uf2`, FLASH 99.99% used) and `v1.20.0-samd-ADAFRUIT_FEATHER_M0_EXPRESS`
+(370688-byte `firmware.uf2`) produced genuine, correctly-sized artifacts with the template's own
+C module linked in. A full sweep of every one of the 211 real `(tag, board)` rows (`v1.20.0`
+through `v1.30.0-preview`) was started to confirm the fix generalizes and to surface any
+per-board issue (flash overflow on a tight board, a board-specific compile error) the two rows
+above would not catch — results not yet in as of this addendum; a follow-up addendum or a
+correction to this one will carry them once the sweep finishes.
 
 [0053]: 0053-usermod-ports-without-a-build-driver.md
 [0058]: 0058-image-groups-are-toolchains-not-ports.md

@@ -1994,6 +1994,12 @@ identifiers = [
 [usermod.samd]
 identifier_format = "{tag}-samd-{board}"
 artifacts_dir_name = "{name}-{ver}-{identifier}[-{variant}]"
+# See [usermod.unix]'s own comment -- moved from resources/usermod.toml ([0092]).
+# "make", not "cmake": verified directly against ports/samd/Makefile at
+# v1.29.0 (record 0100) -- plain `include ../../py/mkenv.mk`/`py.mk`/
+# `extmod.mk`/`mkrules.mk`, no cmake/idf.py reference anywhere.
+build-system = "make"
+default-manifest = "boards/manifest.py"
 
 image = "embedded_base"
 post_checkout = "make -C mpy-cross && make -C ports/samd BOARD={board} submodules"

@@ -36,13 +36,12 @@ from typing import Any
 from ...resources import build_platforms_data
 from ...toolchain_fetch import TOOLCHAIN_CROSS_PREFIX
 
-# The six ports with a real `build_<port>()` driver in
-# usermod/build_<port>.py --
-# the other nine `resources/build-platforms.toml` already carries real,
-# verified rows for (mimxrt, samd, stm32, psoc-edge, alif, esp8266,
-# cc3200, renesas-ra, nrf) are a separate, much larger piece of unstarted
-# work (writing each one's own build pipeline), not a config-surface gap
-# this module could close by itself.
+# The seven ports with a real `build_<port>()` driver in
+# usermod/build_<port>.py -- `samd` joined [0100], picked over the other
+# eight [0053] lists (mimxrt, stm32, psoc-edge, alif, esp8266, cc3200,
+# renesas-ra, nrf), which remain a separate, much larger piece of
+# unstarted work, not a config-surface gap this module could close by
+# itself.
 KNOWN_PORTS: tuple[str, ...] = (
     "unix",
     "windows",
@@ -50,6 +49,7 @@ KNOWN_PORTS: tuple[str, ...] = (
     "webassembly",
     "esp32",
     "rp2",
+    "samd",
 )
 
 _USERMOD_ROWS: dict[str, list[dict[str, Any]]] = {
@@ -133,6 +133,25 @@ def rp2_toolchain(tag: str) -> tuple[str, str]:
     the same class of caller error `esp32_idf_info()`'s own docstring
     already covers."""
     return TOOLCHAIN_CROSS_PREFIX["arm_embedded"], _RP2_TOOLCHAIN_VERSION_BY_TAG[tag]
+
+
+# tag -> `samd`'s own `gcc` field, the identical shape `rp2`'s table above
+# already is -- checked directly (record 0100): every one of `samd`'s 18
+# boards shares one `gcc` value at a given tag, the same "one arm-family
+# compiler per tag, not per board" fact `rp2`'s own comment already
+# established.
+_SAMD_TOOLCHAIN_VERSION_BY_TAG: dict[str, str] = {
+    row["tag"]: row["gcc"] for row in _USERMOD_ROWS["samd"] if row.get("gcc")
+}
+
+
+def samd_toolchain(tag: str) -> tuple[str, str]:
+    """`(cross, version)` -- what `build_samd()` passes to
+    `toolchain_fetch.resolve_toolchain()` to fetch `samd`'s own cross
+    compiler at `tag`. `KeyError` for a tag this table has never walked,
+    the same class of caller error `rp2_toolchain()`'s own docstring
+    already covers."""
+    return TOOLCHAIN_CROSS_PREFIX["arm_embedded"], _SAMD_TOOLCHAIN_VERSION_BY_TAG[tag]
 
 
 def qemu_toolchain(tag: str, cross: str) -> tuple[str, str] | None:

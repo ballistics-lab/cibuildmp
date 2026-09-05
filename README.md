@@ -457,15 +457,16 @@ platform.**
 Identifier shapes, one per platform:
 
 <!-- generated: identifier-shapes -- bin/refresh_docs.py, do not edit by hand -->
-| Platform              | Shape                   | Example                               |
-| --------------------- | ----------------------- | ------------------------------------- |
-| natmod                | `mpy{abi}-{tag}-{arch}` | `mpy6.3-v1.29.0-armv6m`               |
-| usermod `esp32`       | `{tag}-esp32-{board}`   | `v1.29.0-esp32-ARDUINO_NANO_ESP32`    |
-| usermod `qemu`        | `{tag}-qemu-{board}`    | `v1.29.0-qemu-MICROBIT`               |
-| usermod `rp2`         | `{tag}-rp2-{board}`     | `v1.29.0-rp2-ADAFRUIT_FEATHER_RP2040` |
-| usermod `unix`        | `{tag}-{arch}`          | `v1.29.0-manylinux_2_28_aarch64`      |
-| usermod `webassembly` | `{tag}-{arch}`          | `v1.29.0-wasm32`                      |
-| usermod `windows`     | `{tag}-{arch}`          | `v1.29.0-win32`                       |
+| Platform | Shape | Example |
+| --- | --- | --- |
+| natmod | `mpy{abi}-{tag}-{arch}` | `mpy6.3-v1.29.0-armv6m` |
+| usermod `esp32` | `{tag}-esp32-{board}` | `v1.29.0-esp32-ARDUINO_NANO_ESP32` |
+| usermod `qemu` | `{tag}-qemu-{board}` | `v1.29.0-qemu-MICROBIT` |
+| usermod `rp2` | `{tag}-rp2-{board}` | `v1.29.0-rp2-ADAFRUIT_FEATHER_RP2040` |
+| usermod `samd` | `{tag}-samd-{board}` | `v1.29.0-samd-ADAFRUIT_FEATHER_M0_EXPRESS` |
+| usermod `unix` | `{tag}-{arch}` | `v1.29.0-manylinux_2_28_aarch64` |
+| usermod `webassembly` | `{tag}-{arch}` | `v1.29.0-wasm32` |
+| usermod `windows` | `{tag}-{arch}` | `v1.29.0-win32` |
 <!-- /generated: identifier-shapes -->
 
 The shape genuinely differs per usermod port — `unix`/`windows`/
