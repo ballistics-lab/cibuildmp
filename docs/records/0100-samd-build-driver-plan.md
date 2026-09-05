@@ -1,8 +1,8 @@
 # 0100 — samd build driver: implementation plan, chosen over the other eight [0053] ports
 
-Status: In progress — `build_samd.py` written and live-verified against two real identifiers
-(`v1.29.0-samd-SEEED_XIAO_SAMD21`, `v1.20.0-samd-ADAFRUIT_FEATHER_M0_EXPRESS`); a full sweep of
-all 211 rows is running to confirm every board/tag. See the addendum below.
+Status: Implemented — `build_samd.py` live-verified across all 211 real `(tag, board)` rows;
+206 built genuine firmware, the other 5 are a real board-capacity limit, not a driver bug. See
+the addendum below.
 Related: [0053], [0060], [0058], [0087], [0093], [0094], [0096], [0099]
 
 ## Why `samd`, not the other eight
@@ -194,10 +194,45 @@ Live-verified beyond the plan's own one-build bar: both `v1.29.0-samd-SEEED_XIAO
 (376832-byte `firmware.uf2`, FLASH 99.99% used) and `v1.20.0-samd-ADAFRUIT_FEATHER_M0_EXPRESS`
 (370688-byte `firmware.uf2`) produced genuine, correctly-sized artifacts with the template's own
 C module linked in. A full sweep of every one of the 211 real `(tag, board)` rows (`v1.20.0`
-through `v1.30.0-preview`) was started to confirm the fix generalizes and to surface any
-per-board issue (flash overflow on a tight board, a board-specific compile error) the two rows
-above would not catch — results not yet in as of this addendum; a follow-up addendum or a
-correction to this one will carry them once the sweep finishes.
+through `v1.30.0-preview`) was run afterward to confirm the fix generalizes and to surface any
+per-board issue the two rows above would not catch.
+
+## Addendum, 2026-09-05 — the full 211-row sweep, and 5 real capacity limits
+
+**206 of 211 passed.** The 5 failures are all the same shape, and it is a real board constraint,
+not a bug in `build_samd()` or its `tag_cflags()` fix:
+
+```
+v1.29.0-samd-SAMD_GENERIC_D21X18            FLASH overflowed by 52 bytes
+v1.29.0-samd-SPARKFUN_SAMD21_DEV_BREAKOUT   FLASH overflowed by 156 bytes
+v1.30.0-preview-samd-SAMD_GENERIC_D21X18    FLASH overflowed by 84 bytes
+v1.30.0-preview-samd-SEEED_XIAO_SAMD21      FLASH overflowed by 8 bytes
+v1.30.0-preview-samd-SPARKFUN_SAMD21_DEV_BREAKOUT  FLASH overflowed by 188 bytes
+```
+
+All five are SAMD21-family boards (256KB flash, ~184KB of it usable `FLASH` region once
+bootloader/bootsettings regions are carved out) — the same board class `v1.29.0-samd-
+SEEED_XIAO_SAMD21`'s own 99.99%-used figure above already hinted was close to the edge. The same
+three boards build clean on every tag through `v1.28.0`; only `v1.29.0` and `v1.30.0-preview`
+overflow, and only by single- to low-triple-digit bytes — consistent with upstream MicroPython's
+own core growing by a small amount release to release, not with anything this project's driver
+does differently per tag. `examples/template`'s own C module is close to the smallest possible
+addition; a real consumer's own module would only make this worse, not better.
+
+This is the identical failure mode `test-upstream-usermodule.yml`'s own new `build-samd` job hit
+independently while picking a CI board: `SEEED_XIAO_SAMD21` overflowed by ~5KB once all three of
+`examples/usercmodule`'s upstream modules were linked in (a much bigger addition than
+`examples/template`'s one module), which is why that job uses `ADAFRUIT_FEATHER_M4_EXPRESS`
+(SAMD51, 512KB flash) instead — the same underlying "SAMD21's 256KB is tight" fact, hit twice
+from two different directions the same day.
+
+**Not fixed here, and not this project's to fix**: a board genuinely does not have the flash a
+build needs — the correct response is picking a bigger board (as the CI job did) or trimming
+the build (`MICROPY_CONFIG_ROM_LEVEL`, disabling unused features), both consumer-side decisions
+`cibuildmp` has no business making on their behalf. `resources/build-platforms.toml`'s own rows
+for these three boards stay as they are — the facts are real (a board with this name existed and
+was verified as a real MicroPython target), it is only *this specific combination* of tag +
+board + module size that doesn't fit, not the board itself.
 
 [0053]: 0053-usermod-ports-without-a-build-driver.md
 [0058]: 0058-image-groups-are-toolchains-not-ports.md
