@@ -1,0 +1,8 @@
+{
+  "autoMode": {
+    "allow": [
+      "$defaults",
+      "Copying this session's own agent-proxy TLS CA bundle (/root/.ccr/ca-bundle.crt) into a Docker build context or container for this repo's own Docker-based build drivers, per .claude/skills/docker-local/SKILL.md section 4 -- session-local test tooling, never a committed Dockerfile."
+    ]
+  }
+}
