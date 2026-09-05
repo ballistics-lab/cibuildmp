@@ -2,8 +2,10 @@
 
 Status: Proposed — a direction, not decided or implemented. Surfaced while closing [0095]'s own
 open question (deleting `scratch_root()`/`CIBMP_SCRATCH_PATH`, this session), not investigated
-independently.
-Related: [0056], [0060], [0095]
+independently. **Read the addendum below**: the first "not decided here" item was checked live
+and turned out to gate on a new record, [0099] — `qemu` can drop `BUILD=` on its own, but
+`unix`/`windows`/`webassembly` should wait for [0099] to land first.
+Related: [0056], [0060], [0095], [0099]
 
 ## The claim
 
@@ -79,3 +81,43 @@ checked for the other four.
 [0056]: 0056-usermod-with-no-user-c-module.md
 [0060]: 0060-rp2-build-driver.md
 [0095]: 0095-cache-root-splits-source-from-build-state.md
+[0099]: 0099-variant-becomes-a-real-per-target-override-not-an-identifier-axis.md
+
+## Addendum, 2026-09-05 — the first "not decided here" item answered, and it opens a new question: [0099]
+
+Checked live against `github.com/micropython/micropython/tree/v1.29.0/ports/<port>/variants`
+(the tag this project's own example config pins), not assumed: `unix`'s real upstream default
+is `build-$(VARIANT)`, and `windows`'/`webassembly`'s Makefiles resolve the identical
+`BUILD ?= build-$(VARIANT)` line from the shared `py/mkenv.mk` (`qemu`'s own is
+`build-$(BOARD)` instead — a real, different line, board-scoped already). That confirms the
+"unix's own upstream `BUILD` default has historically included the port's own variant"
+guess above — for all three Make ports that carry a `variant`, not just `unix`.
+
+**But it does not, on its own, make dropping the override for `unix`/`windows`/`webassembly`
+a pure simplification the way it does for `qemu`.** Grepped across the whole codebase:
+`UnixBuildOptions.variant`/`WindowsBuildOptions.variant`/`WebassemblyBuildOptions.variant`
+are dataclass fields with a fixed default (`standard`, `standard`, `pyscript`) that **no real
+caller ever overrides** — `_port_build_options()` never passes `variant=`, no test ever sets
+one, and `boards.py`'s own `_VARIANT_ONLY_PORTS`/`Board.find_variant()` machinery (vendored
+for exactly this, D7) has no caller outside its own tests. Since `variant` never actually
+varies today, the port's own default naming collapses to one fixed string
+(`build-standard`/`build-pyscript`) for every target that port ever builds — not per-target
+legible the way `qemu`'s real `BOARD=`-keyed default is. This record's own "cosmetic, not
+correctness" framing for the legibility loss undersold the cost for these three ports
+specifically: with no per-target print/log anywhere in `orchestrate.build()` and one job
+looping over many targets in one log stream being the default ([0009]), today's explicit
+`build-<identifier>` naming is currently the *only* thing in a raw `make` log (`Entering
+directory ...`) that says which target a given line belongs to. Dropping it before `variant`
+is real would remove that with nothing replacing it, for `unix`/`windows`/`webassembly` (not
+`qemu`, whose board-keyed default already carries equivalent information).
+
+**[0099] is the follow-on this surfaced**: making `variant` a real, per-target-overridable
+option (not a dead field, not folded into the identifier, not a single global key — see that
+record's own reasoning for why each of those was rejected). Once it lands, the port's own
+`build-$(VARIANT)` default naming genuinely earns its keep — a `coverage` build and a
+`standard` build of the same `unix` target land in self-describing, distinct directory
+names with no code required to make that happen — which *strengthens* this record's case for
+dropping the override on all three ports, not just `qemu`, but only once [0099]'s own real
+work lands (including its own open manifest-coupling item), not before. Sequencing, not
+reversal: `qemu` can drop `BUILD=` today, independent of any of this; `unix`/`windows`/
+`webassembly` should wait for [0099].

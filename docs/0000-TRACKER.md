@@ -55,6 +55,7 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### In progress / Proposed
 
+- [ ] [0099] `variant` becomes a real, per-target-overridable option — not an identifier axis, not a global key
 - [ ] [0098] `BUILD=` may be as unnecessary for unix/windows/qemu/webassembly as `scratch_root()` was
 - [ ] [0094] Arm's own GNU toolchain registry is the third choice [0085] said did not exist
 - [ ] [0083] replace `windows.Dockerfile`'s apt `gcc-mingw-w64` split with one fully prebuilt llvm-mingw toolchain
@@ -278,3 +279,4 @@ record is added.
 [0096]: records/0096-arm-riscv-embedded-collapse-into-embedded-base.md
 [0097]: records/0097-lv-binding-micropython-builds-through-cibuildmp.md
 [0098]: records/0098-build-override-may-be-as-unnecessary-as-scratch-root-was.md
+[0099]: records/0099-variant-becomes-a-real-per-target-override-not-an-identifier-axis.md
