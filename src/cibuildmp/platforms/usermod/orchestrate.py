@@ -33,6 +33,7 @@ from .build_common import UsermodBuildError
 from .build_esp32 import Esp32BuildOptions, build_esp32, esp32_companions
 from .build_qemu import QemuBuildOptions, build_qemu
 from .build_rp2 import Rp2BuildOptions, build_rp2
+from .build_samd import SamdBuildOptions, build_samd
 from .build_unix import UnixBuildOptions, build_unix, unix_companions
 from .build_webassembly import (
     WebassemblyBuildOptions,
@@ -67,6 +68,7 @@ _BUILD_FN: dict[str, Callable[..., Path]] = {
     "webassembly": build_webassembly,
     "esp32": build_esp32,
     "rp2": build_rp2,
+    "samd": build_samd,
 }
 
 # port -> the files that have to travel with `produced` for the collected
@@ -275,6 +277,19 @@ def _port_build_options(
             tag=target.tag,
             extra_make_args=extra_make_args,
             extra_cmake_args=extra_cmake_args,
+        )
+    if port == "samd":
+        # Same "" -> real default fallback qemu/rp2's own branches use --
+        # a hand-built target with no board names none, and
+        # `SamdBuildOptions`' own default should apply rather than an
+        # empty BOARD=. No `extra_cmake_args` -- `samd` is a plain Make
+        # port ([0100]), unlike `rp2`/`esp32`.
+        return SamdBuildOptions(
+            user_c_modules=resolved_user_c_modules,
+            frozen_manifest=frozen_manifest,
+            board=target.arch or "SEEED_XIAO_SAMD21",
+            tag=target.tag,
+            extra_make_args=extra_make_args,
         )
     raise UsermodBuildError(f"no build_options builder wired for port {port!r}")
 

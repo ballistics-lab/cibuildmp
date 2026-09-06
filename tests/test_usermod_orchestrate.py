@@ -481,8 +481,17 @@ def test_build_one_esp32_passes_board_through(tmp_path, monkeypatch):
             build_dir = mpy_dir / "ports" / "esp32" / "build-ESP32_GENERIC_S3"
             build_dir.mkdir(parents=True, exist_ok=True)
             (build_dir / "micropython.bin").write_bytes(FAKE_X86_64_ELF)
-            return
+            return None
         stage_on_conditional_copy_script(cmd)
+        # The cross-compiler discovery script ([0100]'s own rp2
+        # correction, applied to esp32 too) runs with capture_output=True
+        # and needs a real return value -- `_docker()` reads `.stdout`
+        # off it unconditionally when that flag is set.
+        if kwargs.get("capture_output"):
+            import subprocess as _subprocess
+
+            return _subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return None
 
     monkeypatch.setenv("CIBMP_ESP32_DOCKER_IMAGE", "cibuildmp-esp32:local")
     monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", fake_run)
@@ -524,8 +533,17 @@ def test_build_one_esp32_threads_real_idf_version_and_target(tmp_path, monkeypat
             build_dir = mpy_dir / "ports" / "esp32" / "build-ESP32_GENERIC_C3"
             build_dir.mkdir(parents=True, exist_ok=True)
             (build_dir / "micropython.bin").write_bytes(FAKE_X86_64_ELF)
-            return
+            return None
         stage_on_conditional_copy_script(cmd)
+        # The cross-compiler discovery script ([0100]'s own rp2
+        # correction, applied to esp32 too) runs with capture_output=True
+        # and needs a real return value -- `_docker()` reads `.stdout`
+        # off it unconditionally when that flag is set.
+        if kwargs.get("capture_output"):
+            import subprocess as _subprocess
+
+            return _subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return None
 
     fetch_calls = []
     monkeypatch.setenv("CIBMP_ESP32_DOCKER_IMAGE", "cibuildmp-esp32:local")
@@ -997,8 +1015,16 @@ def test_build_one_collects_the_esp32_combined_firmware(tmp_path, monkeypatch):
             build_dir.mkdir(parents=True, exist_ok=True)
             (build_dir / "micropython.bin").write_bytes(FAKE_X86_64_ELF)
             (build_dir / "firmware.bin").write_bytes(b"combined-image")
-            return
+            return None
         stage_on_conditional_copy_script(cmd)
+        # See test_build_one_esp32_passes_board_through's own identical
+        # comment: the discovery script needs a real capture_output
+        # return value.
+        if kwargs.get("capture_output"):
+            import subprocess as _subprocess
+
+            return _subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return None
 
     monkeypatch.setenv("CIBMP_ESP32_DOCKER_IMAGE", "cibuildmp-esp32:local")
     monkeypatch.setattr("cibuildmp.dockerrun.subprocess.run", fake_run)

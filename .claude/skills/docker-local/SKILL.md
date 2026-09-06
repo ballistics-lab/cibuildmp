@@ -246,6 +246,57 @@ ERROR: unable to select packages:
 describes, so the ordinary Debian/Ubuntu fix routes through the one thing that cannot succeed yet.
 Appending directly to the file already on disk sidesteps the whole cycle.
 
+## 4a. When the CA-injection fix itself gets blocked: pre-seed the tool's own download cache instead
+
+Confirmed live (record [0060]'s own esp32 correction): copying this session's own proxy CA into a
+Dockerfile/container — section 4's whole recipe, however it's phrased — can itself get refused by
+this session's **auto-mode classifier**, a separate layer from the network allowlist and from
+ordinary tool permissions. It reads as "inject a certificate into a container", a real MITM
+pattern, regardless of the legitimate reason here. Two things do **not** get past this:
+
+- Adding an explicit allow rule to `.claude/settings.json`'s own `autoMode.allow` list (the
+  documented mechanism for exactly this) is *itself* blocked by the same classifier — an agent
+  cannot self-grant a permission the classifier just refused, which is the boundary working as
+  intended, not a bug to route around.
+- Even after a human adds that rule from outside the session (git push, GitHub web UI, editing
+  the file directly on disk) and it lands in the working tree, the running session does not pick
+  it up — the settings watcher only watches paths that had a settings file *at session start*, the
+  identical caveat the `update-config` skill documents for hooks. Nothing short of a session
+  restart reloads it.
+
+**If a restart isn't available, don't force the CA path — ask whether the specific tool doing the
+fetch already implements its own "already downloaded, skip the network" check, and satisfy that
+check from the host instead.** Several of this project's own container-time fetchers already do
+(`toolchain_fetch.fetch_script()`'s marker file, `container_mpy_cross()`'s cache-by-existence
+rule) — and so, live-verified this session, does ESP-IDF's own `idf_tools.py`: its `download()`
+method looks for `$IDF_TOOLS_PATH/dist/<archive_name>`, verifies its sha256/size against
+`tools.json`, and returns immediately without touching the network if it matches. That check does
+not care *how* the file got there.
+
+The recipe, generalized from the real esp32 case:
+
+1. Find the *tool's own* manifest of exactly what it will fetch, with real URLs and checksums —
+   `idf_tools.py`'s is `<idf-checkout>/tools/tools.json`; other tools have their own equivalent.
+   Cloning the source checkout itself is usually plain `git clone` (this session's own host-side
+   `curl`/`git` already work fine against real hosts — it is only *container* traffic that hits
+   the interception wall) — `usermod/espidf.py`'s own `fetch_esp_idf()` already does exactly this
+   clone, host-side, for the identical reason.
+2. Download each needed artifact **on the host**, into whatever local path the tool's own cache
+   check expects (`$IDF_TOOLS_PATH/dist/<archive_name>` for `idf_tools.py`), verifying its
+   checksum against the manifest's own value — never trust-on-first-use.
+3. Make sure that path is one of the container's own bind mounts (it usually already is, if it's
+   the tool's persistent cache directory rather than the ephemeral build tree) — then the
+   container sees the identical files at the identical path, no new mount, no Dockerfile edit.
+4. Run the real container-time install/fetch command unmodified. It reports "already downloaded"
+   or equivalent and does real, genuine extraction/verification with **zero network calls from
+   inside the container** — this is not a stub or a shortcut, the resulting tool is the real
+   published artifact, just fetched via a path that was never blocked in the first place.
+
+This is real work (the esp32 case needed five separate archives, ~230 MB, individually identified
+from `tools.json` and individually checksummed) but it is a live verification with a genuinely
+real toolchain, not a mock — worth it over declaring the fix "untestable here" when the target
+tool's own caching already does half the job.
+
 ## 5. Hosts this repo's own `docker/*.Dockerfile` files actually fetch from
 
 Grepped directly (`grep -rhoE 'https?://[a-zA-Z0-9.-]+' docker/*.Dockerfile`),

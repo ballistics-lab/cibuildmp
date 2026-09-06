@@ -9,11 +9,19 @@ from cibuildmp.platforms.usermod.portinfo import (
 )
 
 
-def test_known_ports_is_the_six_d16_d21_covers():
-    assert known_ports() == ("esp32", "qemu", "rp2", "unix", "webassembly", "windows")
+def test_known_ports_is_the_seven_wired_drivers():
+    assert known_ports() == (
+        "esp32",
+        "qemu",
+        "rp2",
+        "samd",
+        "unix",
+        "webassembly",
+        "windows",
+    )
 
 
-@pytest.mark.parametrize("port", ["unix", "webassembly", "windows", "qemu"])
+@pytest.mark.parametrize("port", ["unix", "webassembly", "windows", "qemu", "samd"])
 def test_make_driven_ports(port):
     assert build_system(port) == "make"
 
@@ -35,6 +43,7 @@ def test_default_manifest_paths():
     assert default_manifest("windows") == "variants/manifest.py"
     assert default_manifest("esp32") == "boards/manifest.py"
     assert default_manifest("rp2") == "boards/manifest.py"
+    assert default_manifest("samd") == "boards/manifest.py"
 
 
 def test_qemu_has_no_default_manifest():

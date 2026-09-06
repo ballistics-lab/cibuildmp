@@ -67,6 +67,7 @@ that span multiple sessions — **not** user-facing docs (see `README.md` and
 
 ### Implemented
 
+- [x] [0100] samd build driver: implementation plan, chosen over the other eight [0053] ports
 - [x] [0056] building upstream MicroPython through the usermod path with no user C module at all
 - [x] [0057] more than one module per build, in both modes
 - [x] [0097] a real, external, heavy usermod module builds through cibuildmp unmodified
@@ -280,3 +281,4 @@ record is added.
 [0097]: records/0097-lv-binding-micropython-builds-through-cibuildmp.md
 [0098]: records/0098-build-override-may-be-as-unnecessary-as-scratch-root-was.md
 [0099]: records/0099-variant-becomes-a-real-per-target-override-not-an-identifier-axis.md
+[0100]: records/0100-samd-build-driver-plan.md

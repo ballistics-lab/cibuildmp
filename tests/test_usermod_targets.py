@@ -5,7 +5,7 @@ from cibuildmp.platforms.usermod.targets import (
 )
 
 
-def test_known_ports_matches_the_six_wired_drivers():
+def test_known_ports_matches_the_seven_wired_drivers():
     assert set(KNOWN_PORTS) == {
         "unix",
         "windows",
@@ -13,6 +13,7 @@ def test_known_ports_matches_the_six_wired_drivers():
         "webassembly",
         "esp32",
         "rp2",
+        "samd",
     }
 
 

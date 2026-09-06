@@ -6,13 +6,14 @@ name: Test upstream usercmodule
 # not one this project wrote for itself); docs/records/0069 is the mechanism
 # actually landed here and explains every choice below in full.
 #
-# Six jobs, one per port cibuildmp drives a usermod build for -- widened
+# Seven jobs, one per port cibuildmp drives a usermod build for -- widened
 # from the original narrow unix+rp2 slice ([0054]'s own "one Make port and
 # one CMake port is enough to answer the three questions above") once that
 # slice came back green, per [0054]'s own "widen only if it finds
-# something." Still nowhere near build-examples.yml's much broader
-# examples/template matrix: one representative identifier per port, not
-# each port's own full arch/board matrix.
+# something," most recently to samd once [0100] gave it a real driver.
+# Still nowhere near build-examples.yml's much broader examples/template
+# matrix: one representative identifier per port, not each port's own full
+# arch/board matrix.
 #
 # No job here sets `CIBMP_USER_C_MODULES`/`CIBMP_EXTRA_MAKE_ARGS`/
 # `CIBMP_EXTRA_CMAKE_ARGS`, and none of them ever resolves the pinned
@@ -138,6 +139,45 @@ jobs:
         with:
           package-dir: examples/usercmodule
           build: ${{ env.CIBMP_UPSTREAM_TAG }}-rp2-RPI_PICO
+
+      - name: List built artifacts
+        run: tree -a examples/usercmodule/mpyhouse
+
+  # ── samd: the fifth Make port, [0100]'s own build driver ────────────────
+  #
+  # Widened per [0054]'s own "widen only if it finds something" -- samd's
+  # own first live verification found a real bug ([0060]'s correction: an
+  # unprobed gcc-15-only diagnostic breaking every pre-v1.26.0 row), the
+  # exact class of thing this fixture exists to catch on an upstream-owned
+  # module, not one this project wrote for itself. A plain-Make port like
+  # unix/windows/qemu/webassembly, not cmake like rp2/esp32 -- needs the
+  # same `user-c-modules = "{micropython}/examples/usercmodule"` override
+  # those four already carry (examples/usercmodule/cibuildmp.toml), added
+  # there for samd's own identifier glob rather than left on the "." default
+  # that only resolves correctly for the two cmake ports.
+  #
+  # ADAFRUIT_FEATHER_M4_EXPRESS (SAMD51, 512KB flash), not the smaller
+  # SEEED_XIAO_SAMD21 record 0100 verified first -- live-caught here:
+  # SEEED_XIAO_SAMD21's own SAMD21 (256KB flash, 184KB usable FLASH region)
+  # overflows by ~5KB once cexample/cppexample/subpackage are all actually
+  # linked in, `region 'FLASH' overflowed by 4888 bytes`. A real board
+  # constraint, not a cibuildmp bug -- MicroPython's own build fits fine on
+  # SEEED_XIAO_SAMD21 with no extra user C modules.
+  build-samd:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      CIBMP_VERSION: 0.0.0-ci
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v4
+
+      - name: Build upstream examples/usercmodule (samd)
+        uses: ./
+        with:
+          package-dir: examples/usercmodule
+          build: ${{ env.CIBMP_UPSTREAM_TAG }}-samd-ADAFRUIT_FEATHER_M4_EXPRESS
 
       - name: List built artifacts
         run: tree -a examples/usercmodule/mpyhouse
