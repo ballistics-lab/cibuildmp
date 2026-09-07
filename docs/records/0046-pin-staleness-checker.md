@@ -195,6 +195,39 @@ Still unbuilt from this record: nothing writes results anywhere but the job log
 ([0029]'s `stepsummary.py` is still unreused here), and the "are consumers' own
 `micropython` pins in scope" question stays open.
 
+## Addendum, 2026-09-07 — `update_toolchains.py`'s own `arm-none-eabi`/`riscv-none-elf`
+## rows fixed; the weekly job had been crashing, not merely reporting drift
+
+[0096]'s own text ("`bin/update_toolchains.py`'s `PINS`... a pre-existing gap... the real
+fix... is [0090]'s own scope") turned out to point at the wrong record: [0090]'s item 1
+fixed `bin/refresh_toolchain_pins.py`'s per-row `gcc` check, a different script for a
+different question (is a row's pinned compiler inside its own floor/ceiling window). It
+never touched `update_toolchains.py`, so the gap [0096] described — `_pinned()` regexing
+an `ARG TOOLCHAIN_URL=` line that [0087]/[0089] had already deleted from
+`embedded_base.Dockerfile` for both crosses — was still live and unclosed. Found live
+while investigating a failing `pin-staleness.yml` run (2026-09-07): the "toolchain
+tarballs" step raised `SystemExit("arm-none-eabi: no pin found...")` and crashed the whole
+checker before it ever reached `riscv-none-elf`/`xtensa-esp`/`llvm-mingw`/`emsdk`/
+`xtensa-lx106` — every scheduled run since [0087] landed had been reporting a hard
+failure, not real staleness, with the other five pins never actually checked.
+
+Fixed by making `PINS` read those two crosses from `resources/pinned_toolchains.toml`'s
+own `[cross]` tables (the same file [0087]/[0089] actually moved the real pins into)
+instead of a Dockerfile `ARG` that no longer exists. That table is a genuinely different
+shape from the rest of `PINS`: it holds more than one verified version per cross at once
+(`arm-none-eabi-` alone carries three, kept for different rows' own floor/ceiling
+windows — [0088]'s `mimxrt` ceiling among them), so there is no single "the" pin left to
+compare against upstream the way a Dockerfile `ARG` was. `check()` now reads every version
+pinned for a cross and reports whether the *newest* has fallen behind upstream's latest
+release, which is the question this checker can still honestly answer without mislabelling
+an intentionally-kept older version as drift. Verified live: the script now runs to
+completion and reports each of the six pins (three came back `UNKNOWN` on an unauthenticated
+GitHub API rate limit in this sandbox, exactly like the two `github`-kind pins that were
+never in question — not a regression this fix introduced), instead of crashing on the first.
+
+Still open: `--slow`'s `xtensa-lx106` path, and everything this record's own "Still unbuilt"
+paragraph above already named.
+
 [0002]: 0002-delegate-compile-own-environment.md
 [0010]: 0010-pinned-data-in-resources.md
 [0013]: 0013-micropython-list-dedup-by-abi.md
@@ -202,3 +235,7 @@ Still unbuilt from this record: nothing writes results anywhere but the job log
 [0033]: 0033-cibuildmp-never-builds-docker-image-itself.md
 [0044]: 0044-unix-native-images-landed.md
 [0068]: 0068-docker-dependabot-grouping-and-mipsel-ubuntu-26-04.md
+[0087]: 0087-arm-riscv-embedded-thin-out-toolchain-version-lands.md
+[0088]: 0088-mimxrt-own-floor.md
+[0090]: 0090-toolchain-pins-checker-and-0058-text-followup.md
+[0096]: 0096-arm-riscv-embedded-collapse-into-embedded-base.md

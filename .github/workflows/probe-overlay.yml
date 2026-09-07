@@ -62,7 +62,7 @@ jobs:
           - runner: ubuntu-24.04-arm
             image: quay.io/pypa/manylinux_2_28_aarch64@sha256:45ea412cfbd2cc5e51323cecab614ea8e4e5522b4d4f668946c54056b40152f6
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Docker and kernel facts
         run: |

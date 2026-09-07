@@ -154,3 +154,13 @@ digest that run's own "Record the pinned digest" step printed, replacing the int
 (`refresh_toolchain_pins.py`/`update_toolchains.py`'s pre-existing gap, and
 `plan_test_matrix.py`'s arithmetic-estimate weight) are unaffected by this addendum and stay
 open, as [0090]'s own scope and a future re-measurement respectively.
+
+## Addendum, 2026-09-07 — the "[0090]'s own scope" pointer above was wrong for half of it
+
+[0090] closed `refresh_toolchain_pins.py`'s half of the gap this record names above (its own
+item 1), but never touched `bin/update_toolchains.py`'s `PINS` — a different script, checking
+a different question, that this record's own text conflated with it. That half sat unfixed
+and, worse, silently crashing (`SystemExit` on the very first pin) every week `pin-staleness.yml`
+ran since [0087] landed, rather than merely reporting stale drift the way [0046] intends. Fixed
+in [0046]'s own 2026-09-07 addendum, not here — noted in this record only because this record's
+own forward pointer is what sent a later reader looking in the wrong place.
