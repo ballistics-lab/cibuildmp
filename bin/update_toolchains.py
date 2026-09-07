@@ -17,10 +17,15 @@ in the same scheduled job.
 Three upstream shapes, which is why [0046] asked for one script per shape
 rather than one generic checker:
 
-- **GitHub releases** (`arm-none-eabi`, `riscv-none-elf` -- both now
-  `embedded_base`, record 0096 --, `xtensa_esp`, `windows`) -- the pinned
-  tag is in the URL; compare against the repo's
-  own latest release.
+- **GitHub releases.** For `xtensa_esp`/`windows` the pinned tag is in the
+  Dockerfile's own URL; compare against the repo's own latest release.
+  `arm-none-eabi`/`riscv-none-elf` (both `embedded_base` since record 0096)
+  are the same upstream shape but no longer a Dockerfile fact at all --
+  [0087]/[0089] moved their real pins into `resources/pinned_toolchains.toml`'s
+  own `[cross]` tables, keyed by `(cross, version)` because more than one
+  verified version is pinned at once (per-row floor/ceiling windows, e.g.
+  `mimxrt`'s below-13 ceiling). This checker reads every version pinned for
+  that cross and reports whether the newest has fallen behind upstream.
 - **emsdk** (`webassembly`) -- pinned by *build hash*, which looks
   uncomparable and is not: `emscripten-core/emsdk` publishes
   `emscripten-releases-tags.json` mapping every release to its hash, so
@@ -39,6 +44,7 @@ import hashlib
 import json
 import re
 import sys
+import tomllib
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -46,6 +52,8 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 DOCKER = REPO / "docker"
+RESOURCES = REPO / "src" / "cibuildmp" / "resources"
+PINNED_TOOLCHAINS = RESOURCES / "pinned_toolchains.toml"
 
 GITHUB_LATEST = "https://api.github.com/repos/{repo}/releases/latest"
 EMSDK_TAGS = (
@@ -60,37 +68,41 @@ class Pin:
     dockerfile: str
     # How to find the pinned value in that file, group(1) being the value.
     pattern: str
-    kind: str  # "github" | "emsdk" | "unversioned"
-    upstream: str = ""  # owner/repo for "github"
+    kind: str  # "github" | "cross-toml" | "emsdk" | "unversioned"
+    upstream: str = ""  # owner/repo for "github"/"cross-toml"
+    cross: str = ""  # `pinned_toolchains.toml` table key, for "cross-toml"
 
 
-# `arm-none-eabi`/`riscv-none-elf` below point at `embedded_base.Dockerfile`
-# (record 0096 merged what used to be `arm_embedded.Dockerfile`/
-# `riscv_embedded.Dockerfile`) purely so `_pinned()` reads a file that
-# exists -- **neither actually matches any more.** [0087]/[0089] already
-# deleted the `ARG TOOLCHAIN_URL=` line this regex needs from both former
-# files (the tarball is fetched at container run time now, per-row, not
-# baked at image-build time), so `_pinned()` has raised
-# `SystemExit(f"{pin.name}: no pin found...")` for both entries since
-# [0087] landed -- a real, pre-existing gap this record does not close,
-# only avoids widening into a harder `FileNotFoundError` by keeping the
-# filename real. The actual fix (reading `resources/pinned_toolchains.toml`'s
-# own per-cross pin instead of grepping a Dockerfile `ARG`) is [0090]'s own
-# scope, not this Dockerfile-merge's.
+# `arm-none-eabi`/`riscv-none-elf` used to be grepped straight out of
+# `embedded_base.Dockerfile`'s own `ARG TOOLCHAIN_URL=`. [0087]/[0089]
+# deleted that line (the tarball is fetched at container run time now, per
+# row, not baked at image-build time) and moved the real pins into
+# `resources/pinned_toolchains.toml`'s own `[cross]` tables -- and unlike
+# the Dockerfile's single shared `ARG`, that table genuinely holds more
+# than one verified version per cross at once (e.g. `mimxrt`'s own
+# below-13 ceiling, record 0088), because different `(tag, scope)` windows
+# resolve to different versions. There is no longer one "the" pin to
+# compare against upstream; `kind="cross-toml"` instead reads every
+# version pinned for that cross and reports whether the *newest* of them
+# has fallen behind upstream's own latest release -- the question this
+# checker can still answer ("is it time to add a newer entry"), without
+# claiming the older, intentionally-kept versions are drift.
 PINS = (
     Pin(
         "arm-none-eabi",
-        "embedded_base.Dockerfile",
-        r"xpack-dev-tools/arm-none-eabi-gcc-xpack/releases/download/v([^/]+)/",
-        "github",
+        "",
+        "",
+        "cross-toml",
         "xpack-dev-tools/arm-none-eabi-gcc-xpack",
+        "arm-none-eabi-",
     ),
     Pin(
         "riscv-none-elf",
-        "embedded_base.Dockerfile",
-        r"xpack-dev-tools/riscv-none-elf-gcc-xpack/releases/download/v([^/]+)/",
-        "github",
+        "",
+        "",
+        "cross-toml",
         "xpack-dev-tools/riscv-none-elf-gcc-xpack",
+        "riscv64-unknown-elf-",
     ),
     Pin(
         "xtensa-esp",
@@ -135,6 +147,24 @@ def _pinned(pin: Pin) -> str:
     return match.group(1)
 
 
+def _version_key(version: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in re.findall(r"\d+", version))
+
+
+def _newest_cross_pin(pin: Pin) -> tuple[str, int]:
+    """(newest version string, how many versions are pinned) for `pin.cross`
+    in `pinned_toolchains.toml`."""
+    with PINNED_TOOLCHAINS.open("rb") as handle:
+        data = tomllib.load(handle)
+    versions = list(data.get(pin.cross, {}))
+    if not versions:
+        raise SystemExit(
+            f"{pin.name}: no versions pinned for {pin.cross!r} in "
+            f"{PINNED_TOOLCHAINS.relative_to(REPO)}"
+        )
+    return max(versions, key=_version_key), len(versions)
+
+
 def _latest_github(repo: str) -> str:
     data = json.loads(_get(GITHUB_LATEST.format(repo=repo)))
     return str(data["tag_name"]).lstrip("v")
@@ -166,12 +196,16 @@ def _tarball_url(pin: Pin) -> str:
 
 def check(pin: Pin, *, slow: bool) -> int:
     """0 when current, 1 when behind. Prints one line either way."""
-    pinned = _pinned(pin)
+    if pin.kind == "cross-toml":
+        pinned, count = _newest_cross_pin(pin)
+    else:
+        pinned = _pinned(pin)
     try:
-        if pin.kind == "github":
+        if pin.kind in ("github", "cross-toml"):
             latest = _latest_github(pin.upstream)
             stale = pinned.lstrip("v") != latest
-            arrow = f"{pinned} -> {latest}" if stale else pinned
+            suffix = f" (newest of {count} pinned)" if pin.kind == "cross-toml" else ""
+            arrow = f"{pinned} -> {latest}{suffix}" if stale else f"{pinned}{suffix}"
         elif pin.kind == "emsdk":
             version, latest_hash = _latest_emsdk()
             stale = pinned != latest_hash
