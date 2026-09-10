@@ -69,12 +69,16 @@
 # away exactly the reproducibility the `download` strategy exists for in
 # a locally-reproducible tool (D2/D3) -- see docs/reference/
 # open-questions.md's own "Toolchain pinning vs. reproducibility"
-# question, and its note that nothing checks whether a pinned version is
-# stale.
+# question. Its "nothing checks whether a pinned version is stale" note,
+# cited here until this bump, is no longer true: [0046] made that its own
+# work item, and `bin/update_toolchains.py --check` -- run weekly by
+# `.github/workflows/pin-staleness.yml` -- reads the build hash out of the
+# URL below and compares it against emsdk's own `latest` alias. That is
+# exactly how this pin was found behind and moved.
 #
-# The pinned version is the emscripten-releases-tags.json alias "6.0.8",
+# The pinned version is the emscripten-releases-tags.json alias "6.0.9",
 # recorded as the value it resolved to when pinned, not the literal
-# string "latest". `9d70dbe8860ccdd3595f6e6065d94bfb543ae955` in the URL
+# string "latest". `f04ea239d533260dd1db760dd2d668d5f9a88d6b` in the URL
 # is the emscripten-releases build hash that alias resolved to; the URL
 # itself follows emsdk's own
 # emscripten_releases_download_url_template
@@ -135,17 +139,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Pinned exactly as resources/usermod.toml's own [emsdk] table
-# (version = "6.0.8", [emsdk.platform.linux-x64]) -- verified live
-# before pinning here: downloaded the real tarball, confirmed this
-# exact sha256 with `sha256sum -c`, and inspected its own internal
-# layout with `tar tJf` (a top-level `install/` directory containing
-# `install/emscripten/` and `install/bin/`, exactly what
-# `usermod/emsdk.py`'s own `ResolvedEmsdk.env()` already expects on a
-# bare-host resolve) rather than assumed from the tarball's name alone.
+# emsdk 6.0.9, linux-x64 -- verified live before repinning here, the same
+# way the version before it was: downloaded the real tarball, computed
+# this exact sha256 locally, and inspected its own internal layout with
+# `tar tJf` (a top-level `install/` directory containing
+# `install/emscripten/` -- with `emcc.py` and the `cache/` tree chmod'd
+# below -- and `install/bin/`, which is what the ENV PATH further down
+# actually points at) rather than assumed from the tarball's name alone.
+#
+# This no longer tracks `resources/usermod.toml`'s own [emsdk] table, as
+# it said until this bump: [0092] deleted that file and usermod/emsdk.py's
+# `ResolvedEmsdk.env()` went with the bare-host resolver. The pin of
+# record is here, and nowhere else -- note `[usermod.webassembly]` in
+# build-platforms.toml deliberately records *no* emsdk version, because
+# MicroPython's own tools/ci.sh has never pinned one.
 RUN curl -fsSL -o /tmp/wasm-binaries.tar.xz \
-      https://storage.googleapis.com/webassembly/emscripten-releases-builds/linux/9d70dbe8860ccdd3595f6e6065d94bfb543ae955/wasm-binaries.tar.xz && \
-    echo "9bea769c189d9f52196e74283fb86937318cc24bf14879f2c6bdd19862131901  /tmp/wasm-binaries.tar.xz" | sha256sum -c - && \
+      https://storage.googleapis.com/webassembly/emscripten-releases-builds/linux/f04ea239d533260dd1db760dd2d668d5f9a88d6b/wasm-binaries.tar.xz && \
+    echo "d5c6c2917fbc1cae1a7d1e581f1c0b2817369dd57f94c7a0d05921476f1a7287  /tmp/wasm-binaries.tar.xz" | sha256sum -c - && \
     mkdir -p /opt/emsdk && \
     tar -xJf /tmp/wasm-binaries.tar.xz -C /opt/emsdk && \
     rm /tmp/wasm-binaries.tar.xz && \

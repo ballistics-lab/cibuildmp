@@ -92,15 +92,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     g++-mingw-w64-i686 \
     && rm -rf /var/lib/apt/lists/*
 
-# Pinned to resources/usermod.toml's own [llvm-mingw] table (version
-# 20260616, linux-x64) -- keep the URL and sha256 in step with it. The
-# tarball unpacks to a single `llvm-mingw-20260616-ucrt-ubuntu-22.04-x86_64/`
-# directory (`sole_directory()`'s own assumption in llvmmingw.py);
-# --strip-components=1 flattens that away so the install prefix is a
-# stable /opt/llvm-mingw regardless of the version in the name.
+# llvm-mingw 20260908, linux-x64. **Nothing else to keep this in step
+# with** -- this line used to say "pinned to resources/usermod.toml's own
+# [llvm-mingw] table", which contradicted the "pin of record" paragraph
+# above it: [0092] deleted that file, and usermod/llvmmingw.py with its
+# `sole_directory()` call went with [0050]/[0042]. The version, URL and
+# sha256 right here are the whole pin.
+#
+# The tarball still unpacks to a single
+# `llvm-mingw-20260908-ucrt-ubuntu-22.04-x86_64/` directory -- re-checked
+# with `tar tJf` at this version, not carried over from the last one, and
+# so were the four `<arch>-w64-mingw32-` bin/ prefixes build_windows.py
+# drives. --strip-components=1 flattens that away so the install prefix is
+# a stable /opt/llvm-mingw regardless of the version in the name.
 RUN curl -fsSL -o /tmp/llvm-mingw.tar.xz \
-      https://github.com/mstorsjo/llvm-mingw/releases/download/20260616/llvm-mingw-20260616-ucrt-ubuntu-22.04-x86_64.tar.xz && \
-    echo "534b92e067b22a6b4441f48ae9240a3341b17825d04d577eab0cf85c44b4deda  /tmp/llvm-mingw.tar.xz" | sha256sum -c - && \
+      https://github.com/mstorsjo/llvm-mingw/releases/download/20260908/llvm-mingw-20260908-ucrt-ubuntu-22.04-x86_64.tar.xz && \
+    echo "2258c745e3155870c80793f3e8c80b28fbde11b9ff73c4c78783635b3440b092  /tmp/llvm-mingw.tar.xz" | sha256sum -c - && \
     mkdir -p /opt/llvm-mingw && \
     tar -xJf /tmp/llvm-mingw.tar.xz -C /opt/llvm-mingw --strip-components=1 && \
     rm /tmp/llvm-mingw.tar.xz
