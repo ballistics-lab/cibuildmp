@@ -37,7 +37,7 @@ for why the Windows actions never call it either).
 
 | Input     | Required | Default | Description                             |
 | --------- | -------- | ------- | --------------------------------------- |
-| `mpy_tag` | yes      | --      | MicroPython release tag, e.g. `v1.28.0` |
+| `mpy_tag` | yes      | --      | MicroPython release tag, e.g. `v1.29.0` |
 
 No outputs; exports `MPY_DIR` to `$GITHUB_ENV` as a side effect.
 
@@ -300,11 +300,11 @@ jobs:
         with:
           submodules: recursive
 
-      - uses: ballistics-lab/cibuildmp/.github/actions/fetch-micropython@v0.7.2
+      - uses: ballistics-lab/cibuildmp/.github/actions/fetch-micropython@v0.7.3
         with:
-          mpy_tag: v1.28.0
+          mpy_tag: v1.29.0
 
-      - uses: ballistics-lab/cibuildmp/.github/actions/build-natmod@v0.7.2
+      - uses: ballistics-lab/cibuildmp/.github/actions/build-natmod@v0.7.3
         with:
           arch: ${{ matrix.arch }}
           # natmod_dir: natmod              # default; a7p passes micropython/natmod

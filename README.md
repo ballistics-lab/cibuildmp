@@ -125,7 +125,7 @@ On CI, use the action instead of installing the CLI yourself — it already
 runs on a bare runner with the runner's own Docker daemon reachable:
 
 ```yaml
-- uses: ballistics-lab/cibuildmp@v0.7.2
+- uses: ballistics-lab/cibuildmp@v0.7.3
   with:
     build: "mpy6.3-* v1.29.0-manylinux_2_28_x86_64"
 ```
@@ -144,7 +144,7 @@ newest:
     path: ~/.cache/cibuildmp
     key: cibuildmp-${{ runner.os }}
     restore-keys: cibuildmp-${{ runner.os }}
-- uses: ballistics-lab/cibuildmp@v0.7.2
+- uses: ballistics-lab/cibuildmp@v0.7.3
   with:
     build: "mpy6.3-* v1.29.0-manylinux_2_28_x86_64"
 ```
@@ -203,7 +203,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ballistics-lab/cibuildmp@v0.7.2
+      - uses: ballistics-lab/cibuildmp@v0.7.3
         with:
           build: "mpy6.3-v1.29.0-*"
       - uses: actions/upload-artifact@v4
@@ -457,16 +457,16 @@ platform.**
 Identifier shapes, one per platform:
 
 <!-- generated: identifier-shapes -- bin/refresh_docs.py, do not edit by hand -->
-| Platform | Shape | Example |
-| --- | --- | --- |
-| natmod | `mpy{abi}-{tag}-{arch}` | `mpy6.3-v1.29.0-armv6m` |
-| usermod `esp32` | `{tag}-esp32-{board}` | `v1.29.0-esp32-ARDUINO_NANO_ESP32` |
-| usermod `qemu` | `{tag}-qemu-{board}` | `v1.29.0-qemu-MICROBIT` |
-| usermod `rp2` | `{tag}-rp2-{board}` | `v1.29.0-rp2-ADAFRUIT_FEATHER_RP2040` |
-| usermod `samd` | `{tag}-samd-{board}` | `v1.29.0-samd-ADAFRUIT_FEATHER_M0_EXPRESS` |
-| usermod `unix` | `{tag}-{arch}` | `v1.29.0-manylinux_2_28_aarch64` |
-| usermod `webassembly` | `{tag}-{arch}` | `v1.29.0-wasm32` |
-| usermod `windows` | `{tag}-{arch}` | `v1.29.0-win32` |
+| Platform              | Shape                   | Example                                    |
+| --------------------- | ----------------------- | ------------------------------------------ |
+| natmod                | `mpy{abi}-{tag}-{arch}` | `mpy6.3-v1.29.0-armv6m`                    |
+| usermod `esp32`       | `{tag}-esp32-{board}`   | `v1.29.0-esp32-ARDUINO_NANO_ESP32`         |
+| usermod `qemu`        | `{tag}-qemu-{board}`    | `v1.29.0-qemu-MICROBIT`                    |
+| usermod `rp2`         | `{tag}-rp2-{board}`     | `v1.29.0-rp2-ADAFRUIT_FEATHER_RP2040`      |
+| usermod `samd`        | `{tag}-samd-{board}`    | `v1.29.0-samd-ADAFRUIT_FEATHER_M0_EXPRESS` |
+| usermod `unix`        | `{tag}-{arch}`          | `v1.29.0-manylinux_2_28_aarch64`           |
+| usermod `webassembly` | `{tag}-{arch}`          | `v1.29.0-wasm32`                           |
+| usermod `windows`     | `{tag}-{arch}`          | `v1.29.0-win32`                            |
 <!-- /generated: identifier-shapes -->
 
 The shape genuinely differs per usermod port — `unix`/`windows`/
@@ -754,16 +754,16 @@ the port**, because it is that port's own build axis:
 | `esp32`, `rp2`, `webassembly` | *none*           | `CIBMP_WEBASSEMBLY_DOCKER_IMAGE`                |
 
 
-| Variable                                | Effect                                                                                                                                                                                                                            |
-| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Variable                                | Effect                                                                                                                                                                                                                           |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `CIBMP_CACHE_PATH`                      | Where fetched MicroPython checkouts and ESP-IDF are cached. Defaults to `$XDG_CACHE_HOME/cibuildmp`, or `~/.cache/cibuildmp`. Pin it in CI when a later step needs the checkout by path — `<CIBMP_CACHE_PATH>/micropython/<tag>` |
-| `CIBMP_REPORT_PATH`                     | Where the JSON build report is written                                                                                                                                                                                            |
-| `CIBMP_TIMEOUT`                         | Seconds before a build container is killed (`docker kill`, not just the CLI). No limit by default. **usermod only** -- natmod's own container call does not consult it                                                            |
-| `CIBMP_<PORT>_<TARGET>_TIMEOUT`         | The same, for one container — `CIBMP_UNIX_MANYLINUX_2_28_X86_64_TIMEOUT`                                                                                                                                                          |
-| `CIBMP_<PORT>_<TARGET>_DOCKER_IMAGE`    | Run this (port, target) in a different image — a locally built one, or a fork's. Wins over the pinned default. Omit the `<TARGET>` segment for a port with no per-build image axis (`CIBMP_WEBASSEMBLY_DOCKER_IMAGE`)             |
-| `CIBMP_<PORT>_<TARGET>_DOCKER_PLATFORM` | Same shape, for the container's `--platform`                                                                                                                                                                                      |
-| `CIBMP_DEBUG_TRACEBACK`                 | Print a full traceback instead of a one-line error (same as `--debug-traceback`)                                                                                                                                                  |
-| `CIBMP_DISABLE_GITHUB_STEP_SUMMARY`     | Suppress the step-summary table on GitHub Actions                                                                                                                                                                                 |
+| `CIBMP_REPORT_PATH`                     | Where the JSON build report is written                                                                                                                                                                                           |
+| `CIBMP_TIMEOUT`                         | Seconds before a build container is killed (`docker kill`, not just the CLI). No limit by default. **usermod only** -- natmod's own container call does not consult it                                                           |
+| `CIBMP_<PORT>_<TARGET>_TIMEOUT`         | The same, for one container — `CIBMP_UNIX_MANYLINUX_2_28_X86_64_TIMEOUT`                                                                                                                                                         |
+| `CIBMP_<PORT>_<TARGET>_DOCKER_IMAGE`    | Run this (port, target) in a different image — a locally built one, or a fork's. Wins over the pinned default. Omit the `<TARGET>` segment for a port with no per-build image axis (`CIBMP_WEBASSEMBLY_DOCKER_IMAGE`)            |
+| `CIBMP_<PORT>_<TARGET>_DOCKER_PLATFORM` | Same shape, for the container's `--platform`                                                                                                                                                                                     |
+| `CIBMP_DEBUG_TRACEBACK`                 | Print a full traceback instead of a one-line error (same as `--debug-traceback`)                                                                                                                                                 |
+| `CIBMP_DISABLE_GITHUB_STEP_SUMMARY`     | Suppress the step-summary table on GitHub Actions                                                                                                                                                                                |
 
 ### Precedence
 
@@ -1236,7 +1236,7 @@ scheduled `test-all-platforms.yml` run since.
 <tr>
   <td><code>esp32</code></td>
   <td>
-    every board across <code>v1.28.0</code>/<code>v1.29.0</code>[^esp32ci]
+    every board across <code>v1.29.0</code>/<code>v1.29.0</code>[^esp32ci]
   </td>
   <td><code>esp_idf_base</code> (Docker) -- ESP-IDF cloned on the host, installed in-container, per-board <code>idf_target</code>/<code>idf_version</code></td>
   <td>✅</td>
@@ -1375,7 +1375,7 @@ quietly mislabelled `.mpy` when they do not.
 
 **No `dynruntime.mk` default covers either axis fully**, which this
 paragraph did not used to say: `BUILD` defaulted to an unscoped `build` up
-to v1.28.0 and to `build-$(ARCH)` from v1.29.0 — arch-scoped from that tag
+to v1.29.0 and to `build-$(ARCH)` from v1.29.0 — arch-scoped from that tag
 on, tag-scoped in no release at all, since `MPY_DIR` is the only thing that
 knows which release is being built. So on v1.29.0 and later the arch
 collision cannot happen by default; the tag one still can, and only your

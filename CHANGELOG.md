@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-09-10
+
+### Changed
+
+- **The two toolchain pins [0046]'s weekly checker reported behind are moved**:
+  llvm-mingw `20260616` -> `20260908` (`docker/windows.Dockerfile`) and emsdk
+  `6.0.8`/`9d70dbe8` -> `6.0.9`/`f04ea239` (`docker/webassembly.Dockerfile`).
+  Both sha256s recomputed from the real tarball, and each one's internal layout
+  re-checked with `tar tJf` rather than carried over from the previous version:
+  llvm-mingw still unpacks to a single top-level directory (what
+  `--strip-components=1` assumes) and still ships all four
+  `<arch>-w64-mingw32-` bin/ prefixes `build_windows.py` drives; the emsdk
+  tarball still has the `install/emscripten` + `install/bin` shape the image's
+  own `ENV PATH` points at. `bin/update_toolchains.py --check` now reports
+  every pin current. Nothing about the emsdk bump touches
+  `[usermod.webassembly]`, which deliberately records no emsdk version at all
+  ([0092]) -- MicroPython's own `tools/ci.sh` has never pinned one.
+- **Both bumped `RUN` steps stopped claiming to track a deleted file.** Each
+  said it was "pinned to `resources/usermod.toml`'s own `[llvm-mingw]`/`[emsdk]`
+  table -- keep the URL and sha256 in step with it", directly contradicting the
+  "**This file is the pin of record**" paragraph a few lines above it in the
+  same file: [0092] deleted `resources/usermod.toml`, and `usermod/llvmmingw.py`
+  / `usermod/emsdk.py` went with the bare-host resolvers ([0050]/[0042]). The
+  webassembly one also cited `open-questions.md`'s "nothing checks whether a
+  pinned version is stale" note, which [0046] and `pin-staleness.yml` made false
+  -- that checker is precisely what found both of these.
+
+
 ## [0.7.2] - 2026-09-06
 
 ### Added
@@ -1669,7 +1697,8 @@ ballistics-lab/micropython-native-ci, but both tags exist here too, so every
 link resolves inside this repository -- the version line continues rather
 than restarting (see the 0.3.0a1 entry). -->
 
-[Unreleased]: https://github.com/ballistics-lab/cibuildmp/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/ballistics-lab/cibuildmp/compare/v0.7.3...HEAD
+[0.7.3]: https://github.com/ballistics-lab/cibuildmp/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/ballistics-lab/cibuildmp/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/ballistics-lab/cibuildmp/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/ballistics-lab/cibuildmp/compare/v0.6.2...v0.7.0
@@ -1708,3 +1737,7 @@ than restarting (see the 0.3.0a1 entry). -->
 [0053]: docs/records/0053-usermod-ports-without-a-build-driver.md
 [0060]: docs/records/0060-rp2-build-driver.md
 [0100]: docs/records/0100-samd-build-driver-plan.md
+[0046]: docs/records/0046-pin-staleness-checker.md
+[0092]: docs/records/0092-usermod-toml-and-tag-cflags-against-build-platforms.md
+[0050]: docs/records/0050-natmod-is-docker-only.md
+[0042]: docs/records/0042-windows-docker-wiring-and-resolver-removal.md
