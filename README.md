@@ -125,7 +125,7 @@ On CI, use the action instead of installing the CLI yourself — it already
 runs on a bare runner with the runner's own Docker daemon reachable:
 
 ```yaml
-- uses: ballistics-lab/cibuildmp@v0.7.2
+- uses: ballistics-lab/cibuildmp@v0.7.3
   with:
     build: "mpy6.3-* v1.29.0-manylinux_2_28_x86_64"
 ```
@@ -144,7 +144,7 @@ newest:
     path: ~/.cache/cibuildmp
     key: cibuildmp-${{ runner.os }}
     restore-keys: cibuildmp-${{ runner.os }}
-- uses: ballistics-lab/cibuildmp@v0.7.2
+- uses: ballistics-lab/cibuildmp@v0.7.3
   with:
     build: "mpy6.3-* v1.29.0-manylinux_2_28_x86_64"
 ```
@@ -203,7 +203,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ballistics-lab/cibuildmp@v0.7.2
+      - uses: ballistics-lab/cibuildmp@v0.7.3
         with:
           build: "mpy6.3-v1.29.0-*"
       - uses: actions/upload-artifact@v4
