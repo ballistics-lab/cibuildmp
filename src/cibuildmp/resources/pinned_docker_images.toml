@@ -133,33 +133,33 @@
 [image_group]
 
 # ── unix -- one native image per (arch, libc floor), identity-keyed ────
-manylinux_2_28_x86_64 = "quay.io/pypa/manylinux_2_28_x86_64@sha256:531d7aa844bbb0c131d4ab011d3db741c4abc8d498cd5ccc86121046f62303b4"
-musllinux_1_2_x86_64 = "quay.io/pypa/musllinux_1_2_x86_64@sha256:8f7d1c70a5cfb088d9a9609a2671d7a1ac7cb46ccb19e7ac078ba9dbf2552068"
+manylinux_2_28_x86_64 = "quay.io/pypa/manylinux_2_28_x86_64@sha256:407f771c51a2c3e83ebe5a7970b4289ead3a6db21d9b9c089168775cad11d328"
+musllinux_1_2_x86_64 = "quay.io/pypa/musllinux_1_2_x86_64@sha256:bcd644f5f08de4c286b4e8a99652d106a7e56881d8e0b3f92d471f05f5b60fd3"
 
-manylinux_2_28_i686 = "quay.io/pypa/manylinux_2_28_i686@sha256:5b6192340ed5b1a94665842195fae51a2d4bfe6a9de59ae211ee2286ea0f9028"
-musllinux_1_2_i686 = "quay.io/pypa/musllinux_1_2_i686@sha256:a31d86eb287829c99eb7cdf0a0e17bafde14f313076a711ce70161d46a296520"
+manylinux_2_28_i686 = "quay.io/pypa/manylinux_2_28_i686@sha256:613f4424366f9351bfa68a94465002f55a361f3122676bc9ac9d20912298fefe"
+musllinux_1_2_i686 = "quay.io/pypa/musllinux_1_2_i686@sha256:cf2b239c5788f6c6de291a8213e3ca0cd4d443e96ac3f275bd285ae426a0ca7f"
 
-manylinux_2_28_aarch64 = "quay.io/pypa/manylinux_2_28_aarch64@sha256:bbb43f784ce78a454a9e3351b862a12e7ad5c30972e8aeba092da678918bbba9"
-musllinux_1_2_aarch64 = "quay.io/pypa/musllinux_1_2_aarch64@sha256:70a81491cfd91b4ebfc4f1b0bcd8e5da04d78a104cb8dc799f0b071034343df4"
+manylinux_2_28_aarch64 = "quay.io/pypa/manylinux_2_28_aarch64@sha256:c22ffd129ac99a8a42d1f2c2f4e88a9089288dd9ee987a7092da1c7dc48f27a9"
+musllinux_1_2_aarch64 = "quay.io/pypa/musllinux_1_2_aarch64@sha256:fecc36f309839b485f04e36b6fd2272d98b84936e68122f3de9bd65c253e76dc"
 
-manylinux_2_28_ppc64le = "quay.io/pypa/manylinux_2_28_ppc64le@sha256:076418319177918032a40e57374dc56c3ae0c617a7c045a0a01d336aaac054ba"
-musllinux_1_2_ppc64le = "quay.io/pypa/musllinux_1_2_ppc64le@sha256:9780112264ac9653b404627b99f3e017ea0bf414e56d9174f3fa27ba8f69c5ac"
+manylinux_2_28_ppc64le = "quay.io/pypa/manylinux_2_28_ppc64le@sha256:b9273339ee6dfa50d23c98cb68c6abdb2d0148ff9a4707ee75dac79916314ccd"
+musllinux_1_2_ppc64le = "quay.io/pypa/musllinux_1_2_ppc64le@sha256:bed4b2eaa5013b4a67e68307be9517246288608111665e8f0d32b457e5a307a5"
 
-manylinux_2_28_s390x = "quay.io/pypa/manylinux_2_28_s390x@sha256:44e5f0c359f49feaf156ba1c4ad73af6ae3889178d7998388df9c3960e4390e5"
-musllinux_1_2_s390x = "quay.io/pypa/musllinux_1_2_s390x@sha256:5b2068a8dafb5224af5b71c74057fc1f4152312345f2b1408c440ed4f31d596c"
+manylinux_2_28_s390x = "quay.io/pypa/manylinux_2_28_s390x@sha256:c5e140ba52049d32f5fa7fc035d7cb6cd6893062b7f50d76e3816e7e7a5e076f"
+musllinux_1_2_s390x = "quay.io/pypa/musllinux_1_2_s390x@sha256:4a1af0293993de3ba12789a38ebcd4fce21bd8c1b1c04fab06cb75cd3c8cff78"
 
 # armv7l's manylinux line starts at `_2_31` upstream (Ubuntu 20.04/apt,
 # unlike the AlmaLinux 8/dnf `_2_28` images) -- `_2_31` is the lower,
 # more compatible of the two floors pypa offers, and cibuildwheel makes
 # the same default choice.
-manylinux_2_31_armv7l = "quay.io/pypa/manylinux_2_31_armv7l@sha256:2af698070b6f852e0a2dcec165a1f07662d20b2e664efa0e5c1c6669829f76a0"
-musllinux_1_2_armv7l = "quay.io/pypa/musllinux_1_2_armv7l@sha256:4eca90557e9070423ddfa612b155f6b0339550cffd9ae3fec3ba99524bcdd6c1"
+manylinux_2_31_armv7l = "quay.io/pypa/manylinux_2_31_armv7l@sha256:222db91566088f0643a1a36fa0be0ba22b0aa426da7cbb4e3a7109a02d044133"
+musllinux_1_2_armv7l = "quay.io/pypa/musllinux_1_2_armv7l@sha256:36d3a643f82372b2e69690e1111db1583d568752ce2888f13af6f85f1c8ff1cc"
 
 # riscv64 is the newest arch upstream and carries the highest floor:
 # `manylinux_2_39` (Rocky Linux 10/dnf) is the only manylinux image pypa
 # publishes for it.
-manylinux_2_39_riscv64 = "quay.io/pypa/manylinux_2_39_riscv64@sha256:5d475b18315134634549f097926231a78110159cedee78e222eb35f98567f738"
-musllinux_1_2_riscv64 = "quay.io/pypa/musllinux_1_2_riscv64@sha256:19e6fc73cb8bf98c595d61043b8edb25189a5d180e5f509460ed1a7df717e257"
+manylinux_2_39_riscv64 = "quay.io/pypa/manylinux_2_39_riscv64@sha256:0058fcf87e482872960e1d583483769886bb6e95ff9116a6a965b843419838bf"
+musllinux_1_2_riscv64 = "quay.io/pypa/musllinux_1_2_riscv64@sha256:e47e6e52f302f9cbfb57a806f41c0fef25017c6070b4e9912ab6db495153109e"
 
 # mipsel is cibuildmp's own architecture, not one of cibuildwheel's
 # seven, and the one documented exception to record 0043's model: pypa

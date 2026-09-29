@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-09-29
+
+### Changed
+
+- **Refreshed every pinned PyPA manylinux/musllinux base image to the
+  `2026.09.29-1` upstream build.** This updates all 34 entries in
+  `pinned_pypa_images.toml`, including the nine images Dependabot reported,
+  and synchronizes the 14 direct runtime mirrors in
+  `pinned_docker_images.toml`. The remaining image-group pins are immutable
+  cibuildmp GHCR digests and were deliberately left untouched.
+
 ## [0.7.3] - 2026-09-10
 
 ### Changed
@@ -1697,7 +1708,8 @@ ballistics-lab/micropython-native-ci, but both tags exist here too, so every
 link resolves inside this repository -- the version line continues rather
 than restarting (see the 0.3.0a1 entry). -->
 
-[Unreleased]: https://github.com/ballistics-lab/cibuildmp/compare/v0.7.3...HEAD
+[Unreleased]: https://github.com/ballistics-lab/cibuildmp/compare/v0.7.4...HEAD
+[0.7.4]: https://github.com/ballistics-lab/cibuildmp/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/ballistics-lab/cibuildmp/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/ballistics-lab/cibuildmp/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/ballistics-lab/cibuildmp/compare/v0.7.0...v0.7.1
