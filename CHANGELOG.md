@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
-
+- **llvm-mingw `20260908` -> `20260922`** (`docker/windows.Dockerfile`), the pin [0046]'s weekly checker reported behind. sha256 recomputed from the real tarball; still unpacks to a single top-level directory (`tar tJf`).
 - **emsdk `6.0.9`/`f04ea239` -> `6.0.11`/`f6264d4a`** (`docker/webassembly.Dockerfile`), the pin [0046]'s weekly checker reported behind. sha256 recomputed from the real tarball; layout re-checked with `tar tJf` (still a top-level `install/` with `bin/`).
 
 ## [0.7.4] - 2026-09-29
