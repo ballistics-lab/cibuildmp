@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **llvm-mingw `20260908` -> `20260922`** (`docker/windows.Dockerfile`), the pin [0046]'s weekly checker reported behind. sha256 recomputed from the real tarball; still unpacks to a single top-level directory (`tar tJf`).
+
 ## [0.7.4] - 2026-09-29
 
 ### Changed
