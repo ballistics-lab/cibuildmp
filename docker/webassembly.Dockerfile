@@ -76,9 +76,9 @@
 # URL below and compares it against emsdk's own `latest` alias. That is
 # exactly how this pin was found behind and moved.
 #
-# The pinned version is the emscripten-releases-tags.json alias "6.0.9",
+# The pinned version is the emscripten-releases-tags.json alias "6.0.11",
 # recorded as the value it resolved to when pinned, not the literal
-# string "latest". `f04ea239d533260dd1db760dd2d668d5f9a88d6b` in the URL
+# string "latest". `f6264d4a4dd9ba24a9f0a5702835a44d1463de13` in the URL
 # is the emscripten-releases build hash that alias resolved to; the URL
 # itself follows emsdk's own
 # emscripten_releases_download_url_template
@@ -139,7 +139,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# emsdk 6.0.9, linux-x64 -- verified live before repinning here, the same
+# emsdk 6.0.11, linux-x64 -- verified live before repinning here, the same
 # way the version before it was: downloaded the real tarball, computed
 # this exact sha256 locally, and inspected its own internal layout with
 # `tar tJf` (a top-level `install/` directory containing
@@ -154,8 +154,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # build-platforms.toml deliberately records *no* emsdk version, because
 # MicroPython's own tools/ci.sh has never pinned one.
 RUN curl -fsSL -o /tmp/wasm-binaries.tar.xz \
-      https://storage.googleapis.com/webassembly/emscripten-releases-builds/linux/f04ea239d533260dd1db760dd2d668d5f9a88d6b/wasm-binaries.tar.xz && \
-    echo "d5c6c2917fbc1cae1a7d1e581f1c0b2817369dd57f94c7a0d05921476f1a7287  /tmp/wasm-binaries.tar.xz" | sha256sum -c - && \
+      https://storage.googleapis.com/webassembly/emscripten-releases-builds/linux/f6264d4a4dd9ba24a9f0a5702835a44d1463de13/wasm-binaries.tar.xz && \
+    echo "cab251b54999e8fb4260080f0e719796336570396e118865013a20b8d93dbb83  /tmp/wasm-binaries.tar.xz" | sha256sum -c - && \
     mkdir -p /opt/emsdk && \
     tar -xJf /tmp/wasm-binaries.tar.xz -C /opt/emsdk && \
     rm /tmp/wasm-binaries.tar.xz && \
