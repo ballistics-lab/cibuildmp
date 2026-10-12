@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **llvm-mingw `20260922` -> `20261006`** (`docker/windows.Dockerfile`) and **emsdk `6.0.11`/`f6264d4a` -> `6.0.12`/`6e9f6885`** (`docker/webassembly.Dockerfile`), the pins [0046]'s weekly checker reported behind. sha256 recomputed from the real tarballs; layout re-checked with `tar tJf` (llvm-mingw: single top-level directory; emsdk: top-level `install/` with `bin/`).
+- **pypa image digests `2026.10.03-1` -> `2026.10.10-1`** (`pinned_pypa_images.toml`, mirrored into `pinned_docker_images.toml`'s unix cells). The windows/webassembly image digests follow once the images are republished.
+
 ## [0.7.5] - 2026-10-05
 
 ### Changed
