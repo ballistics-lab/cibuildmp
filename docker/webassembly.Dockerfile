@@ -76,9 +76,9 @@
 # URL below and compares it against emsdk's own `latest` alias. That is
 # exactly how this pin was found behind and moved.
 #
-# The pinned version is the emscripten-releases-tags.json alias "6.0.12",
+# The pinned version is the emscripten-releases-tags.json alias "6.0.13",
 # recorded as the value it resolved to when pinned, not the literal
-# string "latest". `6e9f6885cb17a3d6c8fd488a5cff730f50aba61d` in the URL
+# string "latest". `eb132757325583b787fe9414b09afea9442b72ad` in the URL
 # is the emscripten-releases build hash that alias resolved to; the URL
 # itself follows emsdk's own
 # emscripten_releases_download_url_template
@@ -139,7 +139,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# emsdk 6.0.12, linux-x64 -- verified live before repinning here, the same
+# emsdk 6.0.13, linux-x64 -- verified live before repinning here, the same
 # way the version before it was: downloaded the real tarball, computed
 # this exact sha256 locally, and inspected its own internal layout with
 # `tar tJf` (a top-level `install/` directory containing
@@ -154,8 +154,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # build-platforms.toml deliberately records *no* emsdk version, because
 # MicroPython's own tools/ci.sh has never pinned one.
 RUN curl -fsSL -o /tmp/wasm-binaries.tar.xz \
-      https://storage.googleapis.com/webassembly/emscripten-releases-builds/linux/6e9f6885cb17a3d6c8fd488a5cff730f50aba61d/wasm-binaries.tar.xz && \
-    echo "7b073a102b07eca5a0fe344037681e53162639f3540432456874c0446a5e8fa7  /tmp/wasm-binaries.tar.xz" | sha256sum -c - && \
+      https://storage.googleapis.com/webassembly/emscripten-releases-builds/linux/eb132757325583b787fe9414b09afea9442b72ad/wasm-binaries.tar.xz && \
+    echo "cda6801012ff3319a539111826ed02a9abd7eff135c2ef261c8941caf5a3763e  /tmp/wasm-binaries.tar.xz" | sha256sum -c - && \
     mkdir -p /opt/emsdk && \
     tar -xJf /tmp/wasm-binaries.tar.xz -C /opt/emsdk && \
     rm /tmp/wasm-binaries.tar.xz && \

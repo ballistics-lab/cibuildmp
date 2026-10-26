@@ -92,7 +92,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     g++-mingw-w64-i686 \
     && rm -rf /var/lib/apt/lists/*
 
-# llvm-mingw 20261006, linux-x64. **Nothing else to keep this in step
+# llvm-mingw 20261020, linux-x64. **Nothing else to keep this in step
 # with** -- this line used to say "pinned to resources/usermod.toml's own
 # [llvm-mingw] table", which contradicted the "pin of record" paragraph
 # above it: [0092] deleted that file, and usermod/llvmmingw.py with its
@@ -100,14 +100,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # sha256 right here are the whole pin.
 #
 # The tarball still unpacks to a single
-# `llvm-mingw-20261006-ucrt-ubuntu-22.04-x86_64/` directory -- re-checked
+# `llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64/` directory -- re-checked
 # with `tar tJf` at this version, not carried over from the last one, and
 # so were the four `<arch>-w64-mingw32-` bin/ prefixes build_windows.py
 # drives. --strip-components=1 flattens that away so the install prefix is
 # a stable /opt/llvm-mingw regardless of the version in the name.
 RUN curl -fsSL -o /tmp/llvm-mingw.tar.xz \
-      https://github.com/mstorsjo/llvm-mingw/releases/download/20261006/llvm-mingw-20261006-ucrt-ubuntu-22.04-x86_64.tar.xz && \
-    echo "5f9c6ed95b2d4bdb2869a488c5fd5857fbdabcf288a0aa3eb1da43f6a08d8ab4  /tmp/llvm-mingw.tar.xz" | sha256sum -c - && \
+      https://github.com/mstorsjo/llvm-mingw/releases/download/20261020/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64.tar.xz && \
+    echo "55064b60b991a1e1e8090b8c2f84e82b22cfe5903d12c159d65064cf5e8ae335  /tmp/llvm-mingw.tar.xz" | sha256sum -c - && \
     mkdir -p /opt/llvm-mingw && \
     tar -xJf /tmp/llvm-mingw.tar.xz -C /opt/llvm-mingw --strip-components=1 && \
     rm /tmp/llvm-mingw.tar.xz
