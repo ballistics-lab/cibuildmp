@@ -45,16 +45,16 @@ manylinux_2_34 = "quay.io/pypa/manylinux_2_34_aarch64@sha256:934a318cec5315c720e
 musllinux_1_2 = "quay.io/pypa/musllinux_1_2_aarch64@sha256:1db347533f8a7ea39aa20b0203f4e4af00630cdb621216a2b43771523c9983c5"  # 2026.10.26-1
 
 [ppc64le]
-manylinux2014 = "quay.io/pypa/manylinux2014_ppc64le@sha256:7733fe0c095ae5388469737844b1b5976bb84a6d1772ee4a5159923625d250e7"  # 2026.10.25-1
-manylinux_2_28 = "quay.io/pypa/manylinux_2_28_ppc64le@sha256:72aee9fa0f1b12be96ea1be56da1ce1653503d16d04739eed19e8fc145d615e5"  # 2026.10.25-1
-manylinux_2_34 = "quay.io/pypa/manylinux_2_34_ppc64le@sha256:b61a33b0d8de07fa4696c984ac769f599705ba5ceae59597ec2bdddc7f5e56e0"  # 2026.10.25-1
-musllinux_1_2 = "quay.io/pypa/musllinux_1_2_ppc64le@sha256:6dc7326755d326bb5d1aea45dbd0dd3bd0cf292a0f96ecb666ec17e14f2ab1ba"  # 2026.10.25-1
+manylinux2014 = "quay.io/pypa/manylinux2014_ppc64le@sha256:abd1119b9ee8cce9c730d9152d4c28eeef99a75af0c8c329b56ab818f9a0c123"  # 2026.10.26-1
+manylinux_2_28 = "quay.io/pypa/manylinux_2_28_ppc64le@sha256:5f5f44183366b4aa080355c6f226ab0dad21549678590b7c15831db588c26aae"  # 2026.10.26-1
+manylinux_2_34 = "quay.io/pypa/manylinux_2_34_ppc64le@sha256:c40376a2b985714218a3ccd66c6ddb881c11dd8c26be72f465a0496aec13e8e0"  # 2026.10.26-1
+musllinux_1_2 = "quay.io/pypa/musllinux_1_2_ppc64le@sha256:e1d66fc80892cc6275597e1179f84a3b38460cfc483fee00ebb01b362df1f5b9"  # 2026.10.26-1
 
 [s390x]
-manylinux2014 = "quay.io/pypa/manylinux2014_s390x@sha256:4c5d5883b014ca2ec8a65dcb538cde24c10b2842dcba36e2839abd7aa5bdf485"  # 2026.10.25-1
+manylinux2014 = "quay.io/pypa/manylinux2014_s390x@sha256:dea1ac3df28fa9d881276eae1db16bca4b19918c32f9f04e65f6e7f13e11897f"  # 2026.10.26-1
 manylinux_2_28 = "quay.io/pypa/manylinux_2_28_s390x@sha256:ab63144a4fedb556b0f003220cd246d2338bcec33ad715557dbd1101b11b8c42"  # 2026.10.26-1
-manylinux_2_34 = "quay.io/pypa/manylinux_2_34_s390x@sha256:5a66f183990b2d3b94bdf65dd1ae78d0747a1e54b278f5477aeda143fcf970e8"  # 2026.10.25-1
-musllinux_1_2 = "quay.io/pypa/musllinux_1_2_s390x@sha256:4ba592017615419dd447388ad977033ea5d525120b6240167bc99de9de731100"  # 2026.10.25-1
+manylinux_2_34 = "quay.io/pypa/manylinux_2_34_s390x@sha256:4242ab49348a8bca2d5c92e49228cf5843b778550269c5769ac6eafda2747998"  # 2026.10.26-1
+musllinux_1_2 = "quay.io/pypa/musllinux_1_2_s390x@sha256:f5cd9250de3b4c9577606d9097b91b4ad960193e38d1b4f6c5b931a6018e2e80"  # 2026.10.26-1
 
 [pypy_x86_64]
 manylinux2014 = "quay.io/pypa/manylinux2014_x86_64@sha256:296069bc05d85275248f168f6e3b34ba8aa06181b67e40cd7447c64d56d3a851"  # 2026.10.26-1
@@ -77,5 +77,5 @@ manylinux_2_35 = "quay.io/pypa/manylinux_2_35_armv7l@sha256:8291cb9bfbe981215819
 musllinux_1_2 = "quay.io/pypa/musllinux_1_2_armv7l@sha256:22d2d1303b4e78e5d73055f50dc5d6fb0ebbc26a65c9c1256134c52d4975634e"  # 2026.10.26-1
 
 [riscv64]
-manylinux_2_39 = "quay.io/pypa/manylinux_2_39_riscv64@sha256:c3ace59af69987d97c39ea1ed1e6d23cb84668a629abf5ccd92d8562228a7e92"  # 2026.10.25-1
+manylinux_2_39 = "quay.io/pypa/manylinux_2_39_riscv64@sha256:7c353f5e76199618437ec0c187cb7d6bb1777d85f2c13d95636b1a55a6b2ca72"  # 2026.10.26-1
 musllinux_1_2 = "quay.io/pypa/musllinux_1_2_riscv64@sha256:c1ecafb83d4442f542877a469c53e45e1bbd4c32aef4d8f81fd009a8fcd6ad97"  # 2026.10.26-1
