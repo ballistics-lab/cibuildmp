@@ -1189,6 +1189,10 @@ def _build_unix_in(
     mpy_cross = build_common.container_mpy_cross(
         mpy_dir,
         extra_cflags=mpy_cross_cflags,
+        # musllinux only (not `_use_static()`, which also covers `mipsel`'s
+        # glibc cross sysroot, where `libc.a` may not exist for the native
+        # `gcc` that builds mpy-cross): see `container_mpy_cross()`.
+        extra_ldflags=("-static",) if opts.target.startswith("musllinux_") else (),
         timeout=timeout,
         container=container,
     )

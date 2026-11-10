@@ -169,6 +169,7 @@ def container_mpy_cross(
     *,
     timeout: float | None = None,
     extra_cflags: tuple[str, ...] = (),
+    extra_ldflags: tuple[str, ...] = (),
     container: Any,
 ) -> Path:
     """Build `mpy-cross` **inside `container`** and return the binary, for
@@ -242,6 +243,14 @@ def container_mpy_cross(
         # port. Anything the caller needs relaxed for its own sources
         # has to be relaxed for this build as well.
         *([f"CFLAGS_EXTRA={' '.join(extra_cflags)}"] if extra_cflags else []),
+        # `extra_ldflags`: `unix` passes `-static` on musllinux. A dynamic
+        # PIE `mpy-cross` fails under QEMU on `musllinux_1_2_ppc64le`
+        # when it is first executed (to freeze `argparse.py`):
+        #     Error relocating .../mpy-cross: unsupported relocation type 4
+        # musl's ppc64le ldso cannot relocate it. Linked statically there
+        # is no ldso step at all, and the binary is only ever run inside
+        # this same container, so nothing else sees the difference.
+        *([f"LDFLAGS_EXTRA={' '.join(extra_ldflags)}"] if extra_ldflags else []),
         f"-j{os.cpu_count() or 1}",
     ]
     container.call(make_command, workdir=mpy_dir / "mpy-cross", timeout=timeout)

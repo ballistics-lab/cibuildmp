@@ -1,8 +1,10 @@
 import subprocess
+from pathlib import Path
 
 from cibuildmp import dockerrun
 from cibuildmp.platforms.usermod.build_common import (
     cmake_extra_args_env,
+    container_mpy_cross,
     probe_supported_cflags,
 )
 
@@ -109,3 +111,30 @@ def test_probe_supported_cflags_script_ends_with_true(monkeypatch):
     exec_call = next(c for c in calls if c[:2] == ["docker", "exec"])
     script = exec_call[-1]
     assert script.endswith("; true")
+
+
+class _RecordingContainer:
+    def __init__(self):
+        self.calls = []
+
+    def call(self, command, **kwargs):
+        self.calls.append(command)
+
+
+def test_container_mpy_cross_passes_ldflags_when_given():
+    # musllinux_1_2_ppc64le: a dynamic PIE mpy-cross cannot be relocated by
+    # musl's ldso under QEMU ("unsupported relocation type 4"), so `unix`
+    # asks for a static one.
+    container = _RecordingContainer()
+    container_mpy_cross(
+        Path("/gh/mpy"), extra_ldflags=("-static",), container=container
+    )
+    (command,) = container.calls
+    assert "LDFLAGS_EXTRA=-static" in command
+
+
+def test_container_mpy_cross_no_ldflags_by_default():
+    container = _RecordingContainer()
+    container_mpy_cross(Path("/gh/mpy"), container=container)
+    (command,) = container.calls
+    assert not any(arg.startswith("LDFLAGS_EXTRA") for arg in command)
