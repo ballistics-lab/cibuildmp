@@ -7,7 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.6] - 2026-11-10
+
+### Fixed
+- **`unix`: `mpy-cross` is now linked statically on musllinux targets** (#69). A dynamic PIE `mpy-cross` failed on `musllinux_1_2_ppc64le` under QEMU the first time it ran (`Error relocating ...: unsupported relocation type 4/5`) because musl's ppc64le ldso cannot relocate it. `container_mpy_cross()` takes a new `extra_ldflags` and `build_unix` passes `LDFLAGS_EXTRA=-static` when the target is `musllinux_*`; the binary only ever runs inside the same container. glibc targets (including `mipsel`'s cross sysroot) are unchanged.
+
 ### Changed
+- **pypa image digests `2026.10.26-1` -> `2026.11.07-1`** (`pinned_pypa_images.toml`, mirrored into `pinned_docker_images.toml`'s unix cells), including the nine images Dependabot reported in `docker/pypa-tracker.Dockerfile` (`musllinux_1_2_*`, `manylinux_2_31_armv7l`, `manylinux_2_39_riscv64`). Digests and dated tag only; no floor moved.
+- **`astral-sh/setup-uv` `v10.3.0` -> `v10.3.3`** (SHA-pinned in `action.yml` and the `coverage`, `pin-staleness`, `pre-commit` and `publish` workflows).
+- **Dev dependencies (`uv.lock`):** `virtualenv` `21.7.13` -> `21.14.13`, and `python-discovery` `1.6.0` -> `1.6.4`.
 - **llvm-mingw `20261006` -> `20261020`** (`docker/windows.Dockerfile`) and **emsdk `6.0.12`/`6e9f6885` -> `6.0.13`/`eb132757`** (`docker/webassembly.Dockerfile`), the pins [0046]'s weekly checker reported behind. sha256 recomputed from the real tarballs.
 - **pypa image digests `2026.10.22-0` -> `2026.10.26-1`** (`pinned_pypa_images.toml`, mirrored into `pinned_docker_images.toml`'s unix cells). Digests and dated tag only; no floor moved.
 - **`windows` and `webassembly` image digests repinned** (`pinned_docker_images.toml`) after republishing both from the toolchain bumps above (llvm-mingw `20261020`, emsdk `6.0.13`); the other published images were not rebuilt.
@@ -1722,7 +1730,8 @@ ballistics-lab/micropython-native-ci, but both tags exist here too, so every
 link resolves inside this repository -- the version line continues rather
 than restarting (see the 0.3.0a1 entry). -->
 
-[Unreleased]: https://github.com/ballistics-lab/cibuildmp/compare/v0.7.5...HEAD
+[Unreleased]: https://github.com/ballistics-lab/cibuildmp/compare/v0.7.6...HEAD
+[0.7.6]: https://github.com/ballistics-lab/cibuildmp/compare/v0.7.5...v0.7.6
 [0.7.5]: https://github.com/ballistics-lab/cibuildmp/compare/v0.7.4...v0.7.5
 [0.7.4]: https://github.com/ballistics-lab/cibuildmp/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/ballistics-lab/cibuildmp/compare/v0.7.2...v0.7.3
