@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **pypa image digests `2026.11.14-1` -> `2026.11.21-1`** (`pinned_pypa_images.toml`, mirrored into `pinned_docker_images.toml`'s unix cells), including the nine images Dependabot reported in `docker/pypa-tracker.Dockerfile` (`musllinux_1_2_*`, `manylinux_2_31_armv7l`, `manylinux_2_39_riscv64`). Digests and dated tag only; no floor moved.
 - **pypa image digests `2026.11.07-1` -> `2026.11.14-1`** (`pinned_pypa_images.toml`, mirrored into `pinned_docker_images.toml`'s unix cells), including the nine images Dependabot reported in `docker/pypa-tracker.Dockerfile` (`musllinux_1_2_*`, `manylinux_2_31_armv7l`, `manylinux_2_39_riscv64`). Digests and dated tag only; no floor moved.
 
 ## [0.7.6] - 2026-11-10
